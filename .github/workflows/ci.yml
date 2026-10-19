@@ -30,8 +30,12 @@ jobs:
       - name: Cache npx (mermaid-cli + Chromium)
         uses: actions/cache@v4
         with:
-          path: ~/.npm/_npx
-          key: npx-mermaid-${{ runner.os }}-${{ hashFiles('scripts/check-mermaid.mjs') }}
+          # mermaid-cli lives in the npx cache; its puppeteer-managed Chrome lives in ~/.cache/puppeteer —
+          # both must be restored together or mmdc fails with "Could not find chrome-headless-shell".
+          path: |
+            ~/.npm/_npx
+            ~/.cache/puppeteer
+          key: npx-mermaid-v2-${{ runner.os }}-${{ hashFiles('scripts/check-mermaid.mjs') }}
       - name: Validate Mermaid diagrams
         shell: bash
         run: node scripts/check-mermaid.mjs

@@ -23,8 +23,11 @@ test.describe("desktop UI against the real core", () => {
 
     const proj = path.join(ws, "Hills.jdproj");
     await page.getByTestId("project-path").fill(proj);
+    // A small world keeps the software-GL render on CI runners fast; the pipeline is identical.
+    await page.getByLabel("Extent (m)").fill("1024");
+    await page.getByLabel("Resolution (px)").fill("256");
     await page.getByTestId("new-project").click();
-    await expect(page.locator("header")).toContainText("World — 2048²");
+    await expect(page.locator("header")).toContainText("World — 256² · 1024 m");
     expect(existsSync(path.join(proj, "project.json"))).toBe(true);
 
     await page.getByTestId("seed").fill("7");

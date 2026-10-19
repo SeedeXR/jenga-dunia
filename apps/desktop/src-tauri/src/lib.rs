@@ -8,7 +8,9 @@
 
 use jd_core::{Context, Registry, Request, Response};
 use jd_terrain::preview::preview_u16;
-use tauri::menu::{Menu, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
+#[cfg(target_os = "macos")]
+use tauri::menu::PredefinedMenuItem;
+use tauri::menu::{Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::{Emitter, State};
 
 /// Shared registry + session context.
@@ -102,9 +104,9 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         .separator()
         .fullscreen()
         .build()?;
-    let mut builder = MenuBuilder::new(app);
+    let builder = MenuBuilder::new(app);
     #[cfg(target_os = "macos")]
-    {
+    let builder = {
         let about = PredefinedMenuItem::about(app, Some("About Jenga Dunia"), None)?;
         let app_menu = SubmenuBuilder::new(app, "Jenga Dunia")
             .item(&about)
@@ -117,8 +119,8 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             .separator()
             .quit()
             .build()?;
-        builder = builder.item(&app_menu);
-    }
+        builder.item(&app_menu)
+    };
     builder
         .item(&file)
         .item(&edit)
