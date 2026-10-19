@@ -66,13 +66,17 @@ enum Command {
         #[arg(long)]
         save: bool,
     },
-    /// Print JSON schemas of operations.
+    /// Print JSON schemas of operations (or write them all to a directory with --write).
     Schema {
         /// Operation id; omit with --list.
         op: Option<String>,
         /// List all operations.
         #[arg(long)]
         list: bool,
+        /// Write every schema under this directory: `envelope.json`, `ops/index.json`,
+        /// `ops/<op>.request.json`, `ops/<op>.result.json`, `graph/node-kinds.json`.
+        #[arg(long, value_name = "DIR")]
+        write: Option<PathBuf>,
     },
     /// Terrain generation.
     Terrain {
@@ -150,6 +154,42 @@ enum ExportCommand {
 enum DiagCommand {
     /// Host environment, memory, detected tools.
     Env,
+}
+
+/// Write the generated JSON Schemas (envelope, every op's request/result, graph node kinds) so
+/// they can be committed under `schemas/v1/` and diffed in CI (`docs/spec/json-api.md`).
+fn write_schemas(registry: &Registry, dir: &std::path::Path) -> std::io::Result<usize> {
+    use std::fs;
+    let pretty = |v: &Value| serde_json::to_string_pretty(v).unwrap_or_default() + "\n";
+    fs::create_dir_all(dir.join("ops"))?;
+    fs::create_dir_all(dir.join("graph"))?;
+    let mut n = 0usize;
+    let envelope = serde_json::to_value(schemars::schema_for!(Response)).unwrap_or(Value::Null);
+    fs::write(dir.join("envelope.json"), pretty(&envelope))?;
+    n += 1;
+    let mut index = Vec::new();
+    for o in registry.list() {
+        fs::write(
+            dir.join("ops").join(format!("{}.request.json", o.id)),
+            pretty(&o.request_schema),
+        )?;
+        fs::write(
+            dir.join("ops").join(format!("{}.result.json", o.id)),
+            pretty(&o.result_schema),
+        )?;
+        index.push(json!({ "id": o.id, "description": o.description, "scope": o.scope }));
+        n += 2;
+    }
+    fs::write(
+        dir.join("ops").join("index.json"),
+        pretty(&Value::Array(index)),
+    )?;
+    n += 1;
+    let kinds =
+        serde_json::to_value(jd_graph::Registry::with_builtins().list()).unwrap_or(Value::Null);
+    fs::write(dir.join("graph").join("node-kinds.json"), pretty(&kinds))?;
+    n += 1;
+    Ok(n)
 }
 
 fn format_from_ext(path: &std::path::Path) -> Option<&'static str> {
@@ -247,7 +287,30 @@ fn main() -> ExitCode {
             }
             out
         }
-        Command::Schema { op, list } => {
+        Command::Schema {
+            op,
+            list,
+            write: Some(dir),
+        } => {
+            return match write_schemas(&registry, &dir) {
+                Ok(n) => {
+                    if list || op.is_some() {
+                        eprintln!("note: --write ignores other schema arguments");
+                    }
+                    println!("wrote {n} schema files under {}", dir.display());
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("error: {e}");
+                    ExitCode::from(5)
+                }
+            };
+        }
+        Command::Schema {
+            op,
+            list,
+            write: None,
+        } => {
             let payload = if list || op.is_none() {
                 Value::Array(registry.list().into_iter().map(|o| json!({ "id": o.id, "description": o.description, "scope": o.scope })).collect())
             } else {

@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Connect",
+  "description": "`graph.connect` / `graph.disconnect` params.",
+  "type": "object",
+  "properties": {
+    "from": {
+      "description": "Source node.",
+      "$ref": "#/$defs/NodeId"
+    },
+    "from_port": {
+      "description": "Source output port (default `out`).",
+      "type": "string",
+      "default": "out"
+    },
+    "to": {
+      "description": "Destination node.",
+      "$ref": "#/$defs/NodeId"
+    },
+    "to_port": {
+      "description": "Destination input port.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "from",
+    "to",
+    "to_port"
+  ],
+  "$defs": {
+    "NodeId": {
+      "description": "Identifies a graph node.",
+      "type": "string"
+    }
+  }
+}

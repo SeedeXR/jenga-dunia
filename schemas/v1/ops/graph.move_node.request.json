@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MoveNode",
+  "description": "`graph.move_node` params.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "Node id.",
+      "$ref": "#/$defs/NodeId"
+    },
+    "position": {
+      "description": "New editor position.",
+      "type": "array",
+      "items": {
+        "type": "number",
+        "format": "float"
+      },
+      "minItems": 2,
+      "maxItems": 2
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "position"
+  ],
+  "$defs": {
+    "NodeId": {
+      "description": "Identifies a graph node.",
+      "type": "string"
+    }
+  }
+}

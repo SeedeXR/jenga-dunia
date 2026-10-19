@@ -1,0 +1,180 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Response",
+  "description": "An operation response.",
+  "type": "object",
+  "properties": {
+    "op": {
+      "description": "Echo of the request op.",
+      "type": "string"
+    },
+    "schema_version": {
+      "description": "API schema version.",
+      "$ref": "#/$defs/SchemaVersion"
+    },
+    "request_id": {
+      "description": "Correlation id.",
+      "$ref": "#/$defs/RequestId"
+    },
+    "status": {
+      "description": "Outcome.",
+      "$ref": "#/$defs/Status"
+    },
+    "result": {
+      "description": "Result payload when `status == ok`."
+    },
+    "job_id": {
+      "description": "Job id when `status == accepted`.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/JobId"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "error": {
+      "description": "Error when `status == error`.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/JdError"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "warnings": {
+      "description": "Non-fatal warnings.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Warning"
+      }
+    }
+  },
+  "required": [
+    "op",
+    "schema_version",
+    "request_id",
+    "status"
+  ],
+  "$defs": {
+    "SchemaVersion": {
+      "description": "A monotonically increasing document/API schema version.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "RequestId": {
+      "description": "Correlates a request across logs and adapters.",
+      "type": "string"
+    },
+    "Status": {
+      "description": "Outcome status.",
+      "oneOf": [
+        {
+          "description": "Completed synchronously; `result` is set.",
+          "type": "string",
+          "const": "ok"
+        },
+        {
+          "description": "Accepted as a background job; `job_id` is set.",
+          "type": "string",
+          "const": "accepted"
+        },
+        {
+          "description": "Failed; `error` is set.",
+          "type": "string",
+          "const": "error"
+        }
+      ]
+    },
+    "JobId": {
+      "description": "Identifies a background job.",
+      "type": "string"
+    },
+    "JdError": {
+      "description": "The error envelope: what happened, why it matters, what to do next, plus machine context.",
+      "type": "object",
+      "properties": {
+        "code": {
+          "description": "Stable code from the catalogue.",
+          "$ref": "#/$defs/ErrorCode"
+        },
+        "message": {
+          "description": "What happened.",
+          "type": "string"
+        },
+        "why": {
+          "description": "Why it matters.",
+          "type": "string"
+        },
+        "next": {
+          "description": "What the user or agent can do next.",
+          "type": "string"
+        },
+        "details": {
+          "description": "Machine-readable context (path, node, tile, limit, actual, …).",
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ]
+    },
+    "ErrorCode": {
+      "description": "Stable, machine-readable error codes. Never renumber or rename; append only.",
+      "type": "string",
+      "enum": [
+        "E_INPUT_INVALID",
+        "E_GRAPH_CYCLE",
+        "E_GRAPH_TYPE_MISMATCH",
+        "E_GRAPH_MISSING_INPUT",
+        "E_NODE_UNKNOWN",
+        "E_FORMAT_UNSUPPORTED",
+        "E_FORMAT_CORRUPT",
+        "E_SERIALIZE",
+        "E_SCHEMA_VERSION",
+        "E_DEPENDENCY_MISSING",
+        "E_GEOMETRY_INVALID",
+        "E_NUMERIC_UNSTABLE",
+        "E_SHADER_COMPILE",
+        "E_GPU_DEVICE",
+        "E_RESOURCE_MEMORY",
+        "E_RESOURCE_DISK",
+        "E_PERMISSION",
+        "E_TIMEOUT",
+        "E_CANCELLED",
+        "E_COMPAT",
+        "E_PROJECT_CORRUPT",
+        "E_NETWORK",
+        "E_LICENSE_NOT_ACCEPTED",
+        "E_INTERNAL"
+      ]
+    },
+    "Warning": {
+      "description": "A non-fatal warning (`W_…` codes).",
+      "type": "object",
+      "properties": {
+        "code": {
+          "description": "Stable warning code, e.g. `W_UNKNOWN_FIELDS`.",
+          "type": "string"
+        },
+        "message": {
+          "description": "Human-readable message.",
+          "type": "string"
+        },
+        "details": {
+          "description": "Machine context."
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ]
+    }
+  }
+}

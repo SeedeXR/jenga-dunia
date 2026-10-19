@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AddNode",
+  "description": "`graph.add_node` params.",
+  "type": "object",
+  "properties": {
+    "kind": {
+      "description": "Kind `name@version`, e.g. `jd.noise.fbm@1`.",
+      "$ref": "#/$defs/NodeKind"
+    },
+    "params": {
+      "description": "Parameters (validated against the kind's schema before journaling).",
+      "type": "object",
+      "additionalProperties": true,
+      "default": {}
+    },
+    "id": {
+      "description": "Optional client-chosen id (ULID); generated when absent.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/NodeId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "position": {
+      "description": "Editor position.",
+      "type": "array",
+      "items": {
+        "type": "number",
+        "format": "float"
+      },
+      "minItems": 2,
+      "maxItems": 2,
+      "default": [
+        0.0,
+        0.0
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "kind"
+  ],
+  "$defs": {
+    "NodeKind": {
+      "description": "A node kind identifier `namespace.name@version`, e.g. `jd.noise.fbm@1`.",
+      "type": "string"
+    },
+    "NodeId": {
+      "description": "Identifies a graph node.",
+      "type": "string"
+    }
+  }
+}

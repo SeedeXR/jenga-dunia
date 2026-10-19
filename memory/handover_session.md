@@ -60,6 +60,8 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `02:25:00` **Live preview** (World Creator-style): the store debounces (150 ms) a `graph.evaluate` at preview LOD (≤ 512², `height#lod<N>`) after every graph change and on load; `E_GRAPH_MISSING_INPUT` becomes an info line "live preview waiting: …" (half-wired graphs are normal while editing); ⚡ toggle in the graph toolbar; export runs a lod-0 evaluate first when only a preview layer exists. e2e asserts terrain appears after a seed edit without pressing Evaluate and that adding an unconnected node pauses the preview with the explanation.
 
+- `02:40:00` `jd schema --write <dir>` exports envelope + every op's request/result schema + `graph/node-kinds.json`; `schemas/v1/` committed (51 files, deterministic — written twice, identical); CI (Linux rust job) regenerates and fails on drift. CLI test checks `project.create.request.json` has `additionalProperties: false`.
+
 ### Open / next
 1. Apply code-review findings for the graph slice; push; CI.
 2. Desktop: graph panel (React Flow) + starter graph so new projects evaluate immediately.

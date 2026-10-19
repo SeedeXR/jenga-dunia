@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ExportReport",
+  "description": "What was written.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "Written file.",
+      "type": "string"
+    },
+    "sidecar": {
+      "description": "Sidecar JSON (always written) describing size, range and conventions.",
+      "type": "string"
+    },
+    "format": {
+      "description": "Encoding.",
+      "$ref": "#/$defs/HeightmapFormat"
+    },
+    "size_px": {
+      "description": "Width, height in pixels.",
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint32",
+        "minimum": 0
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "range_m": {
+      "description": "Height range encoded (for quantised formats) or observed (exact formats).",
+      "type": "array",
+      "items": {
+        "type": "number",
+        "format": "float"
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "quantisation_step_m": {
+      "description": "Metres per quantisation step (0 for exact formats).",
+      "type": "number",
+      "format": "float"
+    },
+    "flip_y": {
+      "description": "Whether rows were flipped (row 0 = north).",
+      "type": "boolean"
+    },
+    "bytes": {
+      "description": "Bytes written to `path`.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "path",
+    "sidecar",
+    "format",
+    "size_px",
+    "range_m",
+    "quantisation_step_m",
+    "flip_y",
+    "bytes"
+  ],
+  "$defs": {
+    "HeightmapFormat": {
+      "description": "Supported heightmap encodings.",
+      "oneOf": [
+        {
+          "description": "OpenEXR, single `Y` channel, 32-bit float, lossless (ZIP). Exact.",
+          "type": "string",
+          "const": "exr"
+        },
+        {
+          "description": "16-bit grayscale PNG, normalised to the export range.",
+          "type": "string",
+          "const": "png16"
+        },
+        {
+          "description": "Headerless little-endian u16, normalised to the export range (Unity / Unreal).",
+          "type": "string",
+          "const": "raw_r16"
+        },
+        {
+          "description": "Headerless little-endian f32. Exact.",
+          "type": "string",
+          "const": "raw_r32"
+        }
+      ]
+    }
+  }
+}

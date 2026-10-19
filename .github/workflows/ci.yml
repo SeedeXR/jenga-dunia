@@ -78,6 +78,12 @@ jobs:
           ./target/release/jd --json diag env | tail -1 | head -c 400; echo
           ./target/release/jd new "$RUNNER_TEMP/smoke.jdproj" --name Smoke
           ./target/release/jd --json open "$RUNNER_TEMP/smoke.jdproj" | tail -1 | grep -q '"status":"ok"'
+      - name: Generated schemas are committed and current
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          ./target/release/jd schema --write schemas/v1
+          git diff --exit-code -- schemas/ || { echo "::error::schemas/v1 is stale — run: jd schema --write schemas/v1"; exit 1; }
 
   frontend:
     name: frontend (ubuntu)

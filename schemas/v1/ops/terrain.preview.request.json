@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TerrainPreview",
+  "description": "`terrain.preview` params.",
+  "type": "object",
+  "properties": {
+    "layer": {
+      "description": "Layer name.",
+      "type": "string",
+      "default": "height"
+    },
+    "lod": {
+      "description": "Downsample factor exponent (0 = full, 1 = half, …).",
+      "type": "integer",
+      "format": "uint8",
+      "minimum": 0,
+      "maximum": 255,
+      "default": 2
+    }
+  },
+  "additionalProperties": false
+}

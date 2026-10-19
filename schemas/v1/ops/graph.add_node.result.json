@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AddedNode",
+  "description": "`graph.add_node` result.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "Id of the new node.",
+      "$ref": "#/$defs/NodeId"
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "$defs": {
+    "NodeId": {
+      "description": "Identifies a graph node.",
+      "type": "string"
+    }
+  }
+}

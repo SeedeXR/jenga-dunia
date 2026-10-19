@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TerrainExport",
+  "description": "`terrain.export_heightmap` params.",
+  "type": "object",
+  "properties": {
+    "layer": {
+      "description": "Layer name.",
+      "type": "string",
+      "default": "height"
+    },
+    "path": {
+      "description": "Output file; relative paths resolve against the project's `exports/` directory.",
+      "type": "string"
+    },
+    "format": {
+      "description": "Encoding.",
+      "$ref": "#/$defs/HeightmapFormat"
+    },
+    "flip_y": {
+      "description": "Flip rows so row 0 is north (image convention). Default true for images, false for RAW.",
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "default": null
+    },
+    "range_m": {
+      "description": "Height range mapped to [0, 65535] for quantised formats; defaults to the field's min/max.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "number",
+        "format": "float"
+      },
+      "minItems": 2,
+      "maxItems": 2,
+      "default": null
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "format"
+  ],
+  "$defs": {
+    "HeightmapFormat": {
+      "description": "Supported heightmap encodings.",
+      "oneOf": [
+        {
+          "description": "OpenEXR, single `Y` channel, 32-bit float, lossless (ZIP). Exact.",
+          "type": "string",
+          "const": "exr"
+        },
+        {
+          "description": "16-bit grayscale PNG, normalised to the export range.",
+          "type": "string",
+          "const": "png16"
+        },
+        {
+          "description": "Headerless little-endian u16, normalised to the export range (Unity / Unreal).",
+          "type": "string",
+          "const": "raw_r16"
+        },
+        {
+          "description": "Headerless little-endian f32. Exact.",
+          "type": "string",
+          "const": "raw_r32"
+        }
+      ]
+    }
+  }
+}

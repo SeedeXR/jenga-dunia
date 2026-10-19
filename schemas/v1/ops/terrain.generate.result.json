@@ -1,0 +1,93 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LayerInfo",
+  "description": "Result of `terrain.generate` / `terrain.stats`.",
+  "type": "object",
+  "properties": {
+    "layer": {
+      "description": "Layer name.",
+      "type": "string"
+    },
+    "size_px": {
+      "description": "Width, height in pixels.",
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint32",
+        "minimum": 0
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "tile_size": {
+      "description": "Tile size and halo.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "halo": {
+      "description": "Halo.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "stats": {
+      "description": "Statistics.",
+      "$ref": "#/$defs/HeightfieldStats"
+    },
+    "content_hash": {
+      "description": "blake3 content hash (hex).",
+      "type": "string"
+    },
+    "duration_ms": {
+      "description": "Wall time of the operation in milliseconds.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "layer",
+    "size_px",
+    "tile_size",
+    "halo",
+    "stats",
+    "content_hash",
+    "duration_ms"
+  ],
+  "$defs": {
+    "HeightfieldStats": {
+      "description": "Summary statistics over the whole field.",
+      "type": "object",
+      "properties": {
+        "min": {
+          "description": "Minimum height.",
+          "type": "number",
+          "format": "float"
+        },
+        "max": {
+          "description": "Maximum height.",
+          "type": "number",
+          "format": "float"
+        },
+        "mean": {
+          "description": "Mean height.",
+          "type": "number",
+          "format": "double"
+        },
+        "non_finite": {
+          "description": "Count of non-finite samples (must be 0 for a valid field).",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "min",
+        "max",
+        "mean",
+        "non_finite"
+      ]
+    }
+  }
+}

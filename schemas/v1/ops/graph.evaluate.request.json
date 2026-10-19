@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Evaluate",
+  "description": "`graph.evaluate` params.",
+  "type": "object",
+  "properties": {
+    "lod": {
+      "description": "Level of detail (0 = full resolution).",
+      "type": "integer",
+      "format": "uint8",
+      "minimum": 0,
+      "maximum": 255,
+      "default": 0
+    }
+  },
+  "additionalProperties": false
+}

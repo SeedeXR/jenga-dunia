@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "NodeRef",
+  "description": "`graph.remove_node` / `graph.set_bypass` params.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "Node id.",
+      "$ref": "#/$defs/NodeId"
+    },
+    "bypass": {
+      "description": "For `set_bypass`: the new flag.",
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "default": null
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id"
+  ],
+  "$defs": {
+    "NodeId": {
+      "description": "Identifies a graph node.",
+      "type": "string"
+    }
+  }
+}

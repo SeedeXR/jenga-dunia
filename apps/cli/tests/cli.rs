@@ -434,3 +434,58 @@ fn graph_evaluate_in_one_invocation_exports_in_the_next() {
     let raw = std::fs::metadata(proj.join("exports/h.r32")).expect("exported");
     assert_eq!(raw.len(), 4 * 128 * 128);
 }
+
+#[test]
+fn schema_write_emits_every_operation_and_node_kind() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let out = jd()
+        .args(["schema", "--write"])
+        .arg(dir.path())
+        .output()
+        .expect("run");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let index: Value =
+        serde_json::from_slice(&std::fs::read(dir.path().join("ops/index.json")).expect("index"))
+            .expect("json");
+    let ids: Vec<&str> = index
+        .as_array()
+        .expect("array")
+        .iter()
+        .filter_map(|o| o["id"].as_str())
+        .collect();
+    assert!(
+        ids.contains(&"project.create") && ids.contains(&"graph.evaluate"),
+        "{ids:?}"
+    );
+    for id in &ids {
+        for side in ["request", "result"] {
+            let schema: Value = serde_json::from_slice(
+                &std::fs::read(dir.path().join(format!("ops/{id}.{side}.json"))).expect(id),
+            )
+            .expect("json");
+            assert!(schema.is_object(), "{id}.{side}");
+        }
+    }
+    let create: Value = serde_json::from_slice(
+        &std::fs::read(dir.path().join("ops/project.create.request.json")).expect("read"),
+    )
+    .expect("json");
+    assert_eq!(
+        create["additionalProperties"],
+        Value::Bool(false),
+        "unknown params are rejected"
+    );
+    let envelope: Value =
+        serde_json::from_slice(&std::fs::read(dir.path().join("envelope.json")).expect("read"))
+            .expect("json");
+    assert!(envelope["properties"]["status"].is_object());
+    let kinds: Value = serde_json::from_slice(
+        &std::fs::read(dir.path().join("graph/node-kinds.json")).expect("read"),
+    )
+    .expect("json");
+    assert!(kinds.as_array().map(Vec::len).unwrap_or(0) >= 9);
+}

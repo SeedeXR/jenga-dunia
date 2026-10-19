@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Recover",
+  "description": "`project.recover` params.",
+  "type": "object",
+  "properties": {
+    "discard_failed": {
+      "description": "Drop journal entries that fail to replay instead of keeping them pending.",
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "additionalProperties": false
+}

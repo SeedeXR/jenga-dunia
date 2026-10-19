@@ -1,0 +1,122 @@
+[
+  {
+    "id": "diag.env",
+    "description": "Report host environment and detected tools",
+    "scope": "none"
+  },
+  {
+    "id": "graph.add_node",
+    "description": "Add a node (journaled)",
+    "scope": "project-write"
+  },
+  {
+    "id": "graph.connect",
+    "description": "Connect an output to an input (journaled; rejects bad ports, type mismatches and cycles)",
+    "scope": "project-write"
+  },
+  {
+    "id": "graph.disconnect",
+    "description": "Remove an edge (journaled)",
+    "scope": "project-write"
+  },
+  {
+    "id": "graph.evaluate",
+    "description": "Validate and evaluate the graph incrementally; publishes output nodes as layers (`<layer>#lod<N>` when lod > 0)",
+    "scope": "project-write"
+  },
+  {
+    "id": "graph.kinds",
+    "description": "List available node kinds with ports and parameter schemas",
+    "scope": "none"
+  },
+  {
+    "id": "graph.list",
+    "description": "Nodes and edges of the open project's graph",
+    "scope": "project-read"
+  },
+  {
+    "id": "graph.move_node",
+    "description": "Move a node on the editor canvas (journaled)",
+    "scope": "project-write"
+  },
+  {
+    "id": "graph.redo",
+    "description": "Re-apply the last undone graph edit (journaled as graph.restore)",
+    "scope": "project-write"
+  },
+  {
+    "id": "graph.remove_node",
+    "description": "Remove a node and its edges (journaled)",
+    "scope": "project-write"
+  },
+  {
+    "id": "graph.set_bypass",
+    "description": "Bypass or un-bypass a node (journaled)",
+    "scope": "project-write"
+  },
+  {
+    "id": "graph.set_param",
+    "description": "Set (or null to reset) a node parameter (journaled; validated against the kind's schema)",
+    "scope": "project-write"
+  },
+  {
+    "id": "graph.undo",
+    "description": "Take back the last graph edit (journaled as graph.restore)",
+    "scope": "project-write"
+  },
+  {
+    "id": "project.close",
+    "description": "Close the open project (unsaved changes stay in the journal)",
+    "scope": "project-read"
+  },
+  {
+    "id": "project.create",
+    "description": "Create a new project directory and open it",
+    "scope": "fs-write"
+  },
+  {
+    "id": "project.info",
+    "description": "Describe the open project",
+    "scope": "project-read"
+  },
+  {
+    "id": "project.open",
+    "description": "Open an existing project",
+    "scope": "project-read"
+  },
+  {
+    "id": "project.recover",
+    "description": "Replay unsaved journal entries found when the project was opened, then save (entries that fail stay pending unless discard_failed)",
+    "scope": "project-write"
+  },
+  {
+    "id": "project.save",
+    "description": "Write the open project to disk",
+    "scope": "project-write"
+  },
+  {
+    "id": "project.set_name",
+    "description": "Rename the open project",
+    "scope": "project-write"
+  },
+  {
+    "id": "terrain.export_heightmap",
+    "description": "Write a layer as EXR (f32), PNG16, RAW r16 or r32 with a JSON sidecar",
+    "scope": "export"
+  },
+  {
+    "id": "terrain.generate",
+    "description": "Generate a noise heightfield for the open project's world and store it as a layer",
+    "scope": "project-write"
+  },
+  {
+    "id": "terrain.preview",
+    "description": "Downsampled u16 preview of a layer (base64) for agents and viewers",
+    "scope": "project-read"
+  },
+  {
+    "id": "terrain.stats",
+    "description": "Statistics and content hash of a layer",
+    "scope": "project-read"
+  }
+]

@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EvaluateResult",
+  "description": "`graph.evaluate` result.",
+  "type": "object",
+  "properties": {
+    "lod": {
+      "description": "Level of detail evaluated.",
+      "type": "integer",
+      "format": "uint8",
+      "minimum": 0,
+      "maximum": 255
+    },
+    "nodes": {
+      "description": "Reports in evaluation order.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/NodeReport"
+      }
+    },
+    "duration_ms": {
+      "description": "Total milliseconds.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "layers": {
+      "description": "Layers published by output nodes (layer name → content hash).",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "lod",
+    "nodes",
+    "duration_ms",
+    "layers"
+  ],
+  "$defs": {
+    "NodeReport": {
+      "description": "Per-node evaluation report.",
+      "type": "object",
+      "properties": {
+        "node": {
+          "description": "Node id.",
+          "$ref": "#/$defs/NodeId"
+        },
+        "kind": {
+          "description": "Kind.",
+          "type": "string"
+        },
+        "hash": {
+          "description": "Input hash (hex) — the cache key.",
+          "type": "string"
+        },
+        "cached": {
+          "description": "Served from cache?",
+          "type": "boolean"
+        },
+        "duration_ms": {
+          "description": "Milliseconds spent (0 when cached).",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "node",
+        "kind",
+        "hash",
+        "cached",
+        "duration_ms"
+      ]
+    },
+    "NodeId": {
+      "description": "Identifies a graph node.",
+      "type": "string"
+    }
+  }
+}

@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TerrainGenerate",
+  "description": "`terrain.generate` params.",
+  "type": "object",
+  "properties": {
+    "noise": {
+      "description": "Noise parameters (all optional; see schema defaults).",
+      "$ref": "#/$defs/NoiseParams",
+      "default": {
+        "kind": "open_simplex2",
+        "fractal": "fbm",
+        "seed": 0,
+        "feature_size_m": 1024.0,
+        "octaves": 6,
+        "lacunarity": 2.0,
+        "gain": 0.5,
+        "height_range_m": [
+          0.0,
+          500.0
+        ],
+        "offset_m": [
+          0.0,
+          0.0
+        ]
+      }
+    },
+    "layer": {
+      "description": "Layer name to store the result under.",
+      "type": "string",
+      "default": "height"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "NoiseParams": {
+      "description": "Parameters of a noise heightfield generator.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "Lattice.",
+          "$ref": "#/$defs/NoiseKind",
+          "default": "open_simplex2"
+        },
+        "fractal": {
+          "description": "Fractal combinator.",
+          "$ref": "#/$defs/FractalKind",
+          "default": "fbm"
+        },
+        "seed": {
+          "description": "Seed (combined with the world seed by the caller when desired).",
+          "type": "integer",
+          "format": "int32",
+          "default": 0
+        },
+        "feature_size_m": {
+          "description": "Feature size in metres (wavelength of the first octave).",
+          "type": "number",
+          "format": "float",
+          "default": 1024.0
+        },
+        "octaves": {
+          "description": "Octave count (1–16).",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 6
+        },
+        "lacunarity": {
+          "description": "Frequency multiplier per octave.",
+          "type": "number",
+          "format": "float",
+          "default": 2.0
+        },
+        "gain": {
+          "description": "Amplitude multiplier per octave.",
+          "type": "number",
+          "format": "float",
+          "default": 0.5
+        },
+        "height_range_m": {
+          "description": "Output height range in metres: noise ∈ [-1,1] maps to [min, max].",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "default": [
+            0.0,
+            500.0
+          ]
+        },
+        "offset_m": {
+          "description": "Offset of the sampling origin in metres.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "default": [
+            0.0,
+            0.0
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "NoiseKind": {
+      "description": "Base noise lattice.",
+      "oneOf": [
+        {
+          "description": "OpenSimplex2 (fast, isotropic). Default.",
+          "type": "string",
+          "const": "open_simplex2"
+        },
+        {
+          "description": "OpenSimplex2S (smoother).",
+          "type": "string",
+          "const": "open_simplex2_s"
+        },
+        {
+          "description": "Improved Perlin.",
+          "type": "string",
+          "const": "perlin"
+        },
+        {
+          "description": "Value noise.",
+          "type": "string",
+          "const": "value"
+        },
+        {
+          "description": "Cubic value noise.",
+          "type": "string",
+          "const": "value_cubic"
+        },
+        {
+          "description": "Cellular / Worley (F1 distance).",
+          "type": "string",
+          "const": "cellular"
+        }
+      ]
+    },
+    "FractalKind": {
+      "description": "Fractal combinator.",
+      "oneOf": [
+        {
+          "description": "Single octave.",
+          "type": "string",
+          "const": "none"
+        },
+        {
+          "description": "Fractal Brownian motion. Default.",
+          "type": "string",
+          "const": "fbm"
+        },
+        {
+          "description": "Ridged multifractal (mountain ridges).",
+          "type": "string",
+          "const": "ridged"
+        },
+        {
+          "description": "Ping-pong (terraced/billowy).",
+          "type": "string",
+          "const": "ping_pong"
+        }
+      ]
+    }
+  }
+}

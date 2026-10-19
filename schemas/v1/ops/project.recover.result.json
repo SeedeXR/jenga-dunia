@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RecoverResult",
+  "description": "`project.recover` result.",
+  "type": "object",
+  "properties": {
+    "replayed": {
+      "description": "Entries replayed in order.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/JournalEntry"
+      }
+    },
+    "failed": {
+      "description": "Entries that failed to replay (op id + error message).",
+      "type": "array",
+      "items": {
+        "type": "array",
+        "prefixItems": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "string"
+          }
+        ],
+        "minItems": 2,
+        "maxItems": 2
+      }
+    }
+  },
+  "required": [
+    "replayed",
+    "failed"
+  ],
+  "$defs": {
+    "JournalEntry": {
+      "description": "One write-ahead journal entry: a mutating op that was applied in memory.",
+      "type": "object",
+      "properties": {
+        "ts": {
+          "description": "RFC 3339 timestamp.",
+          "type": "string"
+        },
+        "op": {
+          "description": "Operation id.",
+          "type": "string"
+        },
+        "params": {
+          "description": "Parameters as received."
+        }
+      },
+      "required": [
+        "ts",
+        "op",
+        "params"
+      ]
+    }
+  }
+}

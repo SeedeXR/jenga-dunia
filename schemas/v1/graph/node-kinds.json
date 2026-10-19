@@ -1,0 +1,447 @@
+[
+  {
+    "kind": "jd.analysis.slope@1",
+    "description": "Slope mask 0..1 (gradient angle / max_deg) — feed into multiply to attenuate by steepness",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "SlopeParams",
+      "type": "object",
+      "properties": {
+        "max_deg": {
+          "description": "Slope that maps to 1.0 in the mask (degrees, (0, 90]).",
+          "type": "number",
+          "format": "float",
+          "default": 90.0
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "kind": "jd.erosion.thermal@1",
+    "description": "Thermal erosion: material steeper than the talus angle slides downhill (mass-conserving Jacobi steps)",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ThermalParams",
+      "type": "object",
+      "properties": {
+        "talus_deg": {
+          "description": "Angle of repose in degrees (sand ≈ 30–35, scree ≈ 35–40).",
+          "type": "number",
+          "format": "float",
+          "default": 35.0
+        },
+        "iterations": {
+          "description": "Jacobi steps (1..=1000); more steps move material further.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 50
+        },
+        "rate": {
+          "description": "Fraction of the excess that moves per step, (0, 1]; 0.5 is the classic stable value.",
+          "type": "number",
+          "format": "float",
+          "default": 0.5
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "kind": "jd.filter.blur@1",
+    "description": "Box blur (tile-local, reads through the halo; radius ≤ world.halo)",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "BlurParams",
+      "type": "object",
+      "properties": {
+        "radius": {
+          "description": "Box-blur radius in pixels (1..=4; must not exceed the world's tile halo).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 1
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "kind": "jd.math.add@1",
+    "description": "a + b",
+    "inputs": [
+      {
+        "name": "a",
+        "ty": "heightfield",
+        "required": true
+      },
+      {
+        "name": "b",
+        "ty": "heightfield",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "NoParams",
+      "description": "No parameters.",
+      "type": "object",
+      "additionalProperties": false
+    }
+  },
+  {
+    "kind": "jd.math.multiply@1",
+    "description": "a × b (use a 0..1 mask as b to attenuate)",
+    "inputs": [
+      {
+        "name": "a",
+        "ty": "heightfield",
+        "required": true
+      },
+      {
+        "name": "b",
+        "ty": "heightfield",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "NoParams",
+      "description": "No parameters.",
+      "type": "object",
+      "additionalProperties": false
+    }
+  },
+  {
+    "kind": "jd.math.remap@1",
+    "description": "Linear remap of [from0, from1] to [to0, to1], optional clamp",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "RemapParams",
+      "type": "object",
+      "properties": {
+        "from": {
+          "description": "Input range mapped from.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "default": [
+            0.0,
+            1.0
+          ]
+        },
+        "to": {
+          "description": "Output range mapped to.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "default": [
+            0.0,
+            1.0
+          ]
+        },
+        "clamp": {
+          "description": "Clamp to the output range.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "kind": "jd.math.scale@1",
+    "description": "in × factor",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ScaleParams",
+      "type": "object",
+      "properties": {
+        "factor": {
+          "description": "Multiplier.",
+          "type": "number",
+          "format": "float",
+          "default": 1.0
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "kind": "jd.noise.fbm@1",
+    "description": "Fractal noise heightfield (OpenSimplex2/Perlin/… × fBm/ridged/ping-pong), parameters in metres",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "NoiseParams",
+      "description": "Parameters of a noise heightfield generator.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "Lattice.",
+          "$ref": "#/$defs/NoiseKind",
+          "default": "open_simplex2"
+        },
+        "fractal": {
+          "description": "Fractal combinator.",
+          "$ref": "#/$defs/FractalKind",
+          "default": "fbm"
+        },
+        "seed": {
+          "description": "Seed (combined with the world seed by the caller when desired).",
+          "type": "integer",
+          "format": "int32",
+          "default": 0
+        },
+        "feature_size_m": {
+          "description": "Feature size in metres (wavelength of the first octave).",
+          "type": "number",
+          "format": "float",
+          "default": 1024.0
+        },
+        "octaves": {
+          "description": "Octave count (1–16).",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 6
+        },
+        "lacunarity": {
+          "description": "Frequency multiplier per octave.",
+          "type": "number",
+          "format": "float",
+          "default": 2.0
+        },
+        "gain": {
+          "description": "Amplitude multiplier per octave.",
+          "type": "number",
+          "format": "float",
+          "default": 0.5
+        },
+        "height_range_m": {
+          "description": "Output height range in metres: noise ∈ [-1,1] maps to [min, max].",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "default": [
+            0.0,
+            500.0
+          ]
+        },
+        "offset_m": {
+          "description": "Offset of the sampling origin in metres.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "default": [
+            0.0,
+            0.0
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "$defs": {
+        "NoiseKind": {
+          "description": "Base noise lattice.",
+          "oneOf": [
+            {
+              "description": "OpenSimplex2 (fast, isotropic). Default.",
+              "type": "string",
+              "const": "open_simplex2"
+            },
+            {
+              "description": "OpenSimplex2S (smoother).",
+              "type": "string",
+              "const": "open_simplex2_s"
+            },
+            {
+              "description": "Improved Perlin.",
+              "type": "string",
+              "const": "perlin"
+            },
+            {
+              "description": "Value noise.",
+              "type": "string",
+              "const": "value"
+            },
+            {
+              "description": "Cubic value noise.",
+              "type": "string",
+              "const": "value_cubic"
+            },
+            {
+              "description": "Cellular / Worley (F1 distance).",
+              "type": "string",
+              "const": "cellular"
+            }
+          ]
+        },
+        "FractalKind": {
+          "description": "Fractal combinator.",
+          "oneOf": [
+            {
+              "description": "Single octave.",
+              "type": "string",
+              "const": "none"
+            },
+            {
+              "description": "Fractal Brownian motion. Default.",
+              "type": "string",
+              "const": "fbm"
+            },
+            {
+              "description": "Ridged multifractal (mountain ridges).",
+              "type": "string",
+              "const": "ridged"
+            },
+            {
+              "description": "Ping-pong (terraced/billowy).",
+              "type": "string",
+              "const": "ping_pong"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "kind": "jd.output.height@1",
+    "description": "Publishes its input as a named heightfield layer",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "OutputParams",
+      "type": "object",
+      "properties": {
+        "layer": {
+          "description": "Layer name the result is published under.",
+          "type": "string",
+          "default": "height"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+]

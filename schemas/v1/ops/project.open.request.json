@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ProjectOpen",
+  "description": "`project.open` params.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "Project directory.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path"
+  ]
+}

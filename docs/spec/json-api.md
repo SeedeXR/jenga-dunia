@@ -1,6 +1,6 @@
 # JSON API Specification (v1)
 
-Normative companion to `docs/architecture/07-agent-interfaces.md`. JSON Schemas are generated from Rust types with `schemars` and committed under `schemas/v1/` once code exists; this document fixes the envelope and conventions those schemas must satisfy.
+Normative companion to `docs/architecture/07-agent-interfaces.md`. JSON Schemas are generated from Rust types with `schemars` and committed under `schemas/v1/` (`jd schema --write schemas/v1`; CI fails when they are stale): `envelope.json`, `ops/index.json`, `ops/<op>.request.json` / `.result.json`, `graph/node-kinds.json`. This document fixes the envelope and conventions those schemas must satisfy.
 
 ## Envelope
 

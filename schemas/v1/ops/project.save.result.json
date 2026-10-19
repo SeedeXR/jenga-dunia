@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ProjectSummary",
+  "description": "Summary returned by project ops.",
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "description": "Project id.",
+      "type": "string"
+    },
+    "name": {
+      "description": "Name.",
+      "type": "string"
+    },
+    "path": {
+      "description": "Directory.",
+      "type": "string"
+    },
+    "world": {
+      "description": "World settings.",
+      "$ref": "#/$defs/WorldSettings"
+    },
+    "schema_version": {
+      "description": "Document schema version.",
+      "$ref": "#/$defs/SchemaVersion"
+    },
+    "dirty": {
+      "description": "Unsaved changes?",
+      "type": "boolean"
+    },
+    "pending_journal": {
+      "description": "Journal entries awaiting replay.",
+      "type": "integer",
+      "format": "uint",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "project_id",
+    "name",
+    "path",
+    "world",
+    "schema_version",
+    "dirty",
+    "pending_journal"
+  ],
+  "$defs": {
+    "WorldSettings": {
+      "description": "World extent, resolution and tiling (`docs/spec/project-format.md`).",
+      "type": "object",
+      "properties": {
+        "extent_m": {
+          "description": "Extent in metres, [x, y].",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "resolution_px": {
+          "description": "Heightfield resolution in pixels, [x, y].",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "tile_size": {
+          "description": "Tile edge length in pixels (power of two).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "halo": {
+          "description": "Halo width in pixels around each tile.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "origin": {
+          "description": "World-space origin of pixel (0,0), metres.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "crs": {
+          "description": "Optional CRS identifier (e.g. \"EPSG:32637\") when georeferenced.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "seed": {
+          "description": "Master seed for all procedural randomness.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "extent_m",
+        "resolution_px",
+        "tile_size",
+        "halo",
+        "origin",
+        "seed"
+      ]
+    },
+    "SchemaVersion": {
+      "description": "A monotonically increasing document/API schema version.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    }
+  }
+}

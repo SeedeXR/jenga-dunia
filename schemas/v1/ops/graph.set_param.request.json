@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SetParam",
+  "description": "`graph.set_param` params.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "Node id.",
+      "$ref": "#/$defs/NodeId"
+    },
+    "key": {
+      "description": "Parameter key.",
+      "type": "string"
+    },
+    "value": {
+      "description": "New value (`null` removes the key, restoring the default)."
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "key",
+    "value"
+  ],
+  "$defs": {
+    "NodeId": {
+      "description": "Identifies a graph node.",
+      "type": "string"
+    }
+  }
+}

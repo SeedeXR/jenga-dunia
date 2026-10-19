@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Array_of_NodeDefInfo",
+  "type": "array",
+  "items": {
+    "$ref": "#/$defs/NodeDefInfo"
+  },
+  "$defs": {
+    "NodeDefInfo": {
+      "description": "Machine-readable description of a node kind.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "Kind.",
+          "$ref": "#/$defs/NodeKind"
+        },
+        "description": {
+          "description": "Description.",
+          "type": "string"
+        },
+        "inputs": {
+          "description": "Inputs.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Port"
+          }
+        },
+        "outputs": {
+          "description": "Outputs.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Port"
+          }
+        },
+        "param_schema": {
+          "description": "Param schema."
+        }
+      },
+      "required": [
+        "kind",
+        "description",
+        "inputs",
+        "outputs",
+        "param_schema"
+      ]
+    },
+    "NodeKind": {
+      "description": "A node kind identifier `namespace.name@version`, e.g. `jd.noise.fbm@1`.",
+      "type": "string"
+    },
+    "Port": {
+      "description": "A typed port declared by a node definition.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Port name, unique within the node's inputs or outputs.",
+          "type": "string"
+        },
+        "ty": {
+          "description": "Data type.",
+          "$ref": "#/$defs/PortType"
+        },
+        "required": {
+          "description": "Inputs only: must be connected for the node to evaluate.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "name",
+        "ty"
+      ]
+    },
+    "PortType": {
+      "description": "Port data types. Only heightfields flow today; new types are added with their first producer.",
+      "oneOf": [
+        {
+          "description": "f32 heightfield in metres (masks are heightfields in 0..1).",
+          "type": "string",
+          "const": "heightfield"
+        }
+      ]
+    }
+  }
+}
