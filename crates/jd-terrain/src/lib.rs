@@ -14,4 +14,6 @@ pub mod sim;
 pub use export::{HeightmapFormat, export_heightmap};
 pub use heightfield::{Heightfield, HeightfieldStats, Tile, TileCoord};
 pub use noise::{FractalKind, NoiseKind, NoiseParams, generate_noise};
-pub use sim::{slope_mask, thermal_erode};
+pub use sim::{
+    HydraulicParams, HydraulicResult, THERMAL_MAX_RATE, hydraulic_erode, slope_mask, thermal_erode,
+};

@@ -83,7 +83,7 @@ impl LayerCache {
         if !rest.is_empty() || rows.len() != (w as usize) * (h as usize) {
             return Err(corrupt());
         }
-        let mut hf = Heightfield::new(w, h, tile, halo)?;
+        let mut hf = Heightfield::new(w, h, tile, halo).map_err(|_| corrupt())?;
         hf.fill_with(|x, y| f32::from_le_bytes(rows[(y * w + x) as usize]));
         Ok(Some(hf))
     }
@@ -98,16 +98,21 @@ impl LayerCache {
 
     fn read_index(&self) -> JdResult<BTreeMap<String, String>> {
         match fs::read(self.index_path()) {
-            Ok(b) => Ok(serde_json::from_slice(&b)?),
+            // A garbled index is a cache miss, not an error: the cache is disposable and the next
+            // `put` rewrites it (existing blobs are simply forgotten).
+            Ok(b) => Ok(serde_json::from_slice(&b).unwrap_or_default()),
             Err(e) if e.kind() == ErrorKind::NotFound => Ok(BTreeMap::new()),
             Err(e) => Err(e.into()),
         }
     }
 }
 
-/// Write via a temporary file and rename so an interrupted write never leaves a torn blob/index.
+/// Write via a uniquely named temporary file and rename, so an interrupted write never leaves a
+/// torn blob/index and two writers (two processes, or two evaluations) never share a temp file.
 fn write_atomic(path: &Path, bytes: &[u8]) -> JdResult<()> {
-    let tmp = path.with_extension("tmp");
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = path.with_extension(format!("{}-{seq}.tmp", std::process::id()));
     fs::write(&tmp, bytes)?;
     fs::rename(&tmp, path)?;
     Ok(())
@@ -167,6 +172,21 @@ mod tests {
         .expect("write");
         assert_eq!(
             cache.get("a").expect_err("corrupt").code,
+            ErrorCode::E_INTERNAL
+        );
+        // A garbled index reads as empty and heals on the next put.
+        fs::write(dir.path().join("cache/layers/index.json"), b"{ not json").expect("write");
+        assert!(cache.get("b").expect("miss").is_none());
+        cache.put("c", &field(3.0)).expect("put heals");
+        assert!(cache.get("c").expect("get").is_some());
+        // A blob with an impossible header is corrupt, not an input error.
+        let hash = cache.put("d", &field(4.0)).expect("put");
+        let blob = dir.path().join("cache/layers").join(format!("{hash}.jdl"));
+        let mut bad = fs::read(&blob).expect("read");
+        bad[12..16].copy_from_slice(&7u32.to_le_bytes()); // tile_size 7: not a power of two
+        fs::write(&blob, &bad).expect("write");
+        assert_eq!(
+            cache.get("d").expect_err("corrupt header").code,
             ErrorCode::E_INTERNAL
         );
     }

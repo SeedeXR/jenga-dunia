@@ -200,6 +200,14 @@ impl History {
         self.undo.push(current);
         Some(g)
     }
+    /// The snapshot `undo` would restore, without changing the stacks.
+    pub fn peek_undo(&self) -> Option<&GraphDocument> {
+        self.undo.last()
+    }
+    /// The snapshot `redo` would restore, without changing the stacks.
+    pub fn peek_redo(&self) -> Option<&GraphDocument> {
+        self.redo.last()
+    }
     /// (undo depth, redo depth).
     pub fn depths(&self) -> (usize, usize) {
         (self.undo.len(), self.redo.len())

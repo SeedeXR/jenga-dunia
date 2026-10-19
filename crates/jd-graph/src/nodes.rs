@@ -3,7 +3,10 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use jd_terrain::{Heightfield, NoiseParams, generate_noise, slope_mask, thermal_erode};
+use jd_terrain::{
+    Heightfield, HydraulicParams, NoiseParams, THERMAL_MAX_RATE, generate_noise, hydraulic_erode,
+    slope_mask, thermal_erode,
+};
 use jd_types::{JdError, JdResult};
 use rayon::prelude::*;
 use serde::Deserialize;
@@ -74,7 +77,7 @@ struct ThermalParams {
     /// Jacobi steps (1..=1000); more steps move material further.
     #[serde(default = "iterations_default")]
     iterations: u32,
-    /// Fraction of the excess that moves per step, (0, 1]; 0.5 is the classic stable value.
+    /// Fraction of the excess that moves per step, (0, 0.25]; 0.25 is the stable maximum.
     #[serde(default = "rate_default")]
     rate: f32,
 }
@@ -85,7 +88,7 @@ fn iterations_default() -> u32 {
     50
 }
 fn rate_default() -> f32 {
-    0.5
+    THERMAL_MAX_RATE
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -99,9 +102,51 @@ fn ninety() -> f32 {
     90.0
 }
 
-/// Horizontal sample spacing of the world at the current LOD, in metres.
-fn pixel_m(ctx: &EvalCtx) -> f32 {
-    (ctx.lod_world.extent_m[0] / f64::from(ctx.lod_world.resolution_px[0].max(1))) as f32
+/// Horizontal sample spacing (x, y) of the world at the current LOD, in metres.
+fn spacing_m(ctx: &EvalCtx) -> [f32; 2] {
+    let s = ctx.lod_world.spacing_m();
+    [s[0] as f32, s[1] as f32]
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct HydraulicNodeParams {
+    /// Simulation steps (1..=2000).
+    #[serde(default = "hyd_iterations")]
+    iterations: u32,
+    /// Time step in seconds ((0, 1]; 0.02 is stable for the pipe model).
+    #[serde(default = "hyd_dt")]
+    dt: f32,
+    /// Rain in metres of water per second.
+    #[serde(default = "hyd_rain")]
+    rain_rate: f32,
+    /// Evaporation per second (fraction of depth).
+    #[serde(default = "hyd_evap")]
+    evaporation: f32,
+    /// Sediment capacity constant Kc.
+    #[serde(default = "one_f")]
+    capacity_k: f32,
+    /// Dissolving constant Ks.
+    #[serde(default = "half")]
+    dissolve_k: f32,
+    /// Deposition constant Kd.
+    #[serde(default = "one_f")]
+    deposit_k: f32,
+}
+fn hyd_iterations() -> u32 {
+    100
+}
+fn hyd_dt() -> f32 {
+    0.02
+}
+fn hyd_rain() -> f32 {
+    0.012
+}
+fn hyd_evap() -> f32 {
+    0.015
+}
+fn half() -> f32 {
+    0.5
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -296,7 +341,9 @@ pub fn register_all(r: &mut Registry) {
             if !(1..=1000).contains(&tp.iterations) {
                 return Err(JdError::invalid("iterations", "must be within 1..=1000"));
             }
-            Ok(out("out", thermal_erode(field(i, "in")?, pixel_m(ctx), tp.talus_deg, tp.iterations, tp.rate)?))
+            Ok(out("out", thermal_erode(
+                    field(i, "in")?,
+                    spacing_m(ctx), tp.talus_deg, tp.iterations, tp.rate)?))
         },
     ));
     r.register(NodeDef::new::<SlopeParams, _>(
@@ -308,8 +355,43 @@ pub fn register_all(r: &mut Registry) {
             let sp: SlopeParams = params(p)?;
             Ok(out(
                 "out",
-                slope_mask(field(i, "in")?, pixel_m(ctx), sp.max_deg)?,
+                slope_mask(field(i, "in")?, spacing_m(ctx), sp.max_deg)?,
             ))
+        },
+    ));
+    r.register(NodeDef::new::<HydraulicNodeParams, _>(
+        "jd.erosion.hydraulic@1",
+        "Hydraulic erosion (virtual pipes / shallow water): rain flows downhill, dissolves, carries and deposits sediment; outputs terrain, water depth and suspended sediment",
+        vec![port("in", PortType::Heightfield, true)],
+        vec![
+            port("out", PortType::Heightfield, false),
+            port("water", PortType::Heightfield, false),
+            port("sediment", PortType::Heightfield, false),
+        ],
+        |ctx, p, i| {
+            let hp: HydraulicNodeParams = params(p)?;
+            if !(1..=2000).contains(&hp.iterations) {
+                return Err(JdError::invalid("iterations", "must be within 1..=2000"));
+            }
+            let r = hydraulic_erode(
+                field(i, "in")?,
+                spacing_m(ctx),
+                &HydraulicParams {
+                    iterations: hp.iterations,
+                    dt: hp.dt,
+                    rain_rate: hp.rain_rate,
+                    evaporation: hp.evaporation,
+                    capacity_k: hp.capacity_k,
+                    dissolve_k: hp.dissolve_k,
+                    deposit_k: hp.deposit_k,
+                    ..Default::default()
+                },
+            )?;
+            Ok(BTreeMap::from([
+                ("out".to_owned(), Value::field(r.height)),
+                ("water".to_owned(), Value::field(r.water)),
+                ("sediment".to_owned(), Value::field(r.sediment)),
+            ]))
         },
     ));
     r.register(NodeDef::new::<OutputParams, _>(
@@ -652,6 +734,24 @@ mod tests {
         assert!(
             mask.min >= 0.0 && mask.max <= 1.0 && mask.max > 0.0,
             "{mask:?}"
+        );
+        // Hydraulic node: three outputs, terrain+sediment conserved, water and sediment ≥ 0.
+        let hy = add(
+            &mut g,
+            "jd.erosion.hydraulic@1",
+            serde_json::json!({ "iterations": 20 }),
+        );
+        connect(&mut g, &n, "out", &hy, "in");
+        let (outs, _) = Evaluator::new(&reg, &cache)
+            .evaluate(&g, &world(), 0)
+            .expect("eval");
+        let ht = outs[&(hy.clone(), "out".into())].as_field();
+        let wt = outs[&(hy.clone(), "water".into())].as_field();
+        let st = outs[&(hy, "sediment".into())].as_field();
+        assert!(wt.stats().min >= 0.0 && st.stats().min >= 0.0);
+        assert!(
+            ((ht.stats().mean + st.stats().mean) - noise.stats().mean).abs() < 1e-3,
+            "terrain+sediment mean preserved"
         );
         g.nodes
             .get_mut(&n)

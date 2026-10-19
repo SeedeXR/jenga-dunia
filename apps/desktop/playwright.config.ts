@@ -4,7 +4,9 @@ import { defineConfig } from "@playwright/test";
 // real Rust core through `jd-mcp` (see e2e/bridge.ts). Runs in CI without a display.
 export default defineConfig({
   testDir: "./e2e",
-  timeout: 90_000,
+  // CI renders with software GL: every live preview re-tessellates the viewport, so the graph
+  // flow takes ~90 s there (≈3 s locally). Generous there, tight locally.
+  timeout: process.env.CI ? 300_000 : 90_000,
   retries: 0,
   reporter: [["list"]],
   use: {

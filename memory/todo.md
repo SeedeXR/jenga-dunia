@@ -50,7 +50,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [ ] Viewport terrain LOD + PBR + sky
 
 ## Phase 3 — Simulation
-- [~] Thermal ✔ (CPU Jacobi, `jd.erosion.thermal@1`, mass-conserving; GPU/tile-local ☐) · hydraulic (grid/virtual pipes) ☐ · hydraulic (particle) ☐ · stream-power ☐ · wind ☐ · coastal ☐ · snow ☐
+- [~] Thermal ✔ (CPU Jacobi, `jd.erosion.thermal@1`, mass-conserving; GPU/tile-local ☐) · hydraulic (grid/virtual pipes) ✔ (`jd.erosion.hydraulic@1`, CPU, closed boundary; drains/layers/GPU ☐) · hydraulic (particle) ☐ · stream-power ☐ · wind ☐ · coastal ☐ · snow ☐
 - [ ] Hydrology nodes; per-basin lakes
 - [ ] Biomes + scatter + instance export
 - [ ] Weather state, timeline, water/ocean viewport

@@ -10,18 +10,38 @@ use crate::Heightfield;
 use jd_types::{JdError, JdResult};
 use rayon::prelude::*;
 
-const SQRT2: f32 = std::f32::consts::SQRT_2;
-/// 8-neighbourhood offsets and their distances in pixels.
-const NEIGHBOURS: [(i64, i64, f32); 8] = [
-    (-1, -1, SQRT2),
-    (0, -1, 1.0),
-    (1, -1, SQRT2),
-    (-1, 0, 1.0),
-    (1, 0, 1.0),
-    (-1, 1, SQRT2),
-    (0, 1, 1.0),
-    (1, 1, SQRT2),
+/// 8-neighbourhood offsets; `NEIGHBOURS[7 - k]` is the opposite direction of `k`.
+const NEIGHBOURS: [(i64, i64); 8] = [
+    (-1, -1),
+    (0, -1),
+    (1, -1),
+    (-1, 0),
+    (1, 0),
+    (-1, 1),
+    (0, 1),
+    (1, 1),
 ];
+
+/// Metres between a cell and each neighbour for the given sample spacing (pixels may be
+/// anisotropic: `WorldSettings::spacing_m`).
+fn neighbour_dist(spacing: [f32; 2]) -> [f32; 8] {
+    NEIGHBOURS.map(|(dx, dy)| (dx as f32 * spacing[0]).hypot(dy as f32 * spacing[1]))
+}
+
+/// Largest `rate` for which a cell cannot receive more than it is below its 8 neighbours in one
+/// step (inflow ≤ 8·rate·(H−t)/2 ≤ H−t); above it a pit can overshoot into a spike.
+pub const THERMAL_MAX_RATE: f32 = 0.25;
+
+fn check_spacing(spacing_m: [f32; 2]) -> JdResult<()> {
+    if spacing_m.iter().all(|s| *s > 0.0 && s.is_finite()) {
+        Ok(())
+    } else {
+        Err(JdError::invalid(
+            "spacing_m",
+            "sample spacing must be positive",
+        ))
+    }
+}
 
 /// Flat row-major view used inside the kernels (tile `get` per sample is too slow for Jacobi loops).
 struct Grid<'a> {
@@ -44,7 +64,7 @@ impl Grid<'_> {
 /// Pass 1 of a thermal step (Olsen 2004 talus rule): per cell, the material it sheds this step
 /// (`amount = rate · dmax / 2`) and `amount / total_excess`, the factor that turns a neighbour's
 /// excess into its share. Both are 0 when nothing is steeper than the talus.
-fn shed_factors(g: &Grid, talus_h: f32, rate: f32) -> Vec<[f32; 2]> {
+fn shed_factors(g: &Grid, tan_t: f32, dist: &[f32; 8], rate: f32) -> Vec<[f32; 2]> {
     let mut out = vec![[0.0f32; 2]; (g.w * g.hh) as usize];
     out.par_chunks_mut(g.w as usize)
         .enumerate()
@@ -53,12 +73,12 @@ fn shed_factors(g: &Grid, talus_h: f32, rate: f32) -> Vec<[f32; 2]> {
                 let (xi, yi) = (x as i64, y as i64);
                 let hc = g.at(xi, yi);
                 let (mut total, mut dmax) = (0.0f32, 0.0f32);
-                for (dx, dy, dist) in NEIGHBOURS {
+                for (k, (dx, dy)) in NEIGHBOURS.iter().enumerate() {
                     let (nx, ny) = (xi + dx, yi + dy);
                     if !g.inside(nx, ny) {
                         continue; // material never leaves the field: exact conservation
                     }
-                    let d = hc - g.at(nx, ny) - talus_h * dist;
+                    let d = hc - g.at(nx, ny) - tan_t * dist[k];
                     if d > 0.0 {
                         total += d;
                         dmax = dmax.max(d);
@@ -74,7 +94,7 @@ fn shed_factors(g: &Grid, talus_h: f32, rate: f32) -> Vec<[f32; 2]> {
 }
 
 /// Pass 2: every cell loses what it sheds and gains each neighbour's share directed at it.
-fn gather(g: &Grid, shed: &[[f32; 2]], talus_h: f32) -> Vec<f32> {
+fn gather(g: &Grid, shed: &[[f32; 2]], tan_t: f32, dist: &[f32; 8]) -> Vec<f32> {
     let mut out = vec![0.0f32; (g.w * g.hh) as usize];
     out.par_chunks_mut(g.w as usize)
         .enumerate()
@@ -83,14 +103,14 @@ fn gather(g: &Grid, shed: &[[f32; 2]], talus_h: f32) -> Vec<f32> {
                 let (xi, yi) = (x as i64, y as i64);
                 let hc = g.at(xi, yi);
                 let mut gained = 0.0f32;
-                for (dx, dy, dist) in NEIGHBOURS {
+                for (k, (dx, dy)) in NEIGHBOURS.iter().enumerate() {
                     let (nx, ny) = (xi + dx, yi + dy);
                     if !g.inside(nx, ny) {
                         continue;
                     }
                     let factor = shed[(ny * g.w + nx) as usize][1];
                     if factor > 0.0 {
-                        let excess = g.at(nx, ny) - hc - talus_h * dist;
+                        let excess = g.at(nx, ny) - hc - tan_t * dist[k];
                         if excess > 0.0 {
                             gained += factor * excess;
                         }
@@ -103,12 +123,12 @@ fn gather(g: &Grid, shed: &[[f32; 2]], talus_h: f32) -> Vec<f32> {
 }
 
 /// Thermal erosion: material steeper than `talus_deg` slides downhill for `iterations` steps.
-/// `pixel_m` is the horizontal sample spacing; `rate` in (0, 1] scales how much of the excess
-/// moves per step (0.5 is the classic stable choice). Mass is conserved exactly up to float
-/// rounding and the result is independent of thread count.
+/// `spacing_m` is the horizontal sample spacing (x, y); `rate` in (0, 0.25] scales how much of
+/// the excess moves per step ([`THERMAL_MAX_RATE`] keeps a pit from overshooting its rim). Mass is
+/// conserved exactly up to float rounding and the result is independent of thread count.
 pub fn thermal_erode(
     h: &Heightfield,
-    pixel_m: f32,
+    spacing_m: [f32; 2],
     talus_deg: f32,
     iterations: u32,
     rate: f32,
@@ -116,40 +136,273 @@ pub fn thermal_erode(
     if !(0.0..90.0).contains(&talus_deg) {
         return Err(JdError::invalid("talus_deg", "must be within 0..90"));
     }
-    if !(0.0 < rate && rate <= 1.0) {
-        return Err(JdError::invalid("rate", "must be within (0, 1]"));
+    if !(0.0 < rate && rate <= THERMAL_MAX_RATE) {
+        return Err(JdError::invalid(
+            "rate",
+            format!("must be within (0, {THERMAL_MAX_RATE}]"),
+        ));
     }
-    if !(pixel_m > 0.0 && pixel_m.is_finite()) {
-        return Err(JdError::invalid("pixel_m", "must be positive"));
-    }
-    let talus_h = talus_deg.to_radians().tan() * pixel_m;
+    check_spacing(spacing_m)?;
+    let dist = neighbour_dist(spacing_m);
+    let tan_t = talus_deg.to_radians().tan();
     let (w, hh) = (h.width() as i64, h.height() as i64);
     let mut cur = h.to_vec();
     for _ in 0..iterations {
         let g = Grid { h: &cur, w, hh };
-        let shed = shed_factors(&g, talus_h, rate);
-        cur = gather(&g, &shed, talus_h);
+        let shed = shed_factors(&g, tan_t, &dist, rate);
+        cur = gather(&g, &shed, tan_t, &dist);
     }
     let mut out = Heightfield::new(h.width(), h.height(), h.tile_size(), h.halo())?;
     out.fill_with(|x, y| cur[(y as usize) * (w as usize) + x as usize]);
     Ok(out)
 }
 
+/// Hydraulic erosion parameters (virtual pipes / shallow water, Mei–Decaudin–Hu 2007).
+#[derive(Debug, Clone, Copy)]
+pub struct HydraulicParams {
+    /// Simulation steps.
+    pub iterations: u32,
+    /// Time step (s); 0.02 with metre cells is stable for the pipe model.
+    pub dt: f32,
+    /// Rain added every step, metres of water per second.
+    pub rain_rate: f32,
+    /// Evaporation per second (fraction of depth).
+    pub evaporation: f32,
+    /// Sediment capacity constant Kc.
+    pub capacity_k: f32,
+    /// Dissolving constant Ks.
+    pub dissolve_k: f32,
+    /// Deposition constant Kd.
+    pub deposit_k: f32,
+    /// Floor for sin(tilt) so flat water still carries some sediment.
+    pub min_tilt: f32,
+}
+
+impl Default for HydraulicParams {
+    fn default() -> Self {
+        Self {
+            iterations: 100,
+            dt: 0.02,
+            rain_rate: 0.012,
+            evaporation: 0.015,
+            capacity_k: 1.0,
+            dissolve_k: 0.5,
+            deposit_k: 1.0,
+            min_tilt: 0.1,
+        }
+    }
+}
+
+/// Layers produced by hydraulic erosion.
+pub struct HydraulicResult {
+    /// Eroded terrain (metres).
+    pub height: Heightfield,
+    /// Remaining water depth (metres).
+    pub water: Heightfield,
+    /// Suspended sediment (metres).
+    pub sediment: Heightfield,
+}
+
+/// Pipe directions: left, right, top (−y), bottom (+y); `OPPOSITE[k]` is the neighbour's pipe back to us.
+const PIPES: [(i64, i64); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)];
+const OPPOSITE: [usize; 4] = [1, 0, 3, 2];
+
+/// Hydraulic erosion with the virtual-pipe shallow-water model. Closed boundary (no flow leaves
+/// the field), so water changes only by rain and evaporation and `terrain + suspended sediment`
+/// is conserved exactly up to float rounding; every pass gathers from the previous arrays, so
+/// the result is independent of thread count.
+///
+/// ponytail: 4 whole-field passes per step on flat arrays (~40 B/cell scratch); donor-cell
+/// sediment transport (conservative) instead of semi-Lagrangian; GPU twin and open-boundary
+/// drains come with `jd-gpu`.
+pub fn hydraulic_erode(
+    h: &Heightfield,
+    spacing_m: [f32; 2],
+    p: &HydraulicParams,
+) -> JdResult<HydraulicResult> {
+    check_spacing(spacing_m)?;
+    if !(p.dt > 0.0 && p.dt <= 1.0) {
+        return Err(JdError::invalid("dt", "must be within (0, 1]"));
+    }
+    for (name, v) in [
+        ("rain_rate", p.rain_rate),
+        ("evaporation", p.evaporation),
+        ("capacity_k", p.capacity_k),
+        ("dissolve_k", p.dissolve_k),
+        ("deposit_k", p.deposit_k),
+        ("min_tilt", p.min_tilt),
+    ] {
+        if !(v >= 0.0 && v.is_finite()) {
+            return Err(JdError::invalid(name, "must be finite and ≥ 0"));
+        }
+    }
+    if p.evaporation * p.dt >= 1.0 || p.dissolve_k * p.dt > 1.0 || p.deposit_k * p.dt > 1.0 {
+        return Err(JdError::invalid(
+            "dt",
+            "evaporation·dt must be < 1 and dissolve_k·dt, deposit_k·dt ≤ 1",
+        ));
+    }
+    let (w, hh) = (h.width() as i64, h.height() as i64);
+    let n = (w * hh) as usize;
+    let area = spacing_m[0] * spacing_m[1];
+    let (lx, ly, g) = (spacing_m[0], spacing_m[1], 9.81f32);
+    // Pipe length per direction: left/right span x, top/bottom span y.
+    let pipe_len = [lx, lx, ly, ly];
+    let mut terrain = h.to_vec();
+    let mut water = vec![0.0f32; n];
+    let mut sediment = vec![0.0f32; n];
+    let mut flux = vec![[0.0f32; 4]; n];
+    let inside = |x: i64, y: i64| x >= 0 && y >= 0 && x < w && y < hh;
+    let idx = |x: i64, y: i64| (y * w + x) as usize;
+
+    for _ in 0..p.iterations {
+        // 1. Rain.
+        let water_pre: Vec<f32> = water.iter().map(|d| d + p.rain_rate * p.dt).collect();
+        // 2. Outflow flux per pipe, scaled so a cell never sends more water than it holds.
+        let mut new_flux = vec![[0.0f32; 4]; n];
+        new_flux
+            .par_chunks_mut(w as usize)
+            .enumerate()
+            .for_each(|(y, row)| {
+                for (x, f) in row.iter_mut().enumerate() {
+                    let (xi, yi) = (x as i64, y as i64);
+                    let i = idx(xi, yi);
+                    let surface = terrain[i] + water_pre[i];
+                    let mut total = 0.0f32;
+                    for (k, (dx, dy)) in PIPES.iter().enumerate() {
+                        let (nx, ny) = (xi + dx, yi + dy);
+                        if !inside(nx, ny) {
+                            continue;
+                        }
+                        let j = idx(nx, ny);
+                        let dh = surface - (terrain[j] + water_pre[j]);
+                        let v = (flux[i][k] + p.dt * area * g * dh / pipe_len[k]).max(0.0);
+                        f[k] = v;
+                        total += v;
+                    }
+                    let volume = water_pre[i] * area;
+                    if total * p.dt > volume && total > 0.0 {
+                        let k = volume / (total * p.dt);
+                        for v in f.iter_mut() {
+                            *v *= k;
+                        }
+                    }
+                }
+            });
+        flux = new_flux;
+        // 3. Water update, velocity, erosion/deposition, and conservative sediment transport.
+        let mut terrain2 = vec![0.0f32; n];
+        let mut water2 = vec![0.0f32; n];
+        let mut sediment2 = vec![0.0f32; n];
+        terrain2
+            .par_chunks_mut(w as usize)
+            .zip(water2.par_chunks_mut(w as usize))
+            .zip(sediment2.par_chunks_mut(w as usize))
+            .enumerate()
+            .for_each(|(y, ((trow, wrow), srow))| {
+                for x in 0..w as usize {
+                    let (xi, yi) = (x as i64, y as i64);
+                    let i = idx(xi, yi);
+                    let out_total: f32 = flux[i].iter().sum();
+                    let mut in_total = 0.0f32;
+                    let mut sed_in = 0.0f32;
+                    let mut in_lr = 0.0f32; // inflow from left minus inflow from right (x momentum)
+                    let mut in_tb = 0.0f32;
+                    for (k, (dx, dy)) in PIPES.iter().enumerate() {
+                        let (nx, ny) = (xi + dx, yi + dy);
+                        if !inside(nx, ny) {
+                            continue;
+                        }
+                        let j = idx(nx, ny);
+                        let f_in = flux[j][OPPOSITE[k]];
+                        in_total += f_in;
+                        // Donor-cell transport: the neighbour's sediment travels at its concentration.
+                        if water_pre[j] > 0.0 {
+                            sed_in += sediment[j] / water_pre[j] * f_in * p.dt / area;
+                        }
+                        match k {
+                            0 => in_lr += f_in,
+                            1 => in_lr -= f_in,
+                            2 => in_tb += f_in,
+                            _ => in_tb -= f_in,
+                        }
+                    }
+                    let d_new = (water_pre[i] + (in_total - out_total) * p.dt / area).max(0.0);
+                    // Velocity from net horizontal transport through the cell (Mei eq. 8–9).
+                    let d_bar = 0.5 * (water_pre[i] + d_new);
+                    let vel = if d_bar > 1e-6 {
+                        let vx = 0.5 * (in_lr + flux[i][1] - flux[i][0]) / (ly * d_bar);
+                        let vy = 0.5 * (in_tb + flux[i][3] - flux[i][2]) / (lx * d_bar);
+                        (vx * vx + vy * vy).sqrt()
+                    } else {
+                        0.0
+                    };
+                    // Local tilt from the terrain gradient.
+                    let (x0, x1) = ((xi - 1).max(0), (xi + 1).min(w - 1));
+                    let (y0, y1) = ((yi - 1).max(0), (yi + 1).min(hh - 1));
+                    let gx = (terrain[idx(x1, yi)] - terrain[idx(x0, yi)])
+                        / ((x1 - x0).max(1) as f32 * lx);
+                    let gy = (terrain[idx(xi, y1)] - terrain[idx(xi, y0)])
+                        / ((y1 - y0).max(1) as f32 * ly);
+                    let grad = (gx * gx + gy * gy).sqrt();
+                    let sin_tilt = (grad / (1.0 + grad * grad).sqrt()).max(p.min_tilt);
+                    // Capacity scales with the water column (volume concentration × depth): with
+                    // metre-scale heights the pipe velocities are tens of m/s, and without the depth
+                    // factor a 2 cm rain film would carry tens of metres of rock.
+                    let capacity = p.capacity_k * sin_tilt * vel * d_bar;
+                    // Sediment that stays: own minus what left with the outflow, plus what arrived.
+                    let sed_out = if water_pre[i] > 0.0 {
+                        sediment[i] / water_pre[i] * out_total * p.dt / area
+                    } else {
+                        0.0
+                    };
+                    let mut s = (sediment[i] - sed_out).max(0.0) + sed_in;
+                    let mut t = terrain[i];
+                    if capacity > s {
+                        let delta = p.dissolve_k * (capacity - s) * p.dt;
+                        t -= delta;
+                        s += delta;
+                    } else {
+                        let delta = (p.deposit_k * (s - capacity) * p.dt).min(s);
+                        t += delta;
+                        s -= delta;
+                    }
+                    trow[x] = t;
+                    srow[x] = s;
+                    // 4. Evaporation.
+                    wrow[x] = d_new * (1.0 - p.evaporation * p.dt);
+                }
+            });
+        terrain = terrain2;
+        water = water2;
+        sediment = sediment2;
+    }
+    let build = |v: &[f32]| -> JdResult<Heightfield> {
+        let mut f = Heightfield::new(h.width(), h.height(), h.tile_size(), h.halo())?;
+        f.fill_with(|x, y| v[(y as usize) * (w as usize) + x as usize]);
+        Ok(f)
+    };
+    Ok(HydraulicResult {
+        height: build(&terrain)?,
+        water: build(&water)?,
+        sediment: build(&sediment)?,
+    })
+}
+
 /// Slope mask in 0..1: central-difference gradient angle divided by `max_deg`, clamped.
-pub fn slope_mask(h: &Heightfield, pixel_m: f32, max_deg: f32) -> JdResult<Heightfield> {
+pub fn slope_mask(h: &Heightfield, spacing_m: [f32; 2], max_deg: f32) -> JdResult<Heightfield> {
     if !(0.0 < max_deg && max_deg <= 90.0) {
         return Err(JdError::invalid("max_deg", "must be within (0, 90]"));
     }
-    if !(pixel_m > 0.0 && pixel_m.is_finite()) {
-        return Err(JdError::invalid("pixel_m", "must be positive"));
-    }
+    check_spacing(spacing_m)?;
     let (w, hh) = (h.width(), h.height());
     let mut out = Heightfield::new(w, hh, h.tile_size(), h.halo())?;
     out.fill_with(|x, y| {
         let (x0, x1) = (x.saturating_sub(1), (x + 1).min(w - 1));
         let (y0, y1) = (y.saturating_sub(1), (y + 1).min(hh - 1));
-        let dx = (h.get(x1, y) - h.get(x0, y)) / ((x1 - x0) as f32 * pixel_m);
-        let dy = (h.get(x, y1) - h.get(x, y0)) / ((y1 - y0) as f32 * pixel_m);
+        // `.max(1)` keeps 1-pixel fields (deep LODs) finite instead of 0/0.
+        let dx = (h.get(x1, y) - h.get(x0, y)) / ((x1 - x0).max(1) as f32 * spacing_m[0]);
+        let dy = (h.get(x, y1) - h.get(x, y0)) / ((y1 - y0).max(1) as f32 * spacing_m[1]);
         ((dx * dx + dy * dy).sqrt().atan().to_degrees() / max_deg).clamp(0.0, 1.0)
     });
     Ok(out)
@@ -168,7 +421,7 @@ mod tests {
         let mut h = Heightfield::new(64, 48, 32, 4).expect("hf");
         h.fill_with(|x, y| if (x, y) == (30, 20) { 500.0 } else { 0.0 });
         let before = sum(&h);
-        let after = thermal_erode(&h, 10.0, 35.0, 40, 0.5).expect("erode");
+        let after = thermal_erode(&h, [10.0, 10.0], 35.0, 40, 0.25).expect("erode");
         assert!(
             (sum(&after) - before).abs() < 1e-2 * before.abs().max(1.0),
             "mass drifted: {before} → {}",
@@ -186,7 +439,7 @@ mod tests {
         assert_eq!(after.stats().non_finite, 0);
         // Deterministic: same input, same output.
         assert_eq!(
-            thermal_erode(&h, 10.0, 35.0, 40, 0.5)
+            thermal_erode(&h, [10.0, 10.0], 35.0, 40, 0.25)
                 .expect("again")
                 .content_hash(),
             after.content_hash()
@@ -197,18 +450,117 @@ mod tests {
     fn thermal_leaves_gentle_terrain_alone_and_rejects_bad_params() {
         let mut h = Heightfield::new(40, 40, 32, 4).expect("hf");
         h.fill_with(|x, _| x as f32 * 0.1); // 0.1 m rise per 10 m pixel ≈ 0.6°, far below talus
-        let after = thermal_erode(&h, 10.0, 35.0, 5, 0.5).expect("erode");
+        let after = thermal_erode(&h, [10.0, 10.0], 35.0, 5, 0.25).expect("erode");
         assert_eq!(after.content_hash(), h.content_hash());
-        assert!(thermal_erode(&h, 10.0, 95.0, 1, 0.5).is_err());
-        assert!(thermal_erode(&h, 10.0, 35.0, 1, 0.0).is_err());
-        assert!(thermal_erode(&h, 0.0, 35.0, 1, 0.5).is_err());
+        assert!(thermal_erode(&h, [10.0, 10.0], 95.0, 1, 0.25).is_err());
+        assert!(thermal_erode(&h, [10.0, 10.0], 35.0, 1, 0.0).is_err());
+        assert!(
+            thermal_erode(&h, [10.0, 10.0], 35.0, 1, 0.5).is_err(),
+            "above the stability bound"
+        );
+        assert!(thermal_erode(&h, [0.0, 10.0], 35.0, 1, 0.25).is_err());
+        // A one-cell pit in a plateau fills from all 8 sides in one step but never rises above the
+        // plateau it sat in (the THERMAL_MAX_RATE bound); at 0.5 it would overshoot to ~198 m.
+        let mut pit = Heightfield::new(16, 16, 16, 0).expect("hf");
+        pit.fill_with(|x, y| if (x, y) == (8, 8) { 0.0 } else { 100.0 });
+        let after = thermal_erode(&pit, [1.0, 1.0], 35.0, 1, THERMAL_MAX_RATE).expect("erode");
+        assert!(
+            after.get(8, 8) > 50.0 && after.get(8, 8) <= 100.0 + 1e-3,
+            "pit {}",
+            after.get(8, 8)
+        );
+        assert!((sum(&after) - sum(&pit)).abs() < 1e-2);
+        // Anisotropic pixels: a y-ramp just below the talus angle at 2 m y-spacing stays put only
+        // when the y spacing is honoured.
+        let mut ramp = Heightfield::new(16, 16, 16, 0).expect("hf");
+        ramp.fill_with(|_, y| y as f32 * 2.0 * 30f32.to_radians().tan() * 0.99);
+        let kept = thermal_erode(&ramp, [1.0, 2.0], 30.0, 3, THERMAL_MAX_RATE).expect("erode");
+        assert_eq!(
+            kept.content_hash(),
+            ramp.content_hash(),
+            "below talus along y with 2 m spacing"
+        );
+        let moved = thermal_erode(&ramp, [1.0, 1.0], 30.0, 3, THERMAL_MAX_RATE).expect("erode");
+        assert_ne!(
+            moved.content_hash(),
+            ramp.content_hash(),
+            "steeper than talus if y spacing were 1 m"
+        );
+    }
+
+    #[test]
+    fn hydraulic_conserves_terrain_plus_sediment_and_water_budget() {
+        let mut h = Heightfield::new(64, 48, 32, 4).expect("hf");
+        h.fill_with(|x, y| {
+            200.0 * ((x as f32 * 0.2).sin() + (y as f32 * 0.15).cos()) + (x as f32) * 1.5
+        });
+        let p = HydraulicParams {
+            iterations: 60,
+            ..Default::default()
+        };
+        let r = hydraulic_erode(&h, [4.0, 4.0], &p).expect("erode");
+        let before = sum(&h);
+        let after = sum(&r.height) + sum(&r.sediment);
+        assert!(
+            (after - before).abs() < 1e-3 * before.abs().max(1.0),
+            "terrain+sediment drifted: {before} → {after}"
+        );
+        // Closed boundary: water = Σ over steps of (rain − evaporation), i.e. positive and bounded by total rain.
+        let cells = 64.0 * 48.0;
+        let total_rain = cells * (p.rain_rate * p.dt) as f64 * p.iterations as f64;
+        let w = sum(&r.water);
+        assert!(
+            w > 0.0 && w <= total_rain + 1e-6,
+            "water {w} vs rain {total_rain}"
+        );
+        assert_ne!(
+            r.height.content_hash(),
+            h.content_hash(),
+            "terrain must change"
+        );
+        for f in [&r.height, &r.water, &r.sediment] {
+            assert_eq!(f.stats().non_finite, 0);
+            assert!(f.stats().min >= -1e3);
+        }
+        assert!(r.water.stats().min >= 0.0 && r.sediment.stats().min >= 0.0);
+        // Deterministic.
+        assert_eq!(
+            hydraulic_erode(&h, [4.0, 4.0], &p)
+                .expect("again")
+                .height
+                .content_hash(),
+            r.height.content_hash()
+        );
+        // Rejects unstable steps.
+        assert!(
+            hydraulic_erode(
+                &h,
+                [4.0, 4.0],
+                &HydraulicParams {
+                    dt: 2.0,
+                    ..Default::default()
+                }
+            )
+            .is_err()
+        );
+        assert!(
+            hydraulic_erode(
+                &h,
+                [4.0, 4.0],
+                &HydraulicParams {
+                    evaporation: 100.0,
+                    ..Default::default()
+                }
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn slope_of_a_plane_is_constant() {
         let mut h = Heightfield::new(50, 30, 32, 4).expect("hf");
         h.fill_with(|x, _| x as f32 * 10.0); // rise 10 m per 10 m pixel = 45°
-        let m = slope_mask(&h, 10.0, 90.0).expect("slope");
+        let m = slope_mask(&h, [10.0, 10.0], 90.0).expect("slope");
         for (x, y) in [(1u32, 1u32), (25, 15), (48, 28)] {
             assert!(
                 (m.get(x, y) - 0.5).abs() < 1e-4,
@@ -217,7 +569,26 @@ mod tests {
             );
         }
         let flat = Heightfield::new(8, 8, 8, 0).expect("hf");
-        assert_eq!(slope_mask(&flat, 1.0, 45.0).expect("flat").stats().max, 0.0);
-        assert!(slope_mask(&h, 10.0, 0.0).is_err());
+        assert_eq!(
+            slope_mask(&flat, [1.0, 1.0], 45.0)
+                .expect("flat")
+                .stats()
+                .max,
+            0.0
+        );
+        assert!(slope_mask(&h, [10.0, 10.0], 0.0).is_err());
+        // Anisotropic spacing: the same x-ramp over 20 m pixels is half as steep.
+        let m2 = slope_mask(&h, [20.0, 10.0], 90.0).expect("slope");
+        assert!((m2.get(25, 15) - (0.5f32).atan().to_degrees() / 90.0).abs() < 1e-4);
+        // One-pixel-wide fields (deep LODs) stay finite.
+        let mut thin = Heightfield::new(1, 8, 8, 0).expect("hf");
+        thin.fill_with(|_, y| y as f32);
+        assert_eq!(
+            slope_mask(&thin, [1.0, 1.0], 90.0)
+                .expect("thin")
+                .stats()
+                .non_finite,
+            0
+        );
     }
 }

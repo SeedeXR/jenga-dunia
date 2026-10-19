@@ -6,7 +6,7 @@
 //! [`Response`]; they never contain domain logic.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use jd_types::{ErrorCode, JdError, JdResult, SchemaVersion, WorldSettings};
@@ -49,15 +49,31 @@ pub struct Context {
 }
 
 impl Context {
-    /// Store a heightfield layer (written through to the open project's cache).
-    pub fn set_layer(&self, name: &str, hf: jd_terrain::Heightfield) -> JdResult<()> {
-        if let Some(root) = self.project_root() {
-            jd_cache::LayerCache::open(&root).put(name, &hf)?;
+    /// Store a heightfield layer computed for the project at `root` (written through to that
+    /// project's cache). Refused when a different project is open by now: a long evaluation must
+    /// never land its result in the project the user switched to meanwhile.
+    pub fn set_layer_for(
+        &self,
+        root: &Path,
+        name: &str,
+        hf: jd_terrain::Heightfield,
+    ) -> JdResult<()> {
+        if self.project_root().as_deref() != Some(root) {
+            return Err(JdError::new(
+                ErrorCode::E_INPUT_INVALID,
+                "the project changed while the layer was being computed",
+            )
+            .why("Results are stored in the project they were computed for.")
+            .next("Re-run the operation on the project that is open now.")
+            .detail("layer", name));
         }
+        // Lock order: project (above, briefly) → layers. Cache writes happen under the layers lock
+        // so concurrent evaluations never interleave index writes.
         let mut g = self
             .layers
             .lock()
             .map_err(|_| JdError::new(ErrorCode::E_INTERNAL, "layer lock poisoned"))?;
+        jd_cache::LayerCache::open(root).put(name, &hf)?;
         g.insert(name.to_owned(), hf);
         Ok(())
     }
@@ -732,6 +748,11 @@ pub mod graph {
     pub fn validate_mutation(p: &Project, op: &str, params: &Value) -> JdResult<()> {
         // ponytail: graphs are a few hundred nodes at most; cloning per mutation is cheaper than
         // keeping bespoke pre-checks in sync with `apply`.
+        if op == "graph.restore" {
+            // A snapshot is a state the document already had (undo/redo); only its shape is checked.
+            let _: Restore = serde_json::from_value(params.clone())?;
+            return Ok(());
+        }
         let mut trial = p.graph.clone();
         apply(&mut trial, op, params)?;
         let ev = Evaluator::new(registry(), cache());
@@ -922,12 +943,15 @@ pub mod graph {
         ] {
             r.register::<NoParams, GraphView, _>(op, desc, Scope::ProjectWrite, move |ctx, _| {
                 ctx.with_project(|p| {
-                    let current = p.graph.clone();
-                    let target = if op == "graph.undo" {
-                        p.history.undo(current)
+                    let undo = op == "graph.undo";
+                    // Peek, apply, then commit the stacks: a restore that fails to journal or
+                    // validate leaves history exactly as it was.
+                    let target = if undo {
+                        p.history.peek_undo()
                     } else {
-                        p.history.redo(current)
-                    };
+                        p.history.peek_redo()
+                    }
+                    .cloned();
                     let Some(graph) = target else {
                         return Err(JdError::new(
                             ErrorCode::E_INPUT_INVALID,
@@ -936,7 +960,13 @@ pub mod graph {
                         .detail("undo_depth", p.history.depths().0)
                         .detail("redo_depth", p.history.depths().1));
                     };
+                    let current = p.graph.clone();
                     builtin::mutate(p, "graph.restore", serde_json::json!({ "graph": graph }))?;
+                    if undo {
+                        p.history.undo(current);
+                    } else {
+                        p.history.redo(current);
+                    }
                     Ok((view(p), Vec::new()))
                 })
             });
@@ -958,8 +988,9 @@ pub mod graph {
             "Validate and evaluate the graph incrementally; publishes output nodes as layers (`<layer>#lod<N>` when lod > 0)",
             Scope::ProjectWrite,
             |ctx, e| {
-                let (graph, world) =
-                    ctx.with_project(|p| Ok((p.graph.clone(), p.doc.world.clone())))?;
+                let (graph, world, root) = ctx.with_project(|p| {
+                    Ok((p.graph.clone(), p.doc.world.clone(), p.root().to_path_buf()))
+                })?;
                 // Two outputs publishing the same layer would silently overwrite each other.
                 let mut by_layer: BTreeMap<String, &NodeId> = BTreeMap::new();
                 for (id, node) in &graph.nodes {
@@ -989,7 +1020,7 @@ pub mod graph {
                         }
                         let hf = v.as_field();
                         layers.insert(name.clone(), v.content_hash().to_hex().to_string());
-                        ctx.set_layer(&name, (**hf).clone())?;
+                        ctx.set_layer_for(&root, &name, (**hf).clone())?;
                     }
                 }
                 let mut warnings = Vec::new();
@@ -1255,6 +1286,37 @@ pub mod graph {
         }
 
         #[test]
+        fn layer_computed_for_a_closed_project_is_refused() {
+            let reg = Registry::with_builtins();
+            let dir = tempfile::tempdir().expect("tmp");
+            let ctx = Context::default();
+            let a = dir.path().join("a.jdproj");
+            let b = dir.path().join("b.jdproj");
+            call(
+                &reg,
+                &ctx,
+                "project.create",
+                serde_json::json!({ "path": a, "name": "A" }),
+            );
+            let hf = jd_terrain::Heightfield::new(8, 8, 8, 0).expect("hf");
+            // The user switches project while a result for A is still being computed.
+            call(
+                &reg,
+                &ctx,
+                "project.create",
+                serde_json::json!({ "path": b, "name": "B" }),
+            );
+            let err = ctx
+                .set_layer_for(&a, "height", hf)
+                .expect_err("stale project");
+            assert_eq!(err.code, ErrorCode::E_INPUT_INVALID);
+            assert!(
+                !b.join("cache/layers/index.json").exists(),
+                "nothing written into B's cache"
+            );
+        }
+
+        #[test]
         fn invalid_document_stays_editable_and_recover_keeps_failed_entries() {
             let reg = Registry::with_builtins();
             let dir = tempfile::tempdir().expect("tmp");
@@ -1316,6 +1378,22 @@ pub mod graph {
             assert_eq!(
                 r.error.as_ref().map(|e| e.code),
                 Some(ErrorCode::E_NODE_UNKNOWN)
+            );
+            // Removing the broken node is allowed, and undo may bring it back (a prior state of
+            // the document is never "introducing" an error) with the stacks staying consistent.
+            let r = call(
+                &reg,
+                &ctx,
+                "graph.remove_node",
+                serde_json::json!({ "id": "01JDGRAPH0000000000BR0KEN0" }),
+            );
+            assert_eq!(r.status, crate::envelope::Status::Ok, "{r:?}");
+            let r = call(&reg, &ctx, "graph.undo", serde_json::json!({}));
+            let v = r.result.expect("undo of the removal");
+            assert_eq!(v["nodes"].as_array().map(Vec::len), Some(3));
+            assert_eq!(
+                (v["undo_depth"].as_u64(), v["redo_depth"].as_u64()),
+                (Some(1), Some(1))
             );
             // Recovery: the bogus entry fails, so nothing is saved and it stays pending.
             let r = call(&reg, &ctx, "project.recover", serde_json::json!({}));
@@ -1501,11 +1579,12 @@ pub mod terrain {
             "Generate a noise heightfield for the open project's world and store it as a layer",
             Scope::ProjectWrite,
             |ctx, p| {
-                let world = ctx.with_project(|proj| Ok(proj.doc.world.clone()))?;
+                let (world, root) = ctx
+                    .with_project(|proj| Ok((proj.doc.world.clone(), proj.root().to_path_buf())))?;
                 let started = std::time::Instant::now();
                 let hf = generate_noise(&world, &p.noise)?;
                 let out = info(&p.layer, &hf, started.elapsed().as_millis() as u64);
-                ctx.set_layer(&p.layer, hf)?;
+                ctx.set_layer_for(&root, &p.layer, hf)?;
                 Ok((out, Vec::new()))
             },
         );

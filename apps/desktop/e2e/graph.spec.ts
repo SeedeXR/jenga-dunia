@@ -24,9 +24,9 @@ test.describe("node graph editor against the real core", () => {
     const proj = path.join(ws, "Graph.jdproj");
     await page.getByTestId("project-path").fill(proj);
     await page.getByLabel("Extent (m)").fill("1024");
-    await page.getByLabel("Resolution (px)").fill("256");
+    await page.getByLabel("Resolution (px)").fill("128"); // small: CI software GL re-renders on every live preview
     await page.getByTestId("new-project").click();
-    await expect(page.locator("header")).toContainText("World — 256²");
+    await expect(page.locator("header")).toContainText("World — 128²");
 
     // The starter graph (noise → height) is drawn from graph.json.
     const panel = page.getByTestId("graph-panel");
