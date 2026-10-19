@@ -72,7 +72,45 @@ $ jd schema --list
 $ jd schema project.create      # full request/result JSON Schema
 ```
 
-## 4. Diagnostics
+## 4. Generate terrain and export a heightmap
+
+`jd terrain generate` opens the project, generates a noise heightfield for the project's world (extent, resolution, tiles from `project.json`) and optionally exports it in one go. The format follows the extension: `.exr` (32-bit float, exact), `.png` (16-bit, quantised), `.r16` (Unity/Unreal raw), `.r32` (raw float).
+
+```
+$ jd terrain generate --project ~/Worlds/Hills.jdproj --seed 1 --fractal ridged --out ridges.exr
+ok  project.open
+{ ... }
+ok  terrain.generate
+{
+  "layer": "height",
+  "size_px": [4096, 4096],
+  "tile_size": 512,
+  "halo": 4,
+  "stats": { "min": 42.47209, "max": 500.00003, "mean": 221.9, "non_finite": 0 },
+  "content_hash": "…blake3…",
+  "duration_ms": 157
+}
+ok  terrain.export_heightmap
+{
+  "path": "~/Worlds/Hills.jdproj/exports/ridges.exr",
+  "sidecar": "~/Worlds/Hills.jdproj/exports/ridges.exr.jd-height.json",
+  "format": "exr", "size_px": [4096, 4096], "range_m": [42.47209, 500.00003],
+  "quantisation_step_m": 0.0, "flip_y": true, "bytes": 62666077
+}
+```
+
+Options: `--kind open_simplex2|open_simplex2s|perlin|value|value_cubic|cellular`, `--fractal none|fbm|ridged|ping_pong`, `--feature-size <m>`, `--octaves 1..16`, `--min/--max <m>`, `--layer <name>`.
+
+Quantised formats warn so nothing is lost silently, and the sidecar records the range needed to reconstruct heights:
+
+```
+$ jd terrain generate --project ~/Worlds/Hills.jdproj --out h.png
+warning  W_EXPORT_LOSS: Png16 quantises heights to 0.0064 m steps; range recorded in the sidecar
+```
+
+Same seed → same `content_hash`, on any thread count and tile size (tested). Measured on an Apple Silicon laptop (10 cores): 4096² generation 157 ms, whole command 0.42 s, peak RSS 235 MB; the EXR is read by macOS ImageIO as 4096×4096, 32 bits/sample, and the PNG as 16-bit grayscale.
+
+## 5. Diagnostics
 
 ```
 $ jd diag env

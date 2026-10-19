@@ -42,9 +42,44 @@ pub enum Scope {
 #[derive(Default, Clone)]
 pub struct Context {
     project: Arc<Mutex<Option<Project>>>,
+    /// In-memory heightfield layers produced by terrain ops, keyed by layer name.
+    /// ponytail: replaced by the graph engine's content-addressed cache in Phase 2.
+    layers: Arc<Mutex<BTreeMap<String, jd_terrain::Heightfield>>>,
 }
 
 impl Context {
+    /// Store a heightfield layer.
+    pub fn set_layer(&self, name: &str, hf: jd_terrain::Heightfield) -> JdResult<()> {
+        let mut g = self
+            .layers
+            .lock()
+            .map_err(|_| JdError::new(ErrorCode::E_INTERNAL, "layer lock poisoned"))?;
+        g.insert(name.to_owned(), hf);
+        Ok(())
+    }
+
+    /// Run `f` with a stored layer, or fail with `E_INPUT_INVALID`.
+    pub fn with_layer<T>(
+        &self,
+        name: &str,
+        f: impl FnOnce(&jd_terrain::Heightfield) -> JdResult<T>,
+    ) -> JdResult<T> {
+        let g = self
+            .layers
+            .lock()
+            .map_err(|_| JdError::new(ErrorCode::E_INTERNAL, "layer lock poisoned"))?;
+        match g.get(name) {
+            Some(hf) => f(hf),
+            None => Err(JdError::new(
+                ErrorCode::E_INPUT_INVALID,
+                format!("no heightfield layer named `{name}`"),
+            )
+            .why("Terrain ops read from layers produced earlier in this session.")
+            .next("Run terrain.generate first (default layer name: `height`).")
+            .detail("layer", name)),
+        }
+    }
+
     /// Run `f` with the open project, or fail with `E_INPUT_INVALID` when none is open.
     pub fn with_project<T>(&self, f: impl FnOnce(&mut Project) -> JdResult<T>) -> JdResult<T> {
         let mut guard = self
@@ -59,6 +94,16 @@ impl Context {
                     .next("Call project.open or project.create first."),
             ),
         }
+    }
+
+    /// Directory of the open project, if any (adapters use it to resolve relative paths the
+    /// same way the core does).
+    pub fn project_root(&self) -> Option<PathBuf> {
+        self.project
+            .lock()
+            .ok()?
+            .as_ref()
+            .map(|p| p.root().to_path_buf())
     }
 
     /// Replace the open project (saving is the caller's responsibility).
@@ -455,6 +500,216 @@ pub mod builtin {
             Scope::None,
             |_, _| Ok((crate::diag::env_info(), Vec::new())),
         );
+        terrain::register_all(r);
+    }
+}
+
+/// Terrain operations (Phase 2 slice 1): generate a noise heightfield for the open project's
+/// world and export it. Layers live in the [`Context`] until the graph engine owns them.
+pub mod terrain {
+    use super::*;
+    use jd_terrain::export::{ExportOptions, ExportReport};
+    use jd_terrain::{HeightfieldStats, NoiseParams, generate_noise};
+
+    fn default_layer() -> String {
+        "height".into()
+    }
+
+    /// `terrain.generate` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct TerrainGenerate {
+        /// Noise parameters (all optional; see schema defaults).
+        #[serde(default)]
+        pub noise: NoiseParams,
+        /// Layer name to store the result under.
+        #[serde(default = "default_layer")]
+        pub layer: String,
+    }
+
+    /// `terrain.stats` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct TerrainLayer {
+        /// Layer name.
+        #[serde(default = "default_layer")]
+        pub layer: String,
+    }
+
+    /// `terrain.export_heightmap` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct TerrainExport {
+        /// Layer name.
+        #[serde(default = "default_layer")]
+        pub layer: String,
+        /// Output file; relative paths resolve against the project's `exports/` directory.
+        pub path: PathBuf,
+        /// Encoding and conventions.
+        #[serde(flatten)]
+        pub options: ExportOptions,
+    }
+
+    /// Result of `terrain.generate` / `terrain.stats`.
+    #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct LayerInfo {
+        /// Layer name.
+        pub layer: String,
+        /// Width, height in pixels.
+        pub size_px: [u32; 2],
+        /// Tile size and halo.
+        pub tile_size: u32,
+        /// Halo.
+        pub halo: u32,
+        /// Statistics.
+        pub stats: HeightfieldStats,
+        /// blake3 content hash (hex).
+        pub content_hash: String,
+        /// Wall time of the operation in milliseconds.
+        pub duration_ms: u64,
+    }
+
+    fn info(layer: &str, hf: &jd_terrain::Heightfield, duration_ms: u64) -> LayerInfo {
+        LayerInfo {
+            layer: layer.to_owned(),
+            size_px: [hf.width(), hf.height()],
+            tile_size: hf.tile_size(),
+            halo: hf.halo(),
+            stats: hf.stats(),
+            content_hash: hf.content_hash().to_hex().to_string(),
+            duration_ms,
+        }
+    }
+
+    /// Register terrain ops.
+    pub fn register_all(r: &mut Registry) {
+        r.register::<TerrainGenerate, LayerInfo, _>(
+            "terrain.generate",
+            "Generate a noise heightfield for the open project's world and store it as a layer",
+            Scope::ProjectWrite,
+            |ctx, p| {
+                let world = ctx.with_project(|proj| Ok(proj.doc.world.clone()))?;
+                let started = std::time::Instant::now();
+                let hf = generate_noise(&world, &p.noise)?;
+                let out = info(&p.layer, &hf, started.elapsed().as_millis() as u64);
+                ctx.set_layer(&p.layer, hf)?;
+                Ok((out, Vec::new()))
+            },
+        );
+        r.register::<TerrainLayer, LayerInfo, _>(
+            "terrain.stats",
+            "Statistics and content hash of a layer",
+            Scope::ProjectRead,
+            |ctx, p| ctx.with_layer(&p.layer, |hf| Ok((info(&p.layer, hf, 0), Vec::new()))),
+        );
+        r.register::<TerrainExport, ExportReport, _>(
+            "terrain.export_heightmap",
+            "Write a layer as EXR (f32), PNG16, RAW r16 or r32 with a JSON sidecar",
+            Scope::Export,
+            |ctx, p| {
+                let path = if p.path.is_absolute() {
+                    p.path.clone()
+                } else {
+                    ctx.with_project(|proj| Ok(proj.root().join("exports").join(&p.path)))?
+                };
+                let report = ctx.with_layer(&p.layer, |hf| jd_terrain::export_heightmap(hf, &path, &p.options))?;
+                let mut warnings = Vec::new();
+                if report.quantisation_step_m > 0.0 {
+                    warnings.push(
+                        Warning::new(
+                            "W_EXPORT_LOSS",
+                            format!("{:?} quantises heights to {:.4} m steps; range recorded in the sidecar", report.format, report.quantisation_step_m),
+                        ),
+                    );
+                }
+                Ok((report, warnings))
+            },
+        );
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn generate_stats_export_through_the_registry() {
+            let reg = Registry::with_builtins();
+            let dir = tempfile::tempdir().expect("tmp");
+            let ctx = Context::default();
+            let r = reg.invoke(
+                &ctx,
+                Request::new("terrain.generate", serde_json::json!({})),
+            );
+            assert_eq!(
+                r.error.as_ref().map(|e| e.code),
+                Some(ErrorCode::E_INPUT_INVALID),
+                "needs a project"
+            );
+            let world = WorldSettings {
+                resolution_px: [128, 96],
+                extent_m: [1024.0, 768.0],
+                tile_size: 64,
+                halo: 2,
+                ..Default::default()
+            };
+            let r = reg.invoke(&ctx, Request::new("project.create", serde_json::json!({ "path": dir.path().join("t.jdproj"), "name": "T", "world": world })));
+            assert_eq!(r.status, crate::envelope::Status::Ok, "{r:?}");
+            let r = reg.invoke(
+                &ctx,
+                Request::new(
+                    "terrain.generate",
+                    serde_json::json!({ "noise": { "seed": 9, "height_range_m": [0.0, 100.0] } }),
+                ),
+            );
+            assert_eq!(r.status, crate::envelope::Status::Ok, "{r:?}");
+            let res = r.result.expect("result");
+            assert_eq!(res["size_px"], serde_json::json!([128, 96]));
+            assert_eq!(res["stats"]["non_finite"], 0);
+            let hash = res["content_hash"].as_str().expect("hash").to_owned();
+            let r = reg.invoke(&ctx, Request::new("terrain.stats", serde_json::json!({})));
+            assert_eq!(
+                r.result.as_ref().and_then(|v| v["content_hash"].as_str()),
+                Some(hash.as_str())
+            );
+            let r = reg.invoke(
+                &ctx,
+                Request::new(
+                    "terrain.export_heightmap",
+                    serde_json::json!({ "path": "h.png", "format": "png16" }),
+                ),
+            );
+            assert_eq!(r.status, crate::envelope::Status::Ok, "{r:?}");
+            assert!(r.warnings.iter().any(|w| w.code == "W_EXPORT_LOSS"));
+            assert!(dir.path().join("t.jdproj/exports/h.png").exists());
+            assert!(
+                dir.path()
+                    .join("t.jdproj/exports/h.png.jd-height.json")
+                    .exists()
+            );
+            let r = reg.invoke(
+                &ctx,
+                Request::new(
+                    "terrain.export_heightmap",
+                    serde_json::json!({ "path": dir.path().join("abs.exr"), "format": "exr" }),
+                ),
+            );
+            assert!(
+                r.warnings.is_empty(),
+                "exact format has no loss warning: {r:?}"
+            );
+            assert!(dir.path().join("abs.exr").exists());
+            let r = reg.invoke(
+                &ctx,
+                Request::new(
+                    "terrain.export_heightmap",
+                    serde_json::json!({ "layer": "nope", "path": "x.exr", "format": "exr" }),
+                ),
+            );
+            assert_eq!(
+                r.error.as_ref().map(|e| e.code),
+                Some(ErrorCode::E_INPUT_INVALID)
+            );
+        }
     }
 }
 

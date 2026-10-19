@@ -269,6 +269,121 @@ fn rejected_mutation_leaves_no_journal_entry_and_save_refuses_pending_recovery()
 }
 
 #[test]
+fn terrain_generate_exports_a_valid_exr_and_png16() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let proj = dir.path().join("t.jdproj");
+    jd().arg("new")
+        .arg(&proj)
+        .args(["--extent", "512", "--resolution", "128"])
+        .assert()
+        .success();
+    let out = jd()
+        .args(["--json", "terrain", "generate", "--project"])
+        .arg(&proj)
+        .args([
+            "--seed",
+            "3",
+            "--fractal",
+            "ridged",
+            "--min",
+            "10",
+            "--max",
+            "90",
+            "--out",
+            "ridges.exr",
+        ])
+        .output()
+        .expect("run");
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let lines: Vec<Value> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("json"))
+        .collect();
+    assert_eq!(
+        lines
+            .iter()
+            .map(|v| v["op"].as_str().unwrap_or_default())
+            .collect::<Vec<_>>(),
+        [
+            "project.open",
+            "terrain.generate",
+            "terrain.export_heightmap"
+        ]
+    );
+    let stats = &lines[1]["result"]["stats"];
+    assert_eq!(stats["non_finite"], 0);
+    assert!(
+        stats["min"].as_f64().unwrap_or(-1.0) >= 10.0 - 1e-3
+            && stats["max"].as_f64().unwrap_or(1e9) <= 90.0 + 1e-3,
+        "{stats}"
+    );
+    let exr = proj.join("exports/ridges.exr");
+    assert!(exr.exists() && exr.with_file_name("ridges.exr.jd-height.json").exists());
+    assert_eq!(lines[2]["result"]["quantisation_step_m"], 0.0);
+
+    // Same seed → same content hash (determinism through the CLI).
+    let again = jd()
+        .args(["--json", "terrain", "generate", "--project"])
+        .arg(&proj)
+        .args([
+            "--seed",
+            "3",
+            "--fractal",
+            "ridged",
+            "--min",
+            "10",
+            "--max",
+            "90",
+        ])
+        .output()
+        .expect("run");
+    let l2: Vec<Value> = String::from_utf8_lossy(&again.stdout)
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("json"))
+        .collect();
+    assert_eq!(
+        l2[1]["result"]["content_hash"],
+        lines[1]["result"]["content_hash"]
+    );
+
+    // PNG16 export warns about quantisation and writes a real 16-bit PNG.
+    let out = jd()
+        .args(["--json", "terrain", "generate", "--project"])
+        .arg(&proj)
+        .args(["--out", "h.png"])
+        .output()
+        .expect("run");
+    assert!(out.status.success());
+    let l3: Vec<Value> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|l| serde_json::from_str(l).expect("json"))
+        .collect();
+    assert!(
+        l3[2]["warnings"]
+            .as_array()
+            .map(|w| w.iter().any(|x| x["code"] == "W_EXPORT_LOSS"))
+            .unwrap_or(false),
+        "{}",
+        l3[2]
+    );
+    let png = std::fs::read(proj.join("exports/h.png")).expect("png");
+    assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+    assert_eq!(png[24], 16, "bit depth byte in IHDR must be 16");
+    assert_eq!(png[25], 0, "colour type grayscale");
+
+    // Unknown extension is a usage error (exit 2).
+    jd().args(["terrain", "generate", "--project"])
+        .arg(&proj)
+        .args(["--out", "h.tiff"])
+        .assert()
+        .code(2);
+}
+
+#[test]
 fn diag_env_reports_memory_and_tools() {
     let out = jd().args(["--json", "diag", "env"]).output().expect("run");
     assert!(out.status.success());

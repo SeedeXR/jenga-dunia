@@ -74,6 +74,16 @@ enum Command {
         #[arg(long)]
         list: bool,
     },
+    /// Terrain generation.
+    Terrain {
+        #[command(subcommand)]
+        what: TerrainCommand,
+    },
+    /// Export project data.
+    Export {
+        #[command(subcommand)]
+        what: ExportCommand,
+    },
     /// Diagnostics.
     Diag {
         #[command(subcommand)]
@@ -82,9 +92,74 @@ enum Command {
 }
 
 #[derive(Subcommand)]
+enum TerrainCommand {
+    /// Generate a noise heightfield for the project world (optionally export it in one go).
+    Generate {
+        /// Project directory.
+        #[arg(long)]
+        project: PathBuf,
+        /// Noise seed.
+        #[arg(long, default_value_t = 0)]
+        seed: i32,
+        /// Lattice: open_simplex2 | open_simplex2s | perlin | value | value_cubic | cellular.
+        #[arg(long, default_value = "open_simplex2")]
+        kind: String,
+        /// Fractal: none | fbm | ridged | ping_pong.
+        #[arg(long, default_value = "fbm")]
+        fractal: String,
+        /// Feature size in metres (wavelength of the first octave).
+        #[arg(long, default_value_t = 1024.0)]
+        feature_size: f32,
+        /// Octaves (1–16).
+        #[arg(long, default_value_t = 6)]
+        octaves: u8,
+        /// Minimum height in metres.
+        #[arg(long, default_value_t = 0.0)]
+        min: f32,
+        /// Maximum height in metres.
+        #[arg(long, default_value_t = 500.0)]
+        max: f32,
+        /// Layer name.
+        #[arg(long, default_value = "height")]
+        layer: String,
+        /// Also export to this file (format from extension: .exr .png .r16 .r32).
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ExportCommand {
+    /// Export a heightfield layer. Needs a generated layer in this invocation; prefer `jd terrain generate --out`.
+    Heightmap {
+        /// Project directory.
+        #[arg(long)]
+        project: PathBuf,
+        /// Output file (relative paths go under the project's exports/).
+        path: PathBuf,
+        /// Format: exr | png16 | raw_r16 | raw_r32 (default: from extension).
+        #[arg(long)]
+        format: Option<String>,
+        /// Layer name.
+        #[arg(long, default_value = "height")]
+        layer: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum DiagCommand {
     /// Host environment, memory, detected tools.
     Env,
+}
+
+fn format_from_ext(path: &std::path::Path) -> Option<&'static str> {
+    match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
+        "exr" => Some("exr"),
+        "png" => Some("png16"),
+        "r16" | "raw" => Some("raw_r16"),
+        "r32" => Some("raw_r32"),
+        _ => None,
+    }
 }
 
 fn main() -> ExitCode {
@@ -190,6 +265,89 @@ fn main() -> ExitCode {
                 serde_json::to_string_pretty(&payload).unwrap_or_default()
             );
             return ExitCode::SUCCESS;
+        }
+        Command::Terrain {
+            what:
+                TerrainCommand::Generate {
+                    project,
+                    seed,
+                    kind,
+                    fractal,
+                    feature_size,
+                    octaves,
+                    min,
+                    max,
+                    layer,
+                    out,
+                },
+        } => {
+            let mut outs = vec![invoke(
+                &registry,
+                &ctx,
+                "project.open",
+                json!({ "path": project }),
+            )];
+            if outs[0].status != Status::Ok {
+                return finish(outs, json);
+            }
+            let noise = json!({ "seed": seed, "kind": kind, "fractal": fractal, "feature_size_m": feature_size, "octaves": octaves, "height_range_m": [min, max] });
+            outs.push(invoke(
+                &registry,
+                &ctx,
+                "terrain.generate",
+                json!({ "noise": noise, "layer": layer }),
+            ));
+            if let Some(out) = out
+                && outs.last().map(|r| r.status == Status::Ok).unwrap_or(false)
+            {
+                let Some(format) = format_from_ext(&out) else {
+                    eprintln!(
+                        "error: cannot infer a heightmap format from `{}` (use .exr .png .r16 .r32)",
+                        out.display()
+                    );
+                    return ExitCode::from(2);
+                };
+                outs.push(invoke(
+                    &registry,
+                    &ctx,
+                    "terrain.export_heightmap",
+                    json!({ "layer": layer, "path": out, "format": format }),
+                ));
+            }
+            outs
+        }
+        Command::Export {
+            what:
+                ExportCommand::Heightmap {
+                    project,
+                    path,
+                    format,
+                    layer,
+                },
+        } => {
+            let mut outs = vec![invoke(
+                &registry,
+                &ctx,
+                "project.open",
+                json!({ "path": project }),
+            )];
+            if outs[0].status != Status::Ok {
+                return finish(outs, json);
+            }
+            let Some(format) = format.as_deref().or_else(|| format_from_ext(&path)) else {
+                eprintln!(
+                    "error: cannot infer a heightmap format from `{}`; pass --format",
+                    path.display()
+                );
+                return ExitCode::from(2);
+            };
+            outs.push(invoke(
+                &registry,
+                &ctx,
+                "terrain.export_heightmap",
+                json!({ "layer": layer, "path": path, "format": format }),
+            ));
+            outs
         }
         Command::Diag {
             what: DiagCommand::Env,

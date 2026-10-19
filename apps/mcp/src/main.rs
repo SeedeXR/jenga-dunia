@@ -69,9 +69,14 @@ impl JdServer {
         else {
             return Ok(());
         };
-        let candidate = Path::new(path);
+        // Relative paths are resolved by the core against the open project (exports/) — mirror that
+        // here so the check sees the path that will actually be written.
+        let candidate = match (Path::new(path).is_relative(), self.ctx.project_root()) {
+            (true, Some(root)) => root.join("exports").join(path),
+            _ => Path::new(path).to_path_buf(),
+        };
         // Canonicalise the deepest existing ancestor so new project dirs are checked too.
-        let mut probe = candidate.to_path_buf();
+        let mut probe = candidate.clone();
         while !probe.exists() {
             if !probe.pop() {
                 break;

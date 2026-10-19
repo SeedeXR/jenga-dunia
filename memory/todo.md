@@ -36,9 +36,10 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [ ] Platform-native checklist (owner mandate): macOS menu bar/⌘ shortcuts/file association for `.jdproj`, Metal via wgpu; Windows DX12/NVIDIA; Linux Vulkan/NVIDIA; CPU path everywhere
 
 ## Phase 2 — Core terrain authoring
-- [ ] `jd-terrain` tiles + halos + noise nodes + filters + analysis nodes
+- [~] `jd-terrain`: tiles + halos ✔, noise generators ✔ (OpenSimplex2/2S, Perlin, Value, ValueCubic, Cellular × none/fbm/ridged/ping-pong), filters/analysis nodes ☐
+- [x] Ops `terrain.generate` / `terrain.stats` / `terrain.export_heightmap` + CLI `jd terrain generate --out` / `jd export heightmap`; MCP end-to-end test
 - [ ] `jd-graph` evaluator, cache, dirty sets, preview/build LOD
-- [ ] Heightmap import/export (EXR, PNG16, TIFF, RAW r16/r32) with profile conventions
+- [~] Heightmap export: EXR f32 ✔, PNG16 ✔, RAW r16/r32 ✔ (+ JSON sidecar, flip + range conventions, round-trip tests); TIFF ☐; foreign heightmap import without sidecar ☐; Unity/Unreal size presets (2ⁿ+1) ☐
 - [ ] Stroke sculpt nodes
 - [ ] Basic PBR material + GLB export + glTF Validator in CI
 - [ ] Node editor UI, generated inspectors, task monitor, diagnostics console

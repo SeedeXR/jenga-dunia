@@ -44,6 +44,12 @@ Processing time (wall, per stage), **peak RSS**, GPU memory peak, CPU utilisatio
 | CPU across platforms (macOS/Linux/Windows, same arch) | bit-identical for integer/PRNG paths; ≤ 1e-6 relative for float kernels (no FMA contraction differences allowed: build with consistent flags) |
 | GPU vs CPU | per node documented, default ≤ 1e-4 relative on heightfields; erosion ≤ 1e-3 |
 
+## Measured baselines
+
+| Date | Machine | Scene / command | Wall | Peak RSS | Notes |
+|---|---|---|---|---|---|
+| 2026-10-19 | Apple Silicon laptop, 10 cores, 16 GB (Darwin 27.0.1) | `jd terrain generate` 4096² OpenSimplex2 ridged 6 octaves + EXR export (release build) | generate 157 ms; whole process 0.42 s real / 3.06 s user | 235 MB | `/usr/bin/time -l`; EXR validated by macOS ImageIO (4096×4096, 32 bps) |
+
 ## Regression policy
 
 CI runs S1 and S5 (fast) on every PR and compares with the previous `main` baseline; > 10 % regression in time or > 5 % in peak RSS fails the check unless the PR carries a `perf-accepted` label with justification. Full suite runs nightly on Tier A self-hosted runner (when available) and on hosted runners for CPU-only.

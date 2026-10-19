@@ -21,8 +21,13 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 - Workspace confinement and scope gating live in `jd-mcp` (adapter policy) — `ponytail:` move into `jd-core` when the GUI needs the same gate.
 - `project.recover` replays through the same `apply_mutation` used by live ops so recovery cannot diverge.
 
+- `18:40:00` Code review returned 10 findings; all fixed with regression tests (sub-document path confinement `check_relative`, `validate_mutation` before journal, `save()` refuses pending recovery, per-instance lock nonce + foreign-host lock treated as held, file-path create → `E_INPUT_INVALID`, PATHEXT on Windows, validating ULID `Deserialize`, params moved not cloned, dead API removed, `jd new` appends `.jdproj`).
+- `18:55:00` `crates/jd-terrain` added: tiled f32 `Heightfield` with halos, `generate_noise` (fastnoise-lite; metres-based params; tiling/thread-count invariance tests + proptest), `export_heightmap`/`import_heightmap` (EXR f32 exact, PNG16/r16 quantised with sidecar range, r32 exact; flip convention tests). Suite: **48 tests green**, clippy clean, deny ok (RUSTSEC-2024-0436 `paste` via exr→pulp ignored with reason).
+
+- `19:20:00` Terrain ops wired: `terrain.generate` / `terrain.stats` / `terrain.export_heightmap` in the registry (layers held in `Context` until the graph engine exists), CLI `jd terrain generate --out` + `jd export heightmap`, MCP end-to-end test (which caught and fixed a workspace-check bug: relative export paths now resolve against the project root like the core). **51 tests green.** Measured baseline recorded in `docs/spec/performance-targets.md`: 4096² ridged fBm 157 ms, 0.42 s whole run, 235 MB peak RSS; outputs validated with macOS ImageIO. `docs/user/cli-quickstart.md` §4 documents it with real output.
+
 ### Open / next
-1. Wait for code-review findings; fix; commit + push (CI will run Rust matrix for the first time — watch Windows path handling in the CLI smoke step).
+1. CI run for the first Rust matrix — watch Windows path handling in the CLI smoke step.
 2. Phase 2 start: `jd-terrain` tiles + noise nodes, `jd-graph` evaluator, `jd-jobs`; first `graph.evaluate` + EXR/PNG16/R16 export; viewport prototype (ADR-0003 gate).
 3. `docs/user/`: CLI quickstart written from real output; GUI tutorials with Figma-annotated screenshots/video once the Tauri app exists.
 

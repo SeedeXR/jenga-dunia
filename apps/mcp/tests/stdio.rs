@@ -105,6 +105,51 @@ async fn create_rename_recover_through_mcp() {
 }
 
 #[tokio::test]
+async fn agent_can_generate_and_export_terrain() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let ws = dir.path().to_path_buf();
+    let proj = ws.join("terrain.jdproj");
+    let client = connect(&["--scope", "all", "--workspace", ws.to_str().expect("utf8")]).await;
+    let env = call(
+        &client,
+        "project.create",
+        json!({ "path": proj, "name": "T", "world": { "extent_m": [512.0, 512.0], "resolution_px": [128, 128], "tile_size": 64, "halo": 2, "origin": [0.0, 0.0], "seed": 1 } }),
+    )
+    .await;
+    assert_eq!(env["status"], "ok", "{env}");
+    let env = call(
+        &client,
+        "terrain.generate",
+        json!({ "noise": { "seed": 7, "fractal": "ridged" } }),
+    )
+    .await;
+    assert_eq!(env["status"], "ok", "{env}");
+    assert_eq!(env["result"]["stats"]["non_finite"], 0);
+    let env = call(
+        &client,
+        "terrain.export_heightmap",
+        json!({ "path": "agent.r16", "format": "raw_r16" }),
+    )
+    .await;
+    assert_eq!(env["status"], "ok", "{env}");
+    assert_eq!(
+        std::fs::metadata(proj.join("exports/agent.r16"))
+            .expect("r16")
+            .len(),
+        128 * 128 * 2
+    );
+    // Export outside the workspace is refused even though `export` scope is granted.
+    let env = call(
+        &client,
+        "terrain.export_heightmap",
+        json!({ "path": "/tmp/escape.r16", "format": "raw_r16" }),
+    )
+    .await;
+    assert_eq!(env["error"]["code"], "E_PERMISSION", "{env}");
+    client.cancel().await.expect("shutdown");
+}
+
+#[tokio::test]
 async fn denied_scope_is_a_stable_error_not_a_crash() {
     let client = connect(&["--scope", "project:ro"]).await;
     let env = call(&client, "project.set_name", json!({ "name": "x" })).await;
