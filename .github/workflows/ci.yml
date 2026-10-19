@@ -114,10 +114,10 @@ jobs:
       - name: GLB export passes the Khronos glTF validator
         shell: bash
         run: |
-          ../../target/debug/jd new "$RUNNER_TEMP/mesh.jdproj" --extent 1024 --resolution 128
-          ../../target/debug/jd --json op graph.evaluate --project "$RUNNER_TEMP/mesh.jdproj" | tail -1 | grep -q '"status":"ok"'
-          ../../target/debug/jd --json export mesh --project "$RUNNER_TEMP/mesh.jdproj" terrain.glb | tail -1 | grep -q '"format":"glb"'
-          pnpm validate:glb "$RUNNER_TEMP/mesh.jdproj/exports/terrain.glb"
+          ./target/debug/jd new "$RUNNER_TEMP/mesh.jdproj" --extent 1024 --resolution 128
+          ./target/debug/jd --json op graph.evaluate --project "$RUNNER_TEMP/mesh.jdproj" | tail -1 | grep -q '"status":"ok"'
+          ./target/debug/jd --json export mesh --project "$RUNNER_TEMP/mesh.jdproj" terrain.glb | tail -1 | grep -q '"format":"glb"'
+          pnpm --dir apps/desktop validate:glb "$RUNNER_TEMP/mesh.jdproj/exports/terrain.glb"
       - name: Install Playwright Chromium
         working-directory: apps/desktop
         run: pnpm exec playwright install --with-deps chromium
