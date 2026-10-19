@@ -519,7 +519,7 @@ export type TerrainExportMeshRequest = {
   "path": string;
   /** Grid step (1 = every sample). Default: the smallest step that keeps the mesh within `max_vertices`. */
   "step"?: number | null;
-  /** Vertex budget used when `step` is not given. */
+  /** Vertex budget used when `step` is not given (default 1025² = 1 050 625). */
   "max_vertices"?: number;
 };
 
@@ -692,7 +692,7 @@ export type NodeParams_jd_input_heightmap_1 = {
   "range_m"?: [number, number] | null;
   /** Width and height in pixels — required for headerless RAW files. */
   "size_px"?: [number, number] | null;
-  /** Row 0 of the file is north (true, the usual image convention) or south. */
+  /** Row 0 of the file is north (true, the usual image convention) or south (the field convention). */
   "north_up"?: boolean;
 };
 
@@ -741,7 +741,7 @@ export type NodeParams_jd_output_height_1 = {
 };
 
 export type Stroke = {
-  /** Polyline in layer metres: `[u east, v south]` from the north-west corner. */
+  /** Polyline in layer metres: `[u east, v north]` from the south-west corner (row 0 = south). */
   "points": ([number, number])[];
   /** Brush radius in metres. */
   "radius_m": number;
