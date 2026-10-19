@@ -28,7 +28,10 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [x] MCP server over stdio: tools from registry, scope gate (`--scope`), `--workspace` confinement, structured envelopes
 - [ ] Autosave timer + `project.save` on job completion (needs jobs)
 - [ ] `jd-jobs` + `jd-cache` crates (with the first real long-running op, Phase 2 `graph.evaluate`)
-- [ ] Viewport feasibility prototype: three.js WebGPU/WebGL2 in Tauri WebView + Rust headless wgpu tiles; measure IPC MB/s on macOS; close ADR-0003
+- [~] Viewport feasibility prototype: three.js WebGPU/WebGL2 in Tauri WebView ✔ (WebGPU observed active on macOS 27 dev build), u16 tile streaming over raw-bytes IPC ✔; measure IPC MB/s + latency on macOS and Windows ☐; Rust headless wgpu compute ☐; close ADR-0003 ☐
+- [x] Desktop app skeleton (`apps/desktop`, `jd-app`): project panel, noise inspector, three.js viewport, export, log; vitest component tests; Playwright e2e bridged to the real core via jd-mcp
+- [ ] Desktop: native file dialogs (tauri-plugin-dialog), macOS menu bar + ⌘ shortcuts, `.jdproj` open-with, window state persistence
+- [ ] Desktop tutorials: Figma-annotated screenshots + recordings (needs Accessibility permission for input automation, or record manually)
 - [x] CI: Rust matrix (macOS, Ubuntu, Windows) fmt/clippy/test/release-smoke + cargo-deny job; docs job with npx cache
 - [ ] S1 bench smoke in CI (needs a kernel)
 - [ ] Fixtures directory with malformed-file corpus seed

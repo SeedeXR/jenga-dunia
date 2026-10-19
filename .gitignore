@@ -4,3 +4,8 @@ node_modules/
 *.jdproj/journal/
 .DS_Store
 installables/
+apps/desktop/dist/
+apps/desktop/test-results/
+apps/desktop/playwright-report/
+apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/target/

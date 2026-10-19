@@ -581,8 +581,65 @@ pub mod terrain {
         }
     }
 
+    /// `terrain.preview` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct TerrainPreview {
+        /// Layer name.
+        #[serde(default = "default_layer")]
+        pub layer: String,
+        /// Downsample factor exponent (0 = full, 1 = half, …).
+        #[serde(default = "default_preview_lod")]
+        pub lod: u8,
+    }
+
+    fn default_preview_lod() -> u8 {
+        2
+    }
+
+    /// `terrain.preview` result: a downsampled u16 heightfield, base64-encoded.
+    /// (The desktop app uses the zero-copy `layer_preview` command; this op serves MCP agents
+    /// and browser-based tests that cannot receive raw bytes.)
+    #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct PreviewResult {
+        /// Width in samples.
+        pub width: u32,
+        /// Height in samples.
+        pub height: u32,
+        /// Height of sample value 0.
+        pub min: f32,
+        /// Height of sample value 65535.
+        pub max: f32,
+        /// The exact wire format of `jd_terrain::preview::Preview::to_bytes` (16-byte little-endian
+        /// header `u32 width, u32 height, f32 min, f32 max` followed by row-major u16 samples),
+        /// standard base64 with padding. One decoder serves both transports.
+        pub bytes_base64: String,
+    }
+
     /// Register terrain ops.
     pub fn register_all(r: &mut Registry) {
+        r.register::<TerrainPreview, PreviewResult, _>(
+            "terrain.preview",
+            "Downsampled u16 preview of a layer (base64) for agents and viewers",
+            Scope::ProjectRead,
+            |ctx, p| {
+                ctx.with_layer(&p.layer, |hf| {
+                    use base64::Engine as _;
+                    let pv = jd_terrain::preview::preview_u16(hf, p.lod);
+                    Ok((
+                        PreviewResult {
+                            width: pv.width,
+                            height: pv.height,
+                            min: pv.min,
+                            max: pv.max,
+                            bytes_base64: base64::engine::general_purpose::STANDARD
+                                .encode(pv.to_bytes()),
+                        },
+                        Vec::new(),
+                    ))
+                })
+            },
+        );
         r.register::<TerrainGenerate, LayerInfo, _>(
             "terrain.generate",
             "Generate a noise heightfield for the open project's world and store it as a layer",
@@ -630,6 +687,41 @@ pub mod terrain {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn preview_op_returns_the_wire_format() {
+            use base64::Engine as _;
+            let reg = Registry::with_builtins();
+            let dir = tempfile::tempdir().expect("tmp");
+            let ctx = Context::default();
+            let world = WorldSettings {
+                resolution_px: [64, 48],
+                extent_m: [64.0, 48.0],
+                tile_size: 64,
+                halo: 0,
+                ..Default::default()
+            };
+            reg.invoke(&ctx, Request::new("project.create", serde_json::json!({ "path": dir.path().join("p.jdproj"), "name": "P", "world": world })));
+            reg.invoke(
+                &ctx,
+                Request::new("terrain.generate", serde_json::json!({})),
+            );
+            let r = reg.invoke(
+                &ctx,
+                Request::new("terrain.preview", serde_json::json!({ "lod": 1 })),
+            );
+            let res = r.result.expect("preview");
+            assert_eq!(
+                (&res["width"], &res["height"]),
+                (&serde_json::json!(32), &serde_json::json!(24))
+            );
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(res["bytes_base64"].as_str().expect("b64"))
+                .expect("decodes");
+            let pv = jd_terrain::preview::Preview::from_bytes(&bytes).expect("wire format");
+            assert_eq!((pv.width, pv.height), (32, 24));
+            assert_eq!(pv.data.len(), 32 * 24);
+        }
 
         #[test]
         fn generate_stats_export_through_the_registry() {

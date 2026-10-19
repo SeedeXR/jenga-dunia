@@ -1552,6 +1552,74 @@ expression: list
     }
   },
   {
+    "id": "terrain.preview",
+    "description": "Downsampled u16 preview of a layer (base64) for agents and viewers",
+    "scope": "project-read",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TerrainPreview",
+      "description": "`terrain.preview` params.",
+      "type": "object",
+      "properties": {
+        "layer": {
+          "description": "Layer name.",
+          "type": "string",
+          "default": "height"
+        },
+        "lod": {
+          "description": "Downsample factor exponent (0 = full, 1 = half, …).",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 2
+        }
+      },
+      "additionalProperties": false
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "PreviewResult",
+      "description": "`terrain.preview` result: a downsampled u16 heightfield, base64-encoded.\n(The desktop app uses the zero-copy `layer_preview` command; this op serves MCP agents\nand browser-based tests that cannot receive raw bytes.)",
+      "type": "object",
+      "properties": {
+        "width": {
+          "description": "Width in samples.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "height": {
+          "description": "Height in samples.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "min": {
+          "description": "Height of sample value 0.",
+          "type": "number",
+          "format": "float"
+        },
+        "max": {
+          "description": "Height of sample value 65535.",
+          "type": "number",
+          "format": "float"
+        },
+        "bytes_base64": {
+          "description": "The exact wire format of `jd_terrain::preview::Preview::to_bytes` (16-byte little-endian\nheader `u32 width, u32 height, f32 min, f32 max` followed by row-major u16 samples),\nstandard base64 with padding. One decoder serves both transports.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "width",
+        "height",
+        "min",
+        "max",
+        "bytes_base64"
+      ]
+    }
+  },
+  {
     "id": "terrain.stats",
     "description": "Statistics and content hash of a layer",
     "scope": "project-read",

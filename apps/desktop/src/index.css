@@ -1,0 +1,43 @@
+@import "tailwindcss";
+@import "@fontsource-variable/host-grotesk";
+
+/* Dark-first design tokens (docs/architecture/12-ui-workspace.md). */
+@theme {
+  --font-sans: "Host Grotesk Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --color-jd-bg-0: #0a0a0a;
+  --color-jd-bg-1: #141414;
+  --color-jd-bg-2: #1f1f1f;
+  --color-jd-bg-3: #2a2a2a;
+  --color-jd-line: #3a3a3a;
+  --color-jd-fg-0: #f2f2f2;
+  --color-jd-fg-1: #c8c8c8;
+  --color-jd-fg-2: #9a9a9a;
+  --color-jd-accent: #7fb3ff;
+  --color-jd-warn: #f5c451;
+  --color-jd-error: #ff7b72;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: var(--color-jd-bg-0);
+  color: var(--color-jd-fg-0);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+input,
+select {
+  color-scheme: dark;
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center gap-1 rounded border border-jd-line bg-jd-bg-2 px-2 py-1 text-xs text-jd-fg-0 hover:bg-jd-bg-3 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+}

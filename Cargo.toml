@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "apps/cli", "apps/mcp"]
+members = ["crates/*", "apps/cli", "apps/mcp", "apps/desktop/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
@@ -22,6 +22,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
 ulid = { version = "1", features = ["serde"] }
 blake3 = "1"
+base64 = "0.22"
 anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "process"] }

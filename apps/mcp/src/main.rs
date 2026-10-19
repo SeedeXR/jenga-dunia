@@ -39,6 +39,13 @@ struct JdServer {
     ctx: Context,
     scopes: Arc<Vec<String>>,
     workspace: Option<PathBuf>,
+    envelope_schema: Arc<JsonObject>,
+}
+
+fn envelope_schema() -> Arc<JsonObject> {
+    let schema =
+        serde_json::to_value(schemars::schema_for!(jd_core::Response)).unwrap_or(Value::Null);
+    Arc::new(as_object(&schema))
 }
 
 fn scope_name(scope: Scope) -> &'static str {
@@ -129,7 +136,10 @@ impl ServerHandler for JdServer {
             .filter(|o| self.allowed(o.scope))
             .map(|o| {
                 Tool::new(o.id, o.description, Arc::new(as_object(&o.request_schema)))
-                    .with_raw_output_schema(Arc::new(as_object(&o.result_schema)))
+                    // Structured content is always the full envelope (status/result/error/warnings),
+                    // so advertise that shape; the op's own result schema is nested under `result`
+                    // and discoverable via `jd schema <op>`.
+                    .with_raw_output_schema(self.envelope_schema.clone())
             })
             .collect();
         std::future::ready(Ok(ListToolsResult::with_all_items(tools)))
@@ -197,6 +207,7 @@ async fn main() -> anyhow::Result<()> {
         ctx: Context::default(),
         scopes: Arc::new(cli.scopes),
         workspace: cli.workspace,
+        envelope_schema: envelope_schema(),
     };
     tracing::info!(scopes = ?server.scopes, workspace = ?server.workspace, "jd-mcp starting on stdio");
     let service = server.serve(stdio()).await?;

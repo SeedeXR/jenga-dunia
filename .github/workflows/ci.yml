@@ -52,6 +52,11 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Linux system libraries for Tauri (webkit2gtk, gtk, appindicator, rsvg)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy
@@ -66,6 +71,45 @@ jobs:
           ./target/release/jd --json diag env | tail -1 | head -c 400; echo
           ./target/release/jd new "$RUNNER_TEMP/smoke.jdproj" --name Smoke
           ./target/release/jd --json open "$RUNNER_TEMP/smoke.jdproj" | tail -1 | grep -q '"status":"ok"'
+
+  frontend:
+    name: frontend (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck + build
+        working-directory: apps/desktop
+        run: pnpm build
+      - name: Component tests (vitest)
+        working-directory: apps/desktop
+        run: pnpm test
+      - name: Build jd-mcp for the UI end-to-end bridge
+        run: cargo build -p jd-mcp
+      - name: Install Playwright Chromium
+        working-directory: apps/desktop
+        run: pnpm exec playwright install --with-deps chromium
+      - name: UI end-to-end (Playwright ↔ real core via jd-mcp)
+        working-directory: apps/desktop
+        run: pnpm test:e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-output
+          path: apps/desktop/test-results
+          if-no-files-found: ignore
 
   deny:
     name: cargo-deny

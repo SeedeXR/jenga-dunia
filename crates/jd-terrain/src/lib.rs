@@ -8,6 +8,7 @@
 pub mod export;
 pub mod heightfield;
 pub mod noise;
+pub mod preview;
 
 pub use export::{HeightmapFormat, export_heightmap};
 pub use heightfield::{Heightfield, HeightfieldStats, Tile, TileCoord};

@@ -1,0 +1,114 @@
+// UI-driven test: the real App component with the Tauri IPC mocked at the `invoke` boundary.
+// The viewport is replaced (jsdom has no WebGPU/WebGL); everything else is the shipped UI.
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const calls: { cmd: string; args: unknown }[] = [];
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(async (cmd: string, args: { request?: { op: string; params: Record<string, unknown> } }) => {
+    calls.push({ cmd, args });
+    if (cmd === "layer_preview") {
+      const buf = new ArrayBuffer(16 + 4 * 2);
+      const v = new DataView(buf);
+      v.setUint32(0, 2, true);
+      v.setUint32(4, 2, true);
+      v.setFloat32(8, 0, true);
+      v.setFloat32(12, 100, true);
+      return buf;
+    }
+    const req = args.request;
+    if (!req) throw new Error("unexpected command");
+    const base = { op: req.op, schema_version: 1, request_id: "01TEST" };
+    switch (req.op) {
+      case "project.info":
+        return { ...base, status: "error", error: { code: "E_INPUT_INVALID", message: "no project is open" } };
+      case "project.create":
+        if (req.params.path === "/bad") {
+          return { ...base, status: "error", error: { code: "E_INPUT_INVALID", message: "target directory exists and is not empty", next: "Choose an empty or new directory." } };
+        }
+        return {
+          ...base,
+          status: "ok",
+          result: { project_id: "01PROJ", name: req.params.name, path: req.params.path, world: { extent_m: [4096, 4096], resolution_px: [2048, 2048], tile_size: 512, halo: 4, seed: 42 }, schema_version: 1, dirty: false, pending_journal: 0 },
+        };
+      case "terrain.generate":
+        return { ...base, status: "ok", result: { layer: "height", size_px: [2048, 2048], stats: { min: 1.5, max: 498.2, mean: 250.1, non_finite: 0 }, content_hash: "abcdef0123456789abcdef", duration_ms: 42 } };
+      case "terrain.export_heightmap":
+        return { ...base, status: "ok", result: { path: "x.png" }, warnings: [{ code: "W_EXPORT_LOSS", message: "Png16 quantises heights" }] };
+      default:
+        return { ...base, status: "error", error: { code: "E_INPUT_INVALID", message: `unknown op ${req.op}` } };
+    }
+  }),
+}));
+
+const menuListeners: ((e: { payload: string }) => void)[] = [];
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn(async (_name: string, cb: (e: { payload: string }) => void) => {
+    menuListeners.push(cb);
+    return () => undefined;
+  }),
+}));
+
+vi.mock("./viewport/TerrainView", () => ({
+  default: ({ preview }: { preview: { width: number } | null }) => <div data-testid="viewport">{preview ? `preview ${preview.width}` : "no preview"}</div>,
+}));
+
+import App from "./App";
+import { useStore } from "./state";
+
+describe("App", () => {
+  beforeEach(() => {
+    calls.length = 0;
+    // The store is module-global; reset the mirrored state between tests.
+    useStore.setState({ project: null, layer: null, preview: null, previewStats: null, log: [], busy: false });
+  });
+
+  it("creates a project, generates terrain, shows stats and preview, exports with a loss warning", async () => {
+    render(<App />);
+    expect(screen.getByTestId("generate")).toBeDisabled();
+    fireEvent.change(screen.getByTestId("project-path"), { target: { value: "/tmp/Hills.jdproj" } });
+    fireEvent.click(screen.getByTestId("new-project"));
+    await waitFor(() => expect(screen.getByText(/Hills\.jdproj|World — 2048²/)).toBeInTheDocument());
+    const create = calls.find((c) => (c.args as { request?: { op: string } }).request?.op === "project.create");
+    expect(create).toMatchObject({ cmd: "op", args: { request: { op: "project.create", schema_version: 1, params: { path: "/tmp/Hills.jdproj", name: "World" } } } });
+
+    fireEvent.change(screen.getByTestId("seed"), { target: { value: "7" } });
+    fireEvent.click(screen.getByTestId("generate"));
+    await waitFor(() => expect(screen.getByTestId("layer-stats")).toBeInTheDocument());
+    const gen = calls.find((c) => (c.args as { request?: { op: string } }).request?.op === "terrain.generate");
+    expect(gen).toMatchObject({ args: { request: { params: { noise: { seed: 7, kind: "open_simplex2", fractal: "fbm" }, layer: "height" } } } });
+    expect(screen.getByTestId("layer-stats")).toHaveTextContent("1.5 / 498.2 m");
+    expect(screen.getByTestId("viewport")).toHaveTextContent("preview 2");
+    expect(calls.some((c) => c.cmd === "layer_preview")).toBe(true);
+
+    fireEvent.change(screen.getByTestId("export-path"), { target: { value: "h.png" } });
+    fireEvent.click(screen.getByTestId("export"));
+    await waitFor(() => expect(screen.getByTestId("log")).toHaveTextContent("W_EXPORT_LOSS"));
+    const exp = calls.find((c) => (c.args as { request?: { op: string } }).request?.op === "terrain.export_heightmap");
+    expect(exp).toMatchObject({ args: { request: { params: { path: "h.png", format: "png16" } } } });
+  });
+
+  it("native menu events trigger the same operations as the buttons", async () => {
+    render(<App />);
+    fireEvent.change(screen.getByTestId("project-path"), { target: { value: "/tmp/Menu.jdproj" } });
+    fireEvent.click(screen.getByTestId("new-project"));
+    await waitFor(() => expect(screen.getByText(/World — 2048²/)).toBeInTheDocument());
+    expect(menuListeners.length).toBeGreaterThan(0);
+    menuListeners.forEach((cb) => cb({ payload: "generate" }));
+    await waitFor(() => expect(screen.getByTestId("layer-stats")).toBeInTheDocument());
+    menuListeners.forEach((cb) => cb({ payload: "export" }));
+    await waitFor(() => expect(screen.getByTestId("log")).toHaveTextContent("terrain.export_heightmap"));
+    const exp = calls.find((c) => (c.args as { request?: { op: string } }).request?.op === "terrain.export_heightmap");
+    expect(exp).toMatchObject({ args: { request: { params: { path: "height.exr", format: "exr" } } } });
+  });
+
+  it("surfaces core errors with code and next step in the log", async () => {
+    render(<App />);
+    fireEvent.change(screen.getByTestId("project-path"), { target: { value: "/bad" } });
+    fireEvent.click(screen.getByTestId("new-project"));
+    await waitFor(() => expect(screen.getByTestId("log")).toHaveTextContent("E_INPUT_INVALID"));
+    expect(screen.getByTestId("log")).toHaveTextContent("Choose an empty or new directory.");
+    expect(screen.getByTestId("generate")).toBeDisabled();
+  });
+});

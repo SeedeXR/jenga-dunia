@@ -49,6 +49,7 @@ Processing time (wall, per stage), **peak RSS**, GPU memory peak, CPU utilisatio
 | Date | Machine | Scene / command | Wall | Peak RSS | Notes |
 |---|---|---|---|---|---|
 | 2026-10-19 | Apple Silicon laptop, 10 cores, 16 GB (Darwin 27.0.1) | `jd terrain generate` 4096² OpenSimplex2 ridged 6 octaves + EXR export (release build) | generate 157 ms; whole process 0.42 s real / 3.06 s user | 235 MB | `/usr/bin/time -l`; EXR validated by macOS ImageIO (4096×4096, 32 bps) |
+| 2026-10-19 | same | Desktop app (release, `tauri/custom-protocol`): `terrain.generate` 2048² fBm via menu; 1024² u16 preview (2.00 MB) to the WebGPU viewport | generate 58–63 ms (3 runs); preview delivered + decoded in 6 ms | — | header readout + `JD_LOG=info` op spans; viewport 2.09 M tris |
 
 ## Regression policy
 
