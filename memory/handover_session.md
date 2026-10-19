@@ -69,6 +69,8 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `03:25:00` Hydraulic capacity now scales with the water column (`Kc·sin α·|v|·d̄`): with metre heights the pipe velocities are tens of m/s and the first version carried ~35 m of rock in a 2 cm rain film (mean 254 → 215). Release timings: 512² × 100 steps 171 ms, 2048² × 100 steps 2.1 s / 369 MB peak (baseline table). Still stylised — ~5 m mean suspension at 2048²; proper limits (concentration cap, layered materials, open drains) are Phase 3 follow-ups.
 
+- `03:40:00` CI for `36da357`/`de1fb88`: e2e timeout fix worked (frontend green); the Linux rust job failed on the new schema-freshness gate because `schemas/v1/graph/node-kinds.json` was not regenerated after adding the hydraulic node → regenerated (`4856443`). **Pre-push checklist now includes** `cargo run -q -p jd-cli -- schema --write schemas/v1 && git diff --exit-code -- schemas/` after any op/node change.
+
 ### Open / next (as of 2026-10-20 03:30, head `36da357`)
 1. **CI for `36da357`** (hydraulic + review-3 fixes + e2e timeout 300 s on CI): confirm green; if the graph e2e is still slow on the Linux runner, cut live previews in that spec (toggle ⚡ off at the start) rather than raising timeouts further.
 2. **Native re-verification when the display is available**: `v0.0.1` header badge, native dialogs (File → New…/Open…/Export…), ⚡ live preview, Undo/Redo menu items; re-shoot `desktop-menubar.png`, `tutorial-01/02` (viewport now hypsometric + sky) and `tutorial-03-graph.png`; record a native graph-editor clip if Accessibility is granted.
