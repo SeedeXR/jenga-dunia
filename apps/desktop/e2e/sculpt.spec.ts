@@ -40,6 +40,14 @@ test.describe("sculpting against the real core", () => {
     if (!vp) throw new Error("no viewport");
     const cx = vp.x + vp.width / 2;
     const cy = vp.y + vp.height / 2;
+    // Hovering shows the brush ring; the host reports where it sits (layer metres).
+    await page.mouse.move(cx, cy);
+    await page.mouse.move(cx + 2, cy + 2);
+    await expect(page.getByTestId("viewport")).toHaveAttribute("data-brush", /^\d+(\.\d+)?,\d+(\.\d+)?$/);
+    const brushAt = (await page.getByTestId("viewport").getAttribute("data-brush"))!.split(",").map(Number);
+    expect(brushAt[0]).toBeGreaterThan(0);
+    expect(brushAt[0]).toBeLessThan(1024);
+    await page.screenshot({ path: testInfo.outputPath("sculpt-brush.png") }); // tutorial image source
     await page.mouse.move(cx - 60, cy);
     await page.mouse.down();
     await page.mouse.move(cx + 60, cy, { steps: 12 });

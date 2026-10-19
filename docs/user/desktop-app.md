@@ -88,7 +88,7 @@ Undo and redo are operations like everything else (`graph.undo` / `graph.redo`, 
 ## Tutorial: sculpting
 
 1. Click **Sculpt** (top of the viewport). If the graph has no stroke node yet, a `jd.sculpt.strokes` node is inserted in front of the output and selected; the button reads **Sculpting…** and a **Brush** panel (radius, strength in metres; negative strength digs) appears on the right.
-2. Drag on the terrain. The pointer is projected onto the surface and the path becomes one stroke (`points` in layer metres, radius, strength) appended to the node's `strokes` parameter — a journaled `graph.set_param`, so the live preview updates and **Undo** removes the whole stroke.
+2. Move over the terrain: a red ring the size of the brush follows the pointer on the surface. Drag to paint. The pointer is projected onto the surface and the path becomes one stroke (`points` in layer metres, radius, strength) appended to the node's `strokes` parameter — a journaled `graph.set_param`, so the live preview updates and **Undo** removes the whole stroke.
 3. Click **Sculpting…** to go back to orbiting. Strokes are data in `graph.json`: the CLI and MCP see the same node, and re-evaluating anywhere replays them identically.
 
 ![Sculpt mode: Sculpt button, brush panel, stroke node](images/tutorial-04-sculpt.png)

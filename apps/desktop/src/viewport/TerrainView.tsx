@@ -16,7 +16,7 @@ interface Props {
   onInfo?: (info: ViewportInfo) => void;
   /** Sculpt mode: pointer drags paint a stroke on the terrain instead of orbiting. Points are
    *  reported in layer metres (u east from the west edge, v north from the south edge = row 0). */
-  sculpt?: { enabled: boolean; onStroke: (points: [number, number][]) => void };
+  sculpt?: { enabled: boolean; radiusM: number; onStroke: (points: [number, number][]) => void };
 }
 
 function isWebGPU(r: WebGPURenderer): boolean {
@@ -91,6 +91,8 @@ interface SceneState {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | null;
+  /** Brush ring shown under the pointer in sculpt mode. */
+  brush: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
   frame: number;
   backend: ViewportInfo["backend"];
   triangles: number;
@@ -128,11 +130,21 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt }: Props)
     const sun = new THREE.DirectionalLight(0xffffff, 1.6);
     sun.position.set(3000, 5000, 2000);
     scene.add(sun);
+    // Brush cursor: a flat ring (unit radius, scaled per brush) lifted slightly above the surface.
+    const brush = new THREE.Mesh(
+      new THREE.RingGeometry(0.9, 1.0, 48),
+      new THREE.MeshBasicMaterial({ color: 0xff3b30, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthTest: false }),
+    );
+    brush.rotation.x = -Math.PI / 2;
+    brush.visible = false;
+    brush.renderOrder = 10;
+    scene.add(brush);
     const state: SceneState = {
       renderer,
       scene,
       camera,
       mesh: null,
+      brush,
       frame: 0,
       backend: "none",
       triangles: 0,
@@ -157,6 +169,30 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt }: Props)
       // from the south edge: v = 0 at +Z/2.
       return [h.point.x + ext[0] / 2, ext[1] / 2 - h.point.z];
     };
+    // Brush cursor follows the pointer over the terrain while sculpting (also when not dragging).
+    const showBrush = (e: PointerEvent) => {
+      const sc = sculptRef.current;
+      const ext = extentRef.current;
+      if (!sc?.enabled || !state.mesh || !ext) {
+        state.brush.visible = false;
+        el.removeAttribute("data-brush");
+        return;
+      }
+      const p = hit(e);
+      if (!p) {
+        state.brush.visible = false;
+        el.removeAttribute("data-brush");
+        return;
+      }
+      const x = p[0] - ext[0] / 2;
+      const z = ext[1] / 2 - p[1];
+      // Sit just above the surface so the ring is not z-fought by the mesh (depthTest is off anyway).
+      const y = raycaster.intersectObject(state.mesh, false)[0]?.point.y ?? 0;
+      state.brush.position.set(x, y + ext[0] * 0.002, z);
+      state.brush.scale.setScalar(Math.max(1e-3, sc.radiusM));
+      state.brush.visible = true;
+      el.setAttribute("data-brush", `${p[0].toFixed(1)},${p[1].toFixed(1)}`);
+    };
     const onDown = (e: PointerEvent) => {
       dragging = true;
       if (sculptRef.current?.enabled) {
@@ -172,6 +208,7 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt }: Props)
       }
     };
     const onMove = (e: PointerEvent) => {
+      showBrush(e);
       if (!dragging) return;
       if (stroke) {
         const p = hit(e);
@@ -223,6 +260,8 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt }: Props)
       window.removeEventListener("pointerup", onUp);
       el.removeEventListener("pointermove", onMove);
       el.removeEventListener("wheel", onWheel);
+      state.brush.geometry.dispose();
+      state.brush.material.dispose();
       if (state.mesh) {
         state.mesh.geometry.dispose();
         state.mesh.material.dispose();
