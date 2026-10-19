@@ -1,0 +1,32 @@
+# CI — docs round. Validates documentation on all three target OS families so the matrix,
+# caching and runner labels are proven before Rust/Tauri jobs are added (see docs/research/stack.md).
+# ponytail: Rust/frontend jobs are added when the workspace exists; keep this file the single CI entry point.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    name: docs (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate Mermaid diagrams
+        shell: bash
+        run: node scripts/check-mermaid.mjs
+      - name: Check internal links
+        shell: bash
+        run: node scripts/check-links.mjs
