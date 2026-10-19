@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TerrainExportMesh",
+  "description": "`terrain.export_mesh` params.",
+  "type": "object",
+  "properties": {
+    "layer": {
+      "description": "Layer name.",
+      "type": "string",
+      "default": "height"
+    },
+    "path": {
+      "description": "Output `.glb`; relative paths resolve against the project's `exports/` directory.",
+      "type": "string"
+    },
+    "step": {
+      "description": "Grid step (1 = every sample). Default: the smallest step that keeps the mesh within `max_vertices`.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0,
+      "default": null
+    },
+    "max_vertices": {
+      "description": "Vertex budget used when `step` is not given.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0,
+      "default": 1048576
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path"
+  ]
+}

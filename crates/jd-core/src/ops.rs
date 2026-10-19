@@ -1484,6 +1484,27 @@ pub mod terrain {
         pub options: ExportOptions,
     }
 
+    /// `terrain.export_mesh` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct TerrainExportMesh {
+        /// Layer name.
+        #[serde(default = "default_layer")]
+        pub layer: String,
+        /// Output `.glb`; relative paths resolve against the project's `exports/` directory.
+        pub path: PathBuf,
+        /// Grid step (1 = every sample). Default: the smallest step that keeps the mesh within `max_vertices`.
+        #[serde(default)]
+        pub step: Option<u32>,
+        /// Vertex budget used when `step` is not given.
+        #[serde(default = "default_max_vertices")]
+        pub max_vertices: u32,
+    }
+
+    fn default_max_vertices() -> u32 {
+        1_048_576
+    }
+
     /// Result of `terrain.generate` / `terrain.stats`.
     #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
     pub struct LayerInfo {
@@ -1593,6 +1614,29 @@ pub mod terrain {
             "Statistics and content hash of a layer",
             Scope::ProjectRead,
             |ctx, p| ctx.with_layer(&p.layer, |hf| Ok((info(&p.layer, hf, 0), Vec::new()))),
+        );
+        r.register::<TerrainExportMesh, jd_terrain::MeshExportReport, _>(
+            "terrain.export_mesh",
+            "Write a layer as a binary glTF (.glb) grid mesh: metres, +Y up, centred on the world, normals + UVs + PBR material",
+            Scope::Export,
+            |ctx, p| {
+                let (path, extent) = ctx.with_project(|proj| {
+                    let path = if p.path.is_absolute() { p.path.clone() } else { proj.root().join("exports").join(&p.path) };
+                    Ok((path, proj.doc.world.extent_m))
+                })?;
+                let mut warnings = Vec::new();
+                let report = ctx.with_layer(&p.layer, |hf| {
+                    let step = p.step.unwrap_or_else(|| jd_terrain::auto_step(hf.width(), hf.height(), p.max_vertices));
+                    if p.step.is_none() && step > 1 {
+                        warnings.push(Warning::new(
+                            "W_MESH_DECIMATED",
+                            format!("mesh sampled every {step} pixels to stay within {} vertices; pass `step: 1` for the full grid", p.max_vertices),
+                        ));
+                    }
+                    jd_terrain::export_glb(hf, extent, &path, step)
+                })?;
+                Ok((report, warnings))
+            },
         );
         r.register::<TerrainExport, ExportReport, _>(
             "terrain.export_heightmap",
@@ -1725,6 +1769,21 @@ pub mod terrain {
                 "exact format has no loss warning: {r:?}"
             );
             assert!(dir.path().join("abs.exr").exists());
+            // Mesh export: GLB header, auto decimation warning for a large world.
+            let r = reg.invoke(
+                &ctx,
+                Request::new(
+                    "terrain.export_mesh",
+                    serde_json::json!({ "path": "t.glb" }),
+                ),
+            );
+            assert_eq!(r.status, crate::envelope::Status::Ok, "{r:?}");
+            let glb = std::fs::read(dir.path().join("t.jdproj/exports/t.glb")).expect("glb");
+            assert_eq!(&glb[..4], b"glTF");
+            assert_eq!(
+                r.result.as_ref().and_then(|v| v["format"].as_str()),
+                Some("glb")
+            );
             let r = reg.invoke(
                 &ctx,
                 Request::new(

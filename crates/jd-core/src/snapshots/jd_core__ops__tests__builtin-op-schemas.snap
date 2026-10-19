@@ -3204,6 +3204,108 @@ expression: list
     }
   },
   {
+    "id": "terrain.export_mesh",
+    "description": "Write a layer as a binary glTF (.glb) grid mesh: metres, +Y up, centred on the world, normals + UVs + PBR material",
+    "scope": "export",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TerrainExportMesh",
+      "description": "`terrain.export_mesh` params.",
+      "type": "object",
+      "properties": {
+        "layer": {
+          "description": "Layer name.",
+          "type": "string",
+          "default": "height"
+        },
+        "path": {
+          "description": "Output `.glb`; relative paths resolve against the project's `exports/` directory.",
+          "type": "string"
+        },
+        "step": {
+          "description": "Grid step (1 = every sample). Default: the smallest step that keeps the mesh within `max_vertices`.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "default": null
+        },
+        "max_vertices": {
+          "description": "Vertex budget used when `step` is not given.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 1048576
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "MeshExportReport",
+      "description": "What `export_glb` wrote.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "Written file.",
+          "type": "string"
+        },
+        "format": {
+          "description": "Always `glb`.",
+          "type": "string"
+        },
+        "vertices": {
+          "description": "Vertex count.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "triangles": {
+          "description": "Triangle count.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "step": {
+          "description": "Grid step used (1 = every sample).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "bytes": {
+          "description": "Bytes written.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "extent_m": {
+          "description": "World extent covered, metres.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        }
+      },
+      "required": [
+        "path",
+        "format",
+        "vertices",
+        "triangles",
+        "step",
+        "bytes",
+        "extent_m"
+      ]
+    }
+  },
+  {
     "id": "terrain.generate",
     "description": "Generate a noise heightfield for the open project's world and store it as a layer",
     "scope": "project-write",

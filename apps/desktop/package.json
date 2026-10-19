@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "annotate": "node scripts/annotate.mjs"
+    "annotate": "node scripts/annotate.mjs",
+    "validate:glb": "node scripts/validate-glb.mjs"
   },
   "dependencies": {
     "@fontsource-variable/host-grotesk": "^5.3.0",
@@ -35,6 +36,7 @@
     "@types/react-dom": "^19.3.0",
     "@types/three": "^0.186.0",
     "@vitejs/plugin-react": "^6.1.2",
+    "gltf-validator": "2.0.0-dev.3.10",
     "jsdom": "^30.1.3",
     "oxlint": "^1.88.0",
     "tailwindcss": "^4.3.3",

@@ -148,6 +148,20 @@ enum ExportCommand {
         #[arg(long, default_value = "height")]
         layer: String,
     },
+    /// Export a heightfield layer as a binary glTF (.glb) grid mesh (metres, +Y up, centred).
+    Mesh {
+        /// Project directory.
+        #[arg(long)]
+        project: PathBuf,
+        /// Output .glb (relative paths go under the project's exports/).
+        path: PathBuf,
+        /// Grid step (1 = every sample; default keeps the mesh within ~1 M vertices).
+        #[arg(long)]
+        step: Option<u32>,
+        /// Layer name.
+        #[arg(long, default_value = "height")]
+        layer: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -410,6 +424,30 @@ fn main() -> ExitCode {
                 "terrain.export_heightmap",
                 json!({ "layer": layer, "path": path, "format": format }),
             ));
+            outs
+        }
+        Command::Export {
+            what:
+                ExportCommand::Mesh {
+                    project,
+                    path,
+                    step,
+                    layer,
+                },
+        } => {
+            let mut outs = vec![invoke(
+                &registry,
+                &ctx,
+                "project.open",
+                json!({ "path": project }),
+            )];
+            if outs[0].status == Status::Ok {
+                let mut params = json!({ "layer": layer, "path": path });
+                if let Some(step) = step {
+                    params["step"] = json!(step);
+                }
+                outs.push(invoke(&registry, &ctx, "terrain.export_mesh", params));
+            }
             outs
         }
         Command::Diag {

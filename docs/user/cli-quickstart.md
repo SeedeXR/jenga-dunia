@@ -110,6 +110,16 @@ warning  W_EXPORT_LOSS: Png16 quantises heights to 0.0064 m steps; range recorde
 
 Same seed → same `content_hash`, on any thread count and tile size (tested). Measured on an Apple Silicon laptop (10 cores): 4096² generation 157 ms, whole command 0.42 s, peak RSS 235 MB; the EXR is read by macOS ImageIO as 4096×4096, 32 bits/sample, and the PNG as 16-bit grayscale.
 
+### Export the terrain as a mesh (glTF binary)
+
+```
+$ jd --json export mesh --project M.jdproj terrain.glb
+{"op":"terrain.export_mesh","status":"ok","result":{"path":"M.jdproj/exports/terrain.glb","format":"glb",
+  "vertices":262144,"triangles":522242,"step":1,"bytes":14656644,"extent_m":[2048.0,2048.0]}}
+```
+
+(512² world.) The `.glb` is a single grid mesh in metres, +Y up, centred on the world like the viewport, with normals, UVs and a flat PBR material — it opens directly in Blender, three.js or any glTF 2.0 importer, and the Khronos glTF Validator reports 0 errors (CI runs it on every push). Worlds above ~1 M vertices are sampled every `step` pixels (`W_MESH_DECIMATED`); pass `--step 1` for the full grid.
+
 ## 5. Build a procedural graph
 
 Terrain is really a **graph** (`graph.json` in the project): generator → filters → output. Every graph change is a journaled operation (crash-safe, undoable later); evaluation is incremental — unchanged nodes are served from cache by content hash.

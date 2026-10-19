@@ -105,6 +105,11 @@
     "scope": "export"
   },
   {
+    "id": "terrain.export_mesh",
+    "description": "Write a layer as a binary glTF (.glb) grid mesh: metres, +Y up, centred on the world, normals + UVs + PBR material",
+    "scope": "export"
+  },
+  {
     "id": "terrain.generate",
     "description": "Generate a noise heightfield for the open project's world and store it as a layer",
     "scope": "project-write"

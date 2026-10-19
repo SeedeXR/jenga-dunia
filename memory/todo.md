@@ -45,7 +45,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [~] `jd-graph`: typed DAG ✔, validation (types/cycles/required/unknown) ✔, blake3 content-hash incremental evaluation + in-memory cache ✔, LOD ✔, bypass ✔, 7 node kinds ✔, journaled `graph.*` ops with pre-journal structural validation (trial copy + `validate_structure`) ✔, `graph.move_node` ✔, lod>0 → `<layer>#lod<N>` ✔, node-editor UI (React Flow: add/connect/drag/delete/inspector, e2e-tested) ✔; disk cache (`jd-cache`) layer-level ✔ (CLI can export a graph result across invocations); tile-level blobs + SQLite index + LRU eviction ☐, region/tile-level dirty sets ☐, async jobs + progress/cancel ☐, undo/redo ✔ (snapshot history, journaled `graph.restore`)
 - [~] Heightmap export: EXR f32 ✔, PNG16 ✔, RAW r16/r32 ✔ (+ JSON sidecar, flip + range conventions, round-trip tests); TIFF ☐; foreign heightmap import without sidecar ☐; Unity/Unreal size presets (2ⁿ+1) ☐
 - [~] Stroke sculpt nodes: `jd.sculpt.strokes@1` ✔ (smooth-falloff raise/lower polylines), desktop Sculpt mode ✔ (raycast strokes, brush panel, one undo step per stroke); brush cursor/preview, smooth/flatten brushes, stroke files under `strokes/` ☐
-- [ ] Basic PBR material + GLB export + glTF Validator in CI
+- [~] GLB export ✔ (`terrain.export_mesh` / `jd export mesh`: grid mesh, normals, UVs, flat PBR material; Khronos validator 0 errors) + glTF Validator in CI ✔; textured PBR material ☐
 - [ ] Node editor UI, generated inspectors, task monitor, diagnostics console
 - [ ] Viewport terrain LOD + PBR + sky
 
