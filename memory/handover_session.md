@@ -62,6 +62,8 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `02:40:00` `jd schema --write <dir>` exports envelope + every op's request/result schema + `graph/node-kinds.json`; `schemas/v1/` committed (51 files, deterministic — written twice, identical); CI (Linux rust job) regenerates and fails on drift. CLI test checks `project.create.request.json` has `additionalProperties: false`.
 
+- `02:55:00` Viewport preview shading: hypsometric ramp + slope→rock blend (factor 1.4 after 2.5 looked all-grey in the e2e screenshot), sky background `#1b2432` with fog scaled to the world extent. Verified visually via the Playwright screenshot (Chrome, WebGPU). **Tutorial images 01/02 still show the old grey ramp** — re-shoot in the native app when the display is available (`tutorial-03-graph.png` too).
+
 ### Open / next
 1. Apply code-review findings for the graph slice; push; CI.
 2. Desktop: graph panel (React Flow) + starter graph so new projects evaluate immediately.

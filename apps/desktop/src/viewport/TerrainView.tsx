@@ -21,15 +21,28 @@ function isWebGPU(r: WebGPURenderer): boolean {
   return Boolean((r.backend as { isWebGPUBackend?: boolean }).isWebGPUBackend);
 }
 
-// Grey-scale ramp with a faint blue tint low and warm tint high: readable, not decorative.
+// Hypsometric ramp (lowland green → ochre → bare rock → snow) by normalised height, blended
+// towards rock grey on steep slopes. Readable at a glance like World Creator's default look,
+// while staying a preview: materials come from the material graph later.
 // Precomputed once (256 entries) so geometry builds allocate nothing per vertex.
+const STOPS: [number, THREE.Color][] = [
+  [0.0, new THREE.Color(0.16, 0.3, 0.2)],
+  [0.25, new THREE.Color(0.36, 0.48, 0.24)],
+  [0.5, new THREE.Color(0.62, 0.52, 0.34)],
+  [0.75, new THREE.Color(0.52, 0.5, 0.48)],
+  [1.0, new THREE.Color(0.95, 0.95, 0.97)],
+];
+const ROCK = new THREE.Color(0.42, 0.4, 0.38);
 const RAMP: Float32Array = (() => {
-  const lo = new THREE.Color(0.18, 0.2, 0.24);
-  const hi = new THREE.Color(0.9, 0.86, 0.8);
   const out = new Float32Array(256 * 3);
   const c = new THREE.Color();
   for (let i = 0; i < 256; i++) {
-    c.copy(lo).lerp(hi, i / 255);
+    const t = i / 255;
+    let k = 0;
+    while (k < STOPS.length - 2 && t > (STOPS[k + 1]?.[0] ?? 1)) k++;
+    const [t0, c0] = STOPS[k] ?? STOPS[0]!;
+    const [t1, c1] = STOPS[k + 1] ?? STOPS[STOPS.length - 1]!;
+    c.copy(c0).lerp(c1, (t - t0) / Math.max(1e-6, t1 - t0));
     out[i * 3] = c.r;
     out[i * 3 + 1] = c.g;
     out[i * 3 + 2] = c.b;
@@ -56,9 +69,17 @@ export function buildTerrainGeometry(p: Preview, extent: [number, number]): THRE
       colors[vi * 3 + 2] = RAMP[r + 2] ?? 0;
     }
   }
-  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   pos.needsUpdate = true;
   geo.computeVertexNormals();
+  // Steep faces read as rock regardless of altitude: blend by (1 − normal.y), i.e. slope.
+  const nrm = geo.attributes.normal as THREE.BufferAttribute;
+  for (let vi = 0; vi < pos.count; vi++) {
+    const slope = Math.min(1, Math.max(0, (1 - nrm.getY(vi)) * 1.4));
+    colors[vi * 3] += (ROCK.r - (colors[vi * 3] ?? 0)) * slope;
+    colors[vi * 3 + 1] += (ROCK.g - (colors[vi * 3 + 1] ?? 0)) * slope;
+    colors[vi * 3 + 2] += (ROCK.b - (colors[vi * 3 + 2] ?? 0)) * slope;
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   return geo;
 }
 
@@ -89,9 +110,11 @@ export default function TerrainView({ preview, extentM, onInfo }: Props) {
     const renderer = new WebGPURenderer({ antialias: true });
     renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setSize(el.clientWidth, el.clientHeight);
-    renderer.setClearColor(0x0a0a0a, 1);
     el.appendChild(renderer.domElement);
     const scene = new THREE.Scene();
+    // Sky: a dusk-blue background with distance fog so scale reads without a skybox asset.
+    scene.background = new THREE.Color(0x1b2432);
+    scene.fog = new THREE.Fog(0x1b2432, 1, 2);
     const camera = new THREE.PerspectiveCamera(50, el.clientWidth / Math.max(1, el.clientHeight), 1, 200000);
     scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x202020, 0.9));
     const sun = new THREE.DirectionalLight(0xffffff, 1.6);
@@ -192,6 +215,10 @@ export default function TerrainView({ preview, extentM, onInfo }: Props) {
     s.orbit.maxR = size * 20;
     s.camera.near = Math.max(0.1, size * 0.001);
     s.camera.far = size * 50;
+    if (s.scene.fog instanceof THREE.Fog) {
+      s.scene.fog.near = size * 2;
+      s.scene.fog.far = size * 12;
+    }
     s.camera.updateProjectionMatrix();
     placeCamera(s);
     onInfo?.({ backend: s.backend, triangles: s.triangles });
