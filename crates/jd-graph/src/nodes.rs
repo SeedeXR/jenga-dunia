@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use jd_terrain::{Heightfield, NoiseParams, generate_noise};
+use jd_terrain::{Heightfield, NoiseParams, generate_noise, slope_mask, thermal_erode};
 use jd_types::{JdError, JdResult};
 use rayon::prelude::*;
 use serde::Deserialize;
@@ -64,6 +64,45 @@ fn map2(
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct NoParams {}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ThermalParams {
+    /// Angle of repose in degrees (sand ≈ 30–35, scree ≈ 35–40).
+    #[serde(default = "talus_default")]
+    talus_deg: f32,
+    /// Jacobi steps (1..=1000); more steps move material further.
+    #[serde(default = "iterations_default")]
+    iterations: u32,
+    /// Fraction of the excess that moves per step, (0, 1]; 0.5 is the classic stable value.
+    #[serde(default = "rate_default")]
+    rate: f32,
+}
+fn talus_default() -> f32 {
+    35.0
+}
+fn iterations_default() -> u32 {
+    50
+}
+fn rate_default() -> f32 {
+    0.5
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SlopeParams {
+    /// Slope that maps to 1.0 in the mask (degrees, (0, 90]).
+    #[serde(default = "ninety")]
+    max_deg: f32,
+}
+fn ninety() -> f32 {
+    90.0
+}
+
+/// Horizontal sample spacing of the world at the current LOD, in metres.
+fn pixel_m(ctx: &EvalCtx) -> f32 {
+    (ctx.lod_world.extent_m[0] / f64::from(ctx.lod_world.resolution_px[0].max(1))) as f32
+}
 
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -245,6 +284,32 @@ pub fn register_all(r: &mut Registry) {
                 return Err(JdError::invalid("radius", "must be within 1..=4"));
             }
             Ok(out("out", box_blur(field(i, "in")?, bp.radius)?))
+        },
+    ));
+    r.register(NodeDef::new::<ThermalParams, _>(
+        "jd.erosion.thermal@1",
+        "Thermal erosion: material steeper than the talus angle slides downhill (mass-conserving Jacobi steps)",
+        vec![port("in", PortType::Heightfield, true)],
+        vec![port("out", PortType::Heightfield, false)],
+        |ctx, p, i| {
+            let tp: ThermalParams = params(p)?;
+            if !(1..=1000).contains(&tp.iterations) {
+                return Err(JdError::invalid("iterations", "must be within 1..=1000"));
+            }
+            Ok(out("out", thermal_erode(field(i, "in")?, pixel_m(ctx), tp.talus_deg, tp.iterations, tp.rate)?))
+        },
+    ));
+    r.register(NodeDef::new::<SlopeParams, _>(
+        "jd.analysis.slope@1",
+        "Slope mask 0..1 (gradient angle / max_deg) — feed into multiply to attenuate by steepness",
+        vec![port("in", PortType::Heightfield, true)],
+        vec![port("out", PortType::Heightfield, false)],
+        |ctx, p, i| {
+            let sp: SlopeParams = params(p)?;
+            Ok(out(
+                "out",
+                slope_mask(field(i, "in")?, pixel_m(ctx), sp.max_deg)?,
+            ))
         },
     ));
     r.register(NodeDef::new::<OutputParams, _>(
@@ -541,6 +606,65 @@ mod tests {
             .evaluate(&g, &world(), 2)
             .expect("starter evaluates");
         assert_eq!(outs.len(), 2);
+    }
+
+    #[test]
+    fn erosion_and_slope_nodes_evaluate_at_world_scale() {
+        let reg = Registry::with_builtins();
+        let cache = Cache::default();
+        let mut g = Graph::default();
+        let n = add(
+            &mut g,
+            "jd.noise.fbm@1",
+            serde_json::json!({ "seed": 4, "feature_size_m": 64.0, "height_range_m": [0.0, 400.0] }),
+        );
+        let e = add(
+            &mut g,
+            "jd.erosion.thermal@1",
+            serde_json::json!({ "iterations": 10 }),
+        );
+        let s = add(&mut g, "jd.analysis.slope@1", serde_json::json!({}));
+        connect(&mut g, &n, "out", &e, "in");
+        connect(&mut g, &e, "out", &s, "in");
+        let (outs, rep) = Evaluator::new(&reg, &cache)
+            .evaluate(&g, &world(), 0)
+            .expect("eval");
+        assert_eq!(rep.nodes.len(), 3);
+        let noise = outs[&(n.clone(), "out".into())].as_field();
+        let eroded = outs[&(e, "out".into())].as_field();
+        assert_ne!(
+            noise.content_hash(),
+            eroded.content_hash(),
+            "steep noise must erode"
+        );
+        let (a, b) = (noise.stats(), eroded.stats());
+        assert!(
+            (a.mean - b.mean).abs() < 1e-2,
+            "mass conserved: {} vs {}",
+            a.mean,
+            b.mean
+        );
+        assert!(
+            b.max <= a.max + 1e-3 && b.min >= a.min - 1e-3,
+            "erosion never exceeds the input range"
+        );
+        let mask = outs[&(s, "out".into())].as_field().stats();
+        assert!(
+            mask.min >= 0.0 && mask.max <= 1.0 && mask.max > 0.0,
+            "{mask:?}"
+        );
+        g.nodes
+            .get_mut(&n)
+            .expect("n")
+            .params
+            .insert("seed".into(), serde_json::json!(5));
+        let (_, rep2) = Evaluator::new(&reg, &cache)
+            .evaluate(&g, &world(), 0)
+            .expect("eval");
+        assert!(
+            rep2.nodes.iter().all(|r| !r.cached),
+            "upstream change invalidates the chain"
+        );
     }
 
     #[test]

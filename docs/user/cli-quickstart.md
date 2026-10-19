@@ -160,7 +160,22 @@ $ jd --json op terrain.export_heightmap --project G.jdproj --params '{"path":"he
 
 (512² world, debug build.) Deleting `cache/` never breaks a project; the next `graph.evaluate` recreates the layers.
 
-Built-in kinds today: `jd.noise.fbm@1`, `jd.math.add@1`, `jd.math.multiply@1`, `jd.math.scale@1`, `jd.math.remap@1`, `jd.filter.blur@1`, `jd.output.height@1`.
+The first simulation node is thermal erosion. Insert it between the starter noise and output (ids from `graph.list`):
+
+```
+$ jd --json op graph.add_node --project K.jdproj --save \
+    --params '{"kind":"jd.erosion.thermal@1","params":{"talus_deg":33,"iterations":50}}'
+$ jd op graph.connect --project K.jdproj --save --params '{"from":"<noise id>","to":"<thermal id>","to_port":"in"}'
+$ jd op graph.connect --project K.jdproj --save --params '{"from":"<thermal id>","to":"<output id>","to_port":"in"}'
+$ jd --json op graph.evaluate --project K.jdproj
+{"op":"graph.evaluate","status":"ok","result":{"lod":0,"duration_ms":952,
+  "nodes":[{"kind":"jd.noise.fbm@1","duration_ms":64,...},{"kind":"jd.erosion.thermal@1","duration_ms":887,...},
+           {"kind":"jd.output.height@1","duration_ms":0,...}],"layers":{"height":"…"}}}
+```
+
+(2048² world, 50 steps, release build on the M-series reference Mac: 0.98 s wall, 130 MB peak RSS; 512² takes ~65 ms.) Material steeper than `talus_deg` slides to lower neighbours; the step is mass-conserving, so `terrain.stats` reports the same mean before and after.
+
+Built-in kinds today: `jd.noise.fbm@1`, `jd.math.add@1`, `jd.math.multiply@1`, `jd.math.scale@1`, `jd.math.remap@1`, `jd.filter.blur@1`, `jd.erosion.thermal@1` (talus angle, iterations, rate — mass-conserving; 2048² × 50 steps ≈ 0.9 s release), `jd.analysis.slope@1` (0..1 steepness mask; multiply it into a layer to attenuate by slope), `jd.output.height@1`.
 
 ## 6. Diagnostics
 

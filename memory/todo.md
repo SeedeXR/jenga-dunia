@@ -40,7 +40,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [ ] Platform-native checklist (owner mandate): macOS menu bar/⌘ shortcuts/file association for `.jdproj`, Metal via wgpu; Windows DX12/NVIDIA; Linux Vulkan/NVIDIA; CPU path everywhere
 
 ## Phase 2 — Core terrain authoring
-- [~] `jd-terrain`: tiles + halos ✔, noise generators ✔ (OpenSimplex2/2S, Perlin, Value, ValueCubic, Cellular × none/fbm/ridged/ping-pong), filters/analysis nodes ☐
+- [~] `jd-terrain`: tiles + halos ✔, noise generators ✔ (OpenSimplex2/2S, Perlin, Value, ValueCubic, Cellular × none/fbm/ridged/ping-pong), filters/analysis nodes: blur ✔, slope mask ✔ (`jd.analysis.slope@1`); terrace/curvature/flow ☐
 - [x] Ops `terrain.generate` / `terrain.stats` / `terrain.export_heightmap` + CLI `jd terrain generate --out` / `jd export heightmap`; MCP end-to-end test
 - [~] `jd-graph`: typed DAG ✔, validation (types/cycles/required/unknown) ✔, blake3 content-hash incremental evaluation + in-memory cache ✔, LOD ✔, bypass ✔, 7 node kinds ✔, journaled `graph.*` ops with pre-journal structural validation (trial copy + `validate_structure`) ✔, `graph.move_node` ✔, lod>0 → `<layer>#lod<N>` ✔, node-editor UI (React Flow: add/connect/drag/delete/inspector, e2e-tested) ✔; disk cache (`jd-cache`) layer-level ✔ (CLI can export a graph result across invocations); tile-level blobs + SQLite index + LRU eviction ☐, region/tile-level dirty sets ☐, async jobs + progress/cancel ☐, undo/redo ✔ (snapshot history, journaled `graph.restore`)
 - [~] Heightmap export: EXR f32 ✔, PNG16 ✔, RAW r16/r32 ✔ (+ JSON sidecar, flip + range conventions, round-trip tests); TIFF ☐; foreign heightmap import without sidecar ☐; Unity/Unreal size presets (2ⁿ+1) ☐
@@ -50,7 +50,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [ ] Viewport terrain LOD + PBR + sky
 
 ## Phase 3 — Simulation
-- [ ] Hydraulic (particle), hydraulic (grid), stream-power, thermal, wind, coastal, snow
+- [~] Thermal ✔ (CPU Jacobi, `jd.erosion.thermal@1`, mass-conserving; GPU/tile-local ☐) · hydraulic (grid/virtual pipes) ☐ · hydraulic (particle) ☐ · stream-power ☐ · wind ☐ · coastal ☐ · snow ☐
 - [ ] Hydrology nodes; per-basin lakes
 - [ ] Biomes + scatter + instance export
 - [ ] Weather state, timeline, water/ocean viewport

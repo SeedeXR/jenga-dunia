@@ -9,7 +9,9 @@ pub mod export;
 pub mod heightfield;
 pub mod noise;
 pub mod preview;
+pub mod sim;
 
 pub use export::{HeightmapFormat, export_heightmap};
 pub use heightfield::{Heightfield, HeightfieldStats, Tile, TileCoord};
 pub use noise::{FractalKind, NoiseKind, NoiseParams, generate_noise};
+pub use sim::{slope_mask, thermal_erode};
