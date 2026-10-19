@@ -51,6 +51,8 @@ cd apps/desktop && pnpm install && pnpm tauri dev
 
 **Screen recording:** [`videos/first-terrain.mp4`](videos/first-terrain.mp4) (14 s, 1440×892) — the real app opened with a project, **Terrain → Generate Terrain** and **File → Export Heightmap…** triggered through the native menu bar, terrain appearing in the WebGPU viewport, `height.exr` written. Recorded with macOS `screencapture -V`; the menu actions were driven by System Events so the recording is reproducible.
 
+**Screen recording (v0.0.1):** [`videos/graph-erosion-native.mp4`](videos/graph-erosion-native.mp4) (16 s, 1440×892) — the current build opened on a `noise → hydraulic erosion → height` project: the live preview shows the eroded terrain as the project loads, **Terrain → Generate Terrain** replaces it with the raw noise field, **Terrain → Evaluate Graph** brings the eroded result back from cache. Native window, release build, menu actions driven by System Events.
+
 ## Tutorial: the node graph
 
 Every project starts with a two-node graph (`Noise → Height`), the same `graph.json` the CLI and MCP server edit. The panel under the viewport is that graph; **Hide graph** collapses it.
