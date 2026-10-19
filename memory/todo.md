@@ -7,7 +7,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [x] `memory/` files: agent_profile, session_start, philosophy, project_context, porting, mindmap, instruction, todo, handover_session
 - [x] Architecture docs 00–13 with Mermaid (29 diagrams validated by `scripts/check-mermaid.mjs`)
 - [x] Research reports in `docs/research/`: world-creator, gaea-world-machine, opensource-rea, formats-sdks, stack, algorithms, geo-vision
-- [~] `docs/research/materials-geomorphology.md` (texture libraries, soil/rock spectra, environmental shaders, geomorphic processes) — research agent running at session end
+- [x] `docs/research/materials-geomorphology.md` (texture libraries, soil/rock spectra, environmental shaders, geomorphic processes, GIS software licences) + reference-layer architecture wired into 02/04
 - [x] `competitive-matrix.md`, `licensing-register.md`, `evidence-register.md`
 - [x] ADRs 0001–0012 (0003, 0004, 0012 Proposed; others Accepted)
 - [x] Specs: project-format, json-api, error-codes, performance-targets, interoperability-matrix

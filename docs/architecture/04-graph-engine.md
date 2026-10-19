@@ -125,7 +125,8 @@ All graph mutations are commands (`AddNode`, `RemoveNode`, `Connect`, `Disconnec
 | Analysis | Slope, Aspect, Curvature (profile/plan), Height select, Cavity/Peaks, Flow (D8/D∞), AO/Horizon, Distance field |
 | Simulation | Hydraulic (particle), Hydraulic (grid/virtual pipes), Stream power (large-scale), Thermal, Wind/aeolian, Coastal, Snow, Glacier (later), Sediment layer |
 | Hydrology | Fill depressions (priority-flood), Rivers (carve), Lakes, Sea level, Wetness (TWI) |
-| Materials | Material layer, Mask→layer, Blend layers, Triplanar settings, Stochastic tiling, Color ramp, Bake targets |
+| Materials | Material layer, Mask→layer, Blend layers, Triplanar settings, Stochastic tiling, Color ramp, Bake targets, Material preset (measured albedo/roughness/grain/repose), Wetness, Dust accumulation |
+| Site rules (reference layer) | Site context (geo lookup or manual Köppen + lithology), Snow line (lapse rate), Treeline, Moisture (TWI + precipitation), Exposure (aspect, latitude), Repose mask (slope vs preset angle of repose) |
 | Biomes/Scatter | Biome classify, Scatter (Poisson), Density, Instance filter |
 | Mesh | Heightfield→Mesh (grid/RTIN/TIN), Decimate, LOD chain, Tangents, UV, Validate |
 | Output | Export heightmap, Export mesh, Export scene, Export masks, Bake textures |

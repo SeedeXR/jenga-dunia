@@ -69,6 +69,7 @@ flowchart TB
 
 ### 6 Materials
 - Material graph (layers blended by masks from height/slope/curvature/aspect/moisture/temperature/erosion/paint/noise/biome) → internal PBR model → translation layer → {glTF metallic-roughness, UsdPreviewSurface, MaterialX/OpenPBR, baked textures}. Loss report per translation.
+- **Material-science reference layer** (`docs/research/materials-geomorphology.md` §(c)): a swappable `ReferenceProvider` (offline coarse rasters: Köppen, GLiM, GSDS30; online: SoilGrids, Macrostrat, cached) yields a `SiteContext` (climate, biome, USDA soil texture, lithology, snow months) per coarse sample; `MaterialPreset` records (dry/wet linear albedo derived from USGS Spectral Library v7 CC0 spectra, roughness, grain size, angle of repose, wet-darkening, CC0 texture ids from ambientCG/Poly Haven/TextureCan) feed layer weights and thermal-erosion defaults; attribution travels with the data. User-side libraries (Fab/Megascans, Substance) are imports only, never bundled.
 
 ### 7 Scatter
 - Biome classification (temperature × moisture × altitude × slope), Poisson-disk/blue-noise placement with density masks, instance streams, LOD/impostor hints; outputs instance tables (position, rotation, scale, asset id).
