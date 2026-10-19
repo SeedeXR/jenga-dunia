@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ImportAsset",
+  "description": "`project.import_asset` params.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "Source file on disk.",
+      "type": "string"
+    },
+    "name": {
+      "description": "Name inside `assets/` (default: the source file name).",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path"
+  ]
+}

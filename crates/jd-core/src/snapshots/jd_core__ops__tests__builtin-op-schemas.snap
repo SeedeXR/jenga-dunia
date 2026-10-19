@@ -2386,6 +2386,57 @@ expression: list
     }
   },
   {
+    "id": "project.import_asset",
+    "description": "Copy a file (DEM, heightmap, texture) into the project's assets/ so nodes can reference it by name",
+    "scope": "fs-write",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ImportAsset",
+      "description": "`project.import_asset` params.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "Source file on disk.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Name inside `assets/` (default: the source file name).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ImportedAsset",
+      "description": "`project.import_asset` result.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Name to reference from nodes (relative to `assets/`).",
+          "type": "string"
+        },
+        "bytes": {
+          "description": "Bytes copied.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "name",
+        "bytes"
+      ]
+    }
+  },
+  {
     "id": "project.info",
     "description": "Describe the open project",
     "scope": "project-read",
@@ -3104,6 +3155,11 @@ expression: list
               "description": "Headerless little-endian f32. Exact.",
               "type": "string",
               "const": "raw_r32"
+            },
+            {
+              "description": "TIFF, single 32-bit float sample per pixel (GIS and DCC tools read it directly). Exact.",
+              "type": "string",
+              "const": "tiff32"
             }
           ]
         }
@@ -3197,6 +3253,11 @@ expression: list
               "description": "Headerless little-endian f32. Exact.",
               "type": "string",
               "const": "raw_r32"
+            },
+            {
+              "description": "TIFF, single 32-bit float sample per pixel (GIS and DCC tools read it directly). Exact.",
+              "type": "string",
+              "const": "tiff32"
             }
           ]
         }

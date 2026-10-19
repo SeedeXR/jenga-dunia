@@ -81,6 +81,8 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `05:25:00` CI green for sculpt/inspector/flow pushes; GLB (`ae89654`) and TIFF (`3fa3ca9`) runs polling. **TIFF f32 export** (`tiff32`, `tiff` crate Gray32Float, exact round trip, `.tif/.tiff` everywhere). **World presets** in the project panel (Unity 1025²/2049²/4097², Unreal 2049²/4033², plain sizes) with a component test asserting `project.create` receives 2049²/8192 m.
 
+- `05:45:00` **Foreign heightmap import**: `jd-terrain::import` (PNG-16 / EXR / TIFF f32·u16·u8 / RAW with `size_px`; `range_m` for quantised; bilinear `resample_to_world`, `north_up` flip) + `jd.input.heightmap@1` (reads only inside the project's `assets/`, rejects absolute/`..` paths) + `project.import_asset` (copies a file into `assets/`). `EvalCtx.assets_dir` / `Evaluator::evaluate_with` carry the project's assets dir; `graph.evaluate` passes `<root>/assets`. ponytail: node hashes do not include asset bytes (stale cache until a param change/new session) — content hash per asset with `jd-io`.
+
 ### Open / next (as of 2026-10-20 05:10, head `ae89654`)
 1. **CI**: flow node (`2c52705`) and GLB export (`ae89654`, adds the Khronos validator step to the frontend job) runs polling; everything up to `084607b` is green.
 2. **Native re-verification when the display is available** (still asleep at 04:45): `v0.0.1` badge, dialogs, ⚡ live preview, undo/redo, Sculpt mode, layer picker; re-shoot `desktop-menubar.png`, `tutorial-01/02/03` (viewport now hypsometric + sky, toolbar has undo/redo/⚡, Sculpt button) and add a sculpt tutorial image; record a native clip if Accessibility is granted. Until then the Playwright screenshots/videos (same frontend, real core) are the visual evidence.

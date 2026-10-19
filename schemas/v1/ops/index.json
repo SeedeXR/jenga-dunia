@@ -75,6 +75,11 @@
     "scope": "fs-write"
   },
   {
+    "id": "project.import_asset",
+    "description": "Copy a file (DEM, heightmap, texture) into the project's assets/ so nodes can reference it by name",
+    "scope": "fs-write"
+  },
+  {
     "id": "project.info",
     "description": "Describe the open project",
     "scope": "project-read"

@@ -19,6 +19,8 @@ blake3.workspace = true
 rayon = "1"
 
 [dev-dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
+tempfile.workspace = true
 proptest.workspace = true
 
 [lints]

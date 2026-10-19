@@ -249,10 +249,24 @@ impl<'a> Evaluator<'a> {
         world: &WorldSettings,
         lod: u8,
     ) -> JdResult<(Outputs, EvalReport)> {
+        self.evaluate_with(graph, world, lod, None)
+    }
+
+    /// [`Evaluator::evaluate`] inside a project: file-reading nodes resolve paths in `assets_dir`.
+    /// ponytail: node hashes do not include asset file contents, so a changed file is picked up
+    /// after a param change or a new session; a content hash per asset comes with `jd-io`.
+    pub fn evaluate_with(
+        &self,
+        graph: &Graph,
+        world: &WorldSettings,
+        lod: u8,
+        assets_dir: Option<&std::path::Path>,
+    ) -> JdResult<(Outputs, EvalReport)> {
         let started = Instant::now();
         let order = self.validate(graph)?;
         let ctx = EvalCtx {
             lod_world: lod_world(world, lod),
+            assets_dir: assets_dir.map(|p| p.to_path_buf()),
         };
         let lod_world_bytes = serde_json::to_vec(&ctx.lod_world)?;
         let input_map = graph.input_map();
@@ -267,6 +281,11 @@ impl<'a> Evaluator<'a> {
             hasher.update(&serde_json::to_vec(&node.params)?);
             hasher.update(&[node.bypass as u8, lod]);
             hasher.update(&lod_world_bytes);
+            // Results computed inside a project may depend on its assets: never share them
+            // across projects (or with project-less evaluations).
+            if let Some(dir) = &ctx.assets_dir {
+                hasher.update(dir.to_string_lossy().as_bytes());
+            }
             for port in &def.inputs {
                 if let Some(from) = input_map.get(id).and_then(|m| m.get(port.name.as_str())) {
                     let v = produced

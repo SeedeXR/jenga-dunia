@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ImportedAsset",
+  "description": "`project.import_asset` result.",
+  "type": "object",
+  "properties": {
+    "name": {
+      "description": "Name to reference from nodes (relative to `assets/`).",
+      "type": "string"
+    },
+    "bytes": {
+      "description": "Bytes copied.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "name",
+    "bytes"
+  ]
+}

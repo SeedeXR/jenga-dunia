@@ -2137,6 +2137,7 @@ name = "jd-graph"
 version = "0.0.1"
 dependencies = [
  "blake3",
+ "image",
  "jd-terrain",
  "jd-types",
  "proptest",
@@ -2144,6 +2145,7 @@ dependencies = [
  "schemars 1.2.3",
  "serde",
  "serde_json",
+ "tempfile",
  "tracing",
 ]
 

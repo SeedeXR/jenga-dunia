@@ -376,6 +376,26 @@ pub mod builtin {
         pub pending_journal: usize,
     }
 
+    /// `project.import_asset` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct ImportAsset {
+        /// Source file on disk.
+        pub path: PathBuf,
+        /// Name inside `assets/` (default: the source file name).
+        #[serde(default)]
+        pub name: Option<String>,
+    }
+
+    /// `project.import_asset` result.
+    #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct ImportedAsset {
+        /// Name to reference from nodes (relative to `assets/`).
+        pub name: String,
+        /// Bytes copied.
+        pub bytes: u64,
+    }
+
     /// `project.recover` params.
     #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
@@ -557,6 +577,25 @@ pub mod builtin {
                     }
                     Ok((RecoverResult { replayed, failed }, warnings))
                 })
+            },
+        );
+        r.register::<ImportAsset, ImportedAsset, _>(
+            "project.import_asset",
+            "Copy a file (DEM, heightmap, texture) into the project's assets/ so nodes can reference it by name",
+            Scope::FsWrite,
+            |ctx, a| {
+                let name = a
+                    .name
+                    .clone()
+                    .or_else(|| a.path.file_name().map(|n| n.to_string_lossy().into_owned()))
+                    .ok_or_else(|| JdError::invalid("path", "source has no file name"))?;
+                if name.is_empty() || name.contains(['/', '\\']) || name == "." || name == ".." {
+                    return Err(JdError::invalid("name", "must be a plain file name"));
+                }
+                let dest = ctx.with_project(|p| Ok(p.root().join("assets").join(&name)))?;
+                std::fs::create_dir_all(dest.parent().unwrap_or(&dest))?;
+                let bytes = std::fs::copy(&a.path, &dest)?;
+                Ok((ImportedAsset { name, bytes }, Vec::new()))
             },
         );
         r.register::<NoParams, crate::diag::EnvInfo, _>(
@@ -1006,8 +1045,12 @@ pub mod graph {
                         .detail("nodes", vec![other.to_string(), id.to_string()]));
                     }
                 }
-                let (outputs, report) =
-                    Evaluator::new(registry(), cache()).evaluate(&graph, &world, e.lod)?;
+                let (outputs, report) = Evaluator::new(registry(), cache()).evaluate_with(
+                    &graph,
+                    &world,
+                    e.lod,
+                    Some(&root.join("assets")),
+                )?;
                 let mut layers = BTreeMap::new();
                 for (id, node) in &graph.nodes {
                     if node.kind.0.starts_with("jd.output.height@")

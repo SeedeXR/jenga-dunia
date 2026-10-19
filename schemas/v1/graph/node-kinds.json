@@ -220,6 +220,68 @@
     }
   },
   {
+    "kind": "jd.input.heightmap@1",
+    "description": "Load a heightmap from the project's assets/ (PNG 16-bit, EXR, TIFF, RAW) and resample it onto the world grid",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "InputParams",
+      "description": "How to interpret a foreign file.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "File inside the project's `assets/` directory (png, exr, tif/tiff, r16, r32).",
+          "type": "string"
+        },
+        "range_m": {
+          "description": "Height range the full 16-bit span maps to (quantised PNG/TIFF/r16); ignored for float data.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "default": null
+        },
+        "size_px": {
+          "description": "Width and height in pixels — required for headerless RAW files.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "default": null
+        },
+        "north_up": {
+          "description": "Row 0 of the file is north (true, the usual image convention) or south.",
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
     "kind": "jd.math.add@1",
     "description": "a + b",
     "inputs": [

@@ -4,8 +4,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use jd_terrain::{
-    Heightfield, HydraulicParams, NoiseParams, Stroke, THERMAL_MAX_RATE, apply_strokes,
-    flow_accumulation, generate_noise, hydraulic_erode, slope_mask, thermal_erode,
+    ForeignImport, Heightfield, HydraulicParams, NoiseParams, Stroke, THERMAL_MAX_RATE,
+    apply_strokes, flow_accumulation, generate_noise, hydraulic_erode, read_foreign,
+    resample_to_world, slope_mask, thermal_erode,
 };
 use jd_types::{JdError, JdResult};
 use rayon::prelude::*;
@@ -216,6 +217,16 @@ struct FlowParams {
 }
 fn yes() -> bool {
     true
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct InputParams {
+    /// File inside the project's `assets/` directory (png, exr, tif/tiff, r16, r32).
+    path: String,
+    /// How to read it (height range for quantised files, size for RAW, row order).
+    #[serde(flatten)]
+    import: ForeignImport,
 }
 
 /// Tile-local box blur that reads neighbours through the halo (ADR-0005). Fails cleanly when
@@ -431,6 +442,25 @@ pub fn register_all(r: &mut Registry) {
         |ctx, p, i| {
             let fp: FlowParams = params(p)?;
             Ok(out("out", flow_accumulation(field(i, "in")?, spacing_m(ctx), fp.log_scale)?))
+        },
+    ));
+    r.register(NodeDef::new::<InputParams, _>(
+        "jd.input.heightmap@1",
+        "Load a heightmap from the project's assets/ (PNG 16-bit, EXR, TIFF, RAW) and resample it onto the world grid",
+        vec![],
+        vec![port("out", PortType::Heightfield, false)],
+        |ctx, p, _| {
+            let ip: InputParams = params(p)?;
+            let rel = std::path::Path::new(&ip.path);
+            if rel.is_absolute() || rel.components().any(|c| !matches!(c, std::path::Component::Normal(_))) {
+                return Err(JdError::invalid("path", "must be a plain relative path inside assets/")
+                    .next("Copy the file into the project's assets/ directory (project.import_asset) and reference it by name."));
+            }
+            let Some(dir) = &ctx.assets_dir else {
+                return Err(JdError::invalid("path", "no project is open, so there is no assets/ directory to read from"));
+            };
+            let (data, w, h) = read_foreign(&dir.join(rel), &ip.import)?;
+            Ok(out("out", resample_to_world(&data, w, h, ip.import.north_up, &ctx.lod_world)?))
         },
     ));
     r.register(NodeDef::new::<OutputParams, _>(
@@ -850,6 +880,51 @@ mod tests {
             .expect("eval");
         let m = outs[&(f, "out".into())].as_field().stats();
         assert!(m.min > 0.0 && m.max <= 1.0 && m.max > m.min, "{m:?}");
+    }
+
+    #[test]
+    fn input_node_reads_assets_and_refuses_escapes() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let assets = dir.path().join("assets");
+        std::fs::create_dir_all(&assets).expect("dir");
+        let img = image::ImageBuffer::<image::Luma<u16>, Vec<u16>>::from_fn(16, 16, |x, _| {
+            image::Luma([(x * 4369) as u16])
+        });
+        img.save(assets.join("dem.png")).expect("png");
+        let reg = Registry::with_builtins();
+        let cache = Cache::default();
+        let mut g = Graph::default();
+        let i = add(
+            &mut g,
+            "jd.input.heightmap@1",
+            serde_json::json!({ "path": "dem.png", "range_m": [0.0, 100.0] }),
+        );
+        let ev = Evaluator::new(&reg, &cache);
+        let (outs, _) = ev
+            .evaluate_with(&g, &world(), 0, Some(&assets))
+            .expect("eval");
+        let f = outs[&(i.clone(), "out".into())].as_field();
+        assert_eq!(
+            (f.width(), f.height()),
+            (128, 96),
+            "resampled onto the world grid"
+        );
+        assert!(f.get(2, 10) < 20.0 && f.get(125, 10) > 80.0);
+        assert_eq!(
+            ev.evaluate(&g, &world(), 0).expect_err("no project").code,
+            ErrorCode::E_INPUT_INVALID
+        );
+        g.nodes
+            .get_mut(&i)
+            .expect("i")
+            .params
+            .insert("path".into(), serde_json::json!("../dem.png"));
+        assert_eq!(
+            ev.evaluate_with(&g, &world(), 0, Some(&assets))
+                .expect_err("escape")
+                .code,
+            ErrorCode::E_INPUT_INVALID
+        );
     }
 
     #[test]

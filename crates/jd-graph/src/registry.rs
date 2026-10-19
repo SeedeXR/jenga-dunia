@@ -13,6 +13,9 @@ use crate::model::{NodeKind, Port};
 pub struct EvalCtx {
     /// World settings at the requested level of detail (resolution reduced, extent/tiling unchanged).
     pub lod_world: WorldSettings,
+    /// The open project's `assets/` directory, when evaluating inside a project (file-reading
+    /// nodes resolve relative paths here and never outside it).
+    pub assets_dir: Option<std::path::PathBuf>,
 }
 
 type EvalFn = Arc<
