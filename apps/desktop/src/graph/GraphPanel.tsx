@@ -79,7 +79,8 @@ function Inner() {
   const kindMap = useMemo(() => new Map(s.graphKinds.map((k) => [k.kind, { inputs: k.inputs.map((p) => p.name), outputs: k.outputs.map((p) => p.name) }])), [s.graphKinds]);
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode<JdNodeData>>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<FlowEdge>([]);
-  const [selected, setSelected] = useState<string | null>(null);
+  const selected = s.selectedNode;
+  const setSelected = (v: string | null | ((cur: string | null) => string | null)) => s.setSelectedNode(typeof v === "function" ? v(s.selectedNode) : v);
   const [newKind, setNewKind] = useState("jd.filter.blur@1");
 
   useEffect(() => {

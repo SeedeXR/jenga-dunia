@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const calls: { cmd: string; args: unknown }[] = [];
+let sculptAdded = false;
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(async (cmd: string, args: { request?: { op: string; params: Record<string, unknown> } }) => {
@@ -23,8 +24,14 @@ vi.mock("@tauri-apps/api/core", () => ({
     switch (req.op) {
       case "graph.kinds":
         return { ...base, status: "ok", result: [{ kind: "jd.noise.fbm@1", description: "", inputs: [], outputs: [{ name: "out", ty: "heightfield", required: false }], param_schema: {} }] };
-      case "graph.list":
-        return { ...base, status: "ok", result: { nodes: [{ id: "01N", kind: "jd.noise.fbm@1", params: {}, bypass: false, ui: { position: [0, 0], label: "Noise" } }], edges: [] } };
+      case "graph.list": {
+        const nodes = [
+          { id: "01N", kind: "jd.noise.fbm@1", params: {}, bypass: false, ui: { position: [0, 0], label: "Noise" } },
+          { id: "01O", kind: "jd.output.height@1", params: { layer: "height" }, bypass: false, ui: { position: [320, 0], label: "Height" } },
+        ];
+        if (sculptAdded) nodes.push({ id: "01SCULPT00000000000000000A", kind: "jd.sculpt.strokes@1", params: {}, bypass: false, ui: { position: [320, 140], label: "Strokes" } });
+        return { ...base, status: "ok", result: { nodes, edges: [{ from: { node: "01N", port: "out" }, to: { node: "01O", port: "in" } }], undo_depth: 0, redo_depth: 0 } };
+      }
       case "graph.evaluate":
         return { ...base, status: "ok", result: { lod: 0, duration_ms: 3, nodes: [], layers: { height: "abc", water: "def" } } };
       case "terrain.stats": {
@@ -42,6 +49,12 @@ vi.mock("@tauri-apps/api/core", () => ({
           status: "ok",
           result: { project_id: "01PROJ", name: req.params.name, path: req.params.path, world: { extent_m: [4096, 4096], resolution_px: [2048, 2048], tile_size: 512, halo: 4, seed: 42 }, schema_version: 1, dirty: false, pending_journal: 0 },
         };
+      case "graph.add_node":
+        sculptAdded = true;
+        return { ...base, status: "ok", result: { id: "01SCULPT00000000000000000A" } };
+      case "graph.connect":
+      case "graph.set_param":
+        return { ...base, status: "ok", result: { nodes: [{ id: "01SCULPT00000000000000000A", kind: "jd.sculpt.strokes@1", params: {}, bypass: false }], edges: [], undo_depth: 1, redo_depth: 0 } };
       case "terrain.generate":
         return { ...base, status: "ok", result: { layer: "height", size_px: [2048, 2048], stats: { min: 1.5, max: 498.2, mean: 250.1, non_finite: 0 }, content_hash: "abcdef0123456789abcdef", duration_ms: 42 } };
       case "terrain.export_heightmap":
@@ -92,10 +105,11 @@ import { useStore } from "./state";
 describe("App", () => {
   beforeEach(() => {
     calls.length = 0;
+    sculptAdded = false;
     dialog.open = null;
     dialog.save = null;
     // The store is module-global; reset the mirrored state between tests.
-    useStore.setState({ project: null, layer: null, preview: null, previewStats: null, log: [], busy: false, graph: { nodes: [], edges: [] }, graphKinds: [], lastEval: null, live: true });
+    useStore.setState({ project: null, layer: null, preview: null, previewStats: null, log: [], busy: false, graph: { nodes: [], edges: [] }, graphKinds: [], lastEval: null, live: true, selectedNode: null, sculpting: false });
   });
 
   it("creates a project, generates terrain, shows stats and preview, exports with a loss warning", async () => {
@@ -170,6 +184,20 @@ describe("App", () => {
     const waterStats = calls.filter((c) => (c.args as { request?: { op: string; params: { layer?: string } } }).request?.op === "terrain.stats" && (c.args as { request: { params: { layer?: string } } }).request.params.layer === "water");
     expect(waterStats.length).toBeGreaterThan(0);
     expect(screen.getByTestId("viewport")).toHaveTextContent("preview 2");
+  });
+
+  it("Sculpt wires a stroke node in front of the output and enters sculpt mode", async () => {
+    render(<App />);
+    fireEvent.change(screen.getByTestId("project-path"), { target: { value: "/tmp/S.jdproj" } });
+    fireEvent.click(screen.getByTestId("new-project"));
+    await waitFor(() => expect(screen.getByTestId("graph-panel")).toHaveTextContent("jd.noise.fbm@1"));
+    fireEvent.click(screen.getByTestId("sculpt-toggle"));
+    await waitFor(() => expect(screen.getByTestId("sculpt-toggle")).toHaveTextContent("Sculpting"));
+    const add = calls.find((c) => (c.args as { request?: { op: string } }).request?.op === "graph.add_node");
+    expect(add).toMatchObject({ args: { request: { params: { kind: "jd.sculpt.strokes@1" } } } });
+    const connects = calls.filter((c) => (c.args as { request?: { op: string } }).request?.op === "graph.connect");
+    expect(connects.length).toBe(2); // noise → sculpt, sculpt → output
+    expect(screen.getByTestId("brush-strength")).toBeInTheDocument();
   });
 
   it("surfaces core errors with code and next step in the log", async () => {

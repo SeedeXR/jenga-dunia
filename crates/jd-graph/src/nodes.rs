@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use jd_terrain::{
-    Heightfield, HydraulicParams, NoiseParams, THERMAL_MAX_RATE, generate_noise, hydraulic_erode,
-    slope_mask, thermal_erode,
+    Heightfield, HydraulicParams, NoiseParams, Stroke, THERMAL_MAX_RATE, apply_strokes,
+    generate_noise, hydraulic_erode, slope_mask, thermal_erode,
 };
 use jd_types::{JdError, JdResult};
 use rayon::prelude::*;
@@ -197,6 +197,14 @@ struct OutputParams {
 }
 fn height() -> String {
     "height".into()
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SculptParams {
+    /// Recorded brush strokes, applied in order on top of the input.
+    #[serde(default)]
+    strokes: Vec<Stroke>,
 }
 
 /// Tile-local box blur that reads neighbours through the halo (ADR-0005). Fails cleanly when
@@ -392,6 +400,16 @@ pub fn register_all(r: &mut Registry) {
                 ("water".to_owned(), Value::field(r.water)),
                 ("sediment".to_owned(), Value::field(r.sediment)),
             ]))
+        },
+    ));
+    r.register(NodeDef::new::<SculptParams, _>(
+        "jd.sculpt.strokes@1",
+        "Brush strokes (raise/lower with smooth falloff) recorded as data: non-destructive, replayable, undo removes a whole stroke",
+        vec![port("in", PortType::Heightfield, true)],
+        vec![port("out", PortType::Heightfield, false)],
+        |ctx, p, i| {
+            let sp: SculptParams = params(p)?;
+            Ok(out("out", apply_strokes(field(i, "in")?, spacing_m(ctx), &sp.strokes)?))
         },
     ));
     r.register(NodeDef::new::<OutputParams, _>(
@@ -765,6 +783,33 @@ mod tests {
             rep2.nodes.iter().all(|r| !r.cached),
             "upstream change invalidates the chain"
         );
+    }
+
+    #[test]
+    fn sculpt_node_applies_strokes_in_layer_metres() {
+        let reg = Registry::with_builtins();
+        let cache = Cache::default();
+        let mut g = Graph::default();
+        let n = add(&mut g, "jd.noise.fbm@1", serde_json::json!({ "seed": 2 }));
+        let z = add(
+            &mut g,
+            "jd.math.scale@1",
+            serde_json::json!({ "factor": 0.0 }),
+        ); // flat 0 m
+        let s = add(
+            &mut g,
+            "jd.sculpt.strokes@1",
+            serde_json::json!({ "strokes": [{ "points": [[65.0, 86.667]], "radius_m": 20.0, "strength_m": 50.0 }] }),
+        );
+        connect(&mut g, &n, "out", &z, "in");
+        connect(&mut g, &z, "out", &s, "in");
+        let (outs, _) = Evaluator::new(&reg, &cache)
+            .evaluate(&g, &world(), 0)
+            .expect("eval");
+        let f = outs[&(s, "out".into())].as_field();
+        // world(): 256 m over 128×96 px → 2 m × 2.667 m pixels; pixel (32, 32) is centred at (65, 86.667) m.
+        assert!((f.get(32, 32) - 50.0).abs() < 0.5, "{}", f.get(32, 32));
+        assert_eq!(f.get(100, 10), 0.0);
     }
 
     #[test]

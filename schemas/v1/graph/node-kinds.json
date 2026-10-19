@@ -522,5 +522,76 @@
       },
       "additionalProperties": false
     }
+  },
+  {
+    "kind": "jd.sculpt.strokes@1",
+    "description": "Brush strokes (raise/lower with smooth falloff) recorded as data: non-destructive, replayable, undo removes a whole stroke",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "SculptParams",
+      "type": "object",
+      "properties": {
+        "strokes": {
+          "description": "Recorded brush strokes, applied in order on top of the input.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Stroke"
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false,
+      "$defs": {
+        "Stroke": {
+          "description": "One brush stroke.",
+          "type": "object",
+          "properties": {
+            "points": {
+              "description": "Polyline in layer metres: `[u east, v south]` from the north-west corner.",
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "number",
+                  "format": "float"
+                },
+                "minItems": 2,
+                "maxItems": 2
+              }
+            },
+            "radius_m": {
+              "description": "Brush radius in metres.",
+              "type": "number",
+              "format": "float"
+            },
+            "strength_m": {
+              "description": "Height added at the centre (negative lowers), metres.",
+              "type": "number",
+              "format": "float"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "points",
+            "radius_m",
+            "strength_m"
+          ]
+        }
+      }
+    }
   }
 ]

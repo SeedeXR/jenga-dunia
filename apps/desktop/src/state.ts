@@ -81,6 +81,18 @@ interface State {
   setLive: (on: boolean) => void;
   /** Show a published layer (height, height#lod2, water, sediment, …) in the viewport. */
   viewLayer: (name: string) => Promise<void>;
+  /** Node selected in the graph editor (also the sculpt target when it is a sculpt node). */
+  selectedNode: string | null;
+  setSelectedNode: (id: string | null) => void;
+  /** Sculpt mode: viewport drags paint strokes into the selected sculpt node. */
+  sculpting: boolean;
+  setSculpting: (on: boolean) => void;
+  brush: { radius_m: number; strength_m: number };
+  setBrush: (patch: Partial<{ radius_m: number; strength_m: number }>) => void;
+  /** Insert a sculpt node in front of the first output (or select the existing one) and enter sculpt mode. */
+  startSculpting: () => Promise<void>;
+  /** Append a stroke to the selected sculpt node (journaled: undo removes the whole stroke). */
+  addStroke: (points: [number, number][]) => Promise<void>;
   setNoise: (patch: Partial<NoiseSettings>) => void;
   loadGraph: () => Promise<void>;
   addNode: (kind: string) => Promise<void>;
@@ -223,6 +235,36 @@ export const useStore = create<State>((set, get) => {
     lastEval: null,
     live: true,
     viewLayer: showLayer,
+    selectedNode: null,
+    setSelectedNode: (id) => set({ selectedNode: id }),
+    sculpting: false,
+    setSculpting: (on) => set({ sculpting: on }),
+    brush: { radius_m: 150, strength_m: 40 },
+    setBrush: (patch) => set((s) => ({ brush: { ...s.brush, ...patch } })),
+    startSculpting: async () => {
+      const g = get().graph;
+      let node = g.nodes.find((n) => n.kind.startsWith("jd.sculpt.strokes@"));
+      if (!node) {
+        const output = g.nodes.find((n) => n.kind.startsWith("jd.output.height@"));
+        const feed = output ? g.edges.find((e) => e.to.node === output.id && e.to.port === "in") : undefined;
+        const pos = output?.ui?.position ?? [0, 0];
+        const r = await run<{ id: string }>("graph.add_node", { kind: "jd.sculpt.strokes@1", position: [pos[0], pos[1] + 140] });
+        if (r.status !== "ok" || !r.result) return;
+        const id = r.result.id;
+        if (feed) await get().connectNodes(feed.from.node, feed.from.port, id, "in");
+        if (output) await get().connectNodes(id, "out", output.id, "in");
+        await loadGraph();
+        node = get().graph.nodes.find((n) => n.id === id);
+      }
+      if (node) set({ selectedNode: node.id, sculpting: true });
+    },
+    addStroke: async (points) => {
+      const { selectedNode, graph, brush } = get();
+      const node = graph.nodes.find((n) => n.id === selectedNode && n.kind.startsWith("jd.sculpt.strokes@"));
+      if (!node || points.length === 0) return;
+      const strokes = Array.isArray(node.params.strokes) ? (node.params.strokes as unknown[]) : [];
+      await get().setParam(node.id, "strokes", [...strokes, { points: points.map(([u, v]) => [Math.round(u * 10) / 10, Math.round(v * 10) / 10]), radius_m: brush.radius_m, strength_m: brush.strength_m }]);
+    },
     setLive: (on) => {
       set({ live: on });
       if (on) liveEvaluate();

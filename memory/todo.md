@@ -44,7 +44,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [x] Ops `terrain.generate` / `terrain.stats` / `terrain.export_heightmap` + CLI `jd terrain generate --out` / `jd export heightmap`; MCP end-to-end test
 - [~] `jd-graph`: typed DAG ✔, validation (types/cycles/required/unknown) ✔, blake3 content-hash incremental evaluation + in-memory cache ✔, LOD ✔, bypass ✔, 7 node kinds ✔, journaled `graph.*` ops with pre-journal structural validation (trial copy + `validate_structure`) ✔, `graph.move_node` ✔, lod>0 → `<layer>#lod<N>` ✔, node-editor UI (React Flow: add/connect/drag/delete/inspector, e2e-tested) ✔; disk cache (`jd-cache`) layer-level ✔ (CLI can export a graph result across invocations); tile-level blobs + SQLite index + LRU eviction ☐, region/tile-level dirty sets ☐, async jobs + progress/cancel ☐, undo/redo ✔ (snapshot history, journaled `graph.restore`)
 - [~] Heightmap export: EXR f32 ✔, PNG16 ✔, RAW r16/r32 ✔ (+ JSON sidecar, flip + range conventions, round-trip tests); TIFF ☐; foreign heightmap import without sidecar ☐; Unity/Unreal size presets (2ⁿ+1) ☐
-- [ ] Stroke sculpt nodes
+- [~] Stroke sculpt nodes: `jd.sculpt.strokes@1` ✔ (smooth-falloff raise/lower polylines), desktop Sculpt mode ✔ (raycast strokes, brush panel, one undo step per stroke); brush cursor/preview, smooth/flatten brushes, stroke files under `strokes/` ☐
 - [ ] Basic PBR material + GLB export + glTF Validator in CI
 - [ ] Node editor UI, generated inspectors, task monitor, diagnostics console
 - [ ] Viewport terrain LOD + PBR + sky
@@ -62,7 +62,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [ ] Material translation layer + loss reports
 - [ ] Blender bridge add-on (separate licence) + headless round-trip test
 - [ ] Unity/Unreal export profiles (heightmap sizes, weightmaps, z-scale) + documented import procedures
-- [ ] FBX import (ufbx) + optional FBX SDK export adapter (out-of-process) for fbx we build our own high performance accurate reader and writer from sratch you can learn from optima it's in Software Projects , but also you can verify against blender headless , api , autodesk fbx  , maya , unity and unreal
+- [ ] FBX SDK export adapter (out-of-process) for fbx we build our own high performance accurate reader and writer from sratch you can learn from optima it's in Software Projects , but also you can verify against blender headless , api , autodesk fbx  , maya , unity and unreal we build our own fbx dsk reader
 
 ## Phase 5 — Scale & hardening
 - [ ] Streaming, origin rebasing, 16k+ worlds under 4 GB

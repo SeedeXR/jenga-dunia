@@ -14,6 +14,9 @@ interface Props {
   preview: Preview | null;
   extentM: [number, number] | null;
   onInfo?: (info: ViewportInfo) => void;
+  /** Sculpt mode: pointer drags paint a stroke on the terrain instead of orbiting. Points are
+   *  reported in layer metres (u east from the west edge, v south from the north edge). */
+  sculpt?: { enabled: boolean; onStroke: (points: [number, number][]) => void };
 }
 
 function isWebGPU(r: WebGPURenderer): boolean {
@@ -100,9 +103,14 @@ function placeCamera(s: SceneState) {
   s.camera.lookAt(0, 0, 0);
 }
 
-export default function TerrainView({ preview, extentM, onInfo }: Props) {
+export default function TerrainView({ preview, extentM, onInfo, sculpt }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<SceneState | null>(null);
+  // Latest sculpt props without re-creating the renderer effect.
+  const sculptRef = useRef(sculpt);
+  sculptRef.current = sculpt;
+  const extentRef = useRef(extentM);
+  extentRef.current = extentM;
 
   useEffect(() => {
     const el = host.current;
@@ -134,11 +142,43 @@ export default function TerrainView({ preview, extentM, onInfo }: Props) {
     placeCamera(state);
 
     // Simple orbit: drag to rotate, wheel to zoom (no OrbitControls dependency so it works on both backends).
+    // In sculpt mode the drag is a brush stroke: the pointer is raycast onto the terrain mesh.
     let dragging = false;
-    const onDown = () => (dragging = true);
-    const onUp = () => (dragging = false);
+    let stroke: [number, number][] | null = null;
+    const raycaster = new THREE.Raycaster();
+    const hit = (e: PointerEvent): [number, number] | null => {
+      const ext = extentRef.current;
+      if (!state.mesh || !ext) return null;
+      const r = el.getBoundingClientRect();
+      raycaster.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
+      const h = raycaster.intersectObject(state.mesh, false)[0];
+      if (!h) return null;
+      // Mesh is centred at the origin; row 0 of the layer is north (−Z).
+      return [h.point.x + ext[0] / 2, h.point.z + ext[1] / 2];
+    };
+    const onDown = (e: PointerEvent) => {
+      dragging = true;
+      if (sculptRef.current?.enabled) {
+        const p = hit(e);
+        stroke = p ? [p] : [];
+      }
+    };
+    const onUp = () => {
+      dragging = false;
+      if (stroke) {
+        if (stroke.length > 0) sculptRef.current?.onStroke(stroke);
+        stroke = null;
+      }
+    };
     const onMove = (e: PointerEvent) => {
       if (!dragging) return;
+      if (stroke) {
+        const p = hit(e);
+        const last = stroke[stroke.length - 1];
+        // Coalesce samples closer than a few metres so a stroke stays a few dozen points.
+        if (p && (!last || Math.hypot(p[0] - last[0], p[1] - last[1]) > (extentRef.current?.[0] ?? 1000) * 0.005)) stroke.push(p);
+        return;
+      }
       state.orbit.theta -= e.movementX * 0.005;
       state.orbit.phi = Math.min(1.5, Math.max(0.15, state.orbit.phi - e.movementY * 0.005));
       placeCamera(state);

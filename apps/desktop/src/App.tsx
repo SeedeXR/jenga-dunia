@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { FolderOpen, FolderPlus, FolderSearch, Mountain, Save, Upload, Workflow } from "lucide-react";
+import { Brush, FolderOpen, FolderPlus, FolderSearch, Mountain, Save, Upload, Workflow } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import GraphPanel from "./graph/GraphPanel";
 import TerrainView, { type ViewportInfo } from "./viewport/TerrainView";
@@ -33,6 +33,7 @@ export default function App() {
   const [showGraph, setShowGraph] = useState(true);
   const onInfo = useCallback((i: ViewportInfo) => setVp(i), []);
   const pathInput = useRef<HTMLInputElement>(null);
+  const sculptNode = s.graph.nodes.find((n) => n.id === s.selectedNode && n.kind.startsWith("jd.sculpt.strokes@"));
 
   // Native file dialogs (tauri-plugin-dialog). Outside Tauri (browser, tests) they reject and the
   // typed paths keep working, so the dialogs are a convenience layer over the same operations.
@@ -190,7 +191,17 @@ export default function App() {
         {/* Center: viewport (top) + node graph (bottom, toggle) */}
         <main className={`relative grid bg-jd-bg-0 ${showGraph ? "grid-rows-[1fr_300px]" : "grid-rows-[1fr]"}`}>
           <div className="relative min-h-0">
-            <TerrainView preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} />
+            <TerrainView preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} sculpt={{ enabled: s.sculpting && sculptNode !== undefined, onStroke: (pts) => void s.addStroke(pts) }} />
+            <button
+              className={`btn absolute top-2 right-28 ${s.sculpting ? "text-jd-accent" : ""}`}
+              title={s.sculpting ? "Sculpting: drag on the terrain to paint a stroke (click to stop)" : "Sculpt: adds a stroke node before the output and paints with the brush"}
+              onClick={() => (s.sculpting ? s.setSculpting(false) : void s.startSculpting())}
+              disabled={!s.project || s.busy}
+              aria-pressed={s.sculpting}
+              data-testid="sculpt-toggle"
+            >
+              <Brush size={14} /> {s.sculpting ? "Sculpting…" : "Sculpt"}
+            </button>
             <button className="btn absolute top-2 right-2" onClick={() => setShowGraph((v) => !v)} data-testid="toggle-graph">
               <Workflow size={14} /> {showGraph ? "Hide graph" : "Graph"}
             </button>
@@ -209,6 +220,18 @@ export default function App() {
 
         {/* Right: terrain inspector */}
         <aside className="overflow-y-auto border-l border-jd-line bg-jd-bg-1 p-3">
+          {s.sculpting && (
+            <>
+              <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Brush</h2>
+              <Field label="Radius (m)">
+                <input className={inputCls} type="number" value={s.brush.radius_m} onChange={(e) => s.setBrush({ radius_m: Number(e.target.value) })} data-testid="brush-radius" />
+              </Field>
+              <Field label="Strength (m)">
+                <input className={inputCls} type="number" value={s.brush.strength_m} onChange={(e) => s.setBrush({ strength_m: Number(e.target.value) })} data-testid="brush-strength" />
+              </Field>
+              <p className="mb-4 text-xs text-jd-fg-2">Drag on the terrain to raise it; negative strength lowers. Each stroke is one undo step.</p>
+            </>
+          )}
           <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Terrain · Noise</h2>
           <Field label="Lattice">
             <select className={inputCls} value={s.noise.kind} onChange={(e) => s.setNoise({ kind: e.target.value })}>
