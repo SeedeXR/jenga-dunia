@@ -74,8 +74,8 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 
 const menuListeners: ((e: { payload: string }) => void)[] = [];
 vi.mock("@tauri-apps/api/event", () => ({
-  listen: vi.fn(async (_name: string, cb: (e: { payload: string }) => void) => {
-    menuListeners.push(cb);
+  listen: vi.fn(async (name: string, cb: (e: { payload: string }) => void) => {
+    if (name === "menu") menuListeners.push(cb); // other events (project-opened) are not exercised here
     return () => undefined;
   }),
 }));

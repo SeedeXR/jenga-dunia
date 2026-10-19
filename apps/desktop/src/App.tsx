@@ -87,6 +87,22 @@ export default function App() {
     };
   }, []);
 
+  // macOS hands double-clicked .jdproj documents to a running app: the core opened it, re-read.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    listen<string>("project-opened", () => void useStore.getState().probeProject(() => cancelled))
+      .then((u) => {
+        if (cancelled) u();
+        else unlisten = u;
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
   // Native menu bar → the same actions as the buttons (ids from src-tauri build_menu).
   useEffect(() => {
     let unlisten: (() => void) | undefined;

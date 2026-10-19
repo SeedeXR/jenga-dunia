@@ -30,6 +30,17 @@ cargo build -p jd-mcp            # not needed by the app; used by the UI end-to-
 cd apps/desktop && pnpm install && pnpm tauri dev
 ```
 
+## Build the app bundle
+
+```sh
+cd apps/desktop && pnpm tauri build --no-sign
+# → target/release/bundle/macos/Jenga Dunia.app (18 MiB) and dmg/Jenga Dunia_0.0.1_aarch64.dmg (7 MiB)
+```
+
+The bundle is **unsigned** (no Apple developer account yet): macOS Gatekeeper will ask you to confirm the first launch of a downloaded copy; a locally built bundle runs directly. The bundle registers `.jdproj` as a document type (Finder double-click / `open -a "Jenga Dunia.app" My.jdproj` opens that project — macOS hands the document over as an Apple Event, which the app handles alongside the plain `jd-app My.jdproj` launch argument used on Linux/Windows and from the CLI). Verified on macOS 27 (2026-10-20): the project opened and live-previewed; the app menu reads **Jenga Dunia**.
+
+Logs: `~/Library/Logs/com.seedexr.jengadunia/jd-app.log` on macOS (`$XDG_DATA_HOME/com.seedexr.jengadunia/logs` on Linux, `%LOCALAPPDATA%\com.seedexr.jengadunia\logs` on Windows), plus stderr; `JD_LOG=debug` raises the level.
+
 ## Tutorial: first terrain in four steps
 
 ![Step-by-step: create a project, generate, export, read the log](images/tutorial-01-create-project.png)

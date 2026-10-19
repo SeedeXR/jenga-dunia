@@ -94,12 +94,15 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `08:45:00` Native recording `graph-erosion-native.mp4` (live preview → Generate → Evaluate Graph). **Window-state persistence** (`tauri-plugin-window-state` 2.5): verified natively — System Events can *set* window position/size (no Accessibility needed), Quit via the app menu (`menu bar item 2`, item "Quit jd-app"; the menu shows the binary name until the app is bundled with `productName`) writes `~/Library/Application Support/com.seedexr.jengadunia/.window-state.json`, relaunch restores 200,120 / 1100×700 exactly. `pkill` skips the save (expected).
 
-### Open / next (as of 2026-10-20 07:30, head `770f6c4`)
-1. **CI**: `6451255` (types regenerated), `1294a04` (pre-push script), `770f6c4` (sculpt tutorial image) polling; earlier failures were the GLB step path, a stale op-schema snapshot and a stale `ops.gen.ts` — all fixed. Run `scripts/pre-push.sh` before every push.
-2. **Native re-verification when the display is available**: `v0.0.1` badge, dialogs, ⚡ live preview, undo/redo, Sculpt mode, layer picker, presets; re-shoot `desktop-menubar.png`, `tutorial-01/02/03/04` natively (04 is currently the e2e capture, labelled as such); record a native clip if Accessibility is granted.
-3. **Figma**: owner completes the connector OAuth → place/annotate screenshots in file `fxyeV62hgLoNmG3dU1LX6G`.
-4. **Phase 3 follow-ups**: hydraulic concentration cap / layered materials / open drains; thermal + hydraulic WGSL twins (`jd-gpu`); particle hydraulic; D∞/MFD + priority-flood + rivers/lakes; brush cursor + smooth/flatten brushes.
-5. **Phase 2 leftovers**: `jd-jobs` (async + progress/cancel), adopt `JdOps` types in `state.ts`, GeoTIFF tags/nodata on import, window-state persistence, bundle file association, Windows/Linux measurements, textured PBR for GLB.
+- `09:40:00` **Bundle**: `pnpm tauri build --no-sign` → `target/release/bundle/macos/Jenga Dunia.app` (18.3 MiB) + `Jenga Dunia_0.0.1_aarch64.dmg` (6.9 MiB); Info.plist: version 0.0.1, `CFBundleDocumentTypes` jdproj/Editor; app menu reads "Jenga Dunia" (bundled) vs "jd-app" (bare binary). **Finding**: `open -a "Jenga Dunia.app" X.jdproj` did *not* open the project — macOS passes documents as an Apple Event, not argv. Added a `RunEvent::Opened` handler (extension check, since directory URLs end with `/`) + frontend `project-opened` listener; the native log then showed `project.info → graph.list → graph.evaluate (201 ms) → terrain.stats`, i.e. the project opened and live-previewed. The open itself was not logged because the event arrived before `setup` initialised logging → logging now starts first thing in `run()` and also writes `~/Library/Logs/com.seedexr.jengadunia/jd-app.log` (Linux/Windows equivalents). Screenshot hygiene: two captures landed on another app's window (frontmost not taken) — deleted, never committed; always confirm `frontmost of process "jd-app"` before `screencapture -R`.
+
+### Open / next (as of 2026-10-20 08:50, head `208b120`)
+1. **CI**: runs for `f46a848` (native tutorials), `2ebbb1c` (native recording), `208b120` (window state) polling; `6451255`…`770f6c4` green.
+2. **Bundle**: `pnpm tauri build --no-sign` running (unsigned `.app` + `.dmg`; owner has no Apple developer account — see `memory/todo.md`); then verify `open -a "Jenga Dunia.app" <proj>.jdproj` (file association) and that the app menu reads "Jenga Dunia" instead of "jd-app".
+3. **Figma**: the claude.ai Figma connector returned "server not found" this session and the plugin OAuth is still pending on the owner's side → tutorial images stay in `docs/user/images/` (annotated by `annotate.mjs`); place them in file `fxyeV62hgLoNmG3dU1LX6G` when a connector works.
+4. **Native leftovers**: Edit-menu capture (System Events click did not open it), native sculpt capture (needs Accessibility for clicks).
+5. **Phase 3 follow-ups**: hydraulic concentration cap / layered materials / open drains; thermal + hydraulic WGSL twins (`jd-gpu`); particle hydraulic; D∞/MFD + priority-flood + rivers/lakes; brush cursor + smooth/flatten brushes.
+6. **Phase 2 leftovers**: `jd-jobs` (async + progress/cancel), adopt `JdOps` types in `state.ts`, GeoTIFF tags/nodata on import, textured PBR for GLB, Windows/Linux measurements.
 
 ---
 
