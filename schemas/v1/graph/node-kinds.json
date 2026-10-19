@@ -32,6 +32,85 @@
     }
   },
   {
+    "kind": "jd.erosion.hydraulic@1",
+    "description": "Hydraulic erosion (virtual pipes / shallow water): rain flows downhill, dissolves, carries and deposits sediment; outputs terrain, water depth and suspended sediment",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "water",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "sediment",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "HydraulicNodeParams",
+      "type": "object",
+      "properties": {
+        "iterations": {
+          "description": "Simulation steps (1..=2000).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 100
+        },
+        "dt": {
+          "description": "Time step in seconds ((0, 1]; 0.02 is stable for the pipe model).",
+          "type": "number",
+          "format": "float",
+          "default": 0.019999999552965164
+        },
+        "rain_rate": {
+          "description": "Rain in metres of water per second.",
+          "type": "number",
+          "format": "float",
+          "default": 0.012000000104308128
+        },
+        "evaporation": {
+          "description": "Evaporation per second (fraction of depth).",
+          "type": "number",
+          "format": "float",
+          "default": 0.014999999664723873
+        },
+        "capacity_k": {
+          "description": "Sediment capacity constant Kc.",
+          "type": "number",
+          "format": "float",
+          "default": 1.0
+        },
+        "dissolve_k": {
+          "description": "Dissolving constant Ks.",
+          "type": "number",
+          "format": "float",
+          "default": 0.5
+        },
+        "deposit_k": {
+          "description": "Deposition constant Kd.",
+          "type": "number",
+          "format": "float",
+          "default": 1.0
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
     "kind": "jd.erosion.thermal@1",
     "description": "Thermal erosion: material steeper than the talus angle slides downhill (mass-conserving Jacobi steps)",
     "inputs": [
@@ -67,10 +146,10 @@
           "default": 50
         },
         "rate": {
-          "description": "Fraction of the excess that moves per step, (0, 1]; 0.5 is the classic stable value.",
+          "description": "Fraction of the excess that moves per step, (0, 0.25]; 0.25 is the stable maximum.",
           "type": "number",
           "format": "float",
-          "default": 0.5
+          "default": 0.25
         }
       },
       "additionalProperties": false
