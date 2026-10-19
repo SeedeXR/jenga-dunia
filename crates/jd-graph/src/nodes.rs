@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use jd_terrain::{
     Heightfield, HydraulicParams, NoiseParams, Stroke, THERMAL_MAX_RATE, apply_strokes,
-    generate_noise, hydraulic_erode, slope_mask, thermal_erode,
+    flow_accumulation, generate_noise, hydraulic_erode, slope_mask, thermal_erode,
 };
 use jd_types::{JdError, JdResult};
 use rayon::prelude::*;
@@ -205,6 +205,17 @@ struct SculptParams {
     /// Recorded brush strokes, applied in order on top of the input.
     #[serde(default)]
     strokes: Vec<Stroke>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct FlowParams {
+    /// Output ln(1 + area) / ln(1 + N) in 0..1 (true) or the raw upstream cell count (false).
+    #[serde(default = "yes")]
+    log_scale: bool,
+}
+fn yes() -> bool {
+    true
 }
 
 /// Tile-local box blur that reads neighbours through the halo (ADR-0005). Fails cleanly when
@@ -410,6 +421,16 @@ pub fn register_all(r: &mut Registry) {
         |ctx, p, i| {
             let sp: SculptParams = params(p)?;
             Ok(out("out", apply_strokes(field(i, "in")?, spacing_m(ctx), &sp.strokes)?))
+        },
+    ));
+    r.register(NodeDef::new::<FlowParams, _>(
+        "jd.analysis.flow@1",
+        "D8 flow accumulation: upstream drainage area per cell (log-scaled 0..1 mask by default) — rivers, wetness, erosion seeding",
+        vec![port("in", PortType::Heightfield, true)],
+        vec![port("out", PortType::Heightfield, false)],
+        |ctx, p, i| {
+            let fp: FlowParams = params(p)?;
+            Ok(out("out", flow_accumulation(field(i, "in")?, spacing_m(ctx), fp.log_scale)?))
         },
     ));
     r.register(NodeDef::new::<OutputParams, _>(
@@ -810,6 +831,25 @@ mod tests {
         // world(): 256 m over 128×96 px → 2 m × 2.667 m pixels; pixel (32, 32) is centred at (65, 86.667) m.
         assert!((f.get(32, 32) - 50.0).abs() < 0.5, "{}", f.get(32, 32));
         assert_eq!(f.get(100, 10), 0.0);
+    }
+
+    #[test]
+    fn flow_node_marks_valleys() {
+        let reg = Registry::with_builtins();
+        let cache = Cache::default();
+        let mut g = Graph::default();
+        let n = add(
+            &mut g,
+            "jd.noise.fbm@1",
+            serde_json::json!({ "seed": 8, "feature_size_m": 96.0 }),
+        );
+        let f = add(&mut g, "jd.analysis.flow@1", serde_json::json!({}));
+        connect(&mut g, &n, "out", &f, "in");
+        let (outs, _) = Evaluator::new(&reg, &cache)
+            .evaluate(&g, &world(), 0)
+            .expect("eval");
+        let m = outs[&(f, "out".into())].as_field().stats();
+        assert!(m.min > 0.0 && m.max <= 1.0 && m.max > m.min, "{m:?}");
     }
 
     #[test]

@@ -6,6 +6,7 @@
 //! Export writes the formats engines actually consume (`docs/architecture/08-io-formats.md`).
 
 pub mod export;
+pub mod flow;
 pub mod heightfield;
 pub mod noise;
 pub mod preview;
@@ -13,6 +14,7 @@ pub mod sculpt;
 pub mod sim;
 
 pub use export::{HeightmapFormat, export_heightmap};
+pub use flow::{d8_receivers, flow_accumulation};
 pub use heightfield::{Heightfield, HeightfieldStats, Tile, TileCoord};
 pub use noise::{FractalKind, NoiseKind, NoiseParams, generate_noise};
 pub use sculpt::{Stroke, apply_strokes};

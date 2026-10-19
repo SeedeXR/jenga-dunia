@@ -1,5 +1,36 @@
 [
   {
+    "kind": "jd.analysis.flow@1",
+    "description": "D8 flow accumulation: upstream drainage area per cell (log-scaled 0..1 mask by default) — rivers, wetness, erosion seeding",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "FlowParams",
+      "type": "object",
+      "properties": {
+        "log_scale": {
+          "description": "Output ln(1 + area) / ln(1 + N) in 0..1 (true) or the raw upstream cell count (false).",
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
     "kind": "jd.analysis.slope@1",
     "description": "Slope mask 0..1 (gradient angle / max_deg) — feed into multiply to attenuate by steepness",
     "inputs": [
