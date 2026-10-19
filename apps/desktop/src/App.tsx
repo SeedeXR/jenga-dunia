@@ -19,7 +19,7 @@ const inputCls = "w-28 rounded border border-jd-line bg-jd-bg-2 px-2 py-0.5 text
 
 export function formatFor(path: string): string {
   const ext = path.split(".").pop()?.toLowerCase();
-  return ext === "png" ? "png16" : ext === "r16" ? "raw_r16" : ext === "r32" ? "raw_r32" : "exr";
+  return ext === "png" ? "png16" : ext === "r16" ? "raw_r16" : ext === "r32" ? "raw_r32" : ext === "tif" || ext === "tiff" ? "tiff32" : "exr";
 }
 
 export default function App() {
@@ -59,6 +59,7 @@ export default function App() {
         { name: "PNG (16-bit)", extensions: ["png"] },
         { name: "RAW 16-bit", extensions: ["r16"] },
         { name: "RAW 32-bit float", extensions: ["r32"] },
+        { name: "TIFF (32-bit float)", extensions: ["tif", "tiff"] },
       ],
     }).catch(() => null);
     if (!p) return;

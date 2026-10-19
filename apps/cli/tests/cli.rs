@@ -378,7 +378,7 @@ fn terrain_generate_exports_a_valid_exr_and_png16() {
     // Unknown extension is a usage error (exit 2).
     jd().args(["terrain", "generate", "--project"])
         .arg(&proj)
-        .args(["--out", "h.tiff"])
+        .args(["--out", "h.bmp"])
         .assert()
         .code(2);
 }

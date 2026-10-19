@@ -28,6 +28,8 @@ pub enum HeightmapFormat {
     RawR16,
     /// Headerless little-endian f32. Exact.
     RawR32,
+    /// TIFF, single 32-bit float sample per pixel (GIS and DCC tools read it directly). Exact.
+    Tiff32,
 }
 
 impl HeightmapFormat {
@@ -38,6 +40,7 @@ impl HeightmapFormat {
             HeightmapFormat::Png16 => "png",
             HeightmapFormat::RawR16 => "r16",
             HeightmapFormat::RawR32 => "r32",
+            HeightmapFormat::Tiff32 => "tif",
         }
     }
     /// True when values are quantised to 16 bits.
@@ -133,7 +136,7 @@ pub fn export_heightmap(
     let format = opts.format;
     let flip = opts.flip_y.unwrap_or(matches!(
         format,
-        HeightmapFormat::Exr | HeightmapFormat::Png16
+        HeightmapFormat::Exr | HeightmapFormat::Png16 | HeightmapFormat::Tiff32
     ));
     let range = opts.range_m.unwrap_or([stats.min, stats.max]);
     if range[0] >= range[1] || range.iter().any(|v| !v.is_finite()) {
@@ -185,6 +188,19 @@ pub fn export_heightmap(
                 buf.extend_from_slice(&v.to_le_bytes());
             }
             write_all(path, &buf)?
+        }
+        HeightmapFormat::Tiff32 => {
+            let file = fs::File::create(path)?;
+            let mut enc =
+                tiff::encoder::TiffEncoder::new(std::io::BufWriter::new(file)).map_err(|e| {
+                    JdError::new(ErrorCode::E_SERIALIZE, format!("TIFF write failed: {e}"))
+                })?;
+            enc.write_image::<tiff::encoder::colortype::Gray32Float>(w, h, &data)
+                .map_err(|e| {
+                    JdError::new(ErrorCode::E_SERIALIZE, format!("TIFF write failed: {e}"))
+                        .detail("path", path.display().to_string())
+                })?;
+            fs::metadata(path)?.len()
         }
     };
     let sidecar_path = sidecar_path(path);
@@ -288,6 +304,30 @@ pub fn import_heightmap(path: &Path, tile_size: u32, halo: u32) -> JdResult<Heig
             .iter()
             .map(|c| f32::from_le_bytes(*c))
             .collect(),
+        HeightmapFormat::Tiff32 => {
+            let mut dec =
+                tiff::decoder::Decoder::new(std::io::BufReader::new(fs::File::open(path)?))
+                    .map_err(|e| {
+                        JdError::new(
+                            ErrorCode::E_FORMAT_CORRUPT,
+                            format!("TIFF read failed: {e}"),
+                        )
+                    })?;
+            match dec.read_image().map_err(|e| {
+                JdError::new(
+                    ErrorCode::E_FORMAT_CORRUPT,
+                    format!("TIFF read failed: {e}"),
+                )
+            })? {
+                tiff::decoder::DecodingResult::F32(v) => v,
+                _ => {
+                    return Err(JdError::new(
+                        ErrorCode::E_FORMAT_CORRUPT,
+                        "TIFF is not 32-bit float grayscale",
+                    ));
+                }
+            }
+        }
     };
     if data.len() != (w as usize) * (h as usize) {
         return Err(JdError::new(
@@ -344,7 +384,11 @@ mod tests {
     fn exr_and_r32_round_trip_exactly() {
         let dir = tempfile::tempdir().expect("tmp");
         let hf = field();
-        for fmt in [HeightmapFormat::Exr, HeightmapFormat::RawR32] {
+        for fmt in [
+            HeightmapFormat::Exr,
+            HeightmapFormat::RawR32,
+            HeightmapFormat::Tiff32,
+        ] {
             let path = dir.path().join(format!("h.{}", fmt.extension()));
             let rep = export_heightmap(
                 &hf,

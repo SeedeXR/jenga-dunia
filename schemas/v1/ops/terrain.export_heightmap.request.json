@@ -68,6 +68,11 @@
           "description": "Headerless little-endian f32. Exact.",
           "type": "string",
           "const": "raw_r32"
+        },
+        {
+          "description": "TIFF, single 32-bit float sample per pixel (GIS and DCC tools read it directly). Exact.",
+          "type": "string",
+          "const": "tiff32"
         }
       ]
     }

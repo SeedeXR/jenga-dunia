@@ -79,13 +79,13 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `05:00:00` **GLB mesh export** (`jd-terrain::mesh::export_glb`, hand-written binary glTF: positions in metres +Y up centred like the viewport, central-difference normals, UVs, u32 indices, flat PBR material; `step` decimation with auto budget 1 M vertices + `W_MESH_DECIMATED`). Op `terrain.export_mesh`, CLI `jd export mesh --project P out.glb [--step N]`. Validated with the Khronos validator (`apps/desktop/scripts/validate-glb.mjs`, npm `gltf-validator`): 512² → 262 144 vertices / 522 242 triangles / 14.7 MB, **0 errors 0 warnings** (1 info: unused TEXCOORD_0 until textures). Tests: header/chunks/accessor counts, centred min/max, normals up, CCW winding, decimation and auto_step.
 
-### Open / next (as of 2026-10-20 03:30, head `36da357`)
-1. **CI for `36da357`** (hydraulic + review-3 fixes + e2e timeout 300 s on CI): confirm green; if the graph e2e is still slow on the Linux runner, cut live previews in that spec (toggle ⚡ off at the start) rather than raising timeouts further.
-2. **Native re-verification when the display is available**: `v0.0.1` header badge, native dialogs (File → New…/Open…/Export…), ⚡ live preview, Undo/Redo menu items; re-shoot `desktop-menubar.png`, `tutorial-01/02` (viewport now hypsometric + sky) and `tutorial-03-graph.png`; record a native graph-editor clip if Accessibility is granted.
-3. **Figma**: owner completes the connector OAuth → place/annotate the tutorial screenshots in file `fxyeV62hgLoNmG3dU1LX6G` (memory `jenga-dunia-figma-docs-file`).
-4. **Phase 3 follow-ups**: hydraulic concentration cap / layered materials / open-boundary drains; thermal + hydraulic WGSL twins (`jd-gpu`), tile-local passes with halo exchange; particle hydraulic (ADR-0006 item 3); flow-accumulation / curvature analysis nodes.
-5. **Phase 2 leftovers**: `jd-jobs` (async ops + progress/cancel; erosion at 4k takes seconds), TS types generated from `schemas/v1`, TIFF export, foreign heightmap import, Unity/Unreal 2ⁿ+1 presets, window-state persistence, bundle file association (`pnpm tauri build`, unsigned).
-6. **Windows/Linux**: nothing measured yet beyond CI (clippy/tests/e2e on Ubuntu, clippy/tests on Windows); DX12/Vulkan viewport checks need those machines.
+### Open / next (as of 2026-10-20 05:10, head `ae89654`)
+1. **CI**: flow node (`2c52705`) and GLB export (`ae89654`, adds the Khronos validator step to the frontend job) runs polling; everything up to `084607b` is green.
+2. **Native re-verification when the display is available** (still asleep at 04:45): `v0.0.1` badge, dialogs, ⚡ live preview, undo/redo, Sculpt mode, layer picker; re-shoot `desktop-menubar.png`, `tutorial-01/02/03` (viewport now hypsometric + sky, toolbar has undo/redo/⚡, Sculpt button) and add a sculpt tutorial image; record a native clip if Accessibility is granted. Until then the Playwright screenshots/videos (same frontend, real core) are the visual evidence.
+3. **Figma**: owner completes the connector OAuth → place/annotate screenshots in file `fxyeV62hgLoNmG3dU1LX6G`.
+4. **In progress**: TIFF f32 heightmap export (`tiff` crate just added) → then Unity/Unreal 2ⁿ+1 resolution presets in the project panel.
+5. **Phase 3 follow-ups**: hydraulic concentration cap / layered materials / open drains; thermal + hydraulic WGSL twins (`jd-gpu`); particle hydraulic; D∞/MFD + priority-flood + rivers/lakes; brush cursor + smooth/flatten brushes.
+6. **Phase 2 leftovers**: `jd-jobs` (async + progress/cancel), TS types from `schemas/v1`, foreign heightmap import, window-state persistence, bundle file association, Windows/Linux measurements.
 
 ---
 

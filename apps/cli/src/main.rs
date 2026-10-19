@@ -212,6 +212,7 @@ fn format_from_ext(path: &std::path::Path) -> Option<&'static str> {
         "png" => Some("png16"),
         "r16" | "raw" => Some("raw_r16"),
         "r32" => Some("raw_r32"),
+        "tif" | "tiff" => Some("tiff32"),
         _ => None,
     }
 }
