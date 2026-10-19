@@ -18,7 +18,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [ ] Research follow-ups listed in `docs/research/evidence-register.md`
 - [x] Installer-surface inventory of `installables/` (WM Basic 4067, Gaea 2.3.1.0) → `docs/research/research-log/2026-10-19-installer-inventory.md`
 - [ ] CI: bump `actions/checkout` and `actions/setup-node` off Node 20 (deprecation warning in run 2); cache `~/.npm/_npx` for mermaid-cli
-- [ ] Phase 2 backlog additions from WM inventory: undo/history paging with archive cap; preview target frame time setting
+- [~] Phase 2 backlog additions from WM inventory: undo ✔ (cap 100 snapshots; paging/archive ☐); preview target frame time setting ☐
 
 ## Phase 1 — Foundation (in progress, Session 2)
 - [x] Cargo workspace: `jd-types`, `jd-core`, `apps/cli` (`jd`), `apps/mcp` (`jd-mcp`) — real content, 28 tests (unit/property/CLI-driven/MCP-driven)
@@ -42,7 +42,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 ## Phase 2 — Core terrain authoring
 - [~] `jd-terrain`: tiles + halos ✔, noise generators ✔ (OpenSimplex2/2S, Perlin, Value, ValueCubic, Cellular × none/fbm/ridged/ping-pong), filters/analysis nodes ☐
 - [x] Ops `terrain.generate` / `terrain.stats` / `terrain.export_heightmap` + CLI `jd terrain generate --out` / `jd export heightmap`; MCP end-to-end test
-- [~] `jd-graph`: typed DAG ✔, validation (types/cycles/required/unknown) ✔, blake3 content-hash incremental evaluation + in-memory cache ✔, LOD ✔, bypass ✔, 7 node kinds ✔, journaled `graph.*` ops with pre-journal structural validation (trial copy + `validate_structure`) ✔, `graph.move_node` ✔, lod>0 → `<layer>#lod<N>` ✔, node-editor UI (React Flow: add/connect/drag/delete/inspector, e2e-tested) ✔; disk cache (`jd-cache`) layer-level ✔ (CLI can export a graph result across invocations); tile-level blobs + SQLite index + LRU eviction ☐, region/tile-level dirty sets ☐, async jobs + progress/cancel ☐, undo/redo from the journal ☐
+- [~] `jd-graph`: typed DAG ✔, validation (types/cycles/required/unknown) ✔, blake3 content-hash incremental evaluation + in-memory cache ✔, LOD ✔, bypass ✔, 7 node kinds ✔, journaled `graph.*` ops with pre-journal structural validation (trial copy + `validate_structure`) ✔, `graph.move_node` ✔, lod>0 → `<layer>#lod<N>` ✔, node-editor UI (React Flow: add/connect/drag/delete/inspector, e2e-tested) ✔; disk cache (`jd-cache`) layer-level ✔ (CLI can export a graph result across invocations); tile-level blobs + SQLite index + LRU eviction ☐, region/tile-level dirty sets ☐, async jobs + progress/cancel ☐, undo/redo ✔ (snapshot history, journaled `graph.restore`)
 - [~] Heightmap export: EXR f32 ✔, PNG16 ✔, RAW r16/r32 ✔ (+ JSON sidecar, flip + range conventions, round-trip tests); TIFF ☐; foreign heightmap import without sidecar ☐; Unity/Unreal size presets (2ⁿ+1) ☐
 - [ ] Stroke sculpt nodes
 - [ ] Basic PBR material + GLB export + glTF Validator in CI

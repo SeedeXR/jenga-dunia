@@ -73,7 +73,7 @@ interface State {
   noise: NoiseSettings;
   busy: boolean;
   log: LogEntry[];
-  graph: { nodes: GraphNode[]; edges: GraphEdge[] };
+  graph: { nodes: GraphNode[]; edges: GraphEdge[]; undo_depth?: number; redo_depth?: number };
   graphKinds: GraphKind[];
   lastEval: EvalReport | null;
   setNoise: (patch: Partial<NoiseSettings>) => void;
@@ -81,6 +81,8 @@ interface State {
   addNode: (kind: string) => Promise<void>;
   removeNode: (id: string) => Promise<void>;
   moveNode: (id: string, position: [number, number]) => Promise<void>;
+  undoGraph: () => Promise<void>;
+  redoGraph: () => Promise<void>;
   connectNodes: (from: string, fromPort: string, to: string, toPort: string) => Promise<void>;
   disconnectNodes: (from: string, fromPort: string, to: string, toPort: string) => Promise<void>;
   setParam: (id: string, key: string, value: unknown) => Promise<void>;
@@ -148,7 +150,7 @@ export const useStore = create<State>((set, get) => {
       logFailure("layer_preview", e);
     }
   };
-  type GraphView = { nodes: GraphNode[]; edges: GraphEdge[] };
+  type GraphView = { nodes: GraphNode[]; edges: GraphEdge[]; undo_depth: number; redo_depth: number };
   const applyGraph = (r: Response<GraphView>) => {
     if (r.status === "ok" && r.result) set({ graph: r.result });
   };
@@ -180,6 +182,8 @@ export const useStore = create<State>((set, get) => {
     },
     removeNode: async (id) => applyGraph(await run<GraphView>("graph.remove_node", { id })),
     moveNode: async (id, position) => applyGraph(await run<GraphView>("graph.move_node", { id, position })),
+    undoGraph: async () => applyGraph(await run<GraphView>("graph.undo")),
+    redoGraph: async () => applyGraph(await run<GraphView>("graph.redo")),
     connectNodes: async (from, fromPort, to, toPort) => applyGraph(await run<GraphView>("graph.connect", { from, from_port: fromPort, to, to_port: toPort })),
     disconnectNodes: async (from, fromPort, to, toPort) => applyGraph(await run<GraphView>("graph.disconnect", { from, from_port: fromPort, to, to_port: toPort })),
     setParam: async (id, key, value) => applyGraph(await run<GraphView>("graph.set_param", { id, key, value })),

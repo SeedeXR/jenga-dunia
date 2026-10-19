@@ -161,8 +161,49 @@ pub struct Project {
     pub scene: SceneDocument,
     /// Journal entries found on open that were never saved (crash recovery).
     pub pending_journal: Vec<JournalEntry>,
+    /// Undo/redo stacks of graph snapshots (session-only; the journal is the durable record).
+    pub history: History,
     dirty: bool,
     lock_nonce: String,
+}
+
+/// Undo/redo history of the graph document. Every journaled `graph.*` mutation pushes the
+/// previous graph; undo/redo are themselves journaled as `graph.restore`, so recovery replays
+/// exactly what the user saw.
+/// ponytail: whole-graph snapshots capped at 100 (graphs are kilobytes); diff-based history with
+/// an archive (WM inventory) when graphs grow.
+#[derive(Debug, Default)]
+pub struct History {
+    undo: Vec<GraphDocument>,
+    redo: Vec<GraphDocument>,
+}
+
+impl History {
+    const CAP: usize = 100;
+    /// Record the graph as it was before a user mutation (clears the redo stack).
+    pub fn record(&mut self, before: GraphDocument) {
+        if self.undo.len() >= Self::CAP {
+            self.undo.remove(0);
+        }
+        self.undo.push(before);
+        self.redo.clear();
+    }
+    /// Pop the snapshot to restore for undo, remembering `current` for redo.
+    pub fn undo(&mut self, current: GraphDocument) -> Option<GraphDocument> {
+        let g = self.undo.pop()?;
+        self.redo.push(current);
+        Some(g)
+    }
+    /// Pop the snapshot to restore for redo, remembering `current` for undo.
+    pub fn redo(&mut self, current: GraphDocument) -> Option<GraphDocument> {
+        let g = self.redo.pop()?;
+        self.undo.push(current);
+        Some(g)
+    }
+    /// (undo depth, redo depth).
+    pub fn depths(&self) -> (usize, usize) {
+        (self.undo.len(), self.redo.len())
+    }
 }
 
 fn now_rfc3339() -> String {
@@ -322,6 +363,7 @@ impl Project {
             graph: jd_graph::nodes::starter(),
             scene: SceneDocument::default(),
             pending_journal: Vec::new(),
+            history: History::default(),
             dirty: true,
             lock_nonce: String::new(),
         };
@@ -378,6 +420,7 @@ impl Project {
             graph,
             scene,
             pending_journal,
+            history: History::default(),
             dirty: false,
             lock_nonce: String::new(),
         };

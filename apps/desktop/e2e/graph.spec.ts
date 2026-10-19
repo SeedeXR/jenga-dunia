@@ -88,13 +88,21 @@ test.describe("node graph editor against the real core", () => {
     await expect(panel.locator(".react-flow__edge")).toHaveCount(1);
     await expect(page.getByTestId("log")).toContainText("graph.remove_node: ok");
 
+    // Undo brings the node and its edge back (journaled as graph.restore); redo removes it again.
+    await page.getByTestId("graph-undo").click();
+    await expect(panel.locator(".react-flow__node")).toHaveCount(3);
+    await expect(panel.locator(".react-flow__edge")).toHaveCount(2);
+    await page.getByTestId("graph-redo").click();
+    await expect(panel.locator(".react-flow__node")).toHaveCount(2);
+    await expect(page.getByTestId("graph-redo")).toBeDisabled();
+
     // Every edit went through the core's WAL before touching the document.
     const journal = readFileSync(path.join(proj, "journal", "ops.ndjson"), "utf8");
     const ops = journal
       .trim()
       .split("\n")
       .map((l) => (JSON.parse(l) as { op: string }).op);
-    expect(ops).toEqual(["graph.set_param", "graph.add_node", "graph.connect", "graph.move_node", "graph.remove_node"]);
+    expect(ops).toEqual(["graph.set_param", "graph.add_node", "graph.connect", "graph.move_node", "graph.remove_node", "graph.restore", "graph.restore"]);
 
     await page.screenshot({ path: testInfo.outputPath("graph-editor.png") });
     expect(errors, "no uncaught page errors").toEqual([]);

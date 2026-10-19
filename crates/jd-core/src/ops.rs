@@ -432,7 +432,14 @@ pub mod builtin {
     pub(crate) fn mutate(p: &mut Project, op: &str, params: Value) -> JdResult<()> {
         validate_mutation(p, op, &params)?;
         p.journal(op, &params)?;
-        apply_mutation(p, op, &params)
+        // Undo history: every user graph edit records the previous graph; `graph.restore` is
+        // how undo/redo themselves apply, so it must not be recorded as a new edit.
+        let before = (op.starts_with("graph.") && op != "graph.restore").then(|| p.graph.clone());
+        apply_mutation(p, op, &params)?;
+        if let Some(g) = before {
+            p.history.record(g);
+        }
+        Ok(())
     }
 
     /// Register every built-in op.
@@ -653,6 +660,10 @@ pub mod graph {
         pub nodes: Vec<NodeView>,
         /// Edges.
         pub edges: Vec<Edge>,
+        /// Number of edits `graph.undo` can take back.
+        pub undo_depth: usize,
+        /// Number of undone edits `graph.redo` can re-apply.
+        pub redo_depth: usize,
     }
 
     /// `graph.evaluate` result.
@@ -672,6 +683,14 @@ pub mod graph {
         pub id: NodeId,
     }
 
+    /// `graph.restore` params (how undo/redo are journaled).
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct Restore {
+        /// The whole graph document to install.
+        pub graph: Graph,
+    }
+
     /// `graph.move_node` params.
     #[derive(Debug, Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
@@ -689,9 +708,11 @@ pub mod graph {
         })
     }
 
-    fn view(g: &Graph) -> GraphView {
+    fn view(p: &Project) -> GraphView {
+        let (undo_depth, redo_depth) = p.history.depths();
         GraphView {
-            nodes: g
+            nodes: p
+                .graph
                 .nodes
                 .iter()
                 .map(|(id, n)| NodeView {
@@ -699,7 +720,9 @@ pub mod graph {
                     node: n.clone(),
                 })
                 .collect(),
-            edges: g.edges.clone(),
+            edges: p.graph.edges.clone(),
+            undo_depth,
+            redo_depth,
         }
     }
 
@@ -770,6 +793,10 @@ pub mod graph {
                 let m: MoveNode = serde_json::from_value(params.clone())?;
                 node_mut(g, &m.id)?.ui.position = m.position;
             }
+            "graph.restore" => {
+                let r: Restore = serde_json::from_value(params.clone())?;
+                *g = r.graph;
+            }
             "graph.connect" => {
                 let c: Connect = serde_json::from_value(params.clone())?;
                 // One edge per input port: replacing keeps the graph a function of its inputs.
@@ -831,7 +858,7 @@ pub mod graph {
             "graph.list",
             "Nodes and edges of the open project's graph",
             Scope::ProjectRead,
-            |ctx, _| ctx.with_project(|p| Ok((view(&p.graph), Vec::new()))),
+            |ctx, _| ctx.with_project(|p| Ok((view(p), Vec::new()))),
         );
         r.register::<AddNode, AddedNode, _>("graph.add_node", "Add a node (journaled)", Scope::ProjectWrite, |ctx, a| {
             let id = a.id.clone().unwrap_or_default();
@@ -852,7 +879,7 @@ pub mod graph {
                 let params = serde_json::json!({ "id": n.id, "bypass": n.bypass });
                 ctx.with_project(|p| {
                     builtin::mutate(p, op, params)?;
-                    Ok((view(&p.graph), Vec::new()))
+                    Ok((view(p), Vec::new()))
                 })
             });
         }
@@ -864,7 +891,7 @@ pub mod graph {
                 let params = serde_json::json!({ "id": m.id, "position": m.position });
                 ctx.with_project(|p| {
                     builtin::mutate(p, "graph.move_node", params)?;
-                    Ok((view(&p.graph), Vec::new()))
+                    Ok((view(p), Vec::new()))
                 })
             },
         );
@@ -879,7 +906,38 @@ pub mod graph {
                 let params = serde_json::json!({ "from": c.from, "from_port": c.from_port, "to": c.to, "to_port": c.to_port });
                 ctx.with_project(|p| {
                     builtin::mutate(p, op, params)?;
-                    Ok((view(&p.graph), Vec::new()))
+                    Ok((view(p), Vec::new()))
+                })
+            });
+        }
+        for (op, desc) in [
+            (
+                "graph.undo",
+                "Take back the last graph edit (journaled as graph.restore)",
+            ),
+            (
+                "graph.redo",
+                "Re-apply the last undone graph edit (journaled as graph.restore)",
+            ),
+        ] {
+            r.register::<NoParams, GraphView, _>(op, desc, Scope::ProjectWrite, move |ctx, _| {
+                ctx.with_project(|p| {
+                    let current = p.graph.clone();
+                    let target = if op == "graph.undo" {
+                        p.history.undo(current)
+                    } else {
+                        p.history.redo(current)
+                    };
+                    let Some(graph) = target else {
+                        return Err(JdError::new(
+                            ErrorCode::E_INPUT_INVALID,
+                            format!("nothing to {}", &op[6..]),
+                        )
+                        .detail("undo_depth", p.history.depths().0)
+                        .detail("redo_depth", p.history.depths().1));
+                    };
+                    builtin::mutate(p, "graph.restore", serde_json::json!({ "graph": graph }))?;
+                    Ok((view(p), Vec::new()))
                 })
             });
         }
@@ -891,7 +949,7 @@ pub mod graph {
                 let params = serde_json::json!({ "id": s.id, "key": s.key, "value": s.value });
                 ctx.with_project(|p| {
                     builtin::mutate(p, "graph.set_param", params)?;
-                    Ok((view(&p.graph), Vec::new()))
+                    Ok((view(p), Vec::new()))
                 })
             },
         );
@@ -1115,7 +1173,37 @@ pub mod graph {
                 serde_json::json!({ "id": noise_id, "position": [10.0, 20.0] }),
             );
             assert_eq!(r.status, crate::envelope::Status::Ok, "{r:?}");
-            // Crash without saving → reopen → recover replays the five graph mutations.
+            // Undo takes the move back, redo re-applies it; both are journaled as graph.restore.
+            let r = call(&reg, &ctx, "graph.undo", serde_json::json!({}));
+            let v = r.result.expect("undo");
+            assert_eq!(
+                (v["undo_depth"].as_u64(), v["redo_depth"].as_u64()),
+                (Some(4), Some(1))
+            );
+            let n = v["nodes"]
+                .as_array()
+                .expect("nodes")
+                .iter()
+                .find(|n| n["id"] == noise_id)
+                .expect("noise");
+            assert_eq!(
+                n["ui"]["position"],
+                serde_json::json!([0.0, 0.0]),
+                "starter position restored"
+            );
+            let r = call(&reg, &ctx, "graph.redo", serde_json::json!({}));
+            let v = r.result.expect("redo");
+            assert_eq!(
+                (v["undo_depth"].as_u64(), v["redo_depth"].as_u64()),
+                (Some(5), Some(0))
+            );
+            let r = call(&reg, &ctx, "graph.redo", serde_json::json!({}));
+            assert_eq!(
+                r.error.as_ref().map(|e| e.code),
+                Some(ErrorCode::E_INPUT_INVALID),
+                "nothing left to redo"
+            );
+            // Crash without saving → reopen → recover replays the seven graph mutations (incl. the two restores).
             ctx.set_project(None).expect("close");
             let ctx2 = Context::default();
             let r = call(
@@ -1128,7 +1216,7 @@ pub mod graph {
                 r.result
                     .as_ref()
                     .and_then(|v| v["pending_journal"].as_u64()),
-                Some(5)
+                Some(7)
             );
             // The evaluated layer came back from the project's on-disk cache (jd-cache).
             let r = call(
@@ -1144,7 +1232,7 @@ pub mod graph {
                     .as_ref()
                     .and_then(|v| v["replayed"].as_array())
                     .map(Vec::len),
-                Some(5)
+                Some(7)
             );
             assert_eq!(
                 r.result

@@ -143,7 +143,7 @@ $ jd --json op graph.connect --project G.jdproj --params '{"from":"<noise id>","
   "message":"node 01JDGRAPH000000000000N01SE (jd.noise.fbm@1) has no output `nope`", ...}}
 ```
 
-Evaluating with an unconnected required input gives `E_GRAPH_MISSING_INPUT`. `graph.move_node` (editor position) is journaled like every other change, so the desktop canvas layout survives a crash. `graph.evaluate` with `lod > 0` publishes a reduced-resolution preview under `<layer>#lod<N>` (e.g. `height#lod1`) and never overwrites the full-resolution layer.
+Evaluating with an unconnected required input gives `E_GRAPH_MISSING_INPUT`. `graph.move_node` (editor position) is journaled like every other change, so the desktop canvas layout survives a crash. `graph.undo` / `graph.redo` step through the session's edit history (up to 100 steps) and are journaled as `graph.restore` with the full graph, so recovery replays them too; every `graph.*` response carries `undo_depth` / `redo_depth`. `graph.evaluate` with `lod > 0` publishes a reduced-resolution preview under `<layer>#lod<N>` (e.g. `height#lod1`) and never overwrites the full-resolution layer.
 
 Layers persist in the project's disposable cache (`cache/layers/<blake3>.jdl` + `index.json`, see `docs/spec/project-format.md`), so one invocation can evaluate and the next one export — the same path the desktop app and MCP server use:
 

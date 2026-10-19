@@ -96,6 +96,12 @@ export default function App() {
         case "evaluate":
           if (st.project) void st.evaluateGraph();
           break;
+        case "undo-graph":
+          if (st.project) void st.undoGraph();
+          break;
+        case "redo-graph":
+          if (st.project) void st.redoGraph();
+          break;
         case "export":
           if (st.layer) void pickExportPath();
           break;

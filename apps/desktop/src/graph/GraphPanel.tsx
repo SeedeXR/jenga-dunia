@@ -16,7 +16,7 @@ import {
   useNodesState,
   useReactFlow,
 } from "@xyflow/react";
-import { Play, Plus, Trash2 } from "lucide-react";
+import { Play, Plus, Redo2, Trash2, Undo2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { type GraphNode, useStore } from "../state";
 
@@ -160,6 +160,12 @@ function Inner() {
           </select>
           <button className="btn" onClick={() => void s.addNode(newKind)} disabled={!s.project || s.busy} data-testid="graph-add">
             <Plus size={12} /> Add
+          </button>
+          <button className="btn px-1.5" title="Undo graph edit (⌥⌘Z)" onClick={() => void s.undoGraph()} disabled={!s.graph.undo_depth || s.busy} data-testid="graph-undo">
+            <Undo2 size={12} />
+          </button>
+          <button className="btn px-1.5" title="Redo graph edit (⇧⌥⌘Z)" onClick={() => void s.redoGraph()} disabled={!s.graph.redo_depth || s.busy} data-testid="graph-redo">
+            <Redo2 size={12} />
           </button>
           <button className="btn" onClick={() => void s.evaluateGraph()} disabled={!s.project || s.busy} data-testid="graph-evaluate">
             <Play size={12} /> Evaluate

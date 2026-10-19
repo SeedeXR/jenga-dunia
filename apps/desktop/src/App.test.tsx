@@ -147,6 +147,8 @@ describe("App", () => {
     expect(calls.length).toBe(before);
     menuListeners.forEach((cb) => cb({ payload: "evaluate" }));
     await waitFor(() => expect(screen.getByTestId("log")).toHaveTextContent("graph.evaluate"));
+    menuListeners.forEach((cb) => cb({ payload: "undo-graph" }));
+    await waitFor(() => expect(screen.getByTestId("log")).toHaveTextContent("graph.undo"));
   });
 
   it("loads the project graph and evaluating it refreshes stats and preview", async () => {

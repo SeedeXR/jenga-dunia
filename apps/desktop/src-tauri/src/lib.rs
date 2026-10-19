@@ -76,6 +76,13 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let evaluate_item = MenuItemBuilder::with_id("evaluate", "Evaluate Graph")
         .accelerator("CmdOrCtrl+R")
         .build(app)?;
+    // Graph undo/redo get their own items: the predefined Undo/Redo drive the WebView's text editing.
+    let undo_graph = MenuItemBuilder::with_id("undo-graph", "Undo Graph Edit")
+        .accelerator("CmdOrCtrl+Alt+Z")
+        .build(app)?;
+    let redo_graph = MenuItemBuilder::with_id("redo-graph", "Redo Graph Edit")
+        .accelerator("CmdOrCtrl+Alt+Shift+Z")
+        .build(app)?;
     let export_item = MenuItemBuilder::with_id("export", "Export Heightmap…")
         .accelerator("CmdOrCtrl+E")
         .build(app)?;
@@ -92,6 +99,9 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let edit = SubmenuBuilder::new(app, "Edit")
         .undo()
         .redo()
+        .separator()
+        .item(&undo_graph)
+        .item(&redo_graph)
         .separator()
         .cut()
         .copy()
