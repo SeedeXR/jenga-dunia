@@ -591,7 +591,8 @@ pub mod builtin {
                     .ok_or_else(|| JdError::invalid("path", "source has no file name"))?;
                 // A single normal path component (no separators, prefixes, `.` or `..`).
                 let mut comps = Path::new(&name).components();
-                if !matches!((comps.next(), comps.next()), (Some(std::path::Component::Normal(_)), None)) {
+                // `:` is rejected on every OS so a project stays portable to Windows (drive prefixes).
+                if name.contains(':') || !matches!((comps.next(), comps.next()), (Some(std::path::Component::Normal(_)), None)) {
                     return Err(JdError::invalid("name", "must be a plain file name"));
                 }
                 if !a.path.is_absolute() {
