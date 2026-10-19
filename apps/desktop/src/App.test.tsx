@@ -93,7 +93,7 @@ describe("App", () => {
     dialog.open = null;
     dialog.save = null;
     // The store is module-global; reset the mirrored state between tests.
-    useStore.setState({ project: null, layer: null, preview: null, previewStats: null, log: [], busy: false, graph: { nodes: [], edges: [] }, graphKinds: [], lastEval: null });
+    useStore.setState({ project: null, layer: null, preview: null, previewStats: null, log: [], busy: false, graph: { nodes: [], edges: [] }, graphKinds: [], lastEval: null, live: true });
   });
 
   it("creates a project, generates terrain, shows stats and preview, exports with a loss warning", async () => {

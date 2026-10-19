@@ -76,6 +76,9 @@ interface State {
   graph: { nodes: GraphNode[]; edges: GraphEdge[]; undo_depth?: number; redo_depth?: number };
   graphKinds: GraphKind[];
   lastEval: EvalReport | null;
+  /** Re-evaluate at preview LOD after every graph change (World Creator-style live preview). */
+  live: boolean;
+  setLive: (on: boolean) => void;
   setNoise: (patch: Partial<NoiseSettings>) => void;
   loadGraph: () => Promise<void>;
   addNode: (kind: string) => Promise<void>;
@@ -150,9 +153,46 @@ export const useStore = create<State>((set, get) => {
       logFailure("layer_preview", e);
     }
   };
+  // After an evaluation: adopt the first published layer (stats + viewport preview).
+  const adopt = async (report: EvalReport) => {
+    set({ lastEval: report });
+    const layerName = Object.keys(report.layers)[0];
+    if (!layerName) return;
+    const st = await run<LayerInfo>("terrain.stats", { layer: layerName });
+    if (st.status === "ok" && st.result) {
+      set({ layer: st.result });
+      await refreshPreview();
+    }
+  };
+  // Preview LOD keeps live evaluations ≤ 512² so edits feel immediate; Evaluate/export use lod 0.
+  const previewLod = () => {
+    const res = get().project?.world.resolution_px ?? [512, 512];
+    return Math.max(0, Math.ceil(Math.log2(Math.max(res[0], res[1]) / 512)));
+  };
+  let liveTimer: ReturnType<typeof setTimeout> | undefined;
+  const liveEvaluate = () => {
+    clearTimeout(liveTimer);
+    liveTimer = setTimeout(async () => {
+      const { project, live } = get();
+      if (!project || !live) return;
+      try {
+        const r = await op<EvalReport>("graph.evaluate", { lod: previewLod() });
+        if (r.status === "ok" && r.result) await adopt(r.result);
+        else if (r.error?.code === "E_GRAPH_MISSING_INPUT") {
+          // Half-wired graphs are normal while editing: say what is missing, without an error entry.
+          set((s) => ({ log: [...s.log.slice(-199), { ts: Date.now(), level: "info", text: `live preview waiting: ${r.error?.message ?? ""}` }] }));
+        } else log(r);
+      } catch (e) {
+        logFailure("graph.evaluate (live)", e);
+      }
+    }, 150);
+  };
   type GraphView = { nodes: GraphNode[]; edges: GraphEdge[]; undo_depth: number; redo_depth: number };
   const applyGraph = (r: Response<GraphView>) => {
-    if (r.status === "ok" && r.result) set({ graph: r.result });
+    if (r.status === "ok" && r.result) {
+      set({ graph: r.result });
+      liveEvaluate();
+    }
   };
   const loadGraph = async () => {
     if (get().graphKinds.length === 0) {
@@ -172,6 +212,11 @@ export const useStore = create<State>((set, get) => {
     graph: { nodes: [], edges: [] },
     graphKinds: [],
     lastEval: null,
+    live: true,
+    setLive: (on) => {
+      set({ live: on });
+      if (on) liveEvaluate();
+    },
     setNoise: (patch) => set((s) => ({ noise: { ...s.noise, ...patch } })),
     loadGraph,
     addNode: async (kind) => {
@@ -189,17 +234,7 @@ export const useStore = create<State>((set, get) => {
     setParam: async (id, key, value) => applyGraph(await run<GraphView>("graph.set_param", { id, key, value })),
     evaluateGraph: async (lod = 0) => {
       const r = await run<EvalReport>("graph.evaluate", { lod });
-      if (r.status === "ok" && r.result) {
-        set({ lastEval: r.result });
-        const layerName = Object.keys(r.result.layers)[0];
-        if (layerName) {
-          const st = await run<LayerInfo>("terrain.stats", { layer: layerName });
-          if (st.status === "ok" && st.result) {
-            set({ layer: st.result });
-            await refreshPreview();
-          }
-        }
-      }
+      if (r.status === "ok" && r.result) await adopt(r.result);
     },
     probeProject: async (isCancelled) => {
       try {
@@ -240,6 +275,11 @@ export const useStore = create<State>((set, get) => {
       }
     },
     exportHeightmap: async (path, format) => {
+      // A live preview only published `height#lod<N>`; exports always use the full-resolution layer.
+      if (get().layer?.layer.includes("#lod")) {
+        const r = await run<EvalReport>("graph.evaluate", { lod: 0 });
+        if (r.status !== "ok") return;
+      }
       await run("terrain.export_heightmap", { layer: "height", path, format });
     },
     save: async () => {

@@ -53,7 +53,7 @@ Every project starts with a two-node graph (`Noise → Height`), the same `graph
 ![Node graph: add, evaluate, edit, connect, inspect](images/tutorial-03-graph.png)
 
 1. **Add** — pick a kind from the list (`graph.kinds` drives it) and click **Add**; the node is placed to the right of the graph and the view re-fits.
-2. **Evaluate** — or **Terrain → Evaluate Graph (⌘R)**. Unchanged nodes are served from cache (the log shows `graph.evaluate: ok`; the stats panel and viewport update from the `height` output).
+2. **Evaluate** — full-resolution evaluation, also **Terrain → Evaluate Graph (⌘R)**. With **live preview** (⚡, on by default) every edit re-evaluates at preview resolution (≤ 512², published as `height#lod<N>`) so the viewport follows your changes; unchanged nodes come from cache. A half-wired graph pauses the live preview with a `live preview waiting: input … not connected` line instead of an error. Export always evaluates at full resolution first.
 3. **Nodes** — click to select, drag to move (the position is saved in the project), **Delete**/**Backspace** removes the node and its edges. The ↶ ↷ buttons (or **Edit → Undo/Redo Graph Edit**, ⌥⌘Z / ⇧⌥⌘Z) step through the edit history; ⌘Z alone stays with the text fields.
 4. **Inspector** — the selected node's parameters, generated from the kind's JSON schema (enums become drop-downs, defaults show as placeholders). Leaving a field applies `graph.set_param`; an invalid value is rejected by the core before anything is journaled and the reason appears in the log.
 5. **Viewport readout** — backend, triangle count and preview transfer for the evaluated layer.

@@ -58,6 +58,8 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `02:00:00` **First simulation node**: `jd.erosion.thermal@1` (Olsen talus rule, gather form → exact mass conservation, deterministic; params talus_deg/iterations/rate) and `jd.analysis.slope@1` (0..1 steepness mask) in `jd-terrain::sim`, registered in `jd-graph` (9 kinds). Tests: spike spreads with conserved mass and identical hash on re-run; gentle slopes untouched; bad params rejected; plane slope = 45° → 0.5; graph test checks erosion stays within the input range and upstream changes invalidate the chain. ADR-0006 item 1 marked shipped. First version recomputed neighbours' outflow per cell (49.8 s for 512² × 50 in debug) → rewritten as two flat row-parallel passes per step: **release 512² × 50 = 62–68 ms, 2048² × 50 = 887 ms (0.98 s wall, 130 MB peak RSS)**, identical stats to the naive version; recorded in `performance-targets.md` baselines and cli-quickstart §5.
 
+- `02:25:00` **Live preview** (World Creator-style): the store debounces (150 ms) a `graph.evaluate` at preview LOD (≤ 512², `height#lod<N>`) after every graph change and on load; `E_GRAPH_MISSING_INPUT` becomes an info line "live preview waiting: …" (half-wired graphs are normal while editing); ⚡ toggle in the graph toolbar; export runs a lod-0 evaluate first when only a preview layer exists. e2e asserts terrain appears after a seed edit without pressing Evaluate and that adding an unconnected node pauses the preview with the explanation.
+
 ### Open / next
 1. Apply code-review findings for the graph slice; push; CI.
 2. Desktop: graph panel (React Flow) + starter graph so new projects evaluate immediately.

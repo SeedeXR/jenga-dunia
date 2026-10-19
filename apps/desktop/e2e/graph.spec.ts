@@ -44,12 +44,16 @@ test.describe("node graph editor against the real core", () => {
     await seed.blur();
     await expect(page.getByTestId("log")).toContainText("graph.set_param: ok");
     await expect(noise).toContainText("seed=9");
+    // Live preview: the edit re-evaluates the (complete) starter graph without pressing Evaluate.
+    await expect(page.getByTestId("viewport-info")).toContainText(/ [1-9][\d,]* tris/);
 
     // Add a blur node from the kinds list (graph.kinds drives the dropdown).
     await page.getByTestId("graph-kind").selectOption("jd.filter.blur@1");
     await page.getByTestId("graph-add").click();
     await expect(panel.locator(".react-flow__node")).toHaveCount(3);
     const blur = panel.locator(".react-flow__node", { hasText: "jd.filter.blur@1" });
+    // An unconnected required input pauses the live preview with an explanation, not an error.
+    await expect(page.getByTestId("log")).toContainText("live preview waiting: input `in`");
 
     // Wire it in by dragging from the noise output handle to the blur input handle (graph.connect).
     // An unconnected required input is a hard error at evaluate, so the UI must make connecting easy.

@@ -18,7 +18,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [ ] Research follow-ups listed in `docs/research/evidence-register.md`
 - [x] Installer-surface inventory of `installables/` (WM Basic 4067, Gaea 2.3.1.0) → `docs/research/research-log/2026-10-19-installer-inventory.md`
 - [ ] CI: bump `actions/checkout` and `actions/setup-node` off Node 20 (deprecation warning in run 2); cache `~/.npm/_npx` for mermaid-cli
-- [~] Phase 2 backlog additions from WM inventory: undo ✔ (cap 100 snapshots; paging/archive ☐); preview target frame time setting ☐
+- [~] Phase 2 backlog additions from WM inventory: undo ✔ (cap 100 snapshots; paging/archive ☐); live preview at ≤ 512² preview LOD ✔ (target frame-time setting ☐)
 
 ## Phase 1 — Foundation (in progress, Session 2)
 - [x] Cargo workspace: `jd-types`, `jd-core`, `apps/cli` (`jd`), `apps/mcp` (`jd-mcp`) — real content, 28 tests (unit/property/CLI-driven/MCP-driven)
