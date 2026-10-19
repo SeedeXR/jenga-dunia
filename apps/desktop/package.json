@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "annotate": "node scripts/annotate.mjs",
-    "validate:glb": "node scripts/validate-glb.mjs"
+    "validate:glb": "node scripts/validate-glb.mjs",
+    "types:gen": "node scripts/gen-types.mjs"
   },
   "dependencies": {
     "@fontsource-variable/host-grotesk": "^5.3.0",

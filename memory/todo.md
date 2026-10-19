@@ -24,7 +24,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [x] Cargo workspace: `jd-types`, `jd-core`, `apps/cli` (`jd`), `apps/mcp` (`jd-mcp`) — real content, 28 tests (unit/property/CLI-driven/MCP-driven)
 - [x] Project format v1: directory layout, atomic writes, unknown-key preservation, schema-version gate, write-ahead journal + crash recovery (`project.recover`), pid lock with stale detection
 - [x] Operation registry with schemars JSON schemas; snapshot test of all op schemas (`crates/jd-core/src/snapshots/`)
-- [~] Generated schemas committed under `schemas/v1/` ✔ (`jd schema --write`, CI fails when stale; 24 ops × request/result + envelope + node kinds); TS type generation from them ☐
+- [~] Generated schemas committed under `schemas/v1/` ✔ (`jd schema --write`, CI fails when stale; 24 ops × request/result + envelope + node kinds); TS type generation ✔ (`apps/desktop/scripts/gen-types.mjs` → `src/lib/ops.gen.ts`, CI-checked; adopting the types in `state.ts` ☐)
 - [x] CLI `jd new|open|op|schema|diag env` with `--json` NDJSON envelopes and spec exit codes
 - [x] MCP server over stdio: tools from registry, scope gate (`--scope`), `--workspace` confinement, structured envelopes
 - [ ] Autosave timer + `project.save` on job completion (needs jobs)

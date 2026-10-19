@@ -103,6 +103,11 @@ jobs:
       - name: Install frontend dependencies
         working-directory: apps/desktop
         run: pnpm install --frozen-lockfile
+      - name: Generated TypeScript types match schemas/v1
+        working-directory: apps/desktop
+        run: |
+          pnpm types:gen
+          git diff --exit-code -- src/lib/ops.gen.ts || { echo "::error::src/lib/ops.gen.ts is stale — run: pnpm types:gen"; exit 1; }
       - name: Typecheck + build
         working-directory: apps/desktop
         run: pnpm build
