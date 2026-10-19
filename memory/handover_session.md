@@ -71,6 +71,8 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `03:40:00` CI for `36da357`/`de1fb88`: e2e timeout fix worked (frontend green); the Linux rust job failed on the new schema-freshness gate because `schemas/v1/graph/node-kinds.json` was not regenerated after adding the hydraulic node → regenerated (`4856443`). **Pre-push checklist now includes** `cargo run -q -p jd-cli -- schema --write schemas/v1 && git diff --exit-code -- schemas/` after any op/node change.
 
+- `03:55:00` CI green on `92dc6ea` (9/9 twice). Display still asleep (full-screen capture black, window count 0) — native re-shoots still pending. **Viewport layer picker**: header `<select>` over `lastEval.layers` when >1 layer; `viewLayer(name)` → `terrain.stats` + preview; `adopt()` keeps the currently viewed layer (or its `#lod` twin) across live evaluations. Component test: two layers → picker lists both → choosing `water` fetches its stats.
+
 ### Open / next (as of 2026-10-20 03:30, head `36da357`)
 1. **CI for `36da357`** (hydraulic + review-3 fixes + e2e timeout 300 s on CI): confirm green; if the graph e2e is still slow on the Linux runner, cut live previews in that spec (toggle ⚡ off at the start) rather than raising timeouts further.
 2. **Native re-verification when the display is available**: `v0.0.1` header badge, native dialogs (File → New…/Open…/Export…), ⚡ live preview, Undo/Redo menu items; re-shoot `desktop-menubar.png`, `tutorial-01/02` (viewport now hypsometric + sky) and `tutorial-03-graph.png`; record a native graph-editor clip if Accessibility is granted.

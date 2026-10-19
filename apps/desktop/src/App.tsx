@@ -126,7 +126,17 @@ export default function App() {
         <span className="font-semibold tracking-wide">Jenga Dunia</span>
         <span className="text-xs text-jd-fg-2" data-testid="app-version">v{__JD_VERSION__}</span>
         <span className="text-xs text-jd-fg-2">{s.project ? `${s.project.name} — ${s.project.world.resolution_px[0]}² · ${s.project.world.extent_m[0]} m` : "no project"}</span>
-        <span className="ml-auto text-xs text-jd-fg-2" data-testid="viewport-info">
+        {s.lastEval && Object.keys(s.lastEval.layers).length > 1 && (
+          <label className="ml-auto flex items-center gap-1 text-xs text-jd-fg-2">
+            layer
+            <select className="rounded border border-jd-line bg-jd-bg-2 px-1 text-xs text-jd-fg-0" value={s.layer?.layer ?? ""} onChange={(e) => void s.viewLayer(e.target.value)} data-testid="layer-pick">
+              {Object.keys(s.lastEval.layers).map((n) => (
+                <option key={n}>{n}</option>
+              ))}
+            </select>
+          </label>
+        )}
+        <span className={`${s.lastEval && Object.keys(s.lastEval.layers).length > 1 ? "" : "ml-auto "}text-xs text-jd-fg-2`} data-testid="viewport-info">
           viewport: {vp.backend} · {vp.triangles.toLocaleString()} tris
           {s.previewStats ? ` · preview lod ${s.previewStats.lod}, ${(s.previewStats.bytes / 1048576).toFixed(2)} MB in ${s.previewStats.ms.toFixed(0)} ms` : ""}
         </span>

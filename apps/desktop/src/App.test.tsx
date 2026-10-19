@@ -26,9 +26,11 @@ vi.mock("@tauri-apps/api/core", () => ({
       case "graph.list":
         return { ...base, status: "ok", result: { nodes: [{ id: "01N", kind: "jd.noise.fbm@1", params: {}, bypass: false, ui: { position: [0, 0], label: "Noise" } }], edges: [] } };
       case "graph.evaluate":
-        return { ...base, status: "ok", result: { lod: 0, duration_ms: 3, nodes: [], layers: { height: "abc" } } };
-      case "terrain.stats":
-        return { ...base, status: "ok", result: { layer: "height", size_px: [2048, 2048], stats: { min: 1.5, max: 498.2, mean: 250.1, non_finite: 0 }, content_hash: "abc", duration_ms: 0 } };
+        return { ...base, status: "ok", result: { lod: 0, duration_ms: 3, nodes: [], layers: { height: "abc", water: "def" } } };
+      case "terrain.stats": {
+        const layer = String(req.params.layer ?? "height");
+        return { ...base, status: "ok", result: { layer, size_px: [2048, 2048], stats: { min: layer === "water" ? 0 : 1.5, max: 498.2, mean: 250.1, non_finite: 0 }, content_hash: layer === "water" ? "def" : "abc", duration_ms: 0 } };
+      }
       case "project.info":
         return { ...base, status: "error", error: { code: "E_INPUT_INVALID", message: "no project is open" } };
       case "project.create":
@@ -160,6 +162,13 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByTestId("layer-stats")).toBeInTheDocument());
     const ops = calls.map((c) => (c.args as { request?: { op: string } }).request?.op).filter(Boolean);
     expect(ops).toEqual(expect.arrayContaining(["graph.kinds", "graph.list", "graph.evaluate", "terrain.stats"]));
+    // Two published layers → a picker appears; choosing "water" fetches that layer's stats and preview.
+    const pick = screen.getByTestId("layer-pick") as HTMLSelectElement;
+    expect(Array.from(pick.options).map((o) => o.value)).toEqual(["height", "water"]);
+    fireEvent.change(pick, { target: { value: "water" } });
+    await waitFor(() => expect(screen.getByTestId("layer-stats")).toHaveTextContent("def"));
+    const waterStats = calls.filter((c) => (c.args as { request?: { op: string; params: { layer?: string } } }).request?.op === "terrain.stats" && (c.args as { request: { params: { layer?: string } } }).request.params.layer === "water");
+    expect(waterStats.length).toBeGreaterThan(0);
     expect(screen.getByTestId("viewport")).toHaveTextContent("preview 2");
   });
 

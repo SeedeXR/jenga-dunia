@@ -79,6 +79,8 @@ interface State {
   /** Re-evaluate at preview LOD after every graph change (World Creator-style live preview). */
   live: boolean;
   setLive: (on: boolean) => void;
+  /** Show a published layer (height, height#lod2, water, sediment, …) in the viewport. */
+  viewLayer: (name: string) => Promise<void>;
   setNoise: (patch: Partial<NoiseSettings>) => void;
   loadGraph: () => Promise<void>;
   addNode: (kind: string) => Promise<void>;
@@ -154,15 +156,22 @@ export const useStore = create<State>((set, get) => {
     }
   };
   // After an evaluation: adopt the first published layer (stats + viewport preview).
-  const adopt = async (report: EvalReport) => {
-    set({ lastEval: report });
-    const layerName = Object.keys(report.layers)[0];
-    if (!layerName) return;
+  const showLayer = async (layerName: string) => {
     const st = await run<LayerInfo>("terrain.stats", { layer: layerName });
     if (st.status === "ok" && st.result) {
       set({ layer: st.result });
       await refreshPreview();
     }
+  };
+  // After an evaluation: keep showing the layer the user is looking at (same name, or its
+  // full-res/preview twin) when the graph still publishes it; otherwise the first one.
+  const adopt = async (report: EvalReport) => {
+    set({ lastEval: report });
+    const names = Object.keys(report.layers);
+    if (names.length === 0) return;
+    const current = get().layer?.layer.split("#")[0];
+    const keep = names.find((n) => n.split("#")[0] === current);
+    await showLayer(keep ?? names[0]!);
   };
   // Preview LOD keeps live evaluations ≤ 512² so edits feel immediate; Evaluate/export use lod 0.
   const previewLod = () => {
@@ -213,6 +222,7 @@ export const useStore = create<State>((set, get) => {
     graphKinds: [],
     lastEval: null,
     live: true,
+    viewLayer: showLayer,
     setLive: (on) => {
       set({ live: on });
       if (on) liveEvaluate();
