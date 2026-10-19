@@ -304,9 +304,8 @@ mod tests {
             "last column sits on the east edge: {mx}"
         );
         assert!(export_glb(&hf, [640.0, 640.0], &dir.path().join("x.glb"), 0).is_err());
-        assert!(
-            export_glb(&hf, [640.0, 640.0], &dir.path().join("x.glb"), 64).is_err(),
-            "1×1 grid has no faces"
-        );
+        // A huge step still keeps the first and last sample: a 2×2 grid, two triangles.
+        let r = export_glb(&hf, [640.0, 640.0], &dir.path().join("y.glb"), 64).expect("export");
+        assert_eq!((r.vertices, r.triangles), (4, 2));
     }
 }
