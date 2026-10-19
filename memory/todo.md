@@ -15,6 +15,9 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [x] Mermaid + link validation scripts; CI workflow (docs job on macOS/Ubuntu/Windows)
 - [ ] Commit + push to `SeedeXR/jenga-dunia` main
 - [ ] Research follow-ups listed in `docs/research/evidence-register.md`
+- [x] Installer-surface inventory of `installables/` (WM Basic 4067, Gaea 2.3.1.0) → `docs/research/research-log/2026-10-19-installer-inventory.md`
+- [ ] CI: bump `actions/checkout` and `actions/setup-node` off Node 20 (deprecation warning in run 2); cache `~/.npm/_npx` for mermaid-cli
+- [ ] Phase 2 backlog additions from WM inventory: undo/history paging with archive cap; preview target frame time setting
 
 ## Phase 1 — Foundation (next)
 - [ ] Cargo workspace skeleton (`jd-types`, `jd-diag`, `jd-jobs`, `jd-cache`, `jd-core`, `jd-cli`, `jd-mcp`) — no empty crates

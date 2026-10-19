@@ -604,3 +604,9 @@ World Machine (third party):
 - https://windowsforum.com/news/world-machine-build-4065-adds-native-macos-linux-and-vdm-terrain.440477/
 - https://forum.world-machine.com/t/gpgpu-enhancments-multiscreen/3177 ; /t/cellular-automata-for-hydraulic-erosion/3525 ; /t/unable-to-use-more-than-4-threads/6391 ; /t/q-a-world-machine-godot-terrain3d/8099 ; /t/4044-coast-erosion-water-level-bug/7797
 - https://www.vrwiki.cs.brown.edu/vr-development-software/development-tutorials/world-machine (dated requirements)
+
+---
+
+## Addendum (2026-10-19): installer-surface inventory
+
+An inventory-only inspection of the downloaded installers (no decompilation; ADR-0010) is logged in [`research-log/2026-10-19-installer-inventory.md`](research-log/2026-10-19-installer-inventory.md). Verified facts that refine Part B (World Machine Basic 4067, macOS): universal x86_64+arm64 binary; Qt 6.11.1 UI; links OpenGL and Metal; bundles the Slang compiler 2026.7.1 (Code device); devices ship as plugin bundles (`DevicesStandard`, `DevicesCustomGUI`); 34 preset device codes; 54 example `.tmd` worlds; `.tmd` is a binary chunked format (`TMDFile2`), not text; `world.ini` exposes the memory model (85 % RAM budget, 35 % history budget, paging thresholds, 32 GB history archive cap, auto-throttle, 57 ms preview target); EULA §5(b) prohibits terrain-generation-as-a-service; privacy policy states pseudonymous telemetry and opt-in crash reports. Gaea 2.3.1.0: Inno Setup 7.0.0.3 bootstrapper built 2026-08-10; contents not extractable with innoextract 1.9.

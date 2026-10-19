@@ -35,5 +35,10 @@ Notable corrections during the session: merged planned `jd-render`/`jd-compute` 
 4. Research follow-ups in `docs/research/evidence-register.md` (MoGe-2 weight licence file, WebView2 WebGPU default, `openusd` usdz alignment, Unity RAW endianness, Mei 2007 PDF).
 5. Generate the `graphify` knowledge graph once the repo has code (deterministic; add to session-end checklist).
 
+### Addendum `2026-10-19 16:30:00` — materials report, CI, installer inventory
+- Materials/geomorphology report integrated (`43b7245`); reference-layer architecture added to 02/04.
+- CI run 1 failed only on the link check (materials report missing at that commit); run 2 on `43b7245` **green on macOS, Ubuntu, Windows** (Mermaid render + link check). Warning: actions v4 pinned to Node 20 → todo.
+- Owner added `installables/` (git-ignored) with World Machine Basic 4067 `.pkg` and Gaea 2.3.1.0 `.exe` and asked for REA analysis. Performed **inventory-only** inspection with native tools per ADR-0010 (no decompilation; REA not installed/run — not present, VM required, scope covered). Log: `docs/research/research-log/2026-10-19-installer-inventory.md`; addendum in `gaea-world-machine.md`; evidence register row. Gaea payload needs Inno Setup 7 support (innoextract HEAD build attempted).
+
 ### Files touched
 `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `.gitignore`, `.github/workflows/ci.yml`, `scripts/check-mermaid.mjs`, `scripts/check-links.mjs`, `memory/*` (9 files), `docs/README.md`, `docs/roadmap.md`, `docs/architecture/00–13`, `docs/adr/README.md + 0001–0012`, `docs/spec/*` (5), `docs/research/*` (10 + brief).

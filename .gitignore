@@ -3,3 +3,4 @@ node_modules/
 *.jdproj/cache/
 *.jdproj/journal/
 .DS_Store
+installables/
