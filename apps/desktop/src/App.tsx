@@ -17,6 +17,17 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 const inputCls = "w-28 rounded border border-jd-line bg-jd-bg-2 px-2 py-0.5 text-right text-xs text-jd-fg-0 focus:border-jd-accent focus:outline-none";
 
+/** World size presets; Unity/Unreal landscapes want 2ⁿ+1 samples so quads line up with their patch grids. */
+export const PRESETS: { label: string; resolution: number; extent: number }[] = [
+  { label: "Preview 512² · 2 km", resolution: 512, extent: 2048 },
+  { label: "Square 2048² · 8 km", resolution: 2048, extent: 8192 },
+  { label: "Square 4096² · 16 km", resolution: 4096, extent: 16384 },
+  { label: "Unity 1025² · 2 km", resolution: 1025, extent: 2048 },
+  { label: "Unity / Unreal 2049² · 8 km", resolution: 2049, extent: 8192 },
+  { label: "Unreal 4033² · 16 km", resolution: 4033, extent: 16128 },
+  { label: "Unity 4097² · 16 km", resolution: 4097, extent: 16384 },
+];
+
 export function formatFor(path: string): string {
   const ext = path.split(".").pop()?.toLowerCase();
   return ext === "png" ? "png16" : ext === "r16" ? "raw_r16" : ext === "r32" ? "raw_r32" : ext === "tif" || ext === "tiff" ? "tiff32" : "exr";
@@ -165,6 +176,26 @@ export default function App() {
           </Field>
           <Field label="Resolution (px)">
             <input className={inputCls} type="number" value={resolution} onChange={(e) => setResolution(Number(e.target.value))} />
+          </Field>
+          <Field label="Preset">
+            <select
+              className={`${inputCls} w-36`}
+              value=""
+              onChange={(e) => {
+                const p = PRESETS.find((x) => x.label === e.target.value);
+                if (p) {
+                  setResolution(p.resolution);
+                  setExtent(p.extent);
+                }
+              }}
+              title="Engine-friendly sizes: Unity and Unreal heightmaps are 2ⁿ+1 samples"
+              data-testid="world-preset"
+            >
+              <option value="">choose…</option>
+              {PRESETS.map((p) => (
+                <option key={p.label}>{p.label}</option>
+              ))}
+            </select>
           </Field>
           <div className="mt-2 flex gap-2">
             <button className="btn" title="Create at the path above (⌘N opens a dialog)" onClick={() => s.newProject(projPath, projName, extent, resolution)} disabled={!projPath || s.busy} data-testid="new-project">

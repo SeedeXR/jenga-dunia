@@ -200,6 +200,18 @@ describe("App", () => {
     expect(screen.getByTestId("brush-strength")).toBeInTheDocument();
   });
 
+  it("a world preset fills resolution and extent (Unreal 2049²)", async () => {
+    render(<App />);
+    fireEvent.change(screen.getByTestId("world-preset"), { target: { value: "Unity / Unreal 2049² · 8 km" } });
+    expect(screen.getByLabelText("Resolution (px)")).toHaveValue(2049);
+    expect(screen.getByLabelText("Extent (m)")).toHaveValue(8192);
+    fireEvent.change(screen.getByTestId("project-path"), { target: { value: "/tmp/U.jdproj" } });
+    fireEvent.click(screen.getByTestId("new-project"));
+    await waitFor(() => expect(calls.some((c) => (c.args as { request?: { op: string } }).request?.op === "project.create")).toBe(true));
+    const create = calls.find((c) => (c.args as { request?: { op: string } }).request?.op === "project.create");
+    expect(create).toMatchObject({ args: { request: { params: { world: { resolution_px: [2049, 2049], extent_m: [8192, 8192] } } } } });
+  });
+
   it("surfaces core errors with code and next step in the log", async () => {
     render(<App />);
     fireEvent.change(screen.getByTestId("project-path"), { target: { value: "/bad" } });
