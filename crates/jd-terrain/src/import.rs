@@ -21,7 +21,7 @@ pub struct ForeignImport {
     /// Width and height in pixels — required for headerless RAW files.
     #[serde(default)]
     pub size_px: Option<[u32; 2]>,
-    /// Row 0 of the file is north (true, the usual image convention) or south.
+    /// Row 0 of the file is north (true, the usual image convention) or south (the field convention).
     #[serde(default = "yes")]
     pub north_up: bool,
 }
@@ -149,8 +149,8 @@ pub fn read_foreign(path: &Path, opts: &ForeignImport) -> JdResult<(Vec<f32>, u3
     }
 }
 
-/// Bilinearly resample row-major `data` (w × h) onto the world grid, flipping rows when the
-/// file's row 0 is south. Non-finite samples are rejected.
+/// Bilinearly resample row-major `data` (w × h) onto the world grid. Field row 0 is south, so a
+/// north-up file (the image convention) is flipped. Non-finite samples are rejected.
 pub fn resample_to_world(
     data: &[f32],
     w: u32,
@@ -167,7 +167,8 @@ pub fn resample_to_world(
     let mut out = Heightfield::from_world(world)?;
     let (ow, oh) = (out.width(), out.height());
     let at = |x: u32, y: u32| {
-        let yy = if north_up { y } else { h - 1 - y };
+        // Field rows run south → north; a north-up file (row 0 = north) is flipped.
+        let yy = if north_up { h - 1 - y } else { y };
         data[(yy * w + x) as usize]
     };
     out.fill_with(|x, y| {
@@ -243,6 +244,61 @@ mod tests {
     }
 
     #[test]
+    fn quantised_tiff_and_raw_use_range_and_size() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let t = dir.path().join("q.tif");
+        let q: Vec<u16> = (0..8 * 4).map(|i| (i % 8) as u16 * 9362).collect();
+        tiff::encoder::TiffEncoder::new(std::fs::File::create(&t).expect("file"))
+            .expect("enc")
+            .write_image::<tiff::encoder::colortype::Gray16>(8, 4, &q)
+            .expect("write");
+        assert!(
+            read_foreign(&t, &ForeignImport::default()).is_err(),
+            "u16 needs range_m"
+        );
+        let (d, w, h) = read_foreign(
+            &t,
+            &ForeignImport {
+                range_m: Some([0.0, 70.0]),
+                ..Default::default()
+            },
+        )
+        .expect("read");
+        assert_eq!((w, h), (8, 4));
+        assert!((d[7] - 70.0 * 65534.0 / 65535.0).abs() < 1e-2 && d[0] == 0.0);
+        let r = dir.path().join("r.r32");
+        let mut bytes = Vec::new();
+        for v in [1.5f32, 2.5, 3.5, 4.5, 5.5, 6.5] {
+            bytes.extend_from_slice(&v.to_le_bytes());
+        }
+        std::fs::write(&r, &bytes).expect("write");
+        assert!(
+            read_foreign(&r, &ForeignImport::default()).is_err(),
+            "raw needs size_px"
+        );
+        let (d, w, h) = read_foreign(
+            &r,
+            &ForeignImport {
+                size_px: Some([3, 2]),
+                ..Default::default()
+            },
+        )
+        .expect("read");
+        assert_eq!((w, h, d[5]), (3, 2, 6.5));
+        assert!(
+            read_foreign(
+                &r,
+                &ForeignImport {
+                    size_px: Some([4, 2]),
+                    ..Default::default()
+                }
+            )
+            .is_err(),
+            "size mismatch"
+        );
+    }
+
+    #[test]
     fn tiff_f32_round_trips_and_south_up_flips_rows() {
         let dir = tempfile::tempdir().expect("tmp");
         let p = dir.path().join("dem.tif");
@@ -257,8 +313,13 @@ mod tests {
         assert_eq!(back, data);
         let north = resample_to_world(&back, w, h, true, &world(8)).expect("north");
         let south = resample_to_world(&back, w, h, false, &world(8)).expect("south");
-        assert!(north.get(4, 0) < north.get(4, 7));
-        assert!(south.get(4, 0) > south.get(4, 7));
+        // File rows 0..7 rise 0→70 m. north_up: file row 0 is north → field row 0 (south) is the
+        // LAST file row (high); south-up keeps file order.
+        assert!(
+            north.get(4, 0) > north.get(4, 7),
+            "north-up file: low rows land north"
+        );
+        assert!(south.get(4, 0) < south.get(4, 7));
         assert_eq!(
             read_foreign(&dir.path().join("x.bmp"), &ForeignImport::default())
                 .expect_err("ext")

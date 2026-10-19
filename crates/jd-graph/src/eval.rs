@@ -285,6 +285,18 @@ impl<'a> Evaluator<'a> {
             // across projects (or with project-less evaluations).
             if let Some(dir) = &ctx.assets_dir {
                 hasher.update(dir.to_string_lossy().as_bytes());
+                // File-reading nodes: a re-imported asset (new size/mtime) invalidates the result.
+                if node.kind.0.starts_with("jd.input.")
+                    && let Some(p) = node.params.get("path").and_then(|v| v.as_str())
+                    && let Ok(meta) = std::fs::metadata(dir.join(p))
+                {
+                    hasher.update(&meta.len().to_le_bytes());
+                    if let Ok(m) = meta.modified()
+                        && let Ok(d) = m.duration_since(std::time::UNIX_EPOCH)
+                    {
+                        hasher.update(&d.as_nanos().to_le_bytes());
+                    }
+                }
             }
             for port in &def.inputs {
                 if let Some(from) = input_map.get(id).and_then(|m| m.get(port.name.as_str())) {

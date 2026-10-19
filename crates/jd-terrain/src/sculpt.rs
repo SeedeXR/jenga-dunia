@@ -1,6 +1,6 @@
 //! Stroke sculpting: brushes recorded as data and replayed onto a field (`02-subsystems.md` §4).
-//! A stroke is a polyline in layer metres (`u` east from the west edge, `v` south from the north
-//! edge, i.e. row 0), a radius and a signed strength. Height changes by `strength · falloff(d/r)`
+//! A stroke is a polyline in layer metres (`u` east from the west edge, `v` north from the south
+//! edge, i.e. row 0 — the field convention), a radius and a signed strength. Height changes by `strength · falloff(d/r)`
 //! where `d` is the distance to the polyline, so strokes are order-independent and undo removes a
 //! whole stroke by dropping it from the node's params.
 //!
@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Stroke {
-    /// Polyline in layer metres: `[u east, v south]` from the north-west corner.
+    /// Polyline in layer metres: `[u east, v north]` from the south-west corner (row 0 = south).
     pub points: Vec<[f32; 2]>,
     /// Brush radius in metres.
     pub radius_m: f32,

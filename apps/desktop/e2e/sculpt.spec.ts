@@ -66,6 +66,22 @@ test.describe("sculpting against the real core", () => {
       expect(v).toBeGreaterThanOrEqual(0);
       expect(v).toBeLessThanOrEqual(1024);
     }
+    // Orientation: the camera sits south of the terrain (+Z), so a stroke in the lower half of the
+    // viewport is nearer the camera = south = small v (layer row 0 is south).
+    await page.getByTestId("sculpt-toggle").click(); // back to orbit…
+    await page.getByTestId("sculpt-toggle").click(); // …and sculpt again (node already exists)
+    await page.mouse.move(cx - 40, cy + vp.height * 0.28);
+    await page.mouse.down();
+    await page.mouse.move(cx + 40, cy + vp.height * 0.28, { steps: 8 });
+    await page.mouse.up();
+    await expect(page.getByTestId("graph-panel").locator(".react-flow__node", { hasText: "jd.sculpt.strokes@1" })).toContainText("strokes=");
+    const journal2 = readFileSync(path.join(proj, "journal", "ops.ndjson"), "utf8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l) as { op: string; params: { key?: string; value?: unknown } });
+    const southStroke = journal2.filter((e) => e.op === "graph.set_param" && e.params.key === "strokes").pop()!;
+    const south = (southStroke.params.value as { points: [number, number][] }[]).pop()!.points;
+    for (const [, v] of south) expect(v, "lower half of the screen is south → v < extent/2").toBeLessThan(512);
     await page.screenshot({ path: testInfo.outputPath("sculpt.png") });
     expect(errors, "no uncaught page errors").toEqual([]);
     await core.close();

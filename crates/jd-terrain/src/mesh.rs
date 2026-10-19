@@ -35,7 +35,8 @@ pub struct MeshExportReport {
 /// Smallest step so the grid has at most `max_vertices` vertices.
 pub fn auto_step(width: u32, height: u32, max_vertices: u32) -> u32 {
     let mut step = 1u32;
-    while (width.div_ceil(step) as u64) * (height.div_ceil(step) as u64) > max_vertices as u64 {
+    let grid = |n: u32, s: u32| ((n.saturating_sub(1)).div_ceil(s) + 1) as u64;
+    while grid(width, step) * grid(height, step) > max_vertices as u64 {
         step += 1;
     }
     step
@@ -47,7 +48,8 @@ fn pad4(v: &mut Vec<u8>, byte: u8) {
     }
 }
 
-/// Write the field as a `.glb` grid mesh covering `extent_m` (x east, z south; row 0 at −Z).
+/// Write the field as a `.glb` grid mesh covering `extent_m`: +X east, +Z south (field row 0 is
+/// south and lands at +Z/2, matching the viewport and the image exports).
 pub fn export_glb(
     hf: &Heightfield,
     extent_m: [f64; 2],
@@ -62,7 +64,8 @@ pub fn export_glb(
         return Err(JdError::invalid("extent_m", "must be positive"));
     }
     let (w, h) = (hf.width(), hf.height());
-    let (gw, gh) = (w.div_ceil(step), h.div_ceil(step));
+    // Sample 0, step, 2·step, … and always the last row/column so the mesh reaches the edge.
+    let (gw, gh) = ((w - 1).div_ceil(step) + 1, (h - 1).div_ceil(step) + 1);
     if gw < 2 || gh < 2 {
         return Err(JdError::invalid(
             "step",
@@ -79,7 +82,7 @@ pub fn export_glb(
     let (sx, sz) = (extent_m[0] / w as f64, extent_m[1] / h as f64);
     let sample = |gx: u32, gz: u32| hf.get((gx * step).min(w - 1), (gz * step).min(h - 1));
     let xm = |gx: u32| ((gx * step).min(w - 1) as f64 + 0.5) * sx - extent_m[0] / 2.0;
-    let zm = |gz: u32| ((gz * step).min(h - 1) as f64 + 0.5) * sz - extent_m[1] / 2.0;
+    let zm = |gz: u32| extent_m[1] / 2.0 - ((gz * step).min(h - 1) as f64 + 0.5) * sz;
 
     let mut bin: Vec<u8> =
         Vec::with_capacity((n_vertices as usize) * 32 + ((gw - 1) * (gh - 1)) as usize * 24);
@@ -126,8 +129,8 @@ pub fn export_glb(
             let b = a + 1;
             let c = a + gw;
             let d = c + 1;
-            // Counter-clockwise seen from +Y: (a, c, b) and (b, c, d).
-            for i in [a, c, b, b, c, d] {
+            // Row c is north of row a (−Z): (a, b, c) and (b, d, c) are counter-clockwise from +Y.
+            for i in [a, b, c, b, d, c] {
                 bin.extend_from_slice(&i.to_le_bytes());
             }
         }
@@ -258,13 +261,48 @@ mod tests {
     }
 
     #[test]
+    fn south_row_lands_at_positive_z() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let mut hf = Heightfield::new(8, 8, 8, 0).expect("hf");
+        hf.fill_with(|_, y| if y == 0 { 100.0 } else { 0.0 }); // row 0 = south is high
+        let p = dir.path().join("o.glb");
+        export_glb(&hf, [80.0, 80.0], &p, 1).expect("export");
+        let bytes = fs::read(&p).expect("read");
+        let (_, bin) = chunks(&bytes);
+        let v = |i: usize| -> [f32; 3] {
+            let o = i * 12;
+            [0, 4, 8].map(|k| f32::from_le_bytes(bin[o + k..o + k + 4].try_into().unwrap()))
+        };
+        let [_, y0, z0] = v(0); // first vertex: row 0, column 0
+        assert_eq!(y0, 100.0);
+        assert!(z0 > 0.0, "south must be +Z like the viewport: {z0}");
+        let [_, y7, z7] = v(7 * 8);
+        assert!(y7 == 0.0 && z7 < 0.0);
+    }
+
+    #[test]
     fn step_decimates_and_auto_step_respects_the_budget() {
         assert_eq!(auto_step(4096, 4096, 1_048_576), 4);
+        assert_eq!(
+            auto_step(4097, 4097, 1_048_576),
+            4,
+            "2ⁿ+1: 1025 samples per side"
+        );
         assert_eq!(auto_step(100, 100, 1_048_576), 1);
         let dir = tempfile::tempdir().expect("tmp");
         let hf = Heightfield::new(64, 64, 32, 4).expect("hf");
         let r = export_glb(&hf, [640.0, 640.0], &dir.path().join("s.glb"), 4).expect("export");
-        assert_eq!((r.vertices, r.triangles), (256, 450));
+        assert_eq!(
+            (r.vertices, r.triangles),
+            (289, 512),
+            "64 px at step 4 → 17 samples incl. the edge"
+        );
+        let (json, _) = chunks(&fs::read(dir.path().join("s.glb")).expect("read"));
+        let mx = &json["accessors"][0]["max"];
+        assert!(
+            (mx[0].as_f64().unwrap() - 320.0 + 5.0).abs() < 1e-3,
+            "last column sits on the east edge: {mx}"
+        );
         assert!(export_glb(&hf, [640.0, 640.0], &dir.path().join("x.glb"), 0).is_err());
         assert!(
             export_glb(&hf, [640.0, 640.0], &dir.path().join("x.glb"), 64).is_err(),

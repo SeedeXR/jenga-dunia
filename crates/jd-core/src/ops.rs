@@ -589,10 +589,20 @@ pub mod builtin {
                     .clone()
                     .or_else(|| a.path.file_name().map(|n| n.to_string_lossy().into_owned()))
                     .ok_or_else(|| JdError::invalid("path", "source has no file name"))?;
-                if name.is_empty() || name.contains(['/', '\\']) || name == "." || name == ".." {
+                // A single normal path component (no separators, prefixes, `.` or `..`).
+                let mut comps = Path::new(&name).components();
+                if !matches!((comps.next(), comps.next()), (Some(std::path::Component::Normal(_)), None)) {
                     return Err(JdError::invalid("name", "must be a plain file name"));
                 }
+                if !a.path.is_absolute() {
+                    return Err(JdError::invalid("path", "source must be an absolute path")
+                        .why("Relative paths would resolve against the server's working directory, outside any workspace check."));
+                }
                 let dest = ctx.with_project(|p| Ok(p.root().join("assets").join(&name)))?;
+                if dest.exists() {
+                    return Err(JdError::invalid("name", format!("asset `{name}` already exists"))
+                        .next("Pick another name; graphs reference assets by name, so existing files are never replaced."));
+                }
                 std::fs::create_dir_all(dest.parent().unwrap_or(&dest))?;
                 let bytes = std::fs::copy(&a.path, &dest)?;
                 Ok((ImportedAsset { name, bytes }, Vec::new()))
@@ -1326,6 +1336,74 @@ pub mod graph {
                 .find(|n| n["id"] == noise_id)
                 .expect("noise");
             assert_eq!(moved["ui"]["position"], serde_json::json!([10.0, 20.0]));
+        }
+
+        #[test]
+        fn import_asset_requires_absolute_source_and_never_overwrites() {
+            let reg = Registry::with_builtins();
+            let dir = tempfile::tempdir().expect("tmp");
+            let ctx = Context::default();
+            let proj = dir.path().join("i.jdproj");
+            call(
+                &reg,
+                &ctx,
+                "project.create",
+                serde_json::json!({ "path": proj, "name": "I" }),
+            );
+            let src = dir.path().join("dem.png");
+            std::fs::write(&src, b"not really a png").expect("write");
+            let r = call(
+                &reg,
+                &ctx,
+                "project.import_asset",
+                serde_json::json!({ "path": "dem.png" }),
+            );
+            assert_eq!(
+                r.error.as_ref().map(|e| e.code),
+                Some(ErrorCode::E_INPUT_INVALID),
+                "relative source refused"
+            );
+            let r = call(
+                &reg,
+                &ctx,
+                "project.import_asset",
+                serde_json::json!({ "path": src }),
+            );
+            assert_eq!(
+                r.result.as_ref().and_then(|v| v["name"].as_str()),
+                Some("dem.png"),
+                "{r:?}"
+            );
+            let r = call(
+                &reg,
+                &ctx,
+                "project.import_asset",
+                serde_json::json!({ "path": src }),
+            );
+            assert_eq!(
+                r.error.as_ref().map(|e| e.code),
+                Some(ErrorCode::E_INPUT_INVALID),
+                "existing asset is never replaced"
+            );
+            assert_eq!(
+                std::fs::read(proj.join("assets/dem.png"))
+                    .expect("asset")
+                    .len(),
+                16
+            );
+            for bad in ["../x.png", "a/b.png", "C:x.png"] {
+                let r = call(
+                    &reg,
+                    &ctx,
+                    "project.import_asset",
+                    serde_json::json!({ "path": src, "name": bad }),
+                );
+                assert_eq!(
+                    r.error.as_ref().map(|e| e.code),
+                    Some(ErrorCode::E_INPUT_INVALID),
+                    "{bad}"
+                );
+            }
         }
 
         #[test]

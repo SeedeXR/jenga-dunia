@@ -270,7 +270,7 @@
           "default": null
         },
         "north_up": {
-          "description": "Row 0 of the file is north (true, the usual image convention) or south.",
+          "description": "Row 0 of the file is north (true, the usual image convention) or south (the field convention).",
           "type": "boolean",
           "default": true
         }
@@ -654,7 +654,7 @@
           "type": "object",
           "properties": {
             "points": {
-              "description": "Polyline in layer metres: `[u east, v south]` from the north-west corner.",
+              "description": "Polyline in layer metres: `[u east, v north]` from the south-west corner (row 0 = south).",
               "type": "array",
               "items": {
                 "type": "array",

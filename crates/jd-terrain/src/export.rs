@@ -190,16 +190,19 @@ pub fn export_heightmap(
             write_all(path, &buf)?
         }
         HeightmapFormat::Tiff32 => {
-            let file = fs::File::create(path)?;
-            let mut enc =
-                tiff::encoder::TiffEncoder::new(std::io::BufWriter::new(file)).map_err(|e| {
+            {
+                // No BufWriter: tiff writes strips in large chunks, and the encoder's final
+                // directory is written on drop, so the file must be complete before we measure it.
+                let file = fs::File::create(path)?;
+                let mut enc = tiff::encoder::TiffEncoder::new(file).map_err(|e| {
                     JdError::new(ErrorCode::E_SERIALIZE, format!("TIFF write failed: {e}"))
                 })?;
-            enc.write_image::<tiff::encoder::colortype::Gray32Float>(w, h, &data)
-                .map_err(|e| {
-                    JdError::new(ErrorCode::E_SERIALIZE, format!("TIFF write failed: {e}"))
-                        .detail("path", path.display().to_string())
-                })?;
+                enc.write_image::<tiff::encoder::colortype::Gray32Float>(w, h, &data)
+                    .map_err(|e| {
+                        JdError::new(ErrorCode::E_SERIALIZE, format!("TIFF write failed: {e}"))
+                            .detail("path", path.display().to_string())
+                    })?;
+            }
             fs::metadata(path)?.len()
         }
     };

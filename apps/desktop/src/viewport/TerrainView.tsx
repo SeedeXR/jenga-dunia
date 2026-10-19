@@ -15,7 +15,7 @@ interface Props {
   extentM: [number, number] | null;
   onInfo?: (info: ViewportInfo) => void;
   /** Sculpt mode: pointer drags paint a stroke on the terrain instead of orbiting. Points are
-   *  reported in layer metres (u east from the west edge, v south from the north edge). */
+   *  reported in layer metres (u east from the west edge, v north from the south edge = row 0). */
   sculpt?: { enabled: boolean; onStroke: (points: [number, number][]) => void };
 }
 
@@ -153,8 +153,9 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt }: Props)
       raycaster.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
       const h = raycaster.intersectObject(state.mesh, false)[0];
       if (!h) return null;
-      // Mesh is centred at the origin; row 0 of the layer is north (−Z).
-      return [h.point.x + ext[0] / 2, h.point.z + ext[1] / 2];
+      // Mesh is centred at the origin; layer row 0 is SOUTH (+Z in the viewport), so v counts
+      // from the south edge: v = 0 at +Z/2.
+      return [h.point.x + ext[0] / 2, ext[1] / 2 - h.point.z];
     };
     const onDown = (e: PointerEvent) => {
       dragging = true;

@@ -459,7 +459,13 @@ pub fn register_all(r: &mut Registry) {
             let Some(dir) = &ctx.assets_dir else {
                 return Err(JdError::invalid("path", "no project is open, so there is no assets/ directory to read from"));
             };
-            let (data, w, h) = read_foreign(&dir.join(rel), &ip.import)?;
+            // Resolve symlinks and make sure the real file still lives under assets/.
+            let file = std::fs::canonicalize(dir.join(rel)).map_err(|e| JdError::invalid("path", format!("cannot read `{}`: {e}", ip.path)))?;
+            let base = std::fs::canonicalize(dir).map_err(|e| JdError::invalid("path", format!("assets directory unavailable: {e}")))?;
+            if !file.starts_with(&base) {
+                return Err(JdError::invalid("path", "file resolves outside the project's assets/ directory"));
+            }
+            let (data, w, h) = read_foreign(&file, &ip.import)?;
             Ok(out("out", resample_to_world(&data, w, h, ip.import.north_up, &ctx.lod_world)?))
         },
     ));
@@ -914,6 +920,23 @@ mod tests {
             ev.evaluate(&g, &world(), 0).expect_err("no project").code,
             ErrorCode::E_INPUT_INVALID
         );
+        #[cfg(unix)]
+        {
+            std::fs::write(dir.path().join("outside.png"), b"x").expect("write");
+            std::os::unix::fs::symlink(dir.path().join("outside.png"), assets.join("link.png"))
+                .expect("symlink");
+            g.nodes
+                .get_mut(&i)
+                .expect("i")
+                .params
+                .insert("path".into(), serde_json::json!("link.png"));
+            assert_eq!(
+                ev.evaluate_with(&g, &world(), 0, Some(&assets))
+                    .expect_err("symlink escape")
+                    .code,
+                ErrorCode::E_INPUT_INVALID
+            );
+        }
         g.nodes
             .get_mut(&i)
             .expect("i")
