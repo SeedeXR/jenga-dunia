@@ -40,8 +40,9 @@ export type GraphAddNodeRequest = {
   "params"?: Record<string, unknown>;
   /** Optional client-chosen id (ULID); generated when absent. */
   "id"?: NodeId | null;
-  /** Editor position. */
-  "position"?: [number, number];
+  /** Editor position; when omitted the node lands to the right of the current graph so
+scripted additions (CLI, MCP) never stack at the origin. */
+  "position"?: [number, number] | null;
 };
 
 export type GraphAddNodeResult = {
@@ -740,13 +741,19 @@ export type NodeParams_jd_output_height_1 = {
   "layer"?: string;
 };
 
+export type StrokeMode = "raise" | "smooth" | "flatten";
+
 export type Stroke = {
   /** Polyline in layer metres: `[u east, v north]` from the south-west corner (row 0 = south). */
   "points": ([number, number])[];
   /** Brush radius in metres. */
   "radius_m": number;
-  /** Height added at the centre (negative lowers), metres. */
-  "strength_m": number;
+  /** Height added at the centre for `raise` (negative lowers), metres. */
+  "strength_m"?: number;
+  /** Brush behaviour (default `raise`). */
+  "mode"?: StrokeMode;
+  /** Blend factor 0..1 for `smooth` / `flatten` (default 0.5). */
+  "amount"?: number;
 };
 
 export type NodeParams_jd_sculpt_strokes_1 = {

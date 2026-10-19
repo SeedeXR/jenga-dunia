@@ -21,7 +21,7 @@ pub use heightfield::{Heightfield, HeightfieldStats, Tile, TileCoord};
 pub use import::{ForeignImport, read_foreign, resample_to_world};
 pub use mesh::{MeshExportReport, auto_step, export_glb};
 pub use noise::{FractalKind, NoiseKind, NoiseParams, generate_noise};
-pub use sculpt::{Stroke, apply_strokes};
+pub use sculpt::{Stroke, StrokeMode, apply_strokes};
 pub use sim::{
     HydraulicParams, HydraulicResult, THERMAL_MAX_RATE, hydraulic_erode, slope_mask, thermal_erode,
 };

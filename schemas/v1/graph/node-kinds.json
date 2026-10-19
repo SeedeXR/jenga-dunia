@@ -672,16 +672,47 @@
               "format": "float"
             },
             "strength_m": {
-              "description": "Height added at the centre (negative lowers), metres.",
+              "description": "Height added at the centre for `raise` (negative lowers), metres.",
               "type": "number",
-              "format": "float"
+              "format": "float",
+              "default": 0.0
+            },
+            "mode": {
+              "description": "Brush behaviour (default `raise`).",
+              "$ref": "#/$defs/StrokeMode",
+              "default": "raise"
+            },
+            "amount": {
+              "description": "Blend factor 0..1 for `smooth` / `flatten` (default 0.5).",
+              "type": "number",
+              "format": "float",
+              "default": 0.5
             }
           },
           "additionalProperties": false,
           "required": [
             "points",
-            "radius_m",
-            "strength_m"
+            "radius_m"
+          ]
+        },
+        "StrokeMode": {
+          "description": "What a stroke does to the heights under the brush.",
+          "oneOf": [
+            {
+              "description": "Add `strength_m` (negative digs).",
+              "type": "string",
+              "const": "raise"
+            },
+            {
+              "description": "Blend towards the local mean (box filter ~ radius/4) by `amount`.",
+              "type": "string",
+              "const": "smooth"
+            },
+            {
+              "description": "Blend towards the height under the first point by `amount`.",
+              "type": "string",
+              "const": "flatten"
+            }
           ]
         }
       }

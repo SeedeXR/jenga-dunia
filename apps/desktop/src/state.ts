@@ -87,8 +87,8 @@ interface State {
   /** Sculpt mode: viewport drags paint strokes into the selected sculpt node. */
   sculpting: boolean;
   setSculpting: (on: boolean) => void;
-  brush: { radius_m: number; strength_m: number };
-  setBrush: (patch: Partial<{ radius_m: number; strength_m: number }>) => void;
+  brush: { radius_m: number; strength_m: number; mode: "raise" | "smooth" | "flatten"; amount: number };
+  setBrush: (patch: Partial<{ radius_m: number; strength_m: number; mode: "raise" | "smooth" | "flatten"; amount: number }>) => void;
   /** Insert a sculpt node in front of the first output (or select the existing one) and enter sculpt mode. */
   startSculpting: () => Promise<void>;
   /** Append a stroke to the selected sculpt node (journaled: undo removes the whole stroke). */
@@ -239,7 +239,7 @@ export const useStore = create<State>((set, get) => {
     setSelectedNode: (id) => set({ selectedNode: id }),
     sculpting: false,
     setSculpting: (on) => set({ sculpting: on }),
-    brush: { radius_m: 150, strength_m: 40 },
+    brush: { radius_m: 150, strength_m: 40, mode: "raise", amount: 0.5 },
     setBrush: (patch) => set((s) => ({ brush: { ...s.brush, ...patch } })),
     startSculpting: async () => {
       const g = get().graph;
@@ -263,7 +263,7 @@ export const useStore = create<State>((set, get) => {
       const node = graph.nodes.find((n) => n.id === selectedNode && n.kind.startsWith("jd.sculpt.strokes@"));
       if (!node || points.length === 0) return;
       const strokes = Array.isArray(node.params.strokes) ? (node.params.strokes as unknown[]) : [];
-      await get().setParam(node.id, "strokes", [...strokes, { points: points.map(([u, v]) => [Math.round(u * 10) / 10, Math.round(v * 10) / 10]), radius_m: brush.radius_m, strength_m: brush.strength_m }]);
+      await get().setParam(node.id, "strokes", [...strokes, { points: points.map(([u, v]) => [Math.round(u * 10) / 10, Math.round(v * 10) / 10]), radius_m: brush.radius_m, strength_m: brush.strength_m, mode: brush.mode, amount: brush.amount }]);
     },
     setLive: (on) => {
       set({ live: on });

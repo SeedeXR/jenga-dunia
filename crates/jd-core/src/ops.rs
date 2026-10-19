@@ -653,9 +653,10 @@ pub mod graph {
         /// Optional client-chosen id (ULID); generated when absent.
         #[serde(default)]
         pub id: Option<NodeId>,
-        /// Editor position.
+        /// Editor position; when omitted the node lands to the right of the current graph so
+        /// scripted additions (CLI, MCP) never stack at the origin.
         #[serde(default)]
-        pub position: [f32; 2],
+        pub position: Option<[f32; 2]>,
     }
 
     /// `graph.remove_node` / `graph.set_bypass` params.
@@ -843,7 +844,14 @@ pub mod graph {
                         params: a.params,
                         bypass: false,
                         ui: jd_graph::model::UiMeta {
-                            position: a.position,
+                            position: a.position.unwrap_or_else(|| {
+                                let right = g
+                                    .nodes
+                                    .values()
+                                    .map(|n| n.ui.position[0])
+                                    .fold(-320.0f32, f32::max);
+                                [right + 320.0, 0.0]
+                            }),
                             label: None,
                         },
                     },
@@ -1139,6 +1147,16 @@ pub mod graph {
                 .as_str()
                 .expect("id")
                 .to_owned();
+            // No position given: placed right of the starter graph (output sits at x = 320).
+            let listed = call(&reg, &ctx, "graph.list", serde_json::json!({}));
+            let placed = listed.result.expect("list")["nodes"]
+                .as_array()
+                .expect("nodes")
+                .iter()
+                .find(|n| n["id"] == noise_id)
+                .map(|n| n["ui"]["position"].clone())
+                .expect("new node");
+            assert_eq!(placed, serde_json::json!([640.0, 0.0]));
             let out = call(
                 &reg,
                 &ctx,
@@ -1273,8 +1291,8 @@ pub mod graph {
                 .expect("noise");
             assert_eq!(
                 n["ui"]["position"],
-                serde_json::json!([0.0, 0.0]),
-                "starter position restored"
+                serde_json::json!([640.0, 0.0]),
+                "position before the move restored"
             );
             let r = call(&reg, &ctx, "graph.redo", serde_json::json!({}));
             let v = r.result.expect("redo");

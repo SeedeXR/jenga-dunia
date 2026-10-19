@@ -271,13 +271,28 @@ export default function App() {
           {s.sculpting && (
             <>
               <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Brush</h2>
+              <Field label="Mode">
+                <select className={`${inputCls} w-36`} value={s.brush.mode} onChange={(e) => s.setBrush({ mode: e.target.value as "raise" | "smooth" | "flatten" })} data-testid="brush-mode">
+                  <option value="raise">raise / lower</option>
+                  <option value="smooth">smooth</option>
+                  <option value="flatten">flatten</option>
+                </select>
+              </Field>
               <Field label="Radius (m)">
                 <input className={inputCls} type="number" value={s.brush.radius_m} onChange={(e) => s.setBrush({ radius_m: Number(e.target.value) })} data-testid="brush-radius" />
               </Field>
-              <Field label="Strength (m)">
-                <input className={inputCls} type="number" value={s.brush.strength_m} onChange={(e) => s.setBrush({ strength_m: Number(e.target.value) })} data-testid="brush-strength" />
-              </Field>
-              <p className="mb-4 text-xs text-jd-fg-2">Drag on the terrain to raise it; negative strength lowers. Each stroke is one undo step.</p>
+              {s.brush.mode === "raise" ? (
+                <Field label="Strength (m)">
+                  <input className={inputCls} type="number" value={s.brush.strength_m} onChange={(e) => s.setBrush({ strength_m: Number(e.target.value) })} data-testid="brush-strength" />
+                </Field>
+              ) : (
+                <Field label="Amount (0–1)">
+                  <input className={inputCls} type="number" step="0.1" min="0" max="1" value={s.brush.amount} onChange={(e) => s.setBrush({ amount: Number(e.target.value) })} data-testid="brush-amount" />
+                </Field>
+              )}
+              <p className="mb-4 text-xs text-jd-fg-2">
+                {s.brush.mode === "raise" ? "Drag on the terrain to raise it; negative strength lowers." : s.brush.mode === "smooth" ? "Drag to blend heights towards their local mean." : "Drag to pull heights towards the height under the first point."} Each stroke is one undo step.
+              </p>
             </>
           )}
           <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Terrain · Noise</h2>

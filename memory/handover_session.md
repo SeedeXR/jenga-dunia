@@ -98,6 +98,8 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `09:50:00` `src-tauri/Info.plist` merged into the bundle: `.jdproj` is a package document (`LSTypeIsPackage`, UTI `com.seedexr.jengadunia.project` conforming to `com.apple.package`). After `lsregister -f "Jenga Dunia.app"`, a plain `open H512.jdproj` launched Jenga Dunia and opened the project (native log: document open request → project.open ok → live preview). Spotlight's `mdls` still reported `public.folder` for the directory (metadata cache), but LaunchServices routing worked.
 
+- `10:10:00` `graph.add_node` without a position places the node right of the graph (CLI/MCP additions no longer stack at the origin; test). **Smooth / flatten brushes**: `Stroke.mode` (raise|smooth|flatten) + `amount` 0..1; smooth blends towards a box mean (radius/4 px) of the input, flatten towards the height under the stroke's first point; brush panel gained a Mode select (strength for raise, amount otherwise). Kernel test on a checkerboard; schemas/types regenerated.
+
 ### Open / next (as of 2026-10-20 09:55, head `fd63a43`)
 1. **CI**: `645408b` (document open + native log), `1678900` (package UTI), `fd63a43` (brush cursor) polling; everything through `208b120` green.
 2. **Figma**: connector unavailable this session ("server not found") and plugin OAuth pending on the owner's side → tutorial images stay in `docs/user/images/` (annotated by `annotate.mjs`); place them in file `fxyeV62hgLoNmG3dU1LX6G` when a connector works.

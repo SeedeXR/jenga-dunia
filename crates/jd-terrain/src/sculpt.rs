@@ -11,6 +11,21 @@ use crate::Heightfield;
 use jd_types::{JdError, JdResult};
 use serde::{Deserialize, Serialize};
 
+/// What a stroke does to the heights under the brush.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum StrokeMode {
+    /// Add `strength_m` (negative digs).
+    #[default]
+    Raise,
+    /// Blend towards the local mean (box filter ~ radius/4) by `amount`.
+    Smooth,
+    /// Blend towards the height under the first point by `amount`.
+    Flatten,
+}
+
 /// One brush stroke.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -19,8 +34,36 @@ pub struct Stroke {
     pub points: Vec<[f32; 2]>,
     /// Brush radius in metres.
     pub radius_m: f32,
-    /// Height added at the centre (negative lowers), metres.
+    /// Height added at the centre for `raise` (negative lowers), metres.
+    #[serde(default)]
     pub strength_m: f32,
+    /// Brush behaviour (default `raise`).
+    #[serde(default)]
+    pub mode: StrokeMode,
+    /// Blend factor 0..1 for `smooth` / `flatten` (default 0.5).
+    #[serde(default = "half")]
+    pub amount: f32,
+}
+fn half() -> f32 {
+    0.5
+}
+
+/// Box-filtered copy of `h` (radius in pixels, edge-clamped) for smooth strokes.
+fn box_mean(h: &Heightfield, r: u32) -> Heightfield {
+    let (w, hh) = (h.width(), h.height());
+    let mut out = h.clone();
+    out.fill_with(|x, y| {
+        let (x0, x1) = (x.saturating_sub(r), (x + r).min(w - 1));
+        let (y0, y1) = (y.saturating_sub(r), (y + r).min(hh - 1));
+        let mut sum = 0.0f32;
+        for yy in y0..=y1 {
+            for xx in x0..=x1 {
+                sum += h.get(xx, yy);
+            }
+        }
+        sum / ((x1 - x0 + 1) * (y1 - y0 + 1)) as f32
+    });
+    out
 }
 
 fn dist_to_segment(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
@@ -68,13 +111,48 @@ pub fn apply_strokes(
     if strokes.is_empty() {
         return Ok(out);
     }
+    for (i, s) in strokes.iter().enumerate() {
+        if s.mode != StrokeMode::Raise && !(0.0..=1.0).contains(&s.amount) {
+            return Err(JdError::invalid(
+                "strokes",
+                format!("stroke {i}: amount must be within 0..=1"),
+            ));
+        }
+    }
+    // Smooth strokes blend towards a blurred copy of the input (radius ≈ brush/4, ≥ 1 px).
+    let smoothed = strokes
+        .iter()
+        .filter(|s| s.mode == StrokeMode::Smooth)
+        .map(|s| s.radius_m)
+        .fold(None, |m: Option<f32>, r| Some(m.map_or(r, |x| x.max(r))))
+        .map(|r| {
+            let px = ((r / spacing_m[0].min(spacing_m[1])) / 4.0)
+                .round()
+                .max(1.0) as u32;
+            box_mean(h, px)
+        });
+    let sample = |p: [f32; 2]| -> f32 {
+        let x = ((p[0] / spacing_m[0]) as i64).clamp(0, h.width() as i64 - 1) as u32;
+        let y = ((p[1] / spacing_m[1]) as i64).clamp(0, h.height() as i64 - 1) as u32;
+        h.get(x, y)
+    };
+    let targets: Vec<f32> = strokes
+        .iter()
+        .map(|s| {
+            if s.mode == StrokeMode::Flatten {
+                sample(s.points[0])
+            } else {
+                0.0
+            }
+        })
+        .collect();
     out.fill_with(|x, y| {
         let p = [
             (x as f32 + 0.5) * spacing_m[0],
             (y as f32 + 0.5) * spacing_m[1],
         ];
         let mut v = h.get(x, y);
-        for s in strokes {
+        for (s, target) in strokes.iter().zip(&targets) {
             let d = s
                 .points
                 .windows(2)
@@ -88,7 +166,15 @@ pub fn apply_strokes(
             let t = (d / s.radius_m).min(1.0);
             // Smooth falloff: 1 at the centre, 0 at the radius, zero slope at both ends.
             let w = 1.0 - t * t * (3.0 - 2.0 * t);
-            v += s.strength_m * w;
+            match s.mode {
+                StrokeMode::Raise => v += s.strength_m * w,
+                StrokeMode::Smooth => {
+                    if let Some(sm) = &smoothed {
+                        v += (sm.get(x, y) - v) * s.amount * w;
+                    }
+                }
+                StrokeMode::Flatten => v += (target - v) * s.amount * w,
+            }
         }
         v
     });
@@ -100,12 +186,75 @@ mod tests {
     use super::*;
 
     #[test]
+    fn flatten_and_smooth_pull_towards_target_and_local_mean() {
+        let mut h = Heightfield::new(64, 64, 32, 4).expect("hf");
+        h.fill_with(|x, y| if (x + y) % 2 == 0 { 100.0 } else { 0.0 }); // checkerboard: mean 50
+        let flat = apply_strokes(
+            &h,
+            [1.0, 1.0],
+            &[Stroke {
+                points: vec![[32.5, 32.5]],
+                radius_m: 12.0,
+                strength_m: 0.0,
+                mode: StrokeMode::Flatten,
+                amount: 1.0,
+            }],
+        )
+        .expect("flatten");
+        let target = h.get(32, 32);
+        assert_eq!(flat.get(32, 32), target);
+        // One pixel off-centre the falloff is ≈ 0.98, so the neighbour lands just under the target.
+        assert!(
+            flat.get(33, 32) > target - 5.0 && flat.get(33, 32) <= target,
+            "neighbour pulled to the target: {}",
+            flat.get(33, 32)
+        );
+        assert_eq!(flat.get(5, 5), h.get(5, 5), "outside the radius untouched");
+        let smooth = apply_strokes(
+            &h,
+            [1.0, 1.0],
+            &[Stroke {
+                points: vec![[32.5, 32.5]],
+                radius_m: 12.0,
+                strength_m: 0.0,
+                mode: StrokeMode::Smooth,
+                amount: 1.0,
+            }],
+        )
+        .expect("smooth");
+        for (x, y) in [(32u32, 32u32), (33, 32), (31, 33)] {
+            assert!(
+                (smooth.get(x, y) - 50.0).abs() < 12.0,
+                "checkerboard smoothed towards its mean: {}",
+                smooth.get(x, y)
+            );
+        }
+        assert_eq!(smooth.get(5, 5), h.get(5, 5));
+        assert!(
+            apply_strokes(
+                &h,
+                [1.0, 1.0],
+                &[Stroke {
+                    points: vec![[1.0, 1.0]],
+                    radius_m: 2.0,
+                    strength_m: 0.0,
+                    mode: StrokeMode::Smooth,
+                    amount: 1.5
+                }]
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn stroke_raises_along_its_path_and_nothing_beyond_the_radius() {
         let flat = Heightfield::new(64, 64, 32, 4).expect("hf");
         let stroke = Stroke {
             points: vec![[10.0, 32.0], [50.0, 32.0]],
             radius_m: 6.0,
             strength_m: 20.0,
+            mode: StrokeMode::Raise,
+            amount: 0.5,
         };
         let out = apply_strokes(&flat, [1.0, 1.0], &[stroke]).expect("sculpt");
         // Pixel centres sit 0.5 m off the line, so the crest is just under full strength.
@@ -145,6 +294,8 @@ mod tests {
             points: vec![[16.0, 16.0]],
             radius_m: 8.0,
             strength_m: -4.0,
+            mode: StrokeMode::Raise,
+            amount: 0.5,
         };
         let out = apply_strokes(&h, [2.0, 2.0], &[dig.clone(), dig.clone()]).expect("sculpt");
         let single = apply_strokes(&h, [2.0, 2.0], &[dig]).expect("sculpt");
@@ -161,7 +312,9 @@ mod tests {
                 &[Stroke {
                     points: vec![],
                     radius_m: 1.0,
-                    strength_m: 1.0
+                    strength_m: 1.0,
+                    mode: StrokeMode::Raise,
+                    amount: 0.5
                 }]
             )
             .is_err()
@@ -173,7 +326,9 @@ mod tests {
                 &[Stroke {
                     points: vec![[0.0, 0.0]],
                     radius_m: 0.0,
-                    strength_m: 1.0
+                    strength_m: 1.0,
+                    mode: StrokeMode::Raise,
+                    amount: 0.5
                 }]
             )
             .is_err()

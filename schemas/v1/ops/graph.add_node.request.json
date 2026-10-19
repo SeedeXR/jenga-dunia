@@ -27,18 +27,18 @@
       "default": null
     },
     "position": {
-      "description": "Editor position.",
-      "type": "array",
+      "description": "Editor position; when omitted the node lands to the right of the current graph so\nscripted additions (CLI, MCP) never stack at the origin.",
+      "type": [
+        "array",
+        "null"
+      ],
       "items": {
         "type": "number",
         "format": "float"
       },
       "minItems": 2,
       "maxItems": 2,
-      "default": [
-        0.0,
-        0.0
-      ]
+      "default": null
     }
   },
   "additionalProperties": false,
