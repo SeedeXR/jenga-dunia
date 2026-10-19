@@ -44,8 +44,11 @@ function JdNode({ data }: NodeProps<FlowNode<JdNodeData>>) {
 
 const nodeTypes = { jd: JdNode };
 
-type Prop = { type?: string; enum?: string[]; description?: string; default?: unknown };
-type Schema = { properties?: Record<string, Prop & { $ref?: string }>; $defs?: Record<string, { enum?: string[]; oneOf?: { const?: unknown }[] }> };
+type Prop = { type?: string; enum?: string[]; description?: string; default?: unknown; structured?: boolean };
+type Schema = {
+  properties?: Record<string, Prop & { $ref?: string; items?: { type?: string; $ref?: string } }>;
+  $defs?: Record<string, { enum?: string[]; oneOf?: { const?: unknown }[] }>;
+};
 
 /** Flatten schemars output for the inspector: follow `$ref`s into `$defs` and turn `oneOf` consts into an enum. */
 function resolveProps(schema: unknown): Record<string, Prop> {
@@ -54,7 +57,9 @@ function resolveProps(schema: unknown): Record<string, Prop> {
   for (const [key, prop] of Object.entries(sc.properties ?? {})) {
     const def = prop.$ref ? sc.$defs?.[prop.$ref.split("/").pop() ?? ""] : undefined;
     const en = prop.enum ?? def?.enum ?? def?.oneOf?.map((o) => String(o.const));
-    out[key] = { type: prop.type, description: prop.description, default: prop.default, ...(en ? { enum: en } : {}) };
+    // Arrays of objects (e.g. recorded strokes) are data, not something to type into a field.
+    const structured = prop.type === "array" && (prop.items?.$ref !== undefined || prop.items?.type === "object");
+    out[key] = { type: prop.type, description: prop.description, default: prop.default, structured, ...(en ? { enum: en } : {}) };
   }
   return out;
 }
@@ -188,7 +193,11 @@ function Inner() {
               return (
                 <label key={key} className="mb-1 flex items-center justify-between gap-2" title={prop.description}>
                   <span className="text-jd-fg-1">{key}</span>
-                  {prop.enum ? (
+                  {prop.structured ? (
+                    <span className="text-jd-fg-2" data-testid={`param-${key}-count`}>
+                      {Array.isArray(current) ? `${current.length} recorded` : "none"}
+                    </span>
+                  ) : prop.enum ? (
                     <select className="w-28 rounded border border-jd-line bg-jd-bg-2 px-1 text-xs" value={String(current ?? prop.default ?? prop.enum[0])} onChange={(e) => void s.setParam(sel.id, key, e.target.value)}>
                       {prop.enum.map((v) => (
                         <option key={v}>{v}</option>
