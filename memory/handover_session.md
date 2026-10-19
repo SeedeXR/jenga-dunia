@@ -98,13 +98,12 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `09:50:00` `src-tauri/Info.plist` merged into the bundle: `.jdproj` is a package document (`LSTypeIsPackage`, UTI `com.seedexr.jengadunia.project` conforming to `com.apple.package`). After `lsregister -f "Jenga Dunia.app"`, a plain `open H512.jdproj` launched Jenga Dunia and opened the project (native log: document open request → project.open ok → live preview). Spotlight's `mdls` still reported `public.folder` for the directory (metadata cache), but LaunchServices routing worked.
 
-### Open / next (as of 2026-10-20 08:50, head `208b120`)
-1. **CI**: runs for `f46a848` (native tutorials), `2ebbb1c` (native recording), `208b120` (window state) polling; `6451255`…`770f6c4` green.
-2. **Bundle**: `pnpm tauri build --no-sign` running (unsigned `.app` + `.dmg`; owner has no Apple developer account — see `memory/todo.md`); then verify `open -a "Jenga Dunia.app" <proj>.jdproj` (file association) and that the app menu reads "Jenga Dunia" instead of "jd-app".
-3. **Figma**: the claude.ai Figma connector returned "server not found" this session and the plugin OAuth is still pending on the owner's side → tutorial images stay in `docs/user/images/` (annotated by `annotate.mjs`); place them in file `fxyeV62hgLoNmG3dU1LX6G` when a connector works.
-4. **Native leftovers**: Edit-menu capture (System Events click did not open it), native sculpt capture (needs Accessibility for clicks).
-5. **Phase 3 follow-ups**: hydraulic concentration cap / layered materials / open drains; thermal + hydraulic WGSL twins (`jd-gpu`); particle hydraulic; D∞/MFD + priority-flood + rivers/lakes; brush cursor + smooth/flatten brushes.
-6. **Phase 2 leftovers**: `jd-jobs` (async + progress/cancel), adopt `JdOps` types in `state.ts`, GeoTIFF tags/nodata on import, textured PBR for GLB, Windows/Linux measurements.
+### Open / next (as of 2026-10-20 09:55, head `fd63a43`)
+1. **CI**: `645408b` (document open + native log), `1678900` (package UTI), `fd63a43` (brush cursor) polling; everything through `208b120` green.
+2. **Figma**: connector unavailable this session ("server not found") and plugin OAuth pending on the owner's side → tutorial images stay in `docs/user/images/` (annotated by `annotate.mjs`); place them in file `fxyeV62hgLoNmG3dU1LX6G` when a connector works.
+3. **Native leftovers**: Edit-menu capture (System Events click did not open it); native sculpt capture/recording (clicks need Accessibility — tutorial-04 is the e2e capture, labelled); signed/notarised bundle needs an Apple developer account.
+4. **Phase 3 follow-ups**: hydraulic concentration cap / layered materials / open drains; thermal + hydraulic WGSL twins (`jd-gpu`); particle hydraulic; D∞/MFD + priority-flood + rivers/lakes; smooth/flatten brushes; stroke files under `strokes/`.
+5. **Phase 2 leftovers**: `jd-jobs` (async + progress/cancel), adopt `JdOps` types in `state.ts`, GeoTIFF tags/nodata on import, textured PBR for GLB, Windows/Linux measurements, auto-layout for nodes added without a position (CLI adds land at 0,0 and overlap).
 
 ---
 
