@@ -31,7 +31,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [~] `jd-jobs` ☐ + `jd-cache` ✔ (layer-level; tile-level/LRU with jobs)
 - [~] Viewport feasibility prototype: three.js WebGPU/WebGL2 in Tauri WebView ✔ (WebGPU observed active on macOS 27 dev build), u16 tile streaming over raw-bytes IPC ✔; measure IPC MB/s + latency on macOS and Windows ☐; Rust headless wgpu compute ☐; close ADR-0003 ☐
 - [x] Desktop app skeleton (`apps/desktop`, `jd-app`): project panel, noise inspector, three.js viewport, export, log; vitest component tests; Playwright e2e bridged to the real core via jd-mcp
-- [ ] Desktop: native file dialogs (tauri-plugin-dialog), macOS menu bar + ⌘ shortcuts, `.jdproj` open-with, window state persistence
+- [~] Desktop: native file dialogs (tauri-plugin-dialog) ✔ (native check pending — display was locked), macOS menu bar + ⌘ shortcuts ✔, `.jdproj` launch-arg open ✔ / bundle file association ☐, window state persistence ☐
 - [~] Desktop tutorials: annotated screenshots ✔ (tutorial-01/02/03 via `annotate.mjs`), recording ✔ (first-terrain.mp4); graph-editor recording ✔ (Playwright-recorded e2e, `JD_VIDEO=1`); place in the Figma file once the connector OAuth is completed by the owner ☐
 - [x] CI: Rust matrix (macOS, Ubuntu, Windows) fmt/clippy/test/release-smoke + cargo-deny job; docs job with npx cache
 - [ ] S1 bench smoke in CI (needs a kernel)

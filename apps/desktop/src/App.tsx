@@ -1,5 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
-import { FolderOpen, FolderPlus, Mountain, Save, Upload, Workflow } from "lucide-react";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { FolderOpen, FolderPlus, FolderSearch, Mountain, Save, Upload, Workflow } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import GraphPanel from "./graph/GraphPanel";
 import TerrainView, { type ViewportInfo } from "./viewport/TerrainView";
@@ -33,6 +34,37 @@ export default function App() {
   const onInfo = useCallback((i: ViewportInfo) => setVp(i), []);
   const pathInput = useRef<HTMLInputElement>(null);
 
+  // Native file dialogs (tauri-plugin-dialog). Outside Tauri (browser, tests) they reject and the
+  // typed paths keep working, so the dialogs are a convenience layer over the same operations.
+  const pickProjectToOpen = useCallback(async () => {
+    const p = await openDialog({ directory: true, title: "Open Jenga Dunia project" }).catch(() => null);
+    if (typeof p !== "string") return;
+    setProjPath(p);
+    await useStore.getState().openProject(p);
+  }, []);
+  const pickProjectToCreate = useCallback(async () => {
+    const chosen = await saveDialog({ title: "New Jenga Dunia project", defaultPath: `${projName}.jdproj` }).catch(() => null);
+    if (!chosen) return;
+    const p = chosen.endsWith(".jdproj") ? chosen : `${chosen}.jdproj`; // a project is a directory
+    setProjPath(p);
+    await useStore.getState().newProject(p, projName, extent, resolution);
+  }, [projName, extent, resolution]);
+  const pickExportPath = useCallback(async () => {
+    const p = await saveDialog({
+      title: "Export heightmap",
+      defaultPath: exportPath,
+      filters: [
+        { name: "OpenEXR (32-bit float)", extensions: ["exr"] },
+        { name: "PNG (16-bit)", extensions: ["png"] },
+        { name: "RAW 16-bit", extensions: ["r16"] },
+        { name: "RAW 32-bit float", extensions: ["r32"] },
+      ],
+    }).catch(() => null);
+    if (!p) return;
+    setExportPath(p);
+    await useStore.getState().exportHeightmap(p, formatFor(p));
+  }, [exportPath]);
+
   // A project opened at launch (file association / `jd-app path.jdproj`) is adopted on mount.
   useEffect(() => {
     let cancelled = false;
@@ -50,9 +82,10 @@ export default function App() {
       const st = useStore.getState();
       switch (e.payload) {
         case "new":
+          void pickProjectToCreate();
+          break;
         case "open":
-          pathInput.current?.focus();
-          pathInput.current?.select();
+          void pickProjectToOpen();
           break;
         case "save":
           if (st.project) void st.save();
@@ -64,7 +97,7 @@ export default function App() {
           if (st.project) void st.evaluateGraph();
           break;
         case "export":
-          if (st.layer) void st.exportHeightmap(exportPath, formatFor(exportPath));
+          if (st.layer) void pickExportPath();
           break;
       }
     })
@@ -77,7 +110,7 @@ export default function App() {
       cancelled = true;
       unlisten?.();
     };
-  }, [exportPath]);
+  }, [pickProjectToCreate, pickProjectToOpen, pickExportPath]);
 
   return (
     <div className="grid h-full grid-rows-[40px_1fr_160px] bg-jd-bg-0 text-jd-fg-0">
@@ -99,7 +132,12 @@ export default function App() {
         <aside className="overflow-y-auto border-r border-jd-line bg-jd-bg-1 p-3">
           <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Project</h2>
           <Field label="Path">
-            <input ref={pathInput} className={`${inputCls} w-36`} value={projPath} onChange={(e) => setProjPath(e.target.value)} placeholder="~/Worlds/Hills.jdproj" data-testid="project-path" />
+            <span className="flex gap-1">
+              <input ref={pathInput} className={`${inputCls} w-28`} value={projPath} onChange={(e) => setProjPath(e.target.value)} placeholder="~/Worlds/Hills.jdproj" data-testid="project-path" />
+              <button className="btn px-1.5" title="Browse… (opens an existing project)" onClick={() => void pickProjectToOpen()} disabled={s.busy} data-testid="browse-project">
+                <FolderSearch size={14} />
+              </button>
+            </span>
           </Field>
           <Field label="Name">
             <input className={`${inputCls} w-36`} value={projName} onChange={(e) => setProjName(e.target.value)} />
@@ -111,7 +149,7 @@ export default function App() {
             <input className={inputCls} type="number" value={resolution} onChange={(e) => setResolution(Number(e.target.value))} />
           </Field>
           <div className="mt-2 flex gap-2">
-            <button className="btn" onClick={() => s.newProject(projPath, projName, extent, resolution)} disabled={!projPath || s.busy} data-testid="new-project">
+            <button className="btn" title="Create at the path above (⌘N opens a dialog)" onClick={() => s.newProject(projPath, projName, extent, resolution)} disabled={!projPath || s.busy} data-testid="new-project">
               <FolderPlus size={14} /> New
             </button>
             <button className="btn" onClick={() => s.openProject(projPath)} disabled={!projPath || s.busy} data-testid="open-project">
@@ -209,8 +247,13 @@ export default function App() {
             </dl>
           )}
           <h2 className="mt-5 mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Export</h2>
-          <Field label="File (exports/)">
-            <input className={`${inputCls} w-36`} value={exportPath} onChange={(e) => setExportPath(e.target.value)} data-testid="export-path" />
+          <Field label="File">
+            <span className="flex gap-1">
+              <input className={`${inputCls} w-28`} title="Relative paths go to the project's exports/ directory" value={exportPath} onChange={(e) => setExportPath(e.target.value)} data-testid="export-path" />
+              <button className="btn px-1.5" title="Choose where to save… (⌘E)" onClick={() => void pickExportPath()} disabled={!s.layer || s.busy} data-testid="browse-export">
+                <FolderSearch size={14} />
+              </button>
+            </span>
           </Field>
           <button
             className="btn mt-1 w-full justify-center"

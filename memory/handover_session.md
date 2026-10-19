@@ -51,6 +51,9 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `01:05:00` **`jd-cache` slice 1**: `crates/jd-cache` persists layers under `<project>/cache/layers/` (content-addressed `.jdl` blobs + `index.json`, atomic writes, corrupt blob → `E_INTERNAL` with "delete cache/" next step). `Context::set_layer` writes through, `with_layer` falls back to disk, `set_project` drops the previous project's in-memory layers. CLI-verified across processes: `graph.evaluate --project` then `terrain.export_heightmap --project` wrote a 512² EXR (test `graph_evaluate_in_one_invocation_exports_in_the_next`). Gotcha found: `cargo build -p jd` silently did nothing useful — the packages are `jd-cli`, `jd-mcp`, `jd-app`; a `| tail` hid cargo's error (use `set -o pipefail`). The release `jd` used for the §5 timings earlier was therefore stale; the §5 example now says "debug build".
 
+- `01:20:00` **Native file dialogs** (`tauri-plugin-dialog` 2.8.3, capability `dialog:default`): File → New…/Open…/Export Heightmap… and folder buttons beside the Path/File fields; typed paths remain (tests drive them). Component test scripts the dialog results (export to a chosen absolute path with format from extension; cancelled dialog does nothing). cargo-deny ok with the new tree. **Not verified in the native window**: the display was locked/asleep during this stretch (`screencapture` returned black, System Events saw 0 windows for a running jd-app) — re-check the dialogs and the `v0.0.1` header badge in the real app next session, then re-shoot `desktop-menubar.png`.
+- CI: run 39327788774 (version/edition) had 8/9 jobs green when last polled; run 39328518743 (jd-cache) in progress — a background `gh run view` poll was left running.
+
 ### Open / next
 1. Apply code-review findings for the graph slice; push; CI.
 2. Desktop: graph panel (React Flow) + starter graph so new projects evaluate immediately.

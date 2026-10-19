@@ -50,6 +50,13 @@ vi.mock("@tauri-apps/api/core", () => ({
   }),
 }));
 
+// Native dialogs: resolved paths are scripted per test.
+const dialog = { open: null as string | null, save: null as string | null };
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  open: vi.fn(async () => dialog.open),
+  save: vi.fn(async () => dialog.save),
+}));
+
 const menuListeners: ((e: { payload: string }) => void)[] = [];
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(async (_name: string, cb: (e: { payload: string }) => void) => {
@@ -83,6 +90,8 @@ import { useStore } from "./state";
 describe("App", () => {
   beforeEach(() => {
     calls.length = 0;
+    dialog.open = null;
+    dialog.save = null;
     // The store is module-global; reset the mirrored state between tests.
     useStore.setState({ project: null, layer: null, preview: null, previewStats: null, log: [], busy: false, graph: { nodes: [], edges: [] }, graphKinds: [], lastEval: null });
   });
@@ -121,10 +130,21 @@ describe("App", () => {
     expect(menuListeners.length).toBeGreaterThan(0);
     menuListeners.forEach((cb) => cb({ payload: "generate" }));
     await waitFor(() => expect(screen.getByTestId("layer-stats")).toBeInTheDocument());
+    // File → Export… asks the native save dialog, then exports to the chosen path.
+    dialog.save = "/tmp/out/hills.png";
     menuListeners.forEach((cb) => cb({ payload: "export" }));
     await waitFor(() => expect(screen.getByTestId("log")).toHaveTextContent("terrain.export_heightmap"));
     const exp = calls.find((c) => (c.args as { request?: { op: string } }).request?.op === "terrain.export_heightmap");
-    expect(exp).toMatchObject({ args: { request: { params: { path: "height.exr", format: "exr" } } } });
+    expect(exp).toMatchObject({ args: { request: { params: { path: "/tmp/out/hills.png", format: "png16" } } } });
+    // File → Open… picks a directory and opens it; a cancelled dialog does nothing.
+    dialog.open = "/tmp/Other.jdproj";
+    menuListeners.forEach((cb) => cb({ payload: "open" }));
+    await waitFor(() => expect(calls.some((c) => (c.args as { request?: { op: string; params: { path?: string } } }).request?.params?.path === "/tmp/Other.jdproj")).toBe(true));
+    const before = calls.length;
+    dialog.open = null;
+    menuListeners.forEach((cb) => cb({ payload: "open" }));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(calls.length).toBe(before);
     menuListeners.forEach((cb) => cb({ payload: "evaluate" }));
     await waitFor(() => expect(screen.getByTestId("log")).toHaveTextContent("graph.evaluate"));
   });

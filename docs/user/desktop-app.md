@@ -14,7 +14,8 @@ Status: first working build. One window, native macOS title bar, dark theme (Hos
 
 ## Native integration
 
-- Menu bar: **Jenga Dunia** (About, Services, Hide, Quit) · **File** (New ⌘N, Open ⌘O, Save ⌘S, Export Heightmap… ⌘E, Close Window ⌘W) · **Edit** (Undo/Redo/Cut/Copy/Paste/Select All) · **Terrain** (Generate ⌘G) · **Window** (Minimize, Zoom, Full Screen). Menu actions run the same operations as the buttons.
+- Menu bar: **Jenga Dunia** (About, Services, Hide, Quit) · **File** (New… ⌘N, Open… ⌘O, Save ⌘S, Export Heightmap… ⌘E, Close Window ⌘W) · **Edit** (Undo/Redo/Cut/Copy/Paste/Select All) · **Terrain** (Generate ⌘G, Evaluate Graph ⌘R) · **Window** (Minimize, Zoom, Full Screen). Menu actions run the same operations as the buttons.
+- Native file dialogs (tauri-plugin-dialog): **New…** asks where to create the `.jdproj` directory, **Open…** picks an existing one, **Export Heightmap…** is a save dialog with EXR / PNG 16-bit / RAW filters. The folder buttons next to the Path and File fields open the same dialogs; typed paths still work (and are what the tests drive).
 - Launch with a project: `jd-app ~/Worlds/Hills.jdproj` (or double-click a `.jdproj` once the bundle's file association is registered) opens it before the window appears.
 - Dark window theme, native title bar, Host Grotesk typography.
 
@@ -65,9 +66,9 @@ Connect nodes by dragging from an output handle (right) to an input handle (left
 
 ## Workflow
 
-1. **Project** — type a directory path (e.g. `~/Worlds/Hills.jdproj`), set extent (m) and resolution (px), click **New** (or **Open** for an existing one). The header shows `name — resolution² · extent m`; the panel shows the project id, dirty flag and pending journal entries.
+1. **Project** — **File → New… (⌘N)** and choose where the `.jdproj` directory goes, or type a path (e.g. `~/Worlds/Hills.jdproj`) and click **New**; **Open… (⌘O)** or the folder button picks an existing project. Set extent (m) and resolution (px) before creating. The header shows `name — resolution² · extent m`; the panel shows the project id, dirty flag and pending journal entries.
 2. **Terrain · Noise** — choose lattice and fractal, seed, feature size, octaves, lacunarity, gain, height range; click **Generate**. Stats (min/max/mean, time, content hash) appear under the button and the viewport shows the terrain. Drag to orbit, wheel to zoom.
-3. **Export** — type a file name (`height.exr`, `h.png`, `h.r16`, `h.r32`) and click **Export heightmap**; the file lands in the project's `exports/` with a `.jd-height.json` sidecar. Quantised formats log a `W_EXPORT_LOSS` warning.
+3. **Export** — **File → Export Heightmap… (⌘E)** or the folder button opens a save dialog (the extension picks the format: `.exr`, `.png`, `.r16`, `.r32`); typing a relative name and clicking **Export heightmap** writes into the project's `exports/`. Every export gets a `.jd-height.json` sidecar. Quantised formats log a `W_EXPORT_LOSS` warning.
 4. **Save** — writes `project.json`/`graph.json`/`scene.json` atomically and clears the journal.
 
 Every button calls the same operation the CLI and MCP server expose (`jd schema --list`), so anything you do here can be scripted.
@@ -81,4 +82,4 @@ Every button calls the same operation the CLI and MCP server expose (`jd schema 
 | End-to-end, node graph | starter graph drawn from `graph.json`; edit a parameter, add a node, connect it by dragging handles, drag a node, evaluate, delete with the keyboard; the project's `journal/ops.ndjson` is read back and must list exactly `set_param, add_node, connect, move_node, remove_node` | `apps/desktop/e2e/graph.spec.ts` |
 | Native window | screenshots of the real Tauri app on macOS; interaction recording requires Accessibility permission for the automating process | this page |
 
-Known limits of this build: no file dialogs yet (type paths), no sculpting, one output layer, no undo of graph edits yet (the journal records them). The tutorial images are the real app annotated by `scripts/annotate.mjs`; the Figma file linked in the brief is the design reference and receives the same screenshots once the connector is authorised.
+Known limits of this build: no sculpting, one output layer, no undo of graph edits yet (the journal records them). The tutorial images are the real app annotated by `scripts/annotate.mjs`; the Figma file linked in the brief is the design reference and receives the same screenshots once the connector is authorised.
