@@ -4,17 +4,23 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { Page } from "@playwright/test";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
 
 export function mcpBinary(): string {
   const fromEnv = process.env.JD_MCP_BIN;
   if (fromEnv) return fromEnv;
-  const root = path.resolve(__dirname, "../../..");
-  for (const p of ["target/release/jd-mcp", "target/debug/jd-mcp"]) {
-    const full = path.join(root, p + (process.platform === "win32" ? ".exe" : ""));
-    if (existsSync(full)) return full;
-  }
+  const root = path.resolve(here, "../../..");
+  const exe = process.platform === "win32" ? ".exe" : "";
+  // Prefer the most recently built binary so a stale release build never shadows a fresh debug one.
+  const candidates = ["target/release/jd-mcp", "target/debug/jd-mcp"]
+    .map((p) => path.join(root, p + exe))
+    .filter((p) => existsSync(p))
+    .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
+  if (candidates[0]) return candidates[0];
   throw new Error("jd-mcp binary not found; run `cargo build -p jd-mcp` or set JD_MCP_BIN");
 }
 
@@ -59,7 +65,13 @@ export async function installBridge(page: Page, core: Client): Promise<void> {
       for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
       return out.buffer;
     };
-    const w = window as unknown as { __jd_invoke: (c: string, a: unknown) => Promise<Record<string, unknown>>; __TAURI_INTERNALS__: unknown };
+    const w = window as unknown as {
+      __jd_invoke: (c: string, a: unknown) => Promise<Record<string, unknown>>;
+      __TAURI_INTERNALS__: unknown;
+      __TAURI_EVENT_PLUGIN_INTERNALS__: unknown;
+    };
+    // The event module (menu listener) unregisters through this global when `unlisten` runs.
+    w.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => undefined };
     w.__TAURI_INTERNALS__ = {
       invoke: async (cmd: string, args: unknown) => {
         const r = await w.__jd_invoke(cmd, args);

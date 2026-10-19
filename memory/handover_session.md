@@ -36,8 +36,10 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 - `21:45:00` **Release-build measurement (ADR-0003):** 2048² `terrain.generate` 58–63 ms; 1024² u16 preview (2.00 MB) to the WebGPU viewport in **6 ms**. Pitfall found: plain `cargo build --release` embeds the dev URL — the frontend is embedded only with `--features tauri/custom-protocol` (documented in the ADR).
 - Second code review (desktop slice): 10 findings, all fixed — Linux CI apt deps for Tauri; jd-mcp `outputSchema` now the envelope schema; Tauri commands run on blocking threads (`async` + `spawn_blocking`); `invoke` rejections logged instead of unhandled; material disposal + backend readout after init; precomputed colour ramp; e2e tris assertion; preview op returns the exact wire format (`bytes_base64`, `base64` crate) so one decoder serves Tauri + MCP; camera limits scale with extent; `reuseExistingServer: !CI`. Suite: **54 Rust tests + 5 vitest** green; clippy/deny/fmt/links clean. Two cargo-deny ignores recorded with reasons (`paste`, `proc-macro-error`).
 
+- `21:50:00` **Playwright e2e green (2/2)** using the system Chrome locally (`channel: "chrome"` when not CI; the Playwright Chromium download was stalling on this network). Fixes along the way: ESM `__dirname` in the bridge; bridge now picks the newest `jd-mcp` binary (a stale release build had shadowed the debug one → "unknown tool"); event-plugin shim global for the menu listener's `unlisten`.
+
 ### Open / next
-1. Run `pnpm test:e2e` locally once `chromium-headless-shell` finishes downloading (slow registry); fix; push (CI: docs, rust×3, frontend, deny).
+1. Push `be3fd20`+ and watch CI (docs, rust×3 incl. Linux apt deps, frontend with e2e on Ubuntu Chromium, deny).
 2. CI run for the first Rust matrix — watch Windows path handling in the CLI smoke step.
 2. Phase 2 start: `jd-terrain` tiles + noise nodes, `jd-graph` evaluator, `jd-jobs`; first `graph.evaluate` + EXR/PNG16/R16 export; viewport prototype (ADR-0003 gate).
 3. `docs/user/`: CLI quickstart written from real output; GUI tutorials with Figma-annotated screenshots/video once the Tauri app exists.

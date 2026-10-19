@@ -8,6 +8,8 @@ export default defineConfig({
   retries: 0,
   reporter: [["list"]],
   use: {
+    // Locally, reuse the system Chrome (no 150 MB download); CI installs Playwright's Chromium.
+    channel: process.env.CI ? undefined : "chrome",
     baseURL: "http://localhost:5173",
     viewport: { width: 1440, height: 900 },
     colorScheme: "dark",
