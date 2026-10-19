@@ -2098,6 +2098,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "insta",
+ "jd-graph",
  "jd-terrain",
  "jd-types",
  "jiff",
@@ -2108,6 +2109,21 @@ dependencies = [
  "sysinfo",
  "tempfile",
  "thiserror 2.0.21",
+ "tracing",
+]
+
+[[package]]
+name = "jd-graph"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "jd-terrain",
+ "jd-types",
+ "proptest",
+ "rayon",
+ "schemars 1.2.3",
+ "serde",
+ "serde_json",
  "tracing",
 ]
 

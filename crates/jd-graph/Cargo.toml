@@ -1,0 +1,25 @@
+[package]
+name = "jd-graph"
+description = "Jenga Dunia procedural graph engine: typed DAG, validation, content-hashed incremental evaluation. No UI, no filesystem."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+jd-types.workspace = true
+jd-terrain.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
+tracing.workspace = true
+blake3.workspace = true
+rayon = "1"
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

@@ -113,32 +113,8 @@ pub struct ProjectDocument {
     pub extra: BTreeMap<String, Value>,
 }
 
-/// `graph.json` — Phase 1 carries only the header; nodes/edges arrive with `jd-graph`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct GraphDocument {
-    /// Document schema version.
-    pub schema_version: SchemaVersion,
-    /// Nodes keyed by id (opaque until `jd-graph` lands).
-    #[serde(default)]
-    pub nodes: BTreeMap<String, Value>,
-    /// Edges.
-    #[serde(default)]
-    pub edges: Vec<Value>,
-    /// Preserved unknown keys.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
-}
-
-impl Default for GraphDocument {
-    fn default() -> Self {
-        Self {
-            schema_version: SchemaVersion::CURRENT,
-            nodes: BTreeMap::new(),
-            edges: Vec::new(),
-            extra: BTreeMap::new(),
-        }
-    }
-}
+/// `graph.json` — the procedural graph (`jd-graph` owns the type).
+pub type GraphDocument = jd_graph::Graph;
 
 /// `scene.json` — Phase 1 header only.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
