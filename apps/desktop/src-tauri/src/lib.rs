@@ -186,6 +186,8 @@ pub fn run() {
             Ok(())
         })
         .plugin(tauri_plugin_dialog::init())
+        // Window position/size/maximised state survive relaunches (native app feel).
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .invoke_handler(tauri::generate_handler![op, ops_list, layer_preview])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {
