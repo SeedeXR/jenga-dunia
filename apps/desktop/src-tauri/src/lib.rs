@@ -73,6 +73,9 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let generate_item = MenuItemBuilder::with_id("generate", "Generate Terrain")
         .accelerator("CmdOrCtrl+G")
         .build(app)?;
+    let evaluate_item = MenuItemBuilder::with_id("evaluate", "Evaluate Graph")
+        .accelerator("CmdOrCtrl+R")
+        .build(app)?;
     let export_item = MenuItemBuilder::with_id("export", "Export Heightmap…")
         .accelerator("CmdOrCtrl+E")
         .build(app)?;
@@ -97,6 +100,7 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         .build()?;
     let terrain = SubmenuBuilder::new(app, "Terrain")
         .item(&generate_item)
+        .item(&evaluate_item)
         .build()?;
     let window = SubmenuBuilder::new(app, "Window")
         .minimize()

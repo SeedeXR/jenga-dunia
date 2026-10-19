@@ -2065,7 +2065,7 @@ dependencies = [
 
 [[package]]
 name = "jd-app"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "jd-core",
  "jd-terrain",
@@ -2080,7 +2080,7 @@ dependencies = [
 
 [[package]]
 name = "jd-cli"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -2094,7 +2094,7 @@ dependencies = [
 
 [[package]]
 name = "jd-core"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "base64 0.22.1",
  "insta",
@@ -2114,7 +2114,7 @@ dependencies = [
 
 [[package]]
 name = "jd-graph"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "blake3",
  "jd-terrain",
@@ -2129,7 +2129,7 @@ dependencies = [
 
 [[package]]
 name = "jd-mcp"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -2146,7 +2146,7 @@ dependencies = [
 
 [[package]]
 name = "jd-terrain"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "blake3",
  "exr",
@@ -2165,7 +2165,7 @@ dependencies = [
 
 [[package]]
 name = "jd-types"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "proptest",
  "schemars 1.2.3",

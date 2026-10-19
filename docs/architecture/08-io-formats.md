@@ -87,7 +87,7 @@ Also: matrix decomposition to TRS with validation (no shear); MikkTSpace tangent
   "tiles": [{ "x": 0, "y": 0, "heightmap": "tiles/h_0_0.r16", "heightmap_f32": "tiles/h_0_0.exr", "weightmaps": ["tiles/w_rock_0_0.png", "tiles/w_grass_0_0.png"], "colormap": "tiles/c_0_0.png", "normal": "tiles/n_0_0.png" }],
   "layers": [{ "name": "rock", "material": "materials/rock.json" }, { "name": "grass", "material": "materials/grass.json" }],
   "instances": [{ "asset": "assets/pine.glb", "table": "instances/pine.csv" }],
-  "attribution": [ "..." ], "generator": "jenga-dunia 0.1.0" }
+  "attribution": [ "..." ], "generator": "jenga-dunia 0.0.1" }
 ```
 
 ## Validation and round-trip tests (Phase 2→4)

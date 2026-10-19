@@ -54,7 +54,7 @@ Decision: **out-of-process first** (Phase 4). It solves licensing isolation (pro
   "entry": { "type": "process", "command": "./bin/jd-fbx-adapter" },
   "capabilities": { "formats": [{ "ext": "fbx", "import": false, "export": true, "geometry": ["mesh"], "materials": ["pbr-basic"], "textures": ["png"], "hierarchy": true, "instancing": false, "animation": false }] },
   "permissions": ["fs:project-dir", "fs:write:export-dir"],
-  "min_jd_version": "0.1.0"
+  "min_jd_version": "0.0.1"
 }
 ```
 

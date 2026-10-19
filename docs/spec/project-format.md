@@ -28,7 +28,7 @@ Rationale: a directory keeps large binary assets out of JSON, allows partial wri
 ```json
 {
   "schema_version": 1,
-  "app_version": "0.1.0",
+  "app_version": "0.0.1",
   "id": "01JABCDEF...",
   "name": "MyWorld",
   "created": "2026-10-19T10:00:00Z",
