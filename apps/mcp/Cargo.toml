@@ -1,0 +1,31 @@
+[package]
+name = "jd-mcp"
+description = "Jenga Dunia MCP server (`jd-mcp`): exposes jd-core operations as MCP tools over stdio."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "jd-mcp"
+path = "src/main.rs"
+
+[dependencies]
+jd-core.workspace = true
+jd-types.workspace = true
+rmcp.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+
+[dev-dependencies]
+rmcp = { version = "3", features = ["client", "transport-child-process"] }
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -4,6 +4,30 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 ---
 
+## Session 2 — 2026-10-19 — Phase 1 code: workspace, project format, op registry, CLI, MCP
+
+**Mode:** `/loop` dynamic (owner: "don't stop until everything is done"). **Owner additions this session:** platform-native mandate (Metal on macOS, DX12/Vulkan + NVIDIA on Windows/Linux, CPU everywhere; measure on this Mac); Figma file `fxyeV62hgLoNmG3dU1LX6G` for annotated tutorial screenshots; UI to follow World Creator's workflow.
+
+### Timeline
+- `17:05:00` Verified crate versions on crates.io (`cargo info`); read rmcp 3.5.1 and ulid sources from the registry instead of guessing APIs (ulid 3 removed `Ulid::new` → pinned ulid 1; rmcp `Tool`/`Implementation`/`CallToolRequestParams` are non-exhaustive → constructors).
+- `17:20:00` Wrote `crates/jd-types` (ErrorCode catalogue + exit codes, JdError envelope, ULID ids, SchemaVersion, Units/WorldSettings with proptest), `crates/jd-core` (project directory v1 with atomic writes, unknown-key preservation, schema gate, WAL journal + recovery, pid lock; op registry with schemars schemas; envelope; diag.env), `apps/cli` (`jd new|open|op|schema|diag env`, `--json`, exit codes), `apps/mcp` (manual `ServerHandler`: tools from registry, scope gate, workspace confinement, structured results).
+- `17:50:00` Tests: 7 (types) + 13 (core incl. insta snapshot + jsonschema validation) + 5 CLI-driven (assert_cmd on the real binary) + 3 MCP-driven (rmcp client ↔ spawned `jd-mcp` over stdio) = **28 passing** (`cargo test --workspace`). `cargo-nextest` failed to install → using `cargo test`.
+- `18:05:00` Gates: `cargo fmt --check` ok; `cargo clippy --workspace --all-targets -D warnings` ok (clippy.toml allows expect/unwrap in tests; `result_large_err` allowed by design); `cargo deny check` ok (deny.toml: licence allow-list, bincode≥3/contour-isobands/openssl-sys banned, crates `publish = false`).
+- `18:10:00` Ponytail review applied (−16 lines: `as_str` round-trip, dead fn, `is_async`). Correctness review (`/code-review medium`) was interrupted by an API session limit on the previous account, resumed after re-login.
+- CI workflow now has `docs`, `rust` (3 OS: fmt/clippy/test/release build/CLI smoke) and `cargo-deny` jobs; actions bumped to checkout@v5 / setup-node@v5; npx cache for mermaid-cli.
+
+### Decisions
+- Adapters are thin: CLI subcommands and MCP tools call `Registry::invoke` with the JSON envelope (ADR-0001 realised). Generic `jd op <id> --params` guarantees every op is scriptable.
+- Workspace confinement and scope gating live in `jd-mcp` (adapter policy) — `ponytail:` move into `jd-core` when the GUI needs the same gate.
+- `project.recover` replays through the same `apply_mutation` used by live ops so recovery cannot diverge.
+
+### Open / next
+1. Wait for code-review findings; fix; commit + push (CI will run Rust matrix for the first time — watch Windows path handling in the CLI smoke step).
+2. Phase 2 start: `jd-terrain` tiles + noise nodes, `jd-graph` evaluator, `jd-jobs`; first `graph.evaluate` + EXR/PNG16/R16 export; viewport prototype (ADR-0003 gate).
+3. `docs/user/`: CLI quickstart written from real output; GUI tutorials with Figma-annotated screenshots/video once the Tauri app exists.
+
+---
+
 ## Session 1 — 2026-10-19 — Round 1: research + single source of truth
 
 **Agent:** Claude (Fable 5.1 / Opus 5.5) orchestrating 8 research sub-agents. **Human:** project owner.

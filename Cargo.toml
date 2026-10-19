@@ -1,0 +1,44 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/cli", "apps/mcp"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/SeedeXR/jenga-dunia"
+rust-version = "1.98"
+publish = false
+
+[workspace.dependencies]
+jd-types = { path = "crates/jd-types" }
+jd-core = { path = "crates/jd-core" }
+jd-terrain = { path = "crates/jd-terrain" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+schemars = { version = "1", features = ["preserve_order"] }
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+ulid = { version = "1", features = ["serde"] }
+blake3 = "1"
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "process"] }
+rmcp = { version = "3", features = ["server", "transport-io"] }
+sysinfo = "0.39"
+insta = { version = "1", features = ["json"] }
+proptest = "1"
+assert_cmd = "2"
+tempfile = "3"
+jsonschema = "0.59"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+# JdError carries message/why/next/details by design (docs/spec/error-codes.md); it is not on hot paths.
+result_large_err = "allow"

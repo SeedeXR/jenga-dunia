@@ -2,7 +2,12 @@
 
 Open-source (MIT), commercially usable procedural world generation and environmental simulation — Rust core, Tauri desktop app, CLI and MCP server sharing one engine.
 
-**Status: Round 1 — research and architecture documentation. No application code yet.**
+**Status: Phase 1 in progress** — Rust workspace with project format, operation registry, `jd` CLI and `jd-mcp` MCP server (28 tests: unit, property, CLI-driven, MCP-driven). Terrain generation, exports and the desktop app follow in Phase 2. See [`docs/user/`](docs/user/README.md).
+
+```sh
+cargo build --release -p jd-cli -p jd-mcp
+./target/release/jd new ~/Worlds/Hills.jdproj && ./target/release/jd diag env
+```
 
 ## Start here
 

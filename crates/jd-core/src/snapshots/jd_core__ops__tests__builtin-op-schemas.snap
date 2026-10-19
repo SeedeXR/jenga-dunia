@@ -1,0 +1,1109 @@
+---
+source: crates/jd-core/src/ops.rs
+expression: list
+---
+[
+  {
+    "id": "diag.env",
+    "description": "Report host environment and detected tools",
+    "scope": "none",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "NoParams",
+      "description": "Empty params.",
+      "type": "object",
+      "additionalProperties": false
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "EnvInfo",
+      "description": "Snapshot of the host environment.",
+      "type": "object",
+      "properties": {
+        "app_version": {
+          "description": "Jenga Dunia version.",
+          "type": "string"
+        },
+        "os": {
+          "description": "OS name and version.",
+          "type": "string"
+        },
+        "arch": {
+          "description": "CPU architecture.",
+          "type": "string"
+        },
+        "cpus": {
+          "description": "Logical CPU count.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "memory_total_bytes": {
+          "description": "Total physical memory in bytes.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "memory_available_bytes": {
+          "description": "Currently available memory in bytes.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "cwd": {
+          "description": "Current working directory.",
+          "type": "string"
+        },
+        "tools": {
+          "description": "Optional external tools (validators, DCCs) detected on PATH.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ToolStatus"
+          }
+        }
+      },
+      "required": [
+        "app_version",
+        "os",
+        "arch",
+        "cpus",
+        "memory_total_bytes",
+        "memory_available_bytes",
+        "cwd",
+        "tools"
+      ],
+      "$defs": {
+        "ToolStatus": {
+          "description": "Presence of an optional external tool on `PATH`.",
+          "type": "object",
+          "properties": {
+            "name": {
+              "description": "Tool name.",
+              "type": "string"
+            },
+            "path": {
+              "description": "Resolved path, if found.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "name"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "id": "project.close",
+    "description": "Close the open project (unsaved changes stay in the journal)",
+    "scope": "project-read",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "NoParams",
+      "description": "Empty params.",
+      "type": "object",
+      "additionalProperties": false
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ProjectSummary",
+      "description": "Summary returned by project ops.",
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "description": "Project id.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Name.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Directory.",
+          "type": "string"
+        },
+        "world": {
+          "description": "World settings.",
+          "$ref": "#/$defs/WorldSettings"
+        },
+        "schema_version": {
+          "description": "Document schema version.",
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "dirty": {
+          "description": "Unsaved changes?",
+          "type": "boolean"
+        },
+        "pending_journal": {
+          "description": "Journal entries awaiting replay.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "project_id",
+        "name",
+        "path",
+        "world",
+        "schema_version",
+        "dirty",
+        "pending_journal"
+      ],
+      "$defs": {
+        "WorldSettings": {
+          "description": "World extent, resolution and tiling (`docs/spec/project-format.md`).",
+          "type": "object",
+          "properties": {
+            "extent_m": {
+              "description": "Extent in metres, [x, y].",
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "double"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "resolution_px": {
+              "description": "Heightfield resolution in pixels, [x, y].",
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "tile_size": {
+              "description": "Tile edge length in pixels (power of two).",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "halo": {
+              "description": "Halo width in pixels around each tile.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "origin": {
+              "description": "World-space origin of pixel (0,0), metres.",
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "double"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "crs": {
+              "description": "Optional CRS identifier (e.g. \"EPSG:32637\") when georeferenced.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "seed": {
+              "description": "Master seed for all procedural randomness.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "extent_m",
+            "resolution_px",
+            "tile_size",
+            "halo",
+            "origin",
+            "seed"
+          ]
+        },
+        "SchemaVersion": {
+          "description": "A monotonically increasing document/API schema version.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      }
+    }
+  },
+  {
+    "id": "project.create",
+    "description": "Create a new project directory and open it",
+    "scope": "fs-write",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ProjectCreate",
+      "description": "`project.create` params.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "Directory to create (conventionally ending in `.jdproj`).",
+          "type": "string"
+        },
+        "name": {
+          "description": "Display name.",
+          "type": "string"
+        },
+        "world": {
+          "description": "World settings; defaults when omitted.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorldSettings"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "name"
+      ],
+      "$defs": {
+        "WorldSettings": {
+          "description": "World extent, resolution and tiling (`docs/spec/project-format.md`).",
+          "type": "object",
+          "properties": {
+            "extent_m": {
+              "description": "Extent in metres, [x, y].",
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "double"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "resolution_px": {
+              "description": "Heightfield resolution in pixels, [x, y].",
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "tile_size": {
+              "description": "Tile edge length in pixels (power of two).",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "halo": {
+              "description": "Halo width in pixels around each tile.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "origin": {
+              "description": "World-space origin of pixel (0,0), metres.",
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "double"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "crs": {
+              "description": "Optional CRS identifier (e.g. \"EPSG:32637\") when georeferenced.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "seed": {
+              "description": "Master seed for all procedural randomness.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "extent_m",
+            "resolution_px",
+            "tile_size",
+            "halo",
+            "origin",
+            "seed"
+          ]
+        }
+      }
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ProjectSummary",
+      "description": "Summary returned by project ops.",
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "description": "Project id.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Name.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Directory.",
+          "type": "string"
+        },
+        "world": {
+          "description": "World settings.",
+          "$ref": "#/$defs/WorldSettings"
+        },
+        "schema_version": {
+          "description": "Document schema version.",
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "dirty": {
+          "description": "Unsaved changes?",
+          "type": "boolean"
+        },
+        "pending_journal": {
+          "description": "Journal entries awaiting replay.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "project_id",
+        "name",
+        "path",
+        "world",
+        "schema_version",
+        "dirty",
+        "pending_journal"
+      ],
+      "$defs": {
+        "WorldSettings": {
+          "description": "World extent, resolution and tiling (`docs/spec/project-format.md`).",
+          "type": "object",
+          "properties": {
+            "extent_m": {
+              "description": "Extent in metres, [x, y].",
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "double"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "resolution_px": {
+              "description": "Heightfield resolution in pixels, [x, y].",
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "tile_size": {
+              "description": "Tile edge length in pixels (power of two).",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "halo": {
+              "description": "Halo width in pixels around each tile.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "origin": {
+              "description": "World-space origin of pixel (0,0), metres.",
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "double"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "crs": {
+              "description": "Optional CRS identifier (e.g. \"EPSG:32637\") when georeferenced.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "seed": {
+              "description": "Master seed for all procedural randomness.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "extent_m",
+            "resolution_px",
+            "tile_size",
+            "halo",
+            "origin",
+            "seed"
+          ]
+        },
+        "SchemaVersion": {
+          "description": "A monotonically increasing document/API schema version.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      }
+    }
+  },
+  {
+    "id": "project.info",
+    "description": "Describe the open project",
+    "scope": "project-read",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "NoParams",
+      "description": "Empty params.",
+      "type": "object",
+      "additionalProperties": false
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ProjectSummary",
+      "description": "Summary returned by project ops.",
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "description": "Project id.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Name.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Directory.",
+          "type": "string"
+        },
+        "world": {
+          "description": "World settings.",
+          "$ref": "#/$defs/WorldSettings"
+        },
+        "schema_version": {
+          "description": "Document schema version.",
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "dirty": {
+          "description": "Unsaved changes?",
+          "type": "boolean"
+        },
+        "pending_journal": {
+          "description": "Journal entries awaiting replay.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "project_id",
+        "name",
+        "path",
+        "world",
+        "schema_version",
+        "dirty",
+        "pending_journal"
+      ],
+      "$defs": {
+        "WorldSettings": {
+          "description": "World extent, resolution and tiling (`docs/spec/project-format.md`).",
+          "type": "object",
+          "properties": {
+            "extent_m": {
+              "description": "Extent in metres, [x, y].",
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "double"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "resolution_px": {
+              "description": "Heightfield resolution in pixels, [x, y].",
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "tile_size": {
+              "description": "Tile edge length in pixels (power of two).",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "halo": {
+              "description": "Halo width in pixels around each tile.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "origin": {
+              "description": "World-space origin of pixel (0,0), metres.",
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "double"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "crs": {
+              "description": "Optional CRS identifier (e.g. \"EPSG:32637\") when georeferenced.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "seed": {
+              "description": "Master seed for all procedural randomness.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "extent_m",
+            "resolution_px",
+            "tile_size",
+            "halo",
+            "origin",
+            "seed"
+          ]
+        },
+        "SchemaVersion": {
+          "description": "A monotonically increasing document/API schema version.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      }
+    }
+  },
+  {
+    "id": "project.open",
+    "description": "Open an existing project",
+    "scope": "project-read",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ProjectOpen",
+      "description": "`project.open` params.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "Project directory.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ProjectSummary",
+      "description": "Summary returned by project ops.",
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "description": "Project id.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Name.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Directory.",
+          "type": "string"
+        },
+        "world": {
+          "description": "World settings.",
+          "$ref": "#/$defs/WorldSettings"
+        },
+        "schema_version": {
+          "description": "Document schema version.",
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "dirty": {
+          "description": "Unsaved changes?",
+          "type": "boolean"
+        },
+        "pending_journal": {
+          "description": "Journal entries awaiting replay.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "project_id",
+        "name",
+        "path",
+        "world",
+        "schema_version",
+        "dirty",
+        "pending_journal"
+      ],
+      "$defs": {
+        "WorldSettings": {
+          "description": "World extent, resolution and tiling (`docs/spec/project-format.md`).",
+          "type": "object",
+          "properties": {
+            "extent_m": {
+              "description": "Extent in metres, [x, y].",
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "double"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "resolution_px": {
+              "description": "Heightfield resolution in pixels, [x, y].",
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "tile_size": {
+              "description": "Tile edge length in pixels (power of two).",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "halo": {
+              "description": "Halo width in pixels around each tile.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "origin": {
+              "description": "World-space origin of pixel (0,0), metres.",
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "double"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "crs": {
+              "description": "Optional CRS identifier (e.g. \"EPSG:32637\") when georeferenced.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "seed": {
+              "description": "Master seed for all procedural randomness.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "extent_m",
+            "resolution_px",
+            "tile_size",
+            "halo",
+            "origin",
+            "seed"
+          ]
+        },
+        "SchemaVersion": {
+          "description": "A monotonically increasing document/API schema version.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      }
+    }
+  },
+  {
+    "id": "project.recover",
+    "description": "Replay unsaved journal entries found when the project was opened, then save",
+    "scope": "project-write",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "NoParams",
+      "description": "Empty params.",
+      "type": "object",
+      "additionalProperties": false
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "RecoverResult",
+      "description": "`project.recover` result.",
+      "type": "object",
+      "properties": {
+        "replayed": {
+          "description": "Entries replayed in order.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/JournalEntry"
+          }
+        },
+        "failed": {
+          "description": "Entries that failed to replay (op id + error message).",
+          "type": "array",
+          "items": {
+            "type": "array",
+            "prefixItems": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "minItems": 2,
+            "maxItems": 2
+          }
+        }
+      },
+      "required": [
+        "replayed",
+        "failed"
+      ],
+      "$defs": {
+        "JournalEntry": {
+          "description": "One write-ahead journal entry: a mutating op that was applied in memory.",
+          "type": "object",
+          "properties": {
+            "ts": {
+              "description": "RFC 3339 timestamp.",
+              "type": "string"
+            },
+            "op": {
+              "description": "Operation id.",
+              "type": "string"
+            },
+            "params": {
+              "description": "Parameters as received."
+            }
+          },
+          "required": [
+            "ts",
+            "op",
+            "params"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "id": "project.save",
+    "description": "Write the open project to disk",
+    "scope": "project-write",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "NoParams",
+      "description": "Empty params.",
+      "type": "object",
+      "additionalProperties": false
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ProjectSummary",
+      "description": "Summary returned by project ops.",
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "description": "Project id.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Name.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Directory.",
+          "type": "string"
+        },
+        "world": {
+          "description": "World settings.",
+          "$ref": "#/$defs/WorldSettings"
+        },
+        "schema_version": {
+          "description": "Document schema version.",
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "dirty": {
+          "description": "Unsaved changes?",
+          "type": "boolean"
+        },
+        "pending_journal": {
+          "description": "Journal entries awaiting replay.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "project_id",
+        "name",
+        "path",
+        "world",
+        "schema_version",
+        "dirty",
+        "pending_journal"
+      ],
+      "$defs": {
+        "WorldSettings": {
+          "description": "World extent, resolution and tiling (`docs/spec/project-format.md`).",
+          "type": "object",
+          "properties": {
+            "extent_m": {
+              "description": "Extent in metres, [x, y].",
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "double"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "resolution_px": {
+              "description": "Heightfield resolution in pixels, [x, y].",
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "tile_size": {
+              "description": "Tile edge length in pixels (power of two).",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "halo": {
+              "description": "Halo width in pixels around each tile.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "origin": {
+              "description": "World-space origin of pixel (0,0), metres.",
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "double"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "crs": {
+              "description": "Optional CRS identifier (e.g. \"EPSG:32637\") when georeferenced.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "seed": {
+              "description": "Master seed for all procedural randomness.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "extent_m",
+            "resolution_px",
+            "tile_size",
+            "halo",
+            "origin",
+            "seed"
+          ]
+        },
+        "SchemaVersion": {
+          "description": "A monotonically increasing document/API schema version.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      }
+    }
+  },
+  {
+    "id": "project.set_name",
+    "description": "Rename the open project",
+    "scope": "project-write",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ProjectSetName",
+      "description": "`project.set_name` params.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "New display name.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ]
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ProjectSummary",
+      "description": "Summary returned by project ops.",
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "description": "Project id.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Name.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Directory.",
+          "type": "string"
+        },
+        "world": {
+          "description": "World settings.",
+          "$ref": "#/$defs/WorldSettings"
+        },
+        "schema_version": {
+          "description": "Document schema version.",
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "dirty": {
+          "description": "Unsaved changes?",
+          "type": "boolean"
+        },
+        "pending_journal": {
+          "description": "Journal entries awaiting replay.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "project_id",
+        "name",
+        "path",
+        "world",
+        "schema_version",
+        "dirty",
+        "pending_journal"
+      ],
+      "$defs": {
+        "WorldSettings": {
+          "description": "World extent, resolution and tiling (`docs/spec/project-format.md`).",
+          "type": "object",
+          "properties": {
+            "extent_m": {
+              "description": "Extent in metres, [x, y].",
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "double"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "resolution_px": {
+              "description": "Heightfield resolution in pixels, [x, y].",
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "tile_size": {
+              "description": "Tile edge length in pixels (power of two).",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "halo": {
+              "description": "Halo width in pixels around each tile.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "origin": {
+              "description": "World-space origin of pixel (0,0), metres.",
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "double"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "crs": {
+              "description": "Optional CRS identifier (e.g. \"EPSG:32637\") when georeferenced.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "seed": {
+              "description": "Master seed for all procedural randomness.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "extent_m",
+            "resolution_px",
+            "tile_size",
+            "halo",
+            "origin",
+            "seed"
+          ]
+        },
+        "SchemaVersion": {
+          "description": "A monotonically increasing document/API schema version.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      }
+    }
+  }
+]

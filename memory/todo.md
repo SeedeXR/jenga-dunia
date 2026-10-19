@@ -19,16 +19,21 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [ ] CI: bump `actions/checkout` and `actions/setup-node` off Node 20 (deprecation warning in run 2); cache `~/.npm/_npx` for mermaid-cli
 - [ ] Phase 2 backlog additions from WM inventory: undo/history paging with archive cap; preview target frame time setting
 
-## Phase 1 — Foundation (next)
-- [ ] Cargo workspace skeleton (`jd-types`, `jd-diag`, `jd-jobs`, `jd-cache`, `jd-core`, `jd-cli`, `jd-mcp`) — no empty crates
-- [ ] Project format v1 implementation + migrations + journal + autosave + tests
-- [ ] Operation registry + schemars JSON schema generation committed under `schemas/v1/`
-- [ ] CLI `jd new|diag|schema` with `--json` and exit codes
-- [ ] MCP server over stdio with `project.*`, `diag.*` tools and scope gate
-- [ ] Viewport feasibility prototype: native wgpu surface in Tauri window vs WebGPU/WebGL in WebView; measure; close ADR-0003
-- [ ] CI: Rust matrix (macOS arm64, Ubuntu, Windows), `cargo deny`, nextest, S1 bench smoke
+## Phase 1 — Foundation (in progress, Session 2)
+- [x] Cargo workspace: `jd-types`, `jd-core`, `apps/cli` (`jd`), `apps/mcp` (`jd-mcp`) — real content, 28 tests (unit/property/CLI-driven/MCP-driven)
+- [x] Project format v1: directory layout, atomic writes, unknown-key preservation, schema-version gate, write-ahead journal + crash recovery (`project.recover`), pid lock with stale detection
+- [x] Operation registry with schemars JSON schemas; snapshot test of all op schemas (`crates/jd-core/src/snapshots/`)
+- [ ] Commit generated schemas under `schemas/v1/` (currently only in the insta snapshot) + TS type generation
+- [x] CLI `jd new|open|op|schema|diag env` with `--json` NDJSON envelopes and spec exit codes
+- [x] MCP server over stdio: tools from registry, scope gate (`--scope`), `--workspace` confinement, structured envelopes
+- [ ] Autosave timer + `project.save` on job completion (needs jobs)
+- [ ] `jd-jobs` + `jd-cache` crates (with the first real long-running op, Phase 2 `graph.evaluate`)
+- [ ] Viewport feasibility prototype: three.js WebGPU/WebGL2 in Tauri WebView + Rust headless wgpu tiles; measure IPC MB/s on macOS; close ADR-0003
+- [x] CI: Rust matrix (macOS, Ubuntu, Windows) fmt/clippy/test/release-smoke + cargo-deny job; docs job with npx cache
+- [ ] S1 bench smoke in CI (needs a kernel)
 - [ ] Fixtures directory with malformed-file corpus seed
 - [ ] `graphify` knowledge graph generation added to session-end checklist and CI (deterministic output)
+- [ ] Platform-native checklist (owner mandate): macOS menu bar/⌘ shortcuts/file association for `.jdproj`, Metal via wgpu; Windows DX12/NVIDIA; Linux Vulkan/NVIDIA; CPU path everywhere
 
 ## Phase 2 — Core terrain authoring
 - [ ] `jd-terrain` tiles + halos + noise nodes + filters + analysis nodes
@@ -52,13 +57,13 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [ ] Material translation layer + loss reports
 - [ ] Blender bridge add-on (separate licence) + headless round-trip test
 - [ ] Unity/Unreal export profiles (heightmap sizes, weightmaps, z-scale) + documented import procedures
-- [ ] FBX import (ufbx) + optional FBX SDK export adapter (out-of-process)
+- [ ] FBX import (ufbx) + optional FBX SDK export adapter (out-of-process) for fbx we build our own high performance accurate reader and writer from sratch you can learn from optima it's in Software Projects , but also you can verify against blender headless , api , autodesk fbx  , maya , unity and unreal
 
 ## Phase 5 — Scale & hardening
 - [ ] Streaming, origin rebasing, 16k+ worlds under 4 GB
 - [ ] GPU kernels + parity tests
 - [ ] `jd-geo` (DEM/OSM/contours with attribution) and `jd-vision` (MoGe-2, DA3 via ONNX; licence gate)
-- [ ] Fuzzing, signed releases, diagnostic bundles
+- [ ] Fuzzing, signed releases ( no signed releases since we don't have an apple developer account.), diagnostic bundles
 - [ ] Acceptance scenario §20 green
 
 ## Deferred (with reasons)

@@ -1,6 +1,5 @@
-# CI — docs round. Validates documentation on all three target OS families so the matrix,
-# caching and runner labels are proven before Rust/Tauri jobs are added (see docs/research/stack.md).
-# ponytail: Rust/frontend jobs are added when the workspace exists; keep this file the single CI entry point.
+# CI — docs validation + Rust workspace on the three target OS families.
+# Runner labels verified 2026-10-19 (docs/research/stack.md §6).
 name: ci
 
 on:
@@ -11,6 +10,10 @@ on:
 permissions:
   contents: read
 
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
 jobs:
   docs:
     name: docs (${{ matrix.os }})
@@ -20,13 +23,55 @@ jobs:
       matrix:
         os: [macos-latest, ubuntu-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
+      - name: Cache npx (mermaid-cli + Chromium)
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm/_npx
+          key: npx-mermaid-${{ runner.os }}-${{ hashFiles('scripts/check-mermaid.mjs') }}
       - name: Validate Mermaid diagrams
         shell: bash
         run: node scripts/check-mermaid.mjs
       - name: Check internal links
         shell: bash
         run: node scripts/check-links.mjs
+
+  rust:
+    name: rust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace
+      - name: Build release binaries
+        run: cargo build --release -p jd-cli -p jd-mcp
+      - name: Smoke the CLI
+        shell: bash
+        run: |
+          ./target/release/jd --json diag env | tail -1 | head -c 400; echo
+          ./target/release/jd new "$RUNNER_TEMP/smoke.jdproj" --name Smoke
+          ./target/release/jd --json open "$RUNNER_TEMP/smoke.jdproj" | tail -1 | grep -q '"status":"ok"'
+
+  deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check

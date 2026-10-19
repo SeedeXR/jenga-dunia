@@ -23,6 +23,10 @@ Target workflows: game development, VR/XR, film, architectural visualisation, si
 9. Resource efficiency: ≤ 4 GB RAM typical, measured; tiled/streaming large worlds.
 10. Observability, stable error codes, security (Tauri capabilities, hardened parsers, scoped agent permissions, audit trail).
 
+## Platform-native mandate (owner, 2026-10-19)
+
+The app must feel native on each OS and use its raw hardware: **macOS** — Metal via wgpu, unified memory, Apple Silicon first; native window chrome, menu bar, ⌘ shortcuts, file associations, Quick Look-friendly USDZ. **Windows** — DX12 (fallback Vulkan) for NVIDIA GPUs, CPU SIMD path. **Linux** — Vulkan for NVIDIA, CPU path. CPU kernels are always present; GPU kernels are measured against them. Development and performance measurement happen on this Mac; Windows/Linux are validated through CI and reported honestly as `UNVERIFIED` where no hardware ran them.
+
 ## Technology stack (fixed unless an ADR justifies change)
 
 | Layer | Choice |

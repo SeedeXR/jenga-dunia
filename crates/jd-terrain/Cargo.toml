@@ -1,0 +1,29 @@
+[package]
+name = "jd-terrain"
+description = "Jenga Dunia terrain: tiled f32 heightfields with halos, deterministic noise generators, heightmap import/export."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+jd-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
+tracing.workspace = true
+rayon = "1"
+fastnoise-lite = "1.1"
+exr = "1.74"
+smallvec = "1"
+image = { version = "0.25", default-features = false, features = ["png"] }
+blake3.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

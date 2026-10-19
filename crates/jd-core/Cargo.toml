@@ -1,0 +1,27 @@
+[package]
+name = "jd-core"
+description = "Jenga Dunia core: project documents, journal/recovery, operation registry and JSON envelopes shared by GUI, CLI and MCP."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+jd-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+jiff = { version = "0.2", features = ["serde"] }
+sysinfo.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+tempfile.workspace = true
+jsonschema.workspace = true
+
+[lints]
+workspace = true
