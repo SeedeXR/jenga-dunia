@@ -4,13 +4,16 @@ Status: first working build. One window, native macOS title bar, dark theme (Hos
 
 ![Jenga Dunia desktop app, empty project state](images/desktop-empty.png)
 
-*Real screenshot of the running app on macOS (2026-10-19). The header reports the viewport backend: here **WebGPU** inside the system WebView.*
+*Real screenshot of the running app on macOS (2026-10-20, v0.0.1). The header reports the viewport backend: here **WebGPU** inside the system WebView.*
 
 ![Jenga Dunia with a generated 2048² terrain in the viewport](images/desktop-generated.png)
 
-*After **Terrain → Generate Terrain** (⌘G) and **File → Export Heightmap…** (⌘E), driven through the native menu bar: 2048² OpenSimplex2 fBm, 2.09 M viewport triangles; `exports/height.exr` validated by macOS ImageIO as 2048×2048, 32 bits/sample. Release build on Apple Silicon: generation 58–63 ms, 2 MB preview to the viewport in 6 ms (the screenshot above was taken from a debug build, hence its slower readout).*
+*After **Terrain → Generate Terrain** (⌘G) driven through the native menu bar on a 512² project (release build, Apple Silicon): generation 15 ms, 0.5 MB preview to the WebGPU viewport in 1 ms, 522 242 triangles. Earlier measurement at 2048²: generation 58–63 ms, 2 MB preview in 6 ms; `exports/height.exr` validated by macOS ImageIO as 2048×2048, 32 bits/sample.*
 
-![Native macOS menu bar](images/desktop-menubar.png)
+![File menu: New Project…, Open Project…, Save, Export Heightmap…](images/desktop-menu-file.png)
+![Terrain menu: Generate Terrain, Evaluate Graph](images/desktop-menu-terrain.png)
+
+*The Edit menu adds **Undo Graph Edit** (⌥⌘Z) and **Redo Graph Edit** (⇧⌥⌘Z) below the WebView's Undo/Redo.*
 
 ## Native integration
 
@@ -30,17 +33,19 @@ cd apps/desktop && pnpm install && pnpm tauri dev
 
 ![Step-by-step: create a project, generate, export, read the log](images/tutorial-01-create-project.png)
 
-1. **Path** — type the project directory (it is created on disk as a `.jdproj` folder).
-2. **New (⌘N)** — or **Open (⌘O)** for an existing project; the header shows `name — resolution² · extent m`.
-3. **Generate (⌘G)** — after choosing lattice, fractal, seed, feature size, octaves, lacunarity, gain and height range.
-4. **Export heightmap (⌘E)** — `.exr` (exact), `.png`/`.r16` (16-bit, warns about quantisation), `.r32` (exact).
-5. **Log** — every operation with warnings and errors (stable code, why, what to do next).
+1. **Path** — type the project directory (created on disk as a `.jdproj` folder), or use the folder button / **File → Open…** for a native dialog.
+2. **Preset** — Unity 1025²/2049²/4097², Unreal 2049²/4033² or plain squares fill resolution and extent.
+3. **New (⌘N)** — or **Open (⌘O)** for an existing project; the header shows `name — resolution² · extent m`.
+4. **Generate (⌘G)** — after choosing lattice, fractal, seed, feature size, octaves, lacunarity, gain and height range.
+5. **Export heightmap (⌘E)** — `.exr`/`.tif`/`.r32` (exact), `.png`/`.r16` (16-bit, warns about quantisation).
+6. **Log** — every operation with warnings and errors (stable code, why, what to do next).
 
 ![After generating: viewport readout, layer stats, export](images/tutorial-02-generated.png)
 
-1. Viewport readout: backend (WebGPU here), triangle count, preview size and transfer time.
+1. Viewport readout: backend (WebGPU here), triangle count, preview size and transfer time. Shading is a preview: altitude tint (valley green → rock → snow), steep faces towards rock grey, sky with distance fog.
 2. Layer statistics: min/max/mean height, generation time and the content hash — the same seed and parameters always give the same hash.
-3. Export writes `exports/<file>` plus a `.jd-height.json` sidecar (size, range, flip, byte order).
+3. Export writes `exports/<file>` plus a `.jd-height.json` sidecar (size, range, flip, byte order); the folder button opens a native save dialog.
+4. **Sculpt** switches the viewport to brush strokes (tutorial below).
 
 *Annotations are generated from the real screenshots by `apps/desktop/scripts/annotate.mjs` from the `.annot.json` specs next to the images, so they can be regenerated whenever the UI changes.*
 
@@ -53,10 +58,12 @@ Every project starts with a two-node graph (`Noise → Height`), the same `graph
 ![Node graph: add, evaluate, edit, connect, inspect](images/tutorial-03-graph.png)
 
 1. **Add** — pick a kind from the list (`graph.kinds` drives it) and click **Add**; the node is placed to the right of the graph and the view re-fits.
-2. **Evaluate** — full-resolution evaluation, also **Terrain → Evaluate Graph (⌘R)**. With **live preview** (⚡, on by default) every edit re-evaluates at preview resolution (≤ 512², published as `height#lod<N>`) so the viewport follows your changes; unchanged nodes come from cache. A half-wired graph pauses the live preview with a `live preview waiting: input … not connected` line instead of an error. Export always evaluates at full resolution first.
-3. **Nodes** — click to select, drag to move (the position is saved in the project), **Delete**/**Backspace** removes the node and its edges. The ↶ ↷ buttons (or **Edit → Undo/Redo Graph Edit**, ⌥⌘Z / ⇧⌥⌘Z) step through the edit history; ⌘Z alone stays with the text fields.
+2. **Undo · Redo · ⚡ · Evaluate** — the toolbar's history buttons, the live-preview toggle and full-resolution evaluation, also **Terrain → Evaluate Graph (⌘R)**. With **live preview** (⚡, on by default) every edit re-evaluates at preview resolution (≤ 512², published as `height#lod<N>`) so the viewport follows your changes; unchanged nodes come from cache. A half-wired graph pauses the live preview with a `live preview waiting: input … not connected` line instead of an error. Export always evaluates at full resolution first.
+3. **Nodes** — click to select, drag to move (the position is saved in the project), **Delete**/**Backspace** removes the node and its edges. The ↶ ↷ buttons (or **Edit → Undo/Redo Graph Edit**, ⌥⌘Z / ⇧⌥⌘Z) step through the edit history; ⌘Z alone stays with the text fields. The capture shows a `noise → hydraulic erosion → height` graph (the hydraulic node overlaps the noise node because it was added from the CLI without a position).
 4. **Inspector** — the selected node's parameters, generated from the kind's JSON schema (enums become drop-downs, defaults show as placeholders). Leaving a field applies `graph.set_param`; an invalid value is rejected by the core before anything is journaled and the reason appears in the log.
-5. **Viewport readout** — backend, triangle count and preview transfer for the evaluated layer. When the graph publishes more than one layer (e.g. a second output node named `water` fed by the hydraulic node's `water` port, or `slope` from the slope mask), a **layer** picker appears in the header; the viewport and stats follow the chosen layer, and live previews keep showing it.
+5. **Viewport readout** — backend, triangle count and preview transfer for the evaluated layer (here the hydraulically eroded 512² terrain, live-previewed when the project opened). When the graph publishes more than one layer (e.g. a second output node named `water` fed by the hydraulic node's `water` port, or `slope` from the slope mask), a **layer** picker appears in the header; the viewport and stats follow the chosen layer, and live previews keep showing it.
+
+6. **Sculpt** — enters sculpt mode (next tutorial).
 
 Undo and redo are operations like everything else (`graph.undo` / `graph.redo`, journaled as `graph.restore`), so a crash in the middle of undoing recovers to exactly what you saw. Connect nodes by dragging from an output handle (right) to an input handle (left); an input holds one edge, so dropping a new connection replaces the old one. Cycles, wrong ports and type mismatches are refused by the core (`E_GRAPH_CYCLE`, `E_INPUT_INVALID`, `E_GRAPH_TYPE_MISMATCH`). Evaluating while a required input is unconnected reports `E_GRAPH_MISSING_INPUT` with the node and port.
 

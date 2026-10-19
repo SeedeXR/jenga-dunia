@@ -2,9 +2,63 @@
   "src": "desktop-generated.png",
   "out": "tutorial-02-generated.png",
   "annotations": [
-    { "type": "box", "x": 1236, "y": 44, "w": 360, "h": 30, "label": "1", "text": "Viewport backend · triangles · preview size & transfer time", "tx": 1220, "ty": 66, "anchor": "end" },
-    { "type": "arrow", "x1": 640, "y1": 265, "x2": 760, "y2": 345, "text": "Drag to orbit · wheel to zoom", "tx": 440, "ty": 250 },
-    { "type": "box", "x": 1298, "y": 382, "w": 190, "h": 72, "label": "2", "text": "Layer stats: min/max/mean, time, content hash", "tx": 1280, "ty": 424, "anchor": "end" },
-    { "type": "box", "x": 1296, "y": 522, "w": 296, "h": 32, "label": "3", "text": "Writes exports/<file> + .jd-height.json sidecar", "tx": 1280, "ty": 546, "anchor": "end" }
+    {
+      "type": "box",
+      "x": 1296,
+      "y": 48,
+      "w": 298,
+      "h": 22,
+      "label": "1",
+      "text": "Viewport backend \u00b7 triangles \u00b7 preview size & transfer time",
+      "tx": 1590,
+      "ty": 30,
+      "anchor": "end"
+    },
+    {
+      "type": "arrow",
+      "x1": 640,
+      "y1": 330,
+      "x2": 760,
+      "y2": 250,
+      "text": "Drag to orbit \u00b7 wheel to zoom",
+      "tx": 440,
+      "ty": 360
+    },
+    {
+      "type": "box",
+      "x": 1298,
+      "y": 382,
+      "w": 190,
+      "h": 72,
+      "label": "2",
+      "text": "Layer stats: min/max/mean, time, content hash",
+      "tx": 1282,
+      "ty": 424,
+      "anchor": "end"
+    },
+    {
+      "type": "box",
+      "x": 1298,
+      "y": 528,
+      "w": 292,
+      "h": 28,
+      "label": "3",
+      "text": "Export writes exports/<file> + .jd-height.json sidecar",
+      "tx": 1282,
+      "ty": 580,
+      "anchor": "end"
+    },
+    {
+      "type": "box",
+      "x": 1124,
+      "y": 86,
+      "w": 62,
+      "h": 26,
+      "label": "4",
+      "text": "Sculpt: brush strokes on the terrain (see below)",
+      "tx": 1110,
+      "ty": 132,
+      "anchor": "end"
+    }
   ]
 }
