@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "@fontsource-variable/host-grotesk";
+@import "@xyflow/react/dist/style.css";
 
 /* Dark-first design tokens (docs/architecture/12-ui-workspace.md). */
 @theme {

@@ -37,7 +37,7 @@ The best code is the code not written. Reuse maintained, licence-compatible crat
 
 ## 8. Commercial open source, honestly
 
-MIT core. Every dependency's licence is verified and registered. GPL/copyleft, proprietary SDKs (Autodesk FBX SDK) and non-commercial model weights live outside the core as optional, separately-installed adapters, clearly labelled. Attribution obligations (OSM ODbL, DEM providers) are rendered in the app and in exports' metadata.
+MIT core, **one edition**: no Community/Professional tiers, no feature gates, no resolution caps, no licence keys — the whole application for everyone, like Blender (ADR-0013). Every dependency's licence is verified and registered. GPL/copyleft, proprietary SDKs (Autodesk FBX SDK) and non-commercial model weights live outside the core as optional, separately-installed adapters, clearly labelled. Attribution obligations (OSM ODbL, DEM providers) are rendered in the app and in exports' metadata.
 
 ## 9. Observability and security are features
 

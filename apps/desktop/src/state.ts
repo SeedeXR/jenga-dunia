@@ -37,6 +37,34 @@ export interface LogEntry {
   text: string;
 }
 
+export interface GraphNode {
+  id: string;
+  kind: string;
+  params: Record<string, unknown>;
+  bypass: boolean;
+  ui?: { position?: [number, number]; label?: string | null };
+}
+
+export interface GraphEdge {
+  from: { node: string; port: string };
+  to: { node: string; port: string };
+}
+
+export interface GraphKind {
+  kind: string;
+  description: string;
+  inputs: { name: string; ty: string; required: boolean }[];
+  outputs: { name: string; ty: string; required: boolean }[];
+  param_schema: unknown;
+}
+
+export interface EvalReport {
+  lod: number;
+  duration_ms: number;
+  nodes: { node: string; kind: string; hash: string; cached: boolean; duration_ms: number }[];
+  layers: Record<string, string>;
+}
+
 interface State {
   project: ProjectSummary | null;
   layer: LayerInfo | null;
@@ -45,7 +73,18 @@ interface State {
   noise: NoiseSettings;
   busy: boolean;
   log: LogEntry[];
+  graph: { nodes: GraphNode[]; edges: GraphEdge[] };
+  graphKinds: GraphKind[];
+  lastEval: EvalReport | null;
   setNoise: (patch: Partial<NoiseSettings>) => void;
+  loadGraph: () => Promise<void>;
+  addNode: (kind: string) => Promise<void>;
+  removeNode: (id: string) => Promise<void>;
+  moveNode: (id: string, position: [number, number]) => Promise<void>;
+  connectNodes: (from: string, fromPort: string, to: string, toPort: string) => Promise<void>;
+  disconnectNodes: (from: string, fromPort: string, to: string, toPort: string) => Promise<void>;
+  setParam: (id: string, key: string, value: unknown) => Promise<void>;
+  evaluateGraph: (lod?: number) => Promise<void>;
   /** Adopt a project the backend already has open (launch argument / file association). */
   probeProject: (isCancelled?: () => boolean) => Promise<void>;
   newProject: (path: string, name: string, extent: number, resolution: number) => Promise<void>;
@@ -109,6 +148,17 @@ export const useStore = create<State>((set, get) => {
       logFailure("layer_preview", e);
     }
   };
+  type GraphView = { nodes: GraphNode[]; edges: GraphEdge[] };
+  const applyGraph = (r: Response<GraphView>) => {
+    if (r.status === "ok" && r.result) set({ graph: r.result });
+  };
+  const loadGraph = async () => {
+    if (get().graphKinds.length === 0) {
+      const k = await run<GraphKind[]>("graph.kinds");
+      if (k.status === "ok" && k.result) set({ graphKinds: k.result });
+    }
+    applyGraph(await run<GraphView>("graph.list"));
+  };
   return {
     project: null,
     layer: null,
@@ -117,7 +167,36 @@ export const useStore = create<State>((set, get) => {
     noise: defaultNoise,
     busy: false,
     log: [],
+    graph: { nodes: [], edges: [] },
+    graphKinds: [],
+    lastEval: null,
     setNoise: (patch) => set((s) => ({ noise: { ...s.noise, ...patch } })),
+    loadGraph,
+    addNode: async (kind) => {
+      // New nodes go to the right of the current graph so they are visible and easy to wire in.
+      const right = Math.max(-320, ...get().graph.nodes.map((n) => n.ui?.position?.[0] ?? 0));
+      const r = await run<{ id: string }>("graph.add_node", { kind, position: [right + 320, 0] });
+      if (r.status === "ok") await loadGraph();
+    },
+    removeNode: async (id) => applyGraph(await run<GraphView>("graph.remove_node", { id })),
+    moveNode: async (id, position) => applyGraph(await run<GraphView>("graph.move_node", { id, position })),
+    connectNodes: async (from, fromPort, to, toPort) => applyGraph(await run<GraphView>("graph.connect", { from, from_port: fromPort, to, to_port: toPort })),
+    disconnectNodes: async (from, fromPort, to, toPort) => applyGraph(await run<GraphView>("graph.disconnect", { from, from_port: fromPort, to, to_port: toPort })),
+    setParam: async (id, key, value) => applyGraph(await run<GraphView>("graph.set_param", { id, key, value })),
+    evaluateGraph: async (lod = 0) => {
+      const r = await run<EvalReport>("graph.evaluate", { lod });
+      if (r.status === "ok" && r.result) {
+        set({ lastEval: r.result });
+        const layerName = Object.keys(r.result.layers)[0];
+        if (layerName) {
+          const st = await run<LayerInfo>("terrain.stats", { layer: layerName });
+          if (st.status === "ok" && st.result) {
+            set({ layer: st.result });
+            await refreshPreview();
+          }
+        }
+      }
+    },
     probeProject: async (isCancelled) => {
       try {
         const r = await op<ProjectSummary>("project.info");
@@ -125,6 +204,7 @@ export const useStore = create<State>((set, get) => {
         if (r.status === "ok" && r.result) {
           set({ project: r.result });
           log(r);
+          await loadGraph();
         }
       } catch {
         // not inside Tauri (browser/tests)
@@ -136,11 +216,17 @@ export const useStore = create<State>((set, get) => {
         name,
         world: { extent_m: [extent, extent], resolution_px: [resolution, resolution], tile_size: 512, halo: 4, origin: [0, 0], seed: 42 },
       });
-      if (r.status === "ok" && r.result) set({ project: r.result, layer: null, preview: null });
+      if (r.status === "ok" && r.result) {
+        set({ project: r.result, layer: null, preview: null });
+        await loadGraph();
+      }
     },
     openProject: async (path) => {
       const r = await run<ProjectSummary>("project.open", { path });
-      if (r.status === "ok" && r.result) set({ project: r.result, layer: null, preview: null });
+      if (r.status === "ok" && r.result) {
+        set({ project: r.result, layer: null, preview: null });
+        await loadGraph();
+      }
     },
     generate: async () => {
       const r = await run<LayerInfo>("terrain.generate", { noise: get().noise, layer: "height" });

@@ -12,6 +12,6 @@ pub mod model;
 pub mod nodes;
 pub mod registry;
 
-pub use eval::{Cache, EvalReport, Evaluator, NodeReport, Value};
-pub use model::{Edge, Graph, Node, NodeKind, Port, PortType};
-pub use registry::{EvalCtx, NodeDef, Registry};
+pub use eval::{Cache, EvalReport, Evaluator, NodeReport, Outputs, Value};
+pub use model::{Edge, Graph, Node, NodeKind, Port, PortRef, PortType, UiMeta};
+pub use registry::{EvalCtx, NodeDef, NodeDefInfo, Registry};

@@ -319,7 +319,7 @@ impl Project {
         let mut p = Self {
             root: path.to_path_buf(),
             doc,
-            graph: GraphDocument::default(),
+            graph: jd_graph::nodes::starter(),
             scene: SceneDocument::default(),
             pending_journal: Vec::new(),
             dirty: true,
@@ -597,7 +597,7 @@ mod tests {
         assert!(warnings.is_empty(), "{warnings:?}");
         assert_eq!(opened.doc.id, id);
         assert_eq!(opened.doc.name, "World");
-        assert_eq!(opened.graph, GraphDocument::default());
+        assert_eq!(opened.graph, jd_graph::nodes::starter());
         assert!(root.join("cache/.gitignore").exists());
     }
 

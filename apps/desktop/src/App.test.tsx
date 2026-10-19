@@ -21,6 +21,14 @@ vi.mock("@tauri-apps/api/core", () => ({
     if (!req) throw new Error("unexpected command");
     const base = { op: req.op, schema_version: 1, request_id: "01TEST" };
     switch (req.op) {
+      case "graph.kinds":
+        return { ...base, status: "ok", result: [{ kind: "jd.noise.fbm@1", description: "", inputs: [], outputs: [{ name: "out", ty: "heightfield", required: false }], param_schema: {} }] };
+      case "graph.list":
+        return { ...base, status: "ok", result: { nodes: [{ id: "01N", kind: "jd.noise.fbm@1", params: {}, bypass: false, ui: { position: [0, 0], label: "Noise" } }], edges: [] } };
+      case "graph.evaluate":
+        return { ...base, status: "ok", result: { lod: 0, duration_ms: 3, nodes: [], layers: { height: "abc" } } };
+      case "terrain.stats":
+        return { ...base, status: "ok", result: { layer: "height", size_px: [2048, 2048], stats: { min: 1.5, max: 498.2, mean: 250.1, non_finite: 0 }, content_hash: "abc", duration_ms: 0 } };
       case "project.info":
         return { ...base, status: "error", error: { code: "E_INPUT_INVALID", message: "no project is open" } };
       case "project.create":
@@ -50,6 +58,21 @@ vi.mock("@tauri-apps/api/event", () => ({
   }),
 }));
 
+// React Flow needs layout APIs jsdom lacks; the panel is covered by the Playwright e2e.
+vi.mock("./graph/GraphPanel", () => ({
+  default: () => {
+    const s = useStore();
+    return (
+      <div data-testid="graph-panel">
+        {s.graph.nodes.map((n) => n.kind).join(",")}
+        <button data-testid="graph-evaluate" onClick={() => void s.evaluateGraph()}>
+          eval
+        </button>
+      </div>
+    );
+  },
+}));
+
 vi.mock("./viewport/TerrainView", () => ({
   default: ({ preview }: { preview: { width: number } | null }) => <div data-testid="viewport">{preview ? `preview ${preview.width}` : "no preview"}</div>,
 }));
@@ -61,11 +84,12 @@ describe("App", () => {
   beforeEach(() => {
     calls.length = 0;
     // The store is module-global; reset the mirrored state between tests.
-    useStore.setState({ project: null, layer: null, preview: null, previewStats: null, log: [], busy: false });
+    useStore.setState({ project: null, layer: null, preview: null, previewStats: null, log: [], busy: false, graph: { nodes: [], edges: [] }, graphKinds: [], lastEval: null });
   });
 
   it("creates a project, generates terrain, shows stats and preview, exports with a loss warning", async () => {
     render(<App />);
+    expect(screen.getByTestId("app-version")).toHaveTextContent(/^v\d+\.\d+\.\d+$/);
     expect(screen.getByTestId("generate")).toBeDisabled();
     fireEvent.change(screen.getByTestId("project-path"), { target: { value: "/tmp/Hills.jdproj" } });
     fireEvent.click(screen.getByTestId("new-project"));
@@ -101,6 +125,20 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByTestId("log")).toHaveTextContent("terrain.export_heightmap"));
     const exp = calls.find((c) => (c.args as { request?: { op: string } }).request?.op === "terrain.export_heightmap");
     expect(exp).toMatchObject({ args: { request: { params: { path: "height.exr", format: "exr" } } } });
+    menuListeners.forEach((cb) => cb({ payload: "evaluate" }));
+    await waitFor(() => expect(screen.getByTestId("log")).toHaveTextContent("graph.evaluate"));
+  });
+
+  it("loads the project graph and evaluating it refreshes stats and preview", async () => {
+    render(<App />);
+    fireEvent.change(screen.getByTestId("project-path"), { target: { value: "/tmp/G.jdproj" } });
+    fireEvent.click(screen.getByTestId("new-project"));
+    await waitFor(() => expect(screen.getByTestId("graph-panel")).toHaveTextContent("jd.noise.fbm@1"));
+    fireEvent.click(screen.getByTestId("graph-evaluate"));
+    await waitFor(() => expect(screen.getByTestId("layer-stats")).toBeInTheDocument());
+    const ops = calls.map((c) => (c.args as { request?: { op: string } }).request?.op).filter(Boolean);
+    expect(ops).toEqual(expect.arrayContaining(["graph.kinds", "graph.list", "graph.evaluate", "terrain.stats"]));
+    expect(screen.getByTestId("viewport")).toHaveTextContent("preview 2");
   });
 
   it("surfaces core errors with code and next step in the log", async () => {

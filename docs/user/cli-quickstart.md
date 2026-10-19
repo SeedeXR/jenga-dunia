@@ -110,13 +110,52 @@ warning  W_EXPORT_LOSS: Png16 quantises heights to 0.0064 m steps; range recorde
 
 Same seed → same `content_hash`, on any thread count and tile size (tested). Measured on an Apple Silicon laptop (10 cores): 4096² generation 157 ms, whole command 0.42 s, peak RSS 235 MB; the EXR is read by macOS ImageIO as 4096×4096, 32 bits/sample, and the PNG as 16-bit grayscale.
 
-## 5. Diagnostics
+## 5. Build a procedural graph
+
+Terrain is really a **graph** (`graph.json` in the project): generator → filters → output. Every graph change is a journaled operation (crash-safe, undoable later); evaluation is incremental — unchanged nodes are served from cache by content hash.
+
+```
+$ jd op graph.kinds | head          # node kinds with ports and parameter schemas
+$ jd --json op graph.add_node --project G.jdproj --save \
+    --params '{"kind":"jd.noise.fbm@1","params":{"seed":9,"fractal":"ridged","height_range_m":[0,300]}}'
+{"op":"graph.add_node", ..., "result":{"id":"01M5AYXA8NG9R58WS7RRM2RMRM"}}
+$ jd op graph.add_node --project G.jdproj --save --params '{"kind":"jd.filter.blur@1","params":{"radius":2}}'
+$ jd op graph.add_node --project G.jdproj --save --params '{"kind":"jd.output.height@1"}'
+$ jd op graph.connect  --project G.jdproj --save --params '{"from":"<noise id>","to":"<blur id>","to_port":"in"}'
+$ jd op graph.connect  --project G.jdproj --save --params '{"from":"<blur id>","to":"<output id>","to_port":"in"}'
+$ jd --json op graph.evaluate --project G.jdproj --params '{"lod":0}'
+{"op":"graph.evaluate","status":"ok","result":{"lod":0,"duration_ms":20,
+  "nodes":[{"kind":"jd.noise.fbm@1","duration_ms":15,"cached":false,"hash":"…"},
+           {"kind":"jd.filter.blur@1","duration_ms":3,"cached":false,"hash":"…"},
+           {"kind":"jd.output.height@1","duration_ms":0,"cached":false,"hash":"…"}],
+  "layers":{"height":"55fcde70c90c7fd7…"}}}
+```
+
+(512² world, release build.) Every mutation is validated **before** it is journaled, so a rejected request never touches the project: unknown kinds (`E_NODE_UNKNOWN`), parameters that do not match the kind's schema, missing nodes or ports, type mismatches (`E_INPUT_INVALID` / `E_GRAPH_TYPE_MISMATCH`) and cycles (`E_GRAPH_CYCLE`). Errors name the node:
+
+```
+$ jd --json op graph.set_param --project G.jdproj --params '{"id":"<noise id>","key":"octaves","value":"many"}'
+{"op":"graph.set_param","status":"error","error":{"code":"E_INPUT_INVALID",
+  "message":"invalid type: string \"many\", expected u8","why":"Parameters must match the node kind's schema.",
+  "next":"See graph.kinds for the schema.","details":{"path":"params","node":"01JDGRAPH000000000000N01SE"}}}
+$ jd --json op graph.connect --project G.jdproj --params '{"from":"<noise id>","from_port":"nope","to":"<output id>","to_port":"in"}'
+{"op":"graph.connect","status":"error","error":{"code":"E_INPUT_INVALID",
+  "message":"node 01JDGRAPH000000000000N01SE (jd.noise.fbm@1) has no output `nope`", ...}}
+```
+
+Evaluating with an unconnected required input gives `E_GRAPH_MISSING_INPUT`. `graph.move_node` (editor position) is journaled like every other change, so the desktop canvas layout survives a crash. `graph.evaluate` with `lod > 0` publishes a reduced-resolution preview under `<layer>#lod<N>` (e.g. `height#lod1`) and never overwrites the full-resolution layer.
+
+Layers live in memory for the lifetime of the process: in the desktop app and in an MCP session the `height` layer produced by `graph.evaluate` is immediately available to `terrain.stats` / `terrain.export_heightmap`; the CLI runs one operation per invocation, so exporting a graph result from the shell needs the on-disk layer cache that lands with the jobs system (see `memory/todo.md`). Until then use `jd generate` for shell exports.
+
+Built-in kinds today: `jd.noise.fbm@1`, `jd.math.add@1`, `jd.math.multiply@1`, `jd.math.scale@1`, `jd.math.remap@1`, `jd.filter.blur@1`, `jd.output.height@1`.
+
+## 6. Diagnostics
 
 ```
 $ jd diag env
 ok  diag.env
 {
-  "app_version": "0.1.0",
+  "app_version": "0.0.1",
   "os": "Darwin 27.0.1",
   "arch": "aarch64",
   "cpus": 10,

@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
-import { FolderOpen, FolderPlus, Mountain, Save, Upload } from "lucide-react";
+import { FolderOpen, FolderPlus, Mountain, Save, Upload, Workflow } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import GraphPanel from "./graph/GraphPanel";
 import TerrainView, { type ViewportInfo } from "./viewport/TerrainView";
 import { useStore } from "./state";
 
@@ -28,6 +29,7 @@ export default function App() {
   const [resolution, setResolution] = useState(2048);
   const [exportPath, setExportPath] = useState("height.exr");
   const [vp, setVp] = useState<ViewportInfo>({ backend: "none", triangles: 0 });
+  const [showGraph, setShowGraph] = useState(true);
   const onInfo = useCallback((i: ViewportInfo) => setVp(i), []);
   const pathInput = useRef<HTMLInputElement>(null);
 
@@ -58,6 +60,9 @@ export default function App() {
         case "generate":
           if (st.project) void st.generate();
           break;
+        case "evaluate":
+          if (st.project) void st.evaluateGraph();
+          break;
         case "export":
           if (st.layer) void st.exportHeightmap(exportPath, formatFor(exportPath));
           break;
@@ -80,6 +85,7 @@ export default function App() {
       <header className="flex items-center gap-3 border-b border-jd-line bg-jd-bg-1 px-3">
         <Mountain size={16} className="text-jd-accent" />
         <span className="font-semibold tracking-wide">Jenga Dunia</span>
+        <span className="text-xs text-jd-fg-2" data-testid="app-version">v{__JD_VERSION__}</span>
         <span className="text-xs text-jd-fg-2">{s.project ? `${s.project.name} — ${s.project.world.resolution_px[0]}² · ${s.project.world.extent_m[0]} m` : "no project"}</span>
         <span className="ml-auto text-xs text-jd-fg-2" data-testid="viewport-info">
           viewport: {vp.backend} · {vp.triangles.toLocaleString()} tris
@@ -127,9 +133,19 @@ export default function App() {
           )}
         </aside>
 
-        {/* Center: viewport */}
-        <main className="relative bg-jd-bg-0">
-          <TerrainView preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} />
+        {/* Center: viewport (top) + node graph (bottom, toggle) */}
+        <main className={`relative grid bg-jd-bg-0 ${showGraph ? "grid-rows-[1fr_300px]" : "grid-rows-[1fr]"}`}>
+          <div className="relative min-h-0">
+            <TerrainView preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} />
+            <button className="btn absolute top-2 right-2" onClick={() => setShowGraph((v) => !v)} data-testid="toggle-graph">
+              <Workflow size={14} /> {showGraph ? "Hide graph" : "Graph"}
+            </button>
+          </div>
+          {showGraph && (
+            <div className="min-h-0 border-t border-jd-line">
+              <GraphPanel />
+            </div>
+          )}
           {!s.preview && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-jd-fg-2">
               {s.project ? "Generate terrain to see it here" : "Create or open a project"}

@@ -45,6 +45,24 @@ cd apps/desktop && pnpm install && pnpm tauri dev
 
 **Screen recording:** [`videos/first-terrain.mp4`](videos/first-terrain.mp4) (14 s, 1440×892) — the real app opened with a project, **Terrain → Generate Terrain** and **File → Export Heightmap…** triggered through the native menu bar, terrain appearing in the WebGPU viewport, `height.exr` written. Recorded with macOS `screencapture -V`; the menu actions were driven by System Events so the recording is reproducible.
 
+## Tutorial: the node graph
+
+Every project starts with a two-node graph (`Noise → Height`), the same `graph.json` the CLI and MCP server edit. The panel under the viewport is that graph; **Hide graph** collapses it.
+
+![Node graph: add, evaluate, edit, connect, inspect](images/tutorial-03-graph.png)
+
+1. **Add** — pick a kind from the list (`graph.kinds` drives it) and click **Add**; the node is placed to the right of the graph and the view re-fits.
+2. **Evaluate** — or **Terrain → Evaluate Graph (⌘R)**. Unchanged nodes are served from cache (the log shows `graph.evaluate: ok`; the stats panel and viewport update from the `height` output).
+3. **Nodes** — click to select, drag to move (the position is saved in the project), **Delete**/**Backspace** removes the node and its edges.
+4. **Inspector** — the selected node's parameters, generated from the kind's JSON schema (enums become drop-downs, defaults show as placeholders). Leaving a field applies `graph.set_param`; an invalid value is rejected by the core before anything is journaled and the reason appears in the log.
+5. **Viewport readout** — backend, triangle count and preview transfer for the evaluated layer.
+
+Connect nodes by dragging from an output handle (right) to an input handle (left); an input holds one edge, so dropping a new connection replaces the old one. Cycles, wrong ports and type mismatches are refused by the core (`E_GRAPH_CYCLE`, `E_INPUT_INVALID`, `E_GRAPH_TYPE_MISMATCH`). Evaluating while a required input is unconnected reports `E_GRAPH_MISSING_INPUT` with the node and port.
+
+![Terrain menu with Generate Terrain and Evaluate Graph](images/desktop-menu-terrain.png)
+
+**Screen recording:** [`videos/graph-editor.mp4`](videos/graph-editor.mp4) (16 s, 1440×900) — the whole flow above: edit the seed, add a blur node, connect it by dragging the handles, move a node, evaluate, delete with the keyboard. It is the UI-driven test `apps/desktop/e2e/graph.spec.ts` running against the real core, recorded with `JD_VIDEO=1 pnpm exec playwright test e2e/graph.spec.ts` (actions slowed to human pace), so it is regenerated whenever the editor changes.
+
 ## Workflow
 
 1. **Project** — type a directory path (e.g. `~/Worlds/Hills.jdproj`), set extent (m) and resolution (px), click **New** (or **Open** for an existing one). The header shows `name — resolution² · extent m`; the panel shows the project id, dirty flag and pending journal entries.
@@ -60,6 +78,7 @@ Every button calls the same operation the CLI and MCP server expose (`jd schema 
 |---|---|---|
 | Component (jsdom) | the real `App` with `invoke` mocked at the Tauri boundary: create → generate → stats → preview → export warning; error display | `apps/desktop/src/App.test.tsx` (`pnpm test`) |
 | End-to-end (Chromium) | the real frontend driven by Playwright with `invoke` bridged to the **real Rust core** via `jd-mcp` (MCP over stdio): project files appear on disk, the viewport reports its backend and triangle count, a 16-bit PNG is written | `apps/desktop/e2e/terrain.spec.ts` (`pnpm test:e2e`) |
+| End-to-end, node graph | starter graph drawn from `graph.json`; edit a parameter, add a node, connect it by dragging handles, drag a node, evaluate, delete with the keyboard; the project's `journal/ops.ndjson` is read back and must list exactly `set_param, add_node, connect, move_node, remove_node` | `apps/desktop/e2e/graph.spec.ts` |
 | Native window | screenshots of the real Tauri app on macOS; interaction recording requires Accessibility permission for the automating process | this page |
 
-Known limits of this build: no file dialogs yet (type paths), no node editor, no sculpting, one layer. Figma-annotated tutorial images and screen recordings follow once the workflow panels exist.
+Known limits of this build: no file dialogs yet (type paths), no sculpting, one output layer, no undo of graph edits yet (the journal records them). The tutorial images are the real app annotated by `scripts/annotate.mjs`; the Figma file linked in the brief is the design reference and receives the same screenshots once the connector is authorised.

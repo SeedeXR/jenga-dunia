@@ -6,30 +6,18 @@ use jd_types::{ErrorCode, JdError, JdResult, NodeId, SchemaVersion};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-/// Port data types. Implicit conversions are limited to the documented set
-/// (`PortType::accepts`); anything else is `E_GRAPH_TYPE_MISMATCH`.
+/// Port data types. Only heightfields flow today; new types are added with their first producer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PortType {
-    /// f32 heightfield in metres.
+    /// f32 heightfield in metres (masks are heightfields in 0..1).
     Heightfield,
-    /// f32 field normalised to 0..1.
-    Mask,
-    /// A single number.
-    Scalar,
 }
 
 impl PortType {
     /// Can a value of `from` be connected to an input of `self`?
     pub fn accepts(self, from: PortType) -> bool {
-        match (self, from) {
-            (a, b) if a == b => true,
-            // A mask is a heightfield in 0..1 and vice versa after normalisation (done by the consumer).
-            (PortType::Mask, PortType::Heightfield) | (PortType::Heightfield, PortType::Mask) => {
-                true
-            }
-            _ => false,
-        }
+        self == from
     }
 }
 
@@ -39,25 +27,6 @@ impl PortType {
 )]
 #[serde(transparent)]
 pub struct NodeKind(pub String);
-
-impl NodeKind {
-    /// Split into (name, version).
-    pub fn parts(&self) -> JdResult<(&str, u32)> {
-        let (name, ver) = self.0.rsplit_once('@').ok_or_else(|| {
-            JdError::new(
-                ErrorCode::E_NODE_UNKNOWN,
-                format!("node kind `{}` must be `name@version`", self.0),
-            )
-        })?;
-        let version = ver.parse::<u32>().map_err(|_| {
-            JdError::new(
-                ErrorCode::E_NODE_UNKNOWN,
-                format!("node kind `{}` has a non-numeric version", self.0),
-            )
-        })?;
-        Ok((name, version))
-    }
-}
 
 /// A typed port declared by a node definition.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -87,7 +56,7 @@ pub struct UiMeta {
 pub struct Node {
     /// Kind `name@version`.
     pub kind: NodeKind,
-    /// Parameters, validated against the kind's schema.
+    /// Parameters, validated against the kind's schema on every mutation.
     #[serde(default)]
     pub params: Map<String, Value>,
     /// Bypassed nodes pass their first input through unchanged.
@@ -144,19 +113,35 @@ impl Default for Graph {
 }
 
 impl Graph {
-    /// Incoming edges of `node`, keyed by input port name.
-    pub fn inputs_of(&self, node: &NodeId) -> BTreeMap<&str, &PortRef> {
+    /// Incoming edges per node, keyed by input port name (one scan over the edges).
+    pub fn input_map(&self) -> BTreeMap<&NodeId, BTreeMap<&str, &PortRef>> {
+        let mut m: BTreeMap<&NodeId, BTreeMap<&str, &PortRef>> = BTreeMap::new();
+        for e in &self.edges {
+            m.entry(&e.to.node)
+                .or_default()
+                .insert(e.to.port.as_str(), &e.from);
+        }
+        m
+    }
+
+    /// Edges whose endpoints do not exist (corrupt or partially written documents).
+    pub fn dangling_edges(&self) -> Vec<&Edge> {
         self.edges
             .iter()
-            .filter(|e| &e.to.node == node)
-            .map(|e| (e.to.port.as_str(), &e.from))
+            .filter(|e| {
+                !self.nodes.contains_key(&e.from.node) || !self.nodes.contains_key(&e.to.node)
+            })
             .collect()
     }
 
-    /// Nodes in topological order (Kahn). `E_GRAPH_CYCLE` lists the nodes left in the cycle.
+    /// Nodes in topological order (Kahn). Edges with missing endpoints are ignored here and
+    /// reported by [`Graph::dangling_edges`]; `E_GRAPH_CYCLE` lists the nodes left in the cycle.
     pub fn topological_order(&self) -> JdResult<Vec<NodeId>> {
+        let live = |e: &&Edge| {
+            self.nodes.contains_key(&e.from.node) && self.nodes.contains_key(&e.to.node)
+        };
         let mut indegree: BTreeMap<&NodeId, usize> = self.nodes.keys().map(|id| (id, 0)).collect();
-        for e in &self.edges {
+        for e in self.edges.iter().filter(live) {
             if let Some(d) = indegree.get_mut(&e.to.node) {
                 *d += 1;
             }
@@ -169,7 +154,12 @@ impl Graph {
         let mut order = Vec::with_capacity(self.nodes.len());
         while let Some(id) = ready.pop() {
             order.push(id.clone());
-            for e in self.edges.iter().filter(|e| &e.from.node == id) {
+            for e in self
+                .edges
+                .iter()
+                .filter(live)
+                .filter(|e| &e.from.node == id)
+            {
                 if let Some(d) = indegree.get_mut(&e.to.node) {
                     *d -= 1;
                     if *d == 0 {
@@ -194,21 +184,6 @@ impl Graph {
             );
         }
         Ok(order)
-    }
-
-    /// All nodes downstream of `start` (inclusive), in topological order.
-    pub fn downstream(&self, start: &NodeId) -> JdResult<Vec<NodeId>> {
-        let order = self.topological_order()?;
-        let mut marked: std::collections::BTreeSet<&NodeId> = std::collections::BTreeSet::new();
-        marked.insert(start);
-        for id in &order {
-            if marked.contains(id) {
-                for e in self.edges.iter().filter(|e| &e.from.node == id) {
-                    marked.insert(&e.to.node);
-                }
-            }
-        }
-        Ok(order.into_iter().filter(|id| marked.contains(id)).collect())
     }
 }
 
@@ -250,7 +225,6 @@ mod tests {
         let order = g.topological_order().expect("acyclic");
         let pos = |id: &NodeId| order.iter().position(|x| x == id).expect("present");
         assert!(pos(&a) < pos(&b) && pos(&b) < pos(&c));
-        assert_eq!(g.downstream(&b).expect("ok"), vec![b.clone(), c.clone()]);
         g.edges.push(edge(&c, &a));
         let err = g.topological_order().expect_err("cycle");
         assert_eq!(err.code, ErrorCode::E_GRAPH_CYCLE);
@@ -258,14 +232,12 @@ mod tests {
     }
 
     #[test]
-    fn port_type_rules() {
-        assert!(PortType::Mask.accepts(PortType::Heightfield));
-        assert!(PortType::Heightfield.accepts(PortType::Mask));
-        assert!(!PortType::Scalar.accepts(PortType::Heightfield));
-        assert!(NodeKind("jd.noise.fbm@1".into()).parts().is_ok());
-        assert_eq!(
-            NodeKind("bad".into()).parts().expect_err("no version").code,
-            ErrorCode::E_NODE_UNKNOWN
-        );
+    fn dangling_edges_are_not_cycles() {
+        let (a, b) = (NodeId::new(), NodeId::new());
+        let mut g = Graph::default();
+        g.nodes.insert(b.clone(), node("x@1"));
+        g.edges.push(edge(&a, &b)); // `a` does not exist
+        assert_eq!(g.topological_order().expect("no cycle").len(), 1);
+        assert_eq!(g.dangling_edges().len(), 1);
     }
 }

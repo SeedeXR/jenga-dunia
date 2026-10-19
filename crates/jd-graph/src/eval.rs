@@ -7,53 +7,34 @@ use std::time::Instant;
 use jd_terrain::Heightfield;
 use jd_types::{ErrorCode, JdError, JdResult, NodeId, WorldSettings};
 use serde::{Deserialize, Serialize};
-use serde_json::Value as Json;
 
-use crate::model::{Graph, PortType};
-use crate::registry::{EvalCtx, Registry};
+use crate::model::Graph;
+use crate::registry::{EvalCtx, NodeDef, Registry};
 
-/// A value flowing through the graph.
+/// A value flowing through the graph. The content hash is computed once when the value is
+/// produced so cache keys never re-read whole fields.
 #[derive(Debug, Clone)]
 pub enum Value {
-    /// Heightfield in metres (also carries masks: 0..1).
-    Field(Arc<Heightfield>),
-    /// A number.
-    Scalar(f64),
+    /// Heightfield in metres (masks are heightfields in 0..1).
+    Field(Arc<Heightfield>, blake3::Hash),
 }
 
 impl Value {
-    /// Port type of this value.
-    pub fn port_type(&self) -> PortType {
-        match self {
-            Value::Field(_) => PortType::Heightfield,
-            Value::Scalar(_) => PortType::Scalar,
-        }
+    /// Wrap a field, hashing it once.
+    pub fn field(hf: Heightfield) -> Self {
+        let hash = hf.content_hash();
+        Value::Field(Arc::new(hf), hash)
     }
-    /// Borrow as a field or fail with `E_GRAPH_TYPE_MISMATCH`.
-    pub fn field(&self) -> JdResult<&Arc<Heightfield>> {
+    /// Borrow the field.
+    pub fn as_field(&self) -> &Arc<Heightfield> {
         match self {
-            Value::Field(f) => Ok(f),
-            other => Err(JdError::new(
-                ErrorCode::E_GRAPH_TYPE_MISMATCH,
-                format!("expected a field, got {:?}", other.port_type()),
-            )),
-        }
-    }
-    /// Borrow as a scalar or fail.
-    pub fn scalar(&self) -> JdResult<f64> {
-        match self {
-            Value::Scalar(s) => Ok(*s),
-            other => Err(JdError::new(
-                ErrorCode::E_GRAPH_TYPE_MISMATCH,
-                format!("expected a scalar, got {:?}", other.port_type()),
-            )),
+            Value::Field(f, _) => f,
         }
     }
     /// Content hash for caching.
     pub fn content_hash(&self) -> blake3::Hash {
         match self {
-            Value::Field(f) => f.content_hash(),
-            Value::Scalar(s) => blake3::hash(&s.to_le_bytes()),
+            Value::Field(_, h) => *h,
         }
     }
 }
@@ -77,24 +58,16 @@ impl Cache {
             cap,
         }
     }
-    fn get(&self, key: &[u8; 32]) -> Option<BTreeMap<String, Value>> {
+    fn get(&self, key: &[u8; 32]) -> Option<NodeOutputs> {
         self.inner.lock().ok()?.get(key).cloned()
     }
-    fn put(&self, key: [u8; 32], v: BTreeMap<String, Value>) {
+    fn put(&self, key: [u8; 32], v: NodeOutputs) {
         if let Ok(mut g) = self.inner.lock() {
             if self.cap > 0 && g.len() >= self.cap {
                 g.clear(); // ponytail: wholesale eviction; LRU when the disk cache arrives
             }
             g.insert(key, v);
         }
-    }
-    /// Number of cached results.
-    pub fn len(&self) -> usize {
-        self.inner.lock().map(|g| g.len()).unwrap_or(0)
-    }
-    /// True when empty.
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
     }
 }
 
@@ -130,7 +103,7 @@ pub struct Evaluator<'a> {
     cache: &'a Cache,
 }
 
-/// Values produced by output nodes: `(output node id, port) → value`.
+/// Values produced by every node: `(node id, port) → value`.
 pub type Outputs = BTreeMap<(NodeId, String), Value>;
 
 impl<'a> Evaluator<'a> {
@@ -139,71 +112,130 @@ impl<'a> Evaluator<'a> {
         Self { registry, cache }
     }
 
-    /// Validate the whole graph without evaluating: kinds known, ports exist, types compatible,
-    /// required inputs connected, no cycles.
-    pub fn validate(&self, graph: &Graph) -> JdResult<Vec<NodeId>> {
-        let order = graph.topological_order()?;
+    /// Every structural problem in the graph (none for a valid one): unknown kinds, params that do
+    /// not match the kind, dangling edges, unknown ports, port type mismatches, cycles. Does **not**
+    /// require inputs to be connected (a graph under construction is structurally valid). Returning
+    /// all problems lets a mutation on an already-broken document be judged by what it *adds*.
+    pub fn structure_errors(&self, graph: &Graph) -> Vec<JdError> {
+        let mut errs = Vec::new();
+        for e in graph.dangling_edges() {
+            errs.push(
+                JdError::new(
+                    ErrorCode::E_INPUT_INVALID,
+                    format!(
+                        "edge references a missing node ({} → {})",
+                        e.from.node, e.to.node
+                    ),
+                )
+                .next("Remove the edge or restore the node.")
+                .detail("from", e.from.node.to_string())
+                .detail("to", e.to.node.to_string()),
+            );
+        }
+        if let Err(e) = graph.topological_order() {
+            errs.push(e);
+        }
+        let inputs = graph.input_map();
         for (id, node) in &graph.nodes {
-            let def = self.registry.get(&node.kind)?;
-            let inputs = graph.inputs_of(id);
-            for port in &def.inputs {
-                match inputs.get(port.name.as_str()) {
-                    None if port.required && !node.bypass => {
-                        return Err(JdError::new(
-                            ErrorCode::E_GRAPH_MISSING_INPUT,
+            let def = match self.registry.get(&node.kind) {
+                Ok(d) => d,
+                Err(e) => {
+                    errs.push(e.detail("node", id.to_string()));
+                    continue;
+                }
+            };
+            if let Err(e) = def.check_params(&node.params) {
+                errs.push(e.detail("node", id.to_string()));
+            }
+            for (name, from) in inputs.get(id).into_iter().flatten() {
+                let Some(port) = def.input(name) else {
+                    errs.push(
+                        JdError::new(
+                            ErrorCode::E_INPUT_INVALID,
+                            format!("node {} ({}) has no input `{}`", id, node.kind.0, name),
+                        )
+                        .detail("node", id.to_string())
+                        .detail("port", (*name).to_owned()),
+                    );
+                    continue;
+                };
+                // Missing source node / unknown source kind are already reported above.
+                let Some(src) = graph.nodes.get(&from.node) else {
+                    continue;
+                };
+                let Ok(src_def) = self.registry.get(&src.kind) else {
+                    continue;
+                };
+                let Some(out) = src_def.output(&from.port) else {
+                    errs.push(
+                        JdError::new(
+                            ErrorCode::E_INPUT_INVALID,
                             format!(
-                                "input `{}` of {} ({}) is not connected",
-                                port.name, id, node.kind.0
+                                "node {} ({}) has no output `{}`",
+                                from.node, src.kind.0, from.port
                             ),
                         )
-                        .next("Connect an output of a compatible type to this input.")
-                        .detail("node", id.to_string())
-                        .detail("port", port.name.clone()));
-                    }
-                    None => {}
-                    Some(from) => {
-                        let src = graph.nodes.get(&from.node).ok_or_else(|| {
-                            JdError::new(
-                                ErrorCode::E_INPUT_INVALID,
-                                format!("edge from unknown node {}", from.node),
-                            )
-                            .detail("node", from.node.to_string())
-                        })?;
-                        let src_def = self.registry.get(&src.kind)?;
-                        let out = src_def.output(&from.port).ok_or_else(|| {
-                            JdError::new(
-                                ErrorCode::E_INPUT_INVALID,
-                                format!(
-                                    "node {} ({}) has no output `{}`",
-                                    from.node, src.kind.0, from.port
-                                ),
-                            )
-                            .detail("node", from.node.to_string())
-                            .detail("port", from.port.clone())
-                        })?;
-                        if !port.ty.accepts(out.ty) {
-                            return Err(JdError::new(
-                                ErrorCode::E_GRAPH_TYPE_MISMATCH,
-                                format!(
-                                    "cannot connect {:?} output `{}` to {:?} input `{}`",
-                                    out.ty, from.port, port.ty, port.name
-                                ),
-                            )
-                            .next("Insert a conversion node or pick a compatible port.")
-                            .detail("from", from.node.to_string())
-                            .detail("to", id.to_string()));
-                        }
-                    }
+                        .detail("node", from.node.to_string())
+                        .detail("port", from.port.clone()),
+                    );
+                    continue;
+                };
+                if !port.ty.accepts(out.ty) {
+                    errs.push(
+                        JdError::new(
+                            ErrorCode::E_GRAPH_TYPE_MISMATCH,
+                            format!(
+                                "cannot connect {:?} output `{}` to {:?} input `{}`",
+                                out.ty, from.port, port.ty, port.name
+                            ),
+                        )
+                        .next("Insert a conversion node or pick a compatible port.")
+                        .detail("from", from.node.to_string())
+                        .detail("to", id.to_string()),
+                    );
                 }
             }
-            for name in inputs.keys() {
-                if def.input(name).is_none() {
+        }
+        errs
+    }
+
+    /// Structural validation — what every mutation must preserve. Fails with the first problem
+    /// from [`Evaluator::structure_errors`]; returns the topological order when sound.
+    pub fn validate_structure(&self, graph: &Graph) -> JdResult<Vec<NodeId>> {
+        if let Some(e) = self.structure_errors(graph).into_iter().next() {
+            return Err(e);
+        }
+        graph.topological_order()
+    }
+
+    /// Full validation: structure plus every required input connected (unless bypassed).
+    pub fn validate(&self, graph: &Graph) -> JdResult<Vec<NodeId>> {
+        let order = self.validate_structure(graph)?;
+        let inputs = graph.input_map();
+        for (id, node) in &graph.nodes {
+            let def = self.registry.get(&node.kind)?;
+            // A bypassed node forwards its first input, so that one is required even if optional.
+            let required: Vec<&crate::model::Port> = if node.bypass {
+                def.inputs.first().into_iter().collect()
+            } else {
+                def.inputs.iter().filter(|p| p.required).collect()
+            };
+            for port in required {
+                if inputs
+                    .get(id)
+                    .and_then(|m| m.get(port.name.as_str()))
+                    .is_none()
+                {
                     return Err(JdError::new(
-                        ErrorCode::E_INPUT_INVALID,
-                        format!("node {} ({}) has no input `{}`", id, node.kind.0, name),
+                        ErrorCode::E_GRAPH_MISSING_INPUT,
+                        format!(
+                            "input `{}` of {} ({}) is not connected",
+                            port.name, id, node.kind.0
+                        ),
                     )
+                    .next("Connect an output of a compatible type to this input.")
                     .detail("node", id.to_string())
-                    .detail("port", (*name).to_owned()));
+                    .detail("port", port.name.clone()));
                 }
             }
         }
@@ -219,26 +251,24 @@ impl<'a> Evaluator<'a> {
     ) -> JdResult<(Outputs, EvalReport)> {
         let started = Instant::now();
         let order = self.validate(graph)?;
-        let lod_world = lod_world(world, lod);
         let ctx = EvalCtx {
-            world,
-            lod,
-            lod_world,
+            lod_world: lod_world(world, lod),
         };
-        let mut produced: BTreeMap<NodeId, BTreeMap<String, Value>> = BTreeMap::new();
+        let lod_world_bytes = serde_json::to_vec(&ctx.lod_world)?;
+        let input_map = graph.input_map();
+        let mut produced: BTreeMap<NodeId, NodeOutputs> = BTreeMap::new();
         let mut reports = Vec::with_capacity(order.len());
         for id in &order {
             let node = &graph.nodes[id];
             let def = self.registry.get(&node.kind)?;
-            // Gather inputs (already produced, since we walk in topological order).
-            let mut inputs: BTreeMap<String, Value> = BTreeMap::new();
+            let mut inputs: NodeOutputs = BTreeMap::new();
             let mut hasher = blake3::Hasher::new();
             hasher.update(node.kind.0.as_bytes());
             hasher.update(&serde_json::to_vec(&node.params)?);
             hasher.update(&[node.bypass as u8, lod]);
-            hasher.update(&serde_json::to_vec(&ctx.lod_world)?);
+            hasher.update(&lod_world_bytes);
             for port in &def.inputs {
-                if let Some(from) = graph.inputs_of(id).get(port.name.as_str()) {
+                if let Some(from) = input_map.get(id).and_then(|m| m.get(port.name.as_str())) {
                     let v = produced
                         .get(&from.node)
                         .and_then(|outs| outs.get(&from.port))
@@ -259,10 +289,14 @@ impl<'a> Evaluator<'a> {
                 Some(outs) => (outs, true),
                 None => {
                     let outs = if node.bypass {
-                        bypass(def, &inputs)?
+                        bypass(def, &inputs)
                     } else {
-                        def.evaluate(&ctx, &node.params, &inputs)?
-                    };
+                        def.evaluate(&ctx, &node.params, &inputs)
+                    }
+                    .map_err(|e| {
+                        e.detail("node", id.to_string())
+                            .detail("kind", node.kind.0.clone())
+                    })?;
                     self.cache.put(key, outs.clone());
                     (outs, false)
                 }
@@ -297,24 +331,23 @@ impl<'a> Evaluator<'a> {
     }
 }
 
-/// World settings at a reduced level of detail (resolution / 2^lod, same extent).
+/// World settings at a reduced level of detail: resolution / 2^lod, everything else unchanged
+/// (identity at lod 0, so graph output tiling matches the project world exactly).
 pub fn lod_world(world: &WorldSettings, lod: u8) -> WorldSettings {
+    if lod == 0 {
+        return world.clone();
+    }
     let div = 1u32 << lod.min(12);
     WorldSettings {
         resolution_px: [
             world.resolution_px[0].div_ceil(div).max(1),
             world.resolution_px[1].div_ceil(div).max(1),
         ],
-        tile_size: world.tile_size.clamp(64, 512),
-        halo: world.halo.min(world.tile_size.clamp(64, 512) / 2),
         ..world.clone()
     }
 }
 
-fn bypass(
-    def: &crate::registry::NodeDef,
-    inputs: &BTreeMap<String, Value>,
-) -> JdResult<BTreeMap<String, Value>> {
+fn bypass(def: &NodeDef, inputs: &NodeOutputs) -> JdResult<NodeOutputs> {
     let first_in = def
         .inputs
         .first()
@@ -325,14 +358,4 @@ fn bypass(
         outs.insert(out.name.clone(), v);
     }
     Ok(outs)
-}
-
-/// Helper for ops: JSON view of outputs (hashes only).
-pub fn outputs_summary(outputs: &Outputs) -> Json {
-    Json::Array(
-        outputs
-            .iter()
-            .map(|((id, port), v)| serde_json::json!({ "node": id, "port": port, "type": v.port_type(), "hash": v.content_hash().to_hex().to_string() }))
-            .collect(),
-    )
 }

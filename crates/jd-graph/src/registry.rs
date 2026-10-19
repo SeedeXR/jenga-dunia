@@ -10,12 +10,8 @@ use crate::eval::Value as EvalValue;
 use crate::model::{NodeKind, Port};
 
 /// Context handed to a node's evaluate function.
-pub struct EvalCtx<'a> {
-    /// World settings (extent, resolution, tiling, seed).
-    pub world: &'a WorldSettings,
-    /// Level of detail: resolution is divided by `2^lod`.
-    pub lod: u8,
-    /// Effective world settings at this lod (resolution reduced, extent unchanged).
+pub struct EvalCtx {
+    /// World settings at the requested level of detail (resolution reduced, extent/tiling unchanged).
     pub lod_world: WorldSettings,
 }
 
@@ -28,6 +24,7 @@ type EvalFn = Arc<
         + Send
         + Sync,
 >;
+type CheckFn = Arc<dyn Fn(&Map<String, Value>) -> JdResult<()> + Send + Sync>;
 
 /// How a node kind is validated and evaluated.
 #[derive(Clone)]
@@ -42,23 +39,21 @@ pub struct NodeDef {
     pub outputs: Vec<Port>,
     /// JSON Schema of `params`.
     pub param_schema: Value,
-    /// Largest neighbourhood (in pixels) a stencil reads; `None` = whole field (not tile-safe).
-    pub stencil_radius: Option<u32>,
+    check: CheckFn,
     eval: EvalFn,
 }
 
 impl NodeDef {
-    /// Build a definition.
-    pub fn new<F>(
+    /// Build a definition whose params deserialise into `P` (schema and check derive from it).
+    pub fn new<P, F>(
         kind: &str,
         description: &'static str,
         inputs: Vec<Port>,
         outputs: Vec<Port>,
-        param_schema: Value,
-        stencil_radius: Option<u32>,
         eval: F,
     ) -> Self
     where
+        P: for<'de> serde::Deserialize<'de> + schemars::JsonSchema,
         F: Fn(
                 &EvalCtx,
                 &Map<String, Value>,
@@ -68,15 +63,29 @@ impl NodeDef {
             + Sync
             + 'static,
     {
+        let check: CheckFn = Arc::new(|p: &Map<String, Value>| {
+            serde_json::from_value::<P>(Value::Object(p.clone()))
+                .map(|_| ())
+                .map_err(|e| {
+                    JdError::invalid("params", e.to_string())
+                        .why("Parameters must match the node kind's schema.")
+                        .next("See graph.kinds for the schema.")
+                })
+        });
         Self {
             kind: NodeKind(kind.into()),
             description,
             inputs,
             outputs,
-            param_schema,
-            stencil_radius,
+            param_schema: serde_json::to_value(schemars::schema_for!(P)).unwrap_or(Value::Null),
+            check,
             eval: Arc::new(eval),
         }
+    }
+
+    /// Validate params against the kind's parameter type (used before journaling mutations).
+    pub fn check_params(&self, params: &Map<String, Value>) -> JdResult<()> {
+        (self.check)(params)
     }
 
     /// Evaluate with validated params and typed inputs.
@@ -113,8 +122,6 @@ pub struct NodeDefInfo {
     pub outputs: Vec<Port>,
     /// Param schema.
     pub param_schema: Value,
-    /// Stencil radius (null = global).
-    pub stencil_radius: Option<u32>,
 }
 
 /// Registry of node kinds.
@@ -149,7 +156,6 @@ impl Registry {
                 inputs: d.inputs.clone(),
                 outputs: d.outputs.clone(),
                 param_schema: d.param_schema.clone(),
-                stencil_radius: d.stencil_radius,
             })
             .collect()
     }

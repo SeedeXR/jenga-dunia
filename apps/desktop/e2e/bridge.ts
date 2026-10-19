@@ -4,7 +4,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { Page } from "@playwright/test";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -30,7 +30,7 @@ export async function connectCore(workspace: string): Promise<Client> {
     args: ["--scope", "all", "--workspace", workspace],
     env: { ...process.env, JD_LOG: "warn" } as Record<string, string>,
   });
-  const client = new Client({ name: "jd-e2e", version: "0.1.0" });
+  const client = new Client({ name: "jd-e2e", version: readFileSync(new URL("../../../VERSION", import.meta.url), "utf8").trim() });
   await client.connect(transport);
   return client;
 }

@@ -3,6 +3,7 @@
 Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) · `- [e]` experimental · ~~struck~~ changed requirement, with reason and replacement below it. Keep phases aligned with `docs/roadmap.md`.
 
 ## Round 1 — Research & single source of truth (2026-10-19)
+- [x] `VERSION` file (0.0.1) mirrored into every manifest, checked in CI (`scripts/check-version.mjs`) and at compile time (`jd-core`); one edition, no tiers (ADR-0013)
 - [x] Archive brief → `docs/research/brief/`
 - [x] `memory/` files: agent_profile, session_start, philosophy, project_context, porting, mindmap, instruction, todo, handover_session
 - [x] Architecture docs 00–13 with Mermaid (29 diagrams validated by `scripts/check-mermaid.mjs`)
@@ -31,7 +32,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [~] Viewport feasibility prototype: three.js WebGPU/WebGL2 in Tauri WebView ✔ (WebGPU observed active on macOS 27 dev build), u16 tile streaming over raw-bytes IPC ✔; measure IPC MB/s + latency on macOS and Windows ☐; Rust headless wgpu compute ☐; close ADR-0003 ☐
 - [x] Desktop app skeleton (`apps/desktop`, `jd-app`): project panel, noise inspector, three.js viewport, export, log; vitest component tests; Playwright e2e bridged to the real core via jd-mcp
 - [ ] Desktop: native file dialogs (tauri-plugin-dialog), macOS menu bar + ⌘ shortcuts, `.jdproj` open-with, window state persistence
-- [ ] Desktop tutorials: Figma-annotated screenshots + recordings (needs Accessibility permission for input automation, or record manually)
+- [~] Desktop tutorials: annotated screenshots ✔ (tutorial-01/02/03 via `annotate.mjs`), recording ✔ (first-terrain.mp4); graph-editor recording ✔ (Playwright-recorded e2e, `JD_VIDEO=1`); place in the Figma file once the connector OAuth is completed by the owner ☐
 - [x] CI: Rust matrix (macOS, Ubuntu, Windows) fmt/clippy/test/release-smoke + cargo-deny job; docs job with npx cache
 - [ ] S1 bench smoke in CI (needs a kernel)
 - [ ] Fixtures directory with malformed-file corpus seed
@@ -41,7 +42,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 ## Phase 2 — Core terrain authoring
 - [~] `jd-terrain`: tiles + halos ✔, noise generators ✔ (OpenSimplex2/2S, Perlin, Value, ValueCubic, Cellular × none/fbm/ridged/ping-pong), filters/analysis nodes ☐
 - [x] Ops `terrain.generate` / `terrain.stats` / `terrain.export_heightmap` + CLI `jd terrain generate --out` / `jd export heightmap`; MCP end-to-end test
-- [ ] `jd-graph` evaluator, cache, dirty sets, preview/build LOD
+- [~] `jd-graph`: typed DAG ✔, validation (types/cycles/required/unknown) ✔, blake3 content-hash incremental evaluation + in-memory cache ✔, LOD ✔, bypass ✔, 7 node kinds ✔, journaled `graph.*` ops with pre-journal structural validation (trial copy + `validate_structure`) ✔, `graph.move_node` ✔, lod>0 → `<layer>#lod<N>` ✔, node-editor UI (React Flow: add/connect/drag/delete/inspector, e2e-tested) ✔; disk cache (`jd-cache`) ☐ — needed so the **CLI can export a graph result** (layers are per-process today), region/tile-level dirty sets ☐, async jobs + progress/cancel ☐, undo/redo from the journal ☐
 - [~] Heightmap export: EXR f32 ✔, PNG16 ✔, RAW r16/r32 ✔ (+ JSON sidecar, flip + range conventions, round-trip tests); TIFF ☐; foreign heightmap import without sidecar ☐; Unity/Unreal size presets (2ⁿ+1) ☐
 - [ ] Stroke sculpt nodes
 - [ ] Basic PBR material + GLB export + glTF Validator in CI

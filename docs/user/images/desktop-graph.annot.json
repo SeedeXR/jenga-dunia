@@ -1,0 +1,73 @@
+{
+  "src": "desktop-graph.png",
+  "out": "tutorial-03-graph.png",
+  "annotations": [
+    {
+      "type": "box",
+      "x": 294,
+      "y": 484,
+      "w": 192,
+      "h": 32,
+      "label": "1",
+      "text": "Pick a kind, Add \u2014 new nodes land to the right",
+      "tx": 294,
+      "ty": 540
+    },
+    {
+      "type": "box",
+      "x": 488,
+      "y": 484,
+      "w": 76,
+      "h": 32,
+      "label": "2",
+      "text": "Evaluate (Terrain \u2192 Evaluate Graph, \u2318R)",
+      "tx": 580,
+      "ty": 505
+    },
+    {
+      "type": "box",
+      "x": 424,
+      "y": 654,
+      "w": 274,
+      "h": 76,
+      "label": "3",
+      "text": "Click to edit \u00b7 drag to move \u00b7 Delete/Backspace removes",
+      "tx": 424,
+      "ty": 760
+    },
+    {
+      "type": "arrow",
+      "x1": 696,
+      "y1": 688,
+      "x2": 736,
+      "y2": 602,
+      "text": "Drag output \u2192 input to connect",
+      "tx": 760,
+      "ty": 650
+    },
+    {
+      "type": "box",
+      "x": 1026,
+      "y": 484,
+      "w": 262,
+      "h": 44,
+      "label": "4",
+      "text": "Inspector: parameters of the selected node",
+      "tx": 1282,
+      "ty": 556,
+      "anchor": "end"
+    },
+    {
+      "type": "box",
+      "x": 1258,
+      "y": 48,
+      "w": 336,
+      "h": 22,
+      "label": "5",
+      "text": "WebGPU \u00b7 522,242 tris \u00b7 0.5 MB preview in 1 ms",
+      "tx": 1590,
+      "ty": 30,
+      "anchor": "end"
+    }
+  ]
+}

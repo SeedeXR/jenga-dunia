@@ -344,6 +344,15 @@ pub mod builtin {
         pub pending_journal: usize,
     }
 
+    /// `project.recover` params.
+    #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct Recover {
+        /// Drop journal entries that fail to replay instead of keeping them pending.
+        #[serde(default)]
+        pub discard_failed: bool,
+    }
+
     /// `project.recover` result.
     #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
     pub struct RecoverResult {
@@ -476,23 +485,38 @@ pub mod builtin {
                 })
             },
         );
-        r.register::<NoParams, RecoverResult, _>(
+        r.register::<Recover, RecoverResult, _>(
             "project.recover",
-            "Replay unsaved journal entries found when the project was opened, then save",
+            "Replay unsaved journal entries found when the project was opened, then save (entries that fail stay pending unless discard_failed)",
             Scope::ProjectWrite,
-            |ctx, _| {
+            |ctx, args| {
                 ctx.with_project(|p| {
                     let entries = p.take_pending_journal();
                     let mut replayed = Vec::new();
                     let mut failed = Vec::new();
+                    let mut failed_entries = Vec::new();
                     for e in entries {
                         match apply_mutation(p, &e.op, &e.params) {
                             Ok(()) => replayed.push(e),
-                            Err(err) => failed.push((e.op.clone(), err.message)),
+                            Err(err) => {
+                                failed.push((e.op.clone(), err.message));
+                                failed_entries.push(e);
+                            }
                         }
                     }
-                    p.save()?;
-                    Ok((RecoverResult { replayed, failed }, Vec::new()))
+                    let mut warnings = Vec::new();
+                    if failed_entries.is_empty() || args.discard_failed {
+                        p.save()?;
+                    } else {
+                        // Saving would truncate the journal and lose these edits for good; keep them
+                        // pending so the user can fix the cause (e.g. install the plugin) and retry.
+                        p.pending_journal = failed_entries;
+                        warnings.push(Warning::new(
+                            "W_RECOVER_INCOMPLETE",
+                            "some journal entries could not be replayed; nothing was saved — fix the cause and run project.recover again, or pass discard_failed to drop them",
+                        ));
+                    }
+                    Ok((RecoverResult { replayed, failed }, warnings))
                 })
             },
         );
@@ -534,7 +558,7 @@ pub mod graph {
     pub struct AddNode {
         /// Kind `name@version`, e.g. `jd.noise.fbm@1`.
         pub kind: NodeKind,
-        /// Parameters (validated at evaluation against the kind's schema).
+        /// Parameters (validated against the kind's schema before journaling).
         #[serde(default)]
         pub params: Map<String, Value>,
         /// Optional client-chosen id (ULID); generated when absent.
@@ -632,6 +656,16 @@ pub mod graph {
         pub id: NodeId,
     }
 
+    /// `graph.move_node` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct MoveNode {
+        /// Node id.
+        pub id: NodeId,
+        /// New editor position.
+        pub position: [f32; 2],
+    }
+
     fn node_mut<'a>(g: &'a mut Graph, id: &NodeId) -> JdResult<&'a mut Node> {
         g.nodes.get_mut(id).ok_or_else(|| {
             JdError::new(ErrorCode::E_INPUT_INVALID, format!("no node {id}"))
@@ -639,87 +673,49 @@ pub mod graph {
         })
     }
 
+    fn view(g: &Graph) -> GraphView {
+        GraphView {
+            nodes: g
+                .nodes
+                .iter()
+                .map(|(id, n)| NodeView {
+                    id: id.clone(),
+                    node: n.clone(),
+                })
+                .collect(),
+            edges: g.edges.clone(),
+        }
+    }
+
     /// Validate a graph mutation against the current document **before** it is journaled, so a
-    /// rejected request (unknown kind, missing node, cycle) never leaves an entry on disk.
+    /// rejected request (unknown kind, bad params, missing node/port, type mismatch, cycle) never
+    /// leaves an entry on disk. Applies the mutation to a copy and checks the result structurally.
     pub fn validate_mutation(p: &Project, op: &str, params: &Value) -> JdResult<()> {
-        let g = &p.graph;
-        let exists = |id: &NodeId| {
-            if g.nodes.contains_key(id) {
-                Ok(())
-            } else {
-                Err(
-                    JdError::new(ErrorCode::E_INPUT_INVALID, format!("no node {id}"))
-                        .detail("node", id.to_string()),
-                )
-            }
-        };
-        match op {
-            "graph.add_node" => {
-                let a: AddNode = serde_json::from_value(params.clone())?;
-                registry().get(&a.kind)?;
-                if let Some(id) = &a.id
-                    && g.nodes.contains_key(id)
-                {
-                    return Err(JdError::new(
-                        ErrorCode::E_INPUT_INVALID,
-                        format!("node {id} already exists"),
-                    ));
-                }
-                Ok(())
-            }
-            "graph.remove_node" | "graph.set_bypass" => {
-                let n: NodeRef = serde_json::from_value(params.clone())?;
-                exists(&n.id)
-            }
-            "graph.connect" => {
-                let c: Connect = serde_json::from_value(params.clone())?;
-                exists(&c.from)?;
-                exists(&c.to)?;
-                // Simulate the edge replacement and reject cycles here, not after journaling.
-                let mut trial = g.clone();
-                trial
-                    .edges
-                    .retain(|e| !(e.to.node == c.to && e.to.port == c.to_port));
-                trial.edges.push(Edge {
-                    from: PortRef {
-                        node: c.from,
-                        port: c.from_port,
-                    },
-                    to: PortRef {
-                        node: c.to,
-                        port: c.to_port,
-                    },
-                });
-                trial.topological_order().map(|_| ())
-            }
-            "graph.disconnect" => {
-                let c: Connect = serde_json::from_value(params.clone())?;
-                let found = g.edges.iter().any(|e| {
-                    e.from.node == c.from
-                        && e.from.port == c.from_port
-                        && e.to.node == c.to
-                        && e.to.port == c.to_port
-                });
-                if found {
-                    Ok(())
-                } else {
-                    Err(JdError::new(ErrorCode::E_INPUT_INVALID, "no such edge"))
-                }
-            }
-            "graph.set_param" => {
-                let s: SetParam = serde_json::from_value(params.clone())?;
-                exists(&s.id)
-            }
-            other => Err(JdError::new(
-                ErrorCode::E_INPUT_INVALID,
-                format!("`{other}` is not a graph mutation"),
-            )),
+        // ponytail: graphs are a few hundred nodes at most; cloning per mutation is cheaper than
+        // keeping bespoke pre-checks in sync with `apply`.
+        let mut trial = p.graph.clone();
+        apply(&mut trial, op, params)?;
+        let ev = Evaluator::new(registry(), cache());
+        let after = ev.structure_errors(&trial);
+        if after.is_empty() {
+            return Ok(());
+        }
+        // A document that is already invalid (missing plugin, hand-edited graph.json) must stay
+        // editable: reject only the problems this mutation introduces.
+        let key = |e: &JdError| format!("{:?}|{}|{:?}", e.code, e.message, e.details);
+        let before: Vec<String> = ev.structure_errors(&p.graph).iter().map(key).collect();
+        match after.into_iter().find(|e| !before.contains(&key(e))) {
+            Some(e) => Err(e),
+            None => Ok(()),
         }
     }
 
     /// Apply a graph mutation to the in-memory document (live and during journal replay).
     pub fn apply_mutation(p: &mut Project, op: &str, params: &Value) -> JdResult<()> {
-        let g = &mut p.graph;
+        apply(&mut p.graph, op, params)
+    }
+
+    fn apply(g: &mut Graph, op: &str, params: &Value) -> JdResult<()> {
         match op {
             "graph.add_node" => {
                 let a: AddNode = serde_json::from_value(params.clone())?;
@@ -754,12 +750,14 @@ pub mod graph {
                 let n: NodeRef = serde_json::from_value(params.clone())?;
                 node_mut(g, &n.id)?.bypass = n.bypass.unwrap_or(true);
             }
+            "graph.move_node" => {
+                let m: MoveNode = serde_json::from_value(params.clone())?;
+                node_mut(g, &m.id)?.ui.position = m.position;
+            }
             "graph.connect" => {
                 let c: Connect = serde_json::from_value(params.clone())?;
-                for id in [&c.from, &c.to] {
-                    node_mut(g, id)?;
-                }
                 // One edge per input port: replacing keeps the graph a function of its inputs.
+                // Ports, types and cycles are checked by `validate_structure` on the trial copy.
                 g.edges
                     .retain(|e| !(e.to.node == c.to && e.to.port == c.to_port));
                 g.edges.push(Edge {
@@ -772,11 +770,6 @@ pub mod graph {
                         port: c.to_port,
                     },
                 });
-                // Reject cycles immediately so the document never stores an unevaluable graph.
-                if let Err(e) = g.topological_order() {
-                    g.edges.pop();
-                    return Err(e);
-                }
             }
             "graph.disconnect" => {
                 let c: Connect = serde_json::from_value(params.clone())?;
@@ -822,25 +815,7 @@ pub mod graph {
             "graph.list",
             "Nodes and edges of the open project's graph",
             Scope::ProjectRead,
-            |ctx, _| {
-                ctx.with_project(|p| {
-                    Ok((
-                        GraphView {
-                            nodes: p
-                                .graph
-                                .nodes
-                                .iter()
-                                .map(|(id, n)| NodeView {
-                                    id: id.clone(),
-                                    node: n.clone(),
-                                })
-                                .collect(),
-                            edges: p.graph.edges.clone(),
-                        },
-                        Vec::new(),
-                    ))
-                })
-            },
+            |ctx, _| ctx.with_project(|p| Ok((view(&p.graph), Vec::new()))),
         );
         r.register::<AddNode, AddedNode, _>("graph.add_node", "Add a node (journaled)", Scope::ProjectWrite, |ctx, a| {
             let id = a.id.clone().unwrap_or_default();
@@ -861,28 +836,26 @@ pub mod graph {
                 let params = serde_json::json!({ "id": n.id, "bypass": n.bypass });
                 ctx.with_project(|p| {
                     builtin::mutate(p, op, params)?;
-                    Ok((
-                        GraphView {
-                            nodes: p
-                                .graph
-                                .nodes
-                                .iter()
-                                .map(|(id, n)| NodeView {
-                                    id: id.clone(),
-                                    node: n.clone(),
-                                })
-                                .collect(),
-                            edges: p.graph.edges.clone(),
-                        },
-                        Vec::new(),
-                    ))
+                    Ok((view(&p.graph), Vec::new()))
                 })
             });
         }
+        r.register::<MoveNode, GraphView, _>(
+            "graph.move_node",
+            "Move a node on the editor canvas (journaled)",
+            Scope::ProjectWrite,
+            |ctx, m| {
+                let params = serde_json::json!({ "id": m.id, "position": m.position });
+                ctx.with_project(|p| {
+                    builtin::mutate(p, "graph.move_node", params)?;
+                    Ok((view(&p.graph), Vec::new()))
+                })
+            },
+        );
         for (op, desc) in [
             (
                 "graph.connect",
-                "Connect an output to an input (journaled; rejects cycles)",
+                "Connect an output to an input (journaled; rejects bad ports, type mismatches and cycles)",
             ),
             ("graph.disconnect", "Remove an edge (journaled)"),
         ] {
@@ -890,54 +863,59 @@ pub mod graph {
                 let params = serde_json::json!({ "from": c.from, "from_port": c.from_port, "to": c.to, "to_port": c.to_port });
                 ctx.with_project(|p| {
                     builtin::mutate(p, op, params)?;
-                    Ok((GraphView { nodes: p.graph.nodes.iter().map(|(id, n)| NodeView { id: id.clone(), node: n.clone() }).collect(), edges: p.graph.edges.clone() }, Vec::new()))
+                    Ok((view(&p.graph), Vec::new()))
                 })
             });
         }
         r.register::<SetParam, GraphView, _>(
             "graph.set_param",
-            "Set (or null to reset) a node parameter (journaled)",
+            "Set (or null to reset) a node parameter (journaled; validated against the kind's schema)",
             Scope::ProjectWrite,
             |ctx, s| {
                 let params = serde_json::json!({ "id": s.id, "key": s.key, "value": s.value });
                 ctx.with_project(|p| {
                     builtin::mutate(p, "graph.set_param", params)?;
-                    Ok((
-                        GraphView {
-                            nodes: p
-                                .graph
-                                .nodes
-                                .iter()
-                                .map(|(id, n)| NodeView {
-                                    id: id.clone(),
-                                    node: n.clone(),
-                                })
-                                .collect(),
-                            edges: p.graph.edges.clone(),
-                        },
-                        Vec::new(),
-                    ))
+                    Ok((view(&p.graph), Vec::new()))
                 })
             },
         );
         r.register::<Evaluate, EvaluateResult, _>(
             "graph.evaluate",
-            "Validate and evaluate the graph incrementally; publishes output nodes as layers",
+            "Validate and evaluate the graph incrementally; publishes output nodes as layers (`<layer>#lod<N>` when lod > 0)",
             Scope::ProjectWrite,
             |ctx, e| {
                 let (graph, world) =
                     ctx.with_project(|p| Ok((p.graph.clone(), p.doc.world.clone())))?;
+                // Two outputs publishing the same layer would silently overwrite each other.
+                let mut by_layer: BTreeMap<String, &NodeId> = BTreeMap::new();
+                for (id, node) in &graph.nodes {
+                    if node.kind.0.starts_with("jd.output.height@")
+                        && let Some(other) = by_layer
+                            .insert(jd_graph::nodes::output_layer_name(&node.params), id)
+                    {
+                        return Err(JdError::new(
+                            ErrorCode::E_INPUT_INVALID,
+                            format!("two output nodes publish the layer `{}`", jd_graph::nodes::output_layer_name(&node.params)),
+                        )
+                        .next("Give one of them a different `layer` parameter.")
+                        .detail("nodes", vec![other.to_string(), id.to_string()]));
+                    }
+                }
                 let (outputs, report) =
                     Evaluator::new(registry(), cache()).evaluate(&graph, &world, e.lod)?;
                 let mut layers = BTreeMap::new();
                 for (id, node) in &graph.nodes {
-                    if node.kind.0.starts_with("jd.output.height@") {
-                        let name = jd_graph::nodes::output_layer_name(&node.params);
-                        if let Some(v) = outputs.get(&(id.clone(), "out".to_owned())) {
-                            let hf = v.field()?;
-                            layers.insert(name.clone(), hf.content_hash().to_hex().to_string());
-                            ctx.set_layer(&name, (**hf).clone())?;
+                    if node.kind.0.starts_with("jd.output.height@")
+                        && let Some(v) = outputs.get(&(id.clone(), "out".to_owned()))
+                    {
+                        let mut name = jd_graph::nodes::output_layer_name(&node.params);
+                        if e.lod > 0 {
+                            // Never overwrite the full-resolution layer with a preview.
+                            name = format!("{name}#lod{}", e.lod);
                         }
+                        let hf = v.as_field();
+                        layers.insert(name.clone(), v.content_hash().to_hex().to_string());
+                        ctx.set_layer(&name, (**hf).clone())?;
                     }
                 }
                 let mut warnings = Vec::new();
@@ -1012,6 +990,22 @@ pub mod graph {
                 .as_str()
                 .expect("id")
                 .to_owned();
+            // Two outputs publishing the same layer (the starter graph already has `height`) are refused.
+            let r = call(&reg, &ctx, "graph.evaluate", serde_json::json!({}));
+            let e = r.error.expect("duplicate layer");
+            assert_eq!(e.code, ErrorCode::E_INPUT_INVALID);
+            assert_eq!(
+                e.details["nodes"].as_array().map(Vec::len),
+                Some(2),
+                "{e:?}"
+            );
+            let r = call(
+                &reg,
+                &ctx,
+                "graph.set_param",
+                serde_json::json!({ "id": out_id, "key": "layer", "value": "height2" }),
+            );
+            assert_eq!(r.status, crate::envelope::Status::Ok, "{r:?}");
             // Evaluate before connecting: missing input is a stable error.
             let r = call(&reg, &ctx, "graph.evaluate", serde_json::json!({}));
             assert_eq!(
@@ -1041,13 +1035,20 @@ pub mod graph {
             );
             assert_eq!(r.status, crate::envelope::Status::Ok, "{r:?}");
             let res = r.result.expect("result");
-            assert_eq!(res["layers"].as_object().map(|m| m.len()), Some(1));
-            assert_eq!(res["nodes"].as_array().map(Vec::len), Some(2));
+            assert_eq!(res["layers"].as_object().map(|m| m.len()), Some(2));
+            assert_eq!(res["nodes"].as_array().map(Vec::len), Some(4));
+            // lod > 0 publishes under a suffixed name so the full-resolution layer survives previews.
+            assert_eq!(
+                res["layers"]
+                    .as_object()
+                    .and_then(|m| m.keys().next().cloned()),
+                Some("height#lod1".to_owned())
+            );
             let r = call(
                 &reg,
                 &ctx,
                 "terrain.stats",
-                serde_json::json!({ "layer": "height" }),
+                serde_json::json!({ "layer": "height#lod1" }),
             );
             assert_eq!(
                 r.result
@@ -1067,7 +1068,38 @@ pub mod graph {
                 r.error.as_ref().map(|e| e.code),
                 Some(ErrorCode::E_NODE_UNKNOWN)
             );
-            // Crash without saving → reopen → recover replays the four graph mutations.
+            // Bad params and bad ports are rejected before journaling.
+            let r = call(
+                &reg,
+                &ctx,
+                "graph.set_param",
+                serde_json::json!({ "id": noise_id, "key": "octaves", "value": "many" }),
+            );
+            assert_eq!(
+                r.error.as_ref().map(|e| e.code),
+                Some(ErrorCode::E_INPUT_INVALID),
+                "{r:?}"
+            );
+            let r = call(
+                &reg,
+                &ctx,
+                "graph.connect",
+                serde_json::json!({ "from": noise_id, "from_port": "nope", "to": out_id, "to_port": "in" }),
+            );
+            assert_eq!(
+                r.error.as_ref().map(|e| e.code),
+                Some(ErrorCode::E_INPUT_INVALID),
+                "{r:?}"
+            );
+            // Moving a node is journaled too.
+            let r = call(
+                &reg,
+                &ctx,
+                "graph.move_node",
+                serde_json::json!({ "id": noise_id, "position": [10.0, 20.0] }),
+            );
+            assert_eq!(r.status, crate::envelope::Status::Ok, "{r:?}");
+            // Crash without saving → reopen → recover replays the five graph mutations.
             ctx.set_project(None).expect("close");
             let ctx2 = Context::default();
             let r = call(
@@ -1080,7 +1112,7 @@ pub mod graph {
                 r.result
                     .as_ref()
                     .and_then(|v| v["pending_journal"].as_u64()),
-                Some(3)
+                Some(5)
             );
             let r = call(&reg, &ctx2, "project.recover", serde_json::json!({}));
             assert_eq!(
@@ -1088,7 +1120,7 @@ pub mod graph {
                     .as_ref()
                     .and_then(|v| v["replayed"].as_array())
                     .map(Vec::len),
-                Some(3)
+                Some(5)
             );
             assert_eq!(
                 r.result
@@ -1099,8 +1131,119 @@ pub mod graph {
             );
             let r = call(&reg, &ctx2, "graph.list", serde_json::json!({}));
             let g = r.result.expect("graph");
-            assert_eq!(g["nodes"].as_array().map(Vec::len), Some(2));
-            assert_eq!(g["edges"].as_array().map(Vec::len), Some(1));
+            assert_eq!(g["nodes"].as_array().map(Vec::len), Some(4));
+            assert_eq!(g["edges"].as_array().map(Vec::len), Some(2));
+            let moved = g["nodes"]
+                .as_array()
+                .expect("nodes")
+                .iter()
+                .find(|n| n["id"] == noise_id)
+                .expect("noise");
+            assert_eq!(moved["ui"]["position"], serde_json::json!([10.0, 20.0]));
+        }
+
+        #[test]
+        fn invalid_document_stays_editable_and_recover_keeps_failed_entries() {
+            let reg = Registry::with_builtins();
+            let dir = tempfile::tempdir().expect("tmp");
+            let path = dir.path().join("b.jdproj");
+            let ctx = Context::default();
+            call(
+                &reg,
+                &ctx,
+                "project.create",
+                serde_json::json!({ "path": path, "name": "B" }),
+            );
+            ctx.set_project(None).expect("close");
+            // Hand-edit graph.json: a node whose kind this build lacks (missing plugin) …
+            let gpath = path.join("graph.json");
+            let mut g: Value =
+                serde_json::from_slice(&std::fs::read(&gpath).expect("read")).expect("json");
+            g["nodes"]["01JDGRAPH0000000000BR0KEN0"] = serde_json::json!({ "kind": "jd.plugin.missing@1", "params": {}, "bypass": false, "ui": { "position": [0.0, 0.0] } });
+            std::fs::write(&gpath, serde_json::to_vec_pretty(&g).expect("ser")).expect("write");
+            // … and a journal entry that can never replay (its target node does not exist).
+            let noise = jd_graph::nodes::STARTER_NOISE_ID;
+            let bogus = serde_json::json!({ "ts": "2026-10-20T00:00:00Z", "op": "graph.connect", "params": { "from": noise, "from_port": "out", "to": "01JDGRAPH000000000000N0PE0", "to_port": "in" } });
+            std::fs::create_dir_all(path.join("journal")).expect("dir");
+            std::fs::write(path.join("journal/ops.ndjson"), format!("{bogus}\n")).expect("journal");
+
+            let r = call(
+                &reg,
+                &ctx,
+                "project.open",
+                serde_json::json!({ "path": path }),
+            );
+            assert_eq!(
+                r.result
+                    .as_ref()
+                    .and_then(|v| v["pending_journal"].as_u64()),
+                Some(1),
+                "{r:?}"
+            );
+            // Unrelated edits still work on the broken document …
+            let r = call(
+                &reg,
+                &ctx,
+                "graph.move_node",
+                serde_json::json!({ "id": noise, "position": [5.0, 5.0] }),
+            );
+            assert_eq!(r.status, crate::envelope::Status::Ok, "{r:?}");
+            // … new problems are still refused …
+            let r = call(
+                &reg,
+                &ctx,
+                "graph.connect",
+                serde_json::json!({ "from": noise, "from_port": "nope", "to": jd_graph::nodes::STARTER_OUTPUT_ID, "to_port": "in" }),
+            );
+            assert_eq!(
+                r.error.as_ref().map(|e| e.code),
+                Some(ErrorCode::E_INPUT_INVALID)
+            );
+            // … and evaluation names the missing kind.
+            let r = call(&reg, &ctx, "graph.evaluate", serde_json::json!({}));
+            assert_eq!(
+                r.error.as_ref().map(|e| e.code),
+                Some(ErrorCode::E_NODE_UNKNOWN)
+            );
+            // Recovery: the bogus entry fails, so nothing is saved and it stays pending.
+            let r = call(&reg, &ctx, "project.recover", serde_json::json!({}));
+            let res = r.result.as_ref().expect("result");
+            // Only entries pending at open are replayed; the live move_node above was already applied.
+            assert_eq!(res["replayed"].as_array().map(Vec::len), Some(0));
+            assert_eq!(res["failed"].as_array().map(Vec::len), Some(1));
+            assert_eq!(
+                r.warnings.first().map(|w| w.code.as_str()),
+                Some("W_RECOVER_INCOMPLETE")
+            );
+            let info = call(&reg, &ctx, "project.info", serde_json::json!({}));
+            assert_eq!(
+                info.result
+                    .as_ref()
+                    .and_then(|v| v["pending_journal"].as_u64()),
+                Some(1)
+            );
+            assert!(
+                std::fs::read_to_string(path.join("journal/ops.ndjson"))
+                    .expect("journal")
+                    .contains("N0PE0"),
+                "journal file untouched"
+            );
+            // Explicitly discarding the failed entry saves and clears the journal.
+            let r = call(
+                &reg,
+                &ctx,
+                "project.recover",
+                serde_json::json!({ "discard_failed": true }),
+            );
+            assert_eq!(r.status, crate::envelope::Status::Ok, "{r:?}");
+            assert!(r.warnings.is_empty());
+            let info = call(&reg, &ctx, "project.info", serde_json::json!({}));
+            assert_eq!(
+                info.result
+                    .as_ref()
+                    .and_then(|v| v["pending_journal"].as_u64()),
+                Some(0)
+            );
         }
     }
 }

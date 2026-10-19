@@ -15,6 +15,9 @@ export default defineConfig({
     colorScheme: "dark",
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
+    // JD_VIDEO=1 records every test (used to produce the tutorial recordings in docs/user/videos).
+    video: process.env.JD_VIDEO ? { mode: "on", size: { width: 1440, height: 900 } } : "off",
+    launchOptions: { slowMo: process.env.JD_VIDEO ? 600 : 0 }, // human-paced actions in recordings
   },
   webServer: {
     command: "pnpm dev",
