@@ -1618,13 +1618,13 @@ pub mod terrain {
         /// Grid step (1 = every sample). Default: the smallest step that keeps the mesh within `max_vertices`.
         #[serde(default)]
         pub step: Option<u32>,
-        /// Vertex budget used when `step` is not given.
+        /// Vertex budget used when `step` is not given (default 1025² = 1 050 625).
         #[serde(default = "default_max_vertices")]
         pub max_vertices: u32,
     }
 
     fn default_max_vertices() -> u32 {
-        1_048_576
+        1025 * 1025 // a 1025² grid: 4096- and 4097-px worlds both export at step 4
     }
 
     /// Result of `terrain.generate` / `terrain.stats`.

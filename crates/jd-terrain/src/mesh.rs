@@ -105,8 +105,10 @@ pub fn export_glb(
             // Central differences over the exported grid (clamped at the border).
             let (x0, x1) = (gx.saturating_sub(1), (gx + 1).min(gw - 1));
             let (z0, z1) = (gz.saturating_sub(1), (gz + 1).min(gh - 1));
-            let dx = (sample(x1, gz) - sample(x0, gz)) as f64 / (xm(x1) - xm(x0)).max(1e-9);
-            let dz = (sample(gx, z1) - sample(gx, z0)) as f64 / (zm(z1) - zm(z0)).max(1e-9);
+            // zm decreases with the row index (south is +Z), so guard the magnitude, not the sign.
+            let guard = |d: f64| if d.abs() < 1e-9 { 1e-9 } else { d };
+            let dx = (sample(x1, gz) - sample(x0, gz)) as f64 / guard(xm(x1) - xm(x0));
+            let dz = (sample(gx, z1) - sample(gx, z0)) as f64 / guard(zm(z1) - zm(z0));
             let len = (dx * dx + 1.0 + dz * dz).sqrt();
             for v in [(-dx / len) as f32, (1.0 / len) as f32, (-dz / len) as f32] {
                 bin.extend_from_slice(&v.to_le_bytes());
@@ -282,13 +284,11 @@ mod tests {
 
     #[test]
     fn step_decimates_and_auto_step_respects_the_budget() {
-        assert_eq!(auto_step(4096, 4096, 1_048_576), 4);
-        assert_eq!(
-            auto_step(4097, 4097, 1_048_576),
-            4,
-            "2ⁿ+1: 1025 samples per side"
-        );
-        assert_eq!(auto_step(100, 100, 1_048_576), 1);
+        // Budget = a 1025² grid (the Unity/Unreal 2ⁿ+1 size): 4096 and 4097 px both fit at step 4.
+        assert_eq!(auto_step(4096, 4096, 1025 * 1025), 4);
+        assert_eq!(auto_step(4097, 4097, 1025 * 1025), 4);
+        assert_eq!(auto_step(4098, 4098, 1025 * 1025), 5);
+        assert_eq!(auto_step(100, 100, 1025 * 1025), 1);
         let dir = tempfile::tempdir().expect("tmp");
         let hf = Heightfield::new(64, 64, 32, 4).expect("hf");
         let r = export_glb(&hf, [640.0, 640.0], &dir.path().join("s.glb"), 4).expect("export");

@@ -24,11 +24,11 @@
       "default": null
     },
     "max_vertices": {
-      "description": "Vertex budget used when `step` is not given.",
+      "description": "Vertex budget used when `step` is not given (default 1025² = 1 050 625).",
       "type": "integer",
       "format": "uint32",
       "minimum": 0,
-      "default": 1048576
+      "default": 1050625
     }
   },
   "additionalProperties": false,
