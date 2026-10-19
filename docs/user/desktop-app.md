@@ -25,6 +25,24 @@ cargo build -p jd-mcp            # not needed by the app; used by the UI end-to-
 cd apps/desktop && pnpm install && pnpm tauri dev
 ```
 
+## Tutorial: first terrain in four steps
+
+![Step-by-step: create a project, generate, export, read the log](images/tutorial-01-create-project.png)
+
+1. **Path** — type the project directory (it is created on disk as a `.jdproj` folder).
+2. **New (⌘N)** — or **Open (⌘O)** for an existing project; the header shows `name — resolution² · extent m`.
+3. **Generate (⌘G)** — after choosing lattice, fractal, seed, feature size, octaves, lacunarity, gain and height range.
+4. **Export heightmap (⌘E)** — `.exr` (exact), `.png`/`.r16` (16-bit, warns about quantisation), `.r32` (exact).
+5. **Log** — every operation with warnings and errors (stable code, why, what to do next).
+
+![After generating: viewport readout, layer stats, export](images/tutorial-02-generated.png)
+
+1. Viewport readout: backend (WebGPU here), triangle count, preview size and transfer time.
+2. Layer statistics: min/max/mean height, generation time and the content hash — the same seed and parameters always give the same hash.
+3. Export writes `exports/<file>` plus a `.jd-height.json` sidecar (size, range, flip, byte order).
+
+*Annotations are generated from the real screenshots by `apps/desktop/scripts/annotate.mjs` from the `.annot.json` specs next to the images, so they can be regenerated whenever the UI changes.*
+
 ## Workflow
 
 1. **Project** — type a directory path (e.g. `~/Worlds/Hills.jdproj`), set extent (m) and resolution (px), click **New** (or **Open** for an existing one). The header shows `name — resolution² · extent m`; the panel shows the project id, dirty flag and pending journal entries.
