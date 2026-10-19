@@ -396,3 +396,41 @@ fn diag_env_reports_memory_and_tools() {
             .unwrap_or(false)
     );
 }
+
+#[test]
+fn graph_evaluate_in_one_invocation_exports_in_the_next() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let proj = dir.path().join("Cached.jdproj");
+    assert!(
+        jd().args(["--json", "new"])
+            .arg(&proj)
+            .args(["--extent", "256", "--resolution", "128"])
+            .output()
+            .expect("run")
+            .status
+            .success()
+    );
+    let out = jd()
+        .args(["--json", "op", "graph.evaluate", "--project"])
+        .arg(&proj)
+        .output()
+        .expect("run");
+    let env = last_json_line(&out.stdout);
+    assert_eq!(env["status"], "ok", "{env}");
+    assert!(env["result"]["layers"]["height"].is_string());
+    assert!(
+        proj.join("cache/layers/index.json").exists(),
+        "layer persisted to the project cache"
+    );
+    // A separate process: the layer is read back from cache/ and exported.
+    let out = jd()
+        .args(["--json", "op", "terrain.export_heightmap", "--project"])
+        .arg(&proj)
+        .args(["--params", r#"{"path":"h.r32","format":"raw_r32"}"#])
+        .output()
+        .expect("run");
+    let env = last_json_line(&out.stdout);
+    assert_eq!(env["status"], "ok", "{env}");
+    let raw = std::fs::metadata(proj.join("exports/h.r32")).expect("exported");
+    assert_eq!(raw.len(), 4 * 128 * 128);
+}

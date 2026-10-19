@@ -15,7 +15,7 @@ MyWorld.jdproj/               # a directory, not a single file (Finder/Explorer 
 ├─ assets/                    # user-imported assets (textures, models, stamps, masks, DEMs) — content-addressed filenames + manifest
 │  └─ manifest.json
 ├─ strokes/                   # sculpt/paint stroke data (binary, zstd) referenced by stroke nodes
-├─ cache/                     # disposable: content-addressed tiles + index.sqlite (gitignored by default)
+├─ cache/                     # disposable (gitignored): layers/<blake3>.jdl + index.json today; tiles + index.sqlite later
 ├─ exports/                   # default export target (user-configurable)
 ├─ journal/                   # crash-recovery journal (append-only ops since last save)
 └─ .lock                      # advisory lock with pid/host

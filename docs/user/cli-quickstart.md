@@ -145,7 +145,20 @@ $ jd --json op graph.connect --project G.jdproj --params '{"from":"<noise id>","
 
 Evaluating with an unconnected required input gives `E_GRAPH_MISSING_INPUT`. `graph.move_node` (editor position) is journaled like every other change, so the desktop canvas layout survives a crash. `graph.evaluate` with `lod > 0` publishes a reduced-resolution preview under `<layer>#lod<N>` (e.g. `height#lod1`) and never overwrites the full-resolution layer.
 
-Layers live in memory for the lifetime of the process: in the desktop app and in an MCP session the `height` layer produced by `graph.evaluate` is immediately available to `terrain.stats` / `terrain.export_heightmap`; the CLI runs one operation per invocation, so exporting a graph result from the shell needs the on-disk layer cache that lands with the jobs system (see `memory/todo.md`). Until then use `jd generate` for shell exports.
+Layers persist in the project's disposable cache (`cache/layers/<blake3>.jdl` + `index.json`, see `docs/spec/project-format.md`), so one invocation can evaluate and the next one export — the same path the desktop app and MCP server use:
+
+```
+$ jd --json op graph.evaluate --project G.jdproj
+{"op":"graph.evaluate","status":"ok","result":{"lod":0,"duration_ms":194,"layers":{"height":"5e12d1d98c5c7402…"}}}
+$ ls G.jdproj/cache/layers
+5e12d1d98c5c7402….jdl  index.json
+$ jd --json op terrain.export_heightmap --project G.jdproj --params '{"path":"height.exr","format":"exr"}'
+{"op":"terrain.export_heightmap","status":"ok","result":{"path":"G.jdproj/exports/height.exr",
+  "sidecar":"G.jdproj/exports/height.exr.jd-height.json","format":"exr","size_px":[512,512],
+  "range_m":[181.76539611816406,392.8346862792969],"quantisation_step_m":0.0, ...}}
+```
+
+(512² world, debug build.) Deleting `cache/` never breaks a project; the next `graph.evaluate` recreates the layers.
 
 Built-in kinds today: `jd.noise.fbm@1`, `jd.math.add@1`, `jd.math.multiply@1`, `jd.math.scale@1`, `jd.math.remap@1`, `jd.filter.blur@1`, `jd.output.height@1`.
 

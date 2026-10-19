@@ -42,14 +42,18 @@ pub enum Scope {
 #[derive(Default, Clone)]
 pub struct Context {
     project: Arc<Mutex<Option<Project>>>,
-    /// In-memory heightfield layers produced by terrain ops, keyed by layer name.
-    /// ponytail: replaced by the graph engine's content-addressed cache in Phase 2.
+    /// Heightfield layers produced by terrain/graph ops, keyed by layer name. Backed by the open
+    /// project's on-disk cache (`jd-cache`), so layers outlive the process and the CLI can
+    /// evaluate in one invocation and export in the next.
     layers: Arc<Mutex<BTreeMap<String, jd_terrain::Heightfield>>>,
 }
 
 impl Context {
-    /// Store a heightfield layer.
+    /// Store a heightfield layer (written through to the open project's cache).
     pub fn set_layer(&self, name: &str, hf: jd_terrain::Heightfield) -> JdResult<()> {
+        if let Some(root) = self.project_root() {
+            jd_cache::LayerCache::open(&root).put(name, &hf)?;
+        }
         let mut g = self
             .layers
             .lock()
@@ -64,18 +68,25 @@ impl Context {
         name: &str,
         f: impl FnOnce(&jd_terrain::Heightfield) -> JdResult<T>,
     ) -> JdResult<T> {
-        let g = self
+        let root = self.project_root(); // taken before the layer lock: with_project never locks layers
+        let mut g = self
             .layers
             .lock()
             .map_err(|_| JdError::new(ErrorCode::E_INTERNAL, "layer lock poisoned"))?;
+        if !g.contains_key(name)
+            && let Some(root) = root
+            && let Some(hf) = jd_cache::LayerCache::open(&root).get(name)?
+        {
+            g.insert(name.to_owned(), hf);
+        }
         match g.get(name) {
             Some(hf) => f(hf),
             None => Err(JdError::new(
                 ErrorCode::E_INPUT_INVALID,
                 format!("no heightfield layer named `{name}`"),
             )
-            .why("Terrain ops read from layers produced earlier in this session.")
-            .next("Run terrain.generate first (default layer name: `height`).")
+            .why("Terrain ops read layers produced by terrain.generate or graph.evaluate; they persist in the project's cache/.")
+            .next("Run graph.evaluate (or terrain.generate) first; the default layer name is `height`.")
             .detail("layer", name)),
         }
     }
@@ -106,13 +117,18 @@ impl Context {
             .map(|p| p.root().to_path_buf())
     }
 
-    /// Replace the open project (saving is the caller's responsibility).
+    /// Replace the open project (saving is the caller's responsibility). In-memory layers belong
+    /// to the previous project and are dropped; the new project's come back from its cache.
     pub fn set_project(&self, p: Option<Project>) -> JdResult<()> {
         let mut guard = self
             .project
             .lock()
             .map_err(|_| JdError::new(ErrorCode::E_INTERNAL, "project lock poisoned"))?;
         *guard = p;
+        self.layers
+            .lock()
+            .map_err(|_| JdError::new(ErrorCode::E_INTERNAL, "layer lock poisoned"))?
+            .clear();
         Ok(())
     }
 }
@@ -1114,6 +1130,14 @@ pub mod graph {
                     .and_then(|v| v["pending_journal"].as_u64()),
                 Some(5)
             );
+            // The evaluated layer came back from the project's on-disk cache (jd-cache).
+            let r = call(
+                &reg,
+                &ctx2,
+                "terrain.stats",
+                serde_json::json!({ "layer": "height#lod1" }),
+            );
+            assert_eq!(r.status, crate::envelope::Status::Ok, "{r:?}");
             let r = call(&reg, &ctx2, "project.recover", serde_json::json!({}));
             assert_eq!(
                 r.result

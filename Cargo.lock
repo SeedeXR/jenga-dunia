@@ -2079,6 +2079,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "jd-cache"
+version = "0.0.1"
+dependencies = [
+ "jd-terrain",
+ "jd-types",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "jd-cli"
 version = "0.0.1"
 dependencies = [
@@ -2098,6 +2108,7 @@ version = "0.0.1"
 dependencies = [
  "base64 0.22.1",
  "insta",
+ "jd-cache",
  "jd-graph",
  "jd-terrain",
  "jd-types",

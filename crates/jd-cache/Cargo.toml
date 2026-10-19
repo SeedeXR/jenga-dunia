@@ -1,0 +1,20 @@
+[package]
+name = "jd-cache"
+description = "Jenga Dunia on-disk layer cache: content-addressed heightfield blobs under <project>/cache/, disposable."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+jd-types.workspace = true
+jd-terrain.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true
