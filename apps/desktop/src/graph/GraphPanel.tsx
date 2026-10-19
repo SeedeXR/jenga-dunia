@@ -25,7 +25,7 @@ type JdNodeData = { kind: string; label: string; params: Record<string, unknown>
 function JdNode({ data }: NodeProps<FlowNode<JdNodeData>>) {
   const summary = Object.entries(data.params)
     .slice(0, 3)
-    .map(([k, v]) => `${k}=${Array.isArray(v) ? v.join("…") : String(v)}`)
+    .map(([k, v]) => `${k}=${Array.isArray(v) ? (v.some((x) => typeof x === "object" && x !== null) ? `${v.length} recorded` : v.join("…")) : String(v)}`)
     .join(" · ");
   return (
     <div className="min-w-40 rounded border border-jd-line bg-jd-bg-2 text-xs text-jd-fg-0 shadow">

@@ -1,0 +1,10 @@
+{
+  "src": "desktop-sculpt.png",
+  "out": "tutorial-04-sculpt.png",
+  "annotations": [
+    { "type": "box", "x": 988, "y": 46, "w": 84, "h": 24, "label": "1", "text": "Sculpt: inserts a stroke node and enters sculpt mode", "tx": 980, "ty": 92, "anchor": "end" },
+    { "type": "box", "x": 1168, "y": 50, "w": 264, "h": 92, "label": "2", "text": "Brush radius and strength (negative digs)", "tx": 1430, "ty": 162, "anchor": "end" },
+    { "type": "arrow", "x1": 560, "y1": 300, "x2": 700, "y2": 215, "text": "Drag on the terrain: one stroke = one undo step", "tx": 330, "ty": 330 },
+    { "type": "box", "x": 684, "y": 638, "w": 132, "h": 46, "label": "3", "text": "Stroke node wired before the output; strokes are data in graph.json", "tx": 400, "ty": 712 }
+  ]
+}

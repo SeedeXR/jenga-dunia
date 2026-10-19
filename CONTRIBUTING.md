@@ -13,6 +13,7 @@ Thank you for helping build Jenga Dunia. This project is developed by humans and
 - Every PR: CI green on macOS, Linux and Windows; tests for new logic; benchmarks for hot-path changes; docs/matrices updated with the code.
 - Review loop before pushing: correctness review and over-engineering review (`/code-review`, `/ponytail-review` for agents). Fix findings first.
 - Never bypass hooks or gates (`--no-verify` is prohibited). A broken gate is a finding to report.
+- `scripts/pre-push.sh` runs every CI gate locally (fmt, clippy, tests, cargo-deny, schema and TypeScript-type freshness, version, links, frontend build/tests/e2e). Run it, read the result, then push — never chain `git push` behind a step that can fail silently.
 
 ## Code standards
 - Rust: `cargo fmt`, `cargo clippy -D warnings`, `cargo deny check`, `cargo nextest run`. `unsafe` requires a `// SAFETY:` comment and an entry in `docs/architecture/10-security.md`.
