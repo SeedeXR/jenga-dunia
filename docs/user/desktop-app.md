@@ -43,6 +43,8 @@ cd apps/desktop && pnpm install && pnpm tauri dev
 
 *Annotations are generated from the real screenshots by `apps/desktop/scripts/annotate.mjs` from the `.annot.json` specs next to the images, so they can be regenerated whenever the UI changes.*
 
+**Screen recording:** [`videos/first-terrain.mp4`](videos/first-terrain.mp4) (14 s, 1440×892) — the real app opened with a project, **Terrain → Generate Terrain** and **File → Export Heightmap…** triggered through the native menu bar, terrain appearing in the WebGPU viewport, `height.exr` written. Recorded with macOS `screencapture -V`; the menu actions were driven by System Events so the recording is reproducible.
+
 ## Workflow
 
 1. **Project** — type a directory path (e.g. `~/Worlds/Hills.jdproj`), set extent (m) and resolution (px), click **New** (or **Open** for an existing one). The header shows `name — resolution² · extent m`; the panel shows the project id, dirty flag and pending journal entries.

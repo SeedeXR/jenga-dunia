@@ -38,8 +38,10 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `21:50:00` **Playwright e2e green (2/2)** using the system Chrome locally (`channel: "chrome"` when not CI; the Playwright Chromium download was stalling on this network). Fixes along the way: ESM `__dirname` in the bridge; bridge now picks the newest `jd-mcp` binary (a stale release build had shadowed the debug one → "unknown tool"); event-plugin shim global for the menu listener's `unlisten`.
 
+- `22:00:00` Pushed `be3fd20`, `5d12d6d`, `3aa5df7`. **Annotated tutorial images** (red boxes/arrows/numbered captions) generated from the real screenshots by `apps/desktop/scripts/annotate.mjs` (SVG overlay rendered in Chrome; `.annot.json` specs beside the images) → `docs/user/images/tutorial-01-create-project.png`, `tutorial-02-generated.png`; wired into `docs/user/desktop-app.md`. The claude.ai Figma connector disconnected mid-session; the plugin Figma server needs the owner to complete OAuth (link was shown) — once connected, the same screenshots can be placed/annotated in the Figma file `fxyeV62hgLoNmG3dU1LX6G` as requested.
+
 ### Open / next
-1. Push `be3fd20`+ and watch CI (docs, rust×3 incl. Linux apt deps, frontend with e2e on Ubuntu Chromium, deny).
+1. Watch CI for `5d12d6d`/`3aa5df7` (docs, rust×3 incl. Linux apt deps, frontend with e2e on Ubuntu Chromium, deny); fix anything red.
 2. CI run for the first Rust matrix — watch Windows path handling in the CLI smoke step.
 2. Phase 2 start: `jd-terrain` tiles + noise nodes, `jd-graph` evaluator, `jd-jobs`; first `graph.evaluate` + EXR/PNG16/R16 export; viewport prototype (ADR-0003 gate).
 3. `docs/user/`: CLI quickstart written from real output; GUI tutorials with Figma-annotated screenshots/video once the Tauri app exists.
