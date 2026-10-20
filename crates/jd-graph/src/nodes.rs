@@ -751,6 +751,17 @@ pub fn register_all(r: &mut Registry) {
             Ok(BTreeMap::from([("depth".to_owned(), Value::field(depth)), ("cover".to_owned(), Value::field(cover))]))
         },
     ).with_memory(16.0));
+    r.register(NodeDef::new::<jd_terrain::RainParams, _>(
+        "jd.climate.rain@1",
+        "Orographic rain: moisture rides the wind across the field; air holds less water the higher it climbs (`moisture_scale_m`), so windward slopes condense the excess as rain, descending air rains nothing (the shadow), flat ground takes a drizzle (`base_per_km`) and dry air re-moistens over `recovery_km` — `rain` 0..1 (the field's 99th percentile at 1; feed `jd.erosion.hydraulic@1`'s `rain` or a biome rule) and `moisture` 0..1, the relative humidity of the air leaving each cell",
+        vec![port("in", PortType::Heightfield, true)],
+        vec![port("rain", PortType::Heightfield, false), port("moisture", PortType::Heightfield, false)],
+        |ctx, p, i| {
+            let rp: jd_terrain::RainParams = params(&with_world_wind(ctx, p, &["wind_azimuth_deg"]))?;
+            let (rain, moisture) = jd_terrain::orographic_rain(field(i, "in")?, spacing_m(ctx), &rp)?;
+            Ok(BTreeMap::from([("rain".to_owned(), Value::field(rain)), ("moisture".to_owned(), Value::field(moisture))]))
+        },
+    ));
     r.register(NodeDef::new::<SlopeParams, _>(
         "jd.analysis.slope@1",
         "Slope mask 0..1 (gradient angle / max_deg) — feed into multiply to attenuate by steepness",
@@ -766,8 +777,8 @@ pub fn register_all(r: &mut Registry) {
     ));
     r.register(NodeDef::new::<HydraulicNodeParams, _>(
         "jd.erosion.hydraulic@1",
-        "Hydraulic erosion (virtual pipes / shallow water): rain flows downhill, dissolves, carries and deposits sediment; outputs terrain, water depth and suspended sediment; an optional `hardness` field (0..1) drops the dissolving rate to a tenth on hard rock",
-        vec![port("in", PortType::Heightfield, true), port("hardness", PortType::Heightfield, false)],
+        "Hydraulic erosion (virtual pipes / shallow water): rain flows downhill, dissolves, carries and deposits sediment; outputs terrain, water depth and suspended sediment; an optional `hardness` field (0..1) drops the dissolving rate to a tenth on hard rock; an optional `rain` field (0..1, e.g. `jd.climate.rain@1`) scales `rain_rate` per cell",
+        vec![port("in", PortType::Heightfield, true), port("hardness", PortType::Heightfield, false), port("rain", PortType::Heightfield, false)],
         vec![
             port("out", PortType::Heightfield, false),
             port("water", PortType::Heightfield, false),
@@ -779,6 +790,7 @@ pub fn register_all(r: &mut Registry) {
                 return Err(JdError::invalid("iterations", "must be within 1..=2000"));
             }
             let hardness = i.get("hardness").map(|v| v.as_field());
+            let rain = i.get("rain").map(|v| v.as_field());
             let r = jd_terrain::hydraulic_erode_with(
                 field(i, "in")?,
                 spacing_m(ctx),
@@ -792,7 +804,7 @@ pub fn register_all(r: &mut Registry) {
                     deposit_k: hp.deposit_k,
                     max_concentration: hp.max_concentration,
                     ..Default::default()
-                }, hardness.map(|k| &**k), Some(&ctx.cancel))?;
+                }, hardness.map(|k| &**k), rain.map(|k| &**k), Some(&ctx.cancel))?;
             Ok(BTreeMap::from([
                 ("out".to_owned(), Value::field(r.height)),
                 ("water".to_owned(), Value::field(r.water)),

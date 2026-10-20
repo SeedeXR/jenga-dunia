@@ -22,7 +22,7 @@ namespace JengaDunia
         [Serializable] class Report
         {
             public string unity, dir; public int heightmap_resolution, source_px, alphamap_layers, trees;
-            public float[] terrain_size, sampled_height_min_max; public string[] layers; public List<string> warnings = new List<string>(); public bool ok;
+            public float[] terrain_size, sampled_height_min_max; public string[] layers; public float mean_height; public float[] layer_mean_height; public List<string> warnings = new List<string>(); public bool ok;
         }
 
         static string Arg(string name, string fallback = null)
@@ -145,15 +145,23 @@ namespace JengaDunia
                     data.alphamapResolution = res - 1;
                     var n = layers.Count;
                     var alpha = new float[res - 1, res - 1, n];
+                    // Registration check: the mean terrain height (0..1) under each layer's > 0.5 cells vs the whole —
+                    // a snow layer that lands on the low ground means the rows are flipped.
+                    var layerSum = new double[n]; var layerCount = new int[n]; double allSum = 0;
                     for (var y = 0; y < res - 1; y++)
                         for (var x = 0; x < res - 1; x++)
                         {
                             int sx = Math.Min(x, w - 1), sy = Math.Min(y, h - 1);
                             float sum = 0;
-                            for (var k = 0; k < n; k++) { var v = weights[k].GetPixel(sx, h - 1 - sy).r; alpha[y, x, k] = v; sum += v; } // PNG row 0 = north
+                            for (var k = 0; k < n; k++) { var v = weights[k].GetPixel(sx, sy).r; alpha[y, x, k] = v; sum += v; } // PNG row 0 = north; LoadImage puts it at texture y = h-1, so y = 0 is already south
                             if (sum > 0) for (var k = 0; k < n; k++) alpha[y, x, k] /= sum; else alpha[y, x, 0] = 1;
+                            allSum += heights[y, x];
+                            for (var k = 0; k < n; k++) if (alpha[y, x, k] > 0.5f) { layerSum[k] += heights[y, x]; layerCount[k]++; }
                         }
                     data.SetAlphamaps(0, 0, alpha);
+                    report.mean_height = (float)(allSum / ((res - 1) * (res - 1)));
+                    report.layer_mean_height = new float[n];
+                    for (var k = 0; k < n; k++) report.layer_mean_height[k] = layerCount[k] > 0 ? (float)(layerSum[k] / layerCount[k]) : -1f;
                 }
                 report.alphamap_layers = layers.Count;
                 report.layers = layerFiles.ToArray();

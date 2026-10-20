@@ -109,18 +109,12 @@ pub fn mesh_topology(triangles: impl Iterator<Item = [u32; 3]>, vertices: usize)
 
 /// Topology of the regular grid the GLB writer emits (two triangles per cell).
 fn grid_topology(gw: u32, gh: u32) -> MeshTopology {
-    let tris = (0..gh - 1).flat_map(move |gz| {
-        (0..gw - 1).flat_map(move |gx| {
-            let (a, b, c, d) = (
-                gz * gw + gx,
-                gz * gw + gx + 1,
-                (gz + 1) * gw + gx,
-                (gz + 1) * gw + gx + 1,
-            );
-            [[a, c, b], [b, c, d]]
-        })
-    });
-    mesh_topology(tris, (gw * gh) as usize)
+    // Closed form: a regular grid has no degenerate, non-manifold or unused element, only its
+    // perimeter — counting 6 M edges in a HashMap per export told us nothing new.
+    MeshTopology {
+        boundary_edges: 2 * (gw - 1) + 2 * (gh - 1),
+        ..MeshTopology::default()
+    }
 }
 
 /// Hypsometric ramp (normalised height → RGB): lowland green → ochre → bare rock → snow.
@@ -260,6 +254,13 @@ pub fn bake_maps_with(
     max_px: u32,
     layers: &[MaterialLayer],
 ) -> JdResult<BakedMaps> {
+    validate_layers(hf, layers)?;
+    bake_maps_body(hf, extent_m, max_px, layers)
+}
+
+/// Every material mask matches the terrain and every colour / roughness sits in 0..=1 — checked
+/// once here for the baked-maps path and the direct GLB path alike.
+fn validate_layers(hf: &Heightfield, layers: &[MaterialLayer]) -> JdResult<()> {
     for (k, l) in layers.iter().enumerate() {
         if let Some(m) = &l.mask
             && (m.width(), m.height()) != (hf.width(), hf.height())
@@ -277,6 +278,15 @@ pub fn bake_maps_with(
             ));
         }
     }
+    Ok(())
+}
+
+fn bake_maps_body(
+    hf: &Heightfield,
+    extent_m: [f64; 2],
+    max_px: u32,
+    layers: &[MaterialLayer],
+) -> JdResult<BakedMaps> {
     let (w, h) = (hf.width(), hf.height());
     let ts = w.max(h).div_ceil(max_px.max(16)).max(1);
     let (tw, th) = (w.div_ceil(ts), h.div_ceil(ts));
@@ -424,6 +434,7 @@ pub fn export_glb_with(
     materials: &[MaterialLayer],
 ) -> JdResult<MeshExportReport> {
     hf.validate_finite()?;
+    validate_layers(hf, materials)?;
     if step == 0 {
         return Err(JdError::invalid("step", "must be ≥ 1"));
     }
@@ -1072,14 +1083,16 @@ pub fn write_usdc(
     path: &Path,
     step: u32,
 ) -> JdResult<MeshExportReport> {
-    let usda = path.with_extension("usda");
+    // A private intermediate layer (`x.usdc.usda`) so a sibling `x.usda` export survives.
+    let usda = path.with_extension("usdc.usda");
     let mut rep = write_usda(mesh, extent_m, &usda, step)?;
     let status = std::process::Command::new("usdcat")
         .arg(&usda)
         .arg("-o")
         .arg(path)
-        .output()
-        .map_err(|e| {
+        .output();
+    let _ = fs::remove_file(&usda);
+    let status = status.map_err(|e| {
             JdError::new(jd_types::ErrorCode::E_DEPENDENCY_MISSING, format!("usdcat not available: {e}"))
                 .next("Install OpenUSD tools (macOS 27 ships them in /usr/bin; `pip install usd-core` elsewhere) or export .usda.")
         })?;
@@ -1517,12 +1530,11 @@ mod tests {
         let bytes = std::fs::read(&usdc).expect("read");
         assert!(bytes.starts_with(b"PXR-USDC"), "binary crate magic");
         assert!(
-            r.bytes
-                < std::fs::metadata(dir.path().join("t.usda"))
-                    .expect("usda")
-                    .len(),
-            "smaller than the text layer"
+            !dir.path().join("t.usdc.usda").exists(),
+            "the intermediate layer is removed"
         );
+        let usda = export_usda(&h, [160.0, 120.0], &dir.path().join("t.usda"), 1).expect("usda");
+        assert!(r.bytes < usda.bytes, "smaller than the text layer");
     }
 
     #[test]

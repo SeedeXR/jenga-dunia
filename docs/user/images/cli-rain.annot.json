@@ -1,0 +1,37 @@
+{
+  "src": "../../../target/scratch/cli-rain-raw.png",
+  "out": "cli-rain.png",
+  "annotations": [
+    {
+      "type": "box",
+      "x": 280,
+      "y": 30,
+      "w": 40,
+      "h": 238,
+      "label": "1",
+      "text": "1  air arrives saturated: the first climbs wring it out",
+      "tx": 16,
+      "ty": 318
+    },
+    {
+      "type": "circle",
+      "cx": 440,
+      "cy": 150,
+      "r": 30,
+      "label": "2",
+      "text": "2  rain shadow: descending air rains nothing",
+      "tx": 16,
+      "ty": 342
+    },
+    {
+      "type": "arrow",
+      "x1": 700,
+      "y1": 296,
+      "x2": 690,
+      "y2": 200,
+      "text": "3  dry lee re-moistens over 40 km",
+      "tx": 16,
+      "ty": 366
+    }
+  ]
+}

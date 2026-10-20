@@ -156,7 +156,13 @@ pub fn coastal_erode(
                     .collect();
                 let total: f32 = weights.iter().sum();
                 for ((j, _), wgt) in wet.iter().zip(&weights) {
-                    delta[*j] += cut * wgt / total;
+                    // drift 1 with the only sea cell straight upwind weighs 0: share evenly then.
+                    delta[*j] += cut
+                        * if total > 0.0 {
+                            wgt / total
+                        } else {
+                            1.0 / wet.len() as f32
+                        };
                 }
             }
         }

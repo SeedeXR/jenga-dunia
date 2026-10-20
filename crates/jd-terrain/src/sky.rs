@@ -111,7 +111,6 @@ pub struct Sky {
     zenith: [f32; 3], // Y (kcd/m²), x, y
 }
 
-/// Direction of (azimuth clockwise from north, elevation) in the terrain frame: x east, y up, z south.
 /// Seeded value noise on a 2-D lattice, 0..1, smooth between lattice points.
 fn value_noise(u: f32, v: f32, seed: u64) -> f32 {
     let hash = |x: i64, y: i64| -> f32 {
@@ -132,6 +131,7 @@ fn value_noise(u: f32, v: f32, seed: u64) -> f32 {
     top + (bottom - top) * sy
 }
 
+/// Direction of (azimuth clockwise from north, elevation) in the terrain frame: x east, y up, z south.
 fn direction(azimuth_deg: f32, elevation_deg: f32) -> [f32; 3] {
     let (az, el) = (azimuth_deg.to_radians(), elevation_deg.to_radians());
     [el.cos() * az.sin(), el.sin(), -el.cos() * az.cos()]

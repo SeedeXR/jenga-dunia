@@ -368,9 +368,7 @@ pub fn bake_water_with(
             };
             if let Some(s) = shore {
                 let wash = s.get(sx, sy).clamp(0.0, 1.0);
-                if d > 0.0 || wash > 0.0 {
-                    foam = foam.max(wash);
-                }
+                foam = foam.max(wash); // wherever the waves worked: water or the cliff foot
             }
             let srgb = |v: f32| (v.clamp(0.0, 1.0).powf(1.0 / 2.2) * 255.0).round() as u8;
             depth_px.put_pixel(

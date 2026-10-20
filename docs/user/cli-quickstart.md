@@ -747,6 +747,32 @@ snow_windy    min 0.0     max 0.995     mean 0.041      (snow line 700 ± 120, w
 
 `jd.climate.snow@1` is a static cover mask from the height layer alone — the heightfield form of the snow-distribution literature (`docs/research/materials-geomorphology.md`): a smooth band around `snow_line_m` (half cover at the line, `transition_m` wide), retention falling linearly to zero at `max_slope_deg` (cliffs hold nothing), slopes whose downslope direction faces `sun_azimuth_deg` losing up to `sun_strength` of their cover, and slopes facing into `wind_azimuth_deg` scoured by up to `wind_strength`. Directional terms fade in with the gradient so flat ground never flickers. The mask is 0..1 like `rivers` or a class mask: colour the viewport by it, scatter from it, or feed it to biome rules via `jd.mask.class@1`-style multiplies. On the 5 120 m / 512² biome world the node takes 67 ms; coverage 3.8 % (default) → 4.1 % with the lower, wind-scoured line (the west wind strips the west-facing flanks and leaves more on the lee). Not modelled: sky visibility, melt over time, drifting — see the research notes for the next terms.
 
+### Orographic rain: windward slopes wet, the lee in a rain shadow
+
+```
+$ jd new Rain.jdproj --extent 51200 --resolution 256 --seed 11         # 200 m cells; noise set to ridged 200..2800 m, feature 14 km
+$ jd op graph.add_node --project Rain.jdproj --save --params '{"kind":"jd.climate.rain@1","params":{}}'   # wind unset → the world's westerly
+# noise.out → rain.in; rain.rain → `rain`, rain.moisture → `moisture`
+$ jd --json op graph.evaluate --project Rain.jdproj            # jd.climate.rain@1 100 ms (256²)
+rain      min 0.027  max 1.0    mean 0.056     (0..1, the 99th percentile at 1)
+moisture  min 0.449  max 0.998  mean 0.747     (relative humidity of the air leaving each cell)
+$ jd export heightmap --project Rain.jdproj --layer rain --format png16 rain.png
+```
+
+![Three panels: the ridged height field; the rain mask with the saturated west edge bright and the interior sparse; the relative humidity falling from white at the upwind edge to grey in the lees](images/cli-rain.png)
+
+`jd.climate.rain@1` is a one-sweep Smith–Barstad-style model: saturated air holds less water the higher it goes (`exp(-h / moisture_scale_m)`, 2 500 m by default), so as a column of air is carried cell to cell along the wind it condenses whatever exceeds the local capacity as rain, drizzles a steady share over flat ground (`base_per_km`), and re-moistens towards saturation over `recovery_km` (40 km — the length of a rain shadow). Descending air rains nothing because its capacity grows, which is why only crests higher than everything upwind of them catch rain and the hills behind a range stay dry until the air has recovered. The wind is the world's (`project.set_settings {wind}`) unless the node sets `wind_azimuth_deg`; unit test: a ridge on a plain under a westerly, then an easterly. Not modelled: temperature, advection delay, winds off the 8 compass directions (the sweep rounds the wind to a neighbour, hence the row-wise streaks).
+
+**Feeding erosion.** The hydraulic node takes the mask on its new `rain` port and scales `rain_rate` per cell — the same 100-step run twice on the world above, once with the port wired and once without:
+
+```
+# rain.rain → hydraulic.rain  (and a second hydraulic node without it)
+water_orographic  mean 0.0013  max 0.66   (water depth, m)
+water_uniform     mean 0.0236  max 3.72
+```
+
+5.5 % of the water for a mask whose mean is 0.056: rivers run where it rains. Biome rules take the same mask through `jd.biome.classify@1`'s `mask` input.
+
 ### Snowpack: a season that falls, drifts and melts
 
 ```

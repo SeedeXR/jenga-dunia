@@ -1434,6 +1434,19 @@ export type NodeParams_jd_biome_seabed_1 = {
   "river_reach_m"?: number;
 };
 
+export type NodeParams_jd_climate_rain_1 = {
+  /** Compass direction the wind blows from, degrees clockwise from north. In a graph, unset →
+the world's shared wind. */
+  "wind_azimuth_deg"?: number;
+  /** Height over which saturated air's water capacity falls to 1/e, metres (> 0): the climb that
+wrings out most of the moisture. */
+  "moisture_scale_m"?: number;
+  /** Share of the air's water that drizzles out per km of travel regardless of the ground (0..1). */
+  "base_per_km"?: number;
+  /** Distance over which dry air re-moistens towards saturation, km (> 0): the length of a rain shadow. */
+  "recovery_km"?: number;
+};
+
 export type NodeParams_jd_climate_snow_1 = {
   /** Height where cover reaches half, metres. */
   "snow_line_m"?: number;
@@ -1926,6 +1939,7 @@ export interface NodeKinds {
   "jd.analysis.slope@1": NodeParams_jd_analysis_slope_1;
   "jd.biome.classify@1": NodeParams_jd_biome_classify_1;
   "jd.biome.seabed@1": NodeParams_jd_biome_seabed_1;
+  "jd.climate.rain@1": NodeParams_jd_climate_rain_1;
   "jd.climate.snow@1": NodeParams_jd_climate_snow_1;
   "jd.climate.snowpack@1": NodeParams_jd_climate_snowpack_1;
   "jd.erosion.aeolian@1": NodeParams_jd_erosion_aeolian_1;

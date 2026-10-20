@@ -330,6 +330,62 @@
     }
   },
   {
+    "kind": "jd.climate.rain@1",
+    "description": "Orographic rain: moisture rides the wind across the field; air holds less water the higher it climbs (`moisture_scale_m`), so windward slopes condense the excess as rain, descending air rains nothing (the shadow), flat ground takes a drizzle (`base_per_km`) and dry air re-moistens over `recovery_km` — `rain` 0..1 (the field's 99th percentile at 1; feed `jd.erosion.hydraulic@1`'s `rain` or a biome rule) and `moisture` 0..1, the relative humidity of the air leaving each cell",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "rain",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "moisture",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "RainParams",
+      "description": "Orographic rain settings.",
+      "type": "object",
+      "properties": {
+        "wind_azimuth_deg": {
+          "description": "Compass direction the wind blows from, degrees clockwise from north. In a graph, unset →\nthe world's shared wind.",
+          "type": "number",
+          "format": "float",
+          "default": 270.0
+        },
+        "moisture_scale_m": {
+          "description": "Height over which saturated air's water capacity falls to 1/e, metres (> 0): the climb that\nwrings out most of the moisture.",
+          "type": "number",
+          "format": "float",
+          "default": 2500.0
+        },
+        "base_per_km": {
+          "description": "Share of the air's water that drizzles out per km of travel regardless of the ground (0..1).",
+          "type": "number",
+          "format": "float",
+          "default": 0.009999999776482582
+        },
+        "recovery_km": {
+          "description": "Distance over which dry air re-moistens towards saturation, km (> 0): the length of a rain shadow.",
+          "type": "number",
+          "format": "float",
+          "default": 40.0
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
     "kind": "jd.climate.snow@1",
     "description": "Snow cover 0..1 from height alone: a soft snow line, retention that falls with slope, sun-facing slopes melt, windward slopes scour — for biome rules, scatter and colour overlays",
     "inputs": [
@@ -787,7 +843,7 @@
   },
   {
     "kind": "jd.erosion.hydraulic@1",
-    "description": "Hydraulic erosion (virtual pipes / shallow water): rain flows downhill, dissolves, carries and deposits sediment; outputs terrain, water depth and suspended sediment; an optional `hardness` field (0..1) drops the dissolving rate to a tenth on hard rock",
+    "description": "Hydraulic erosion (virtual pipes / shallow water): rain flows downhill, dissolves, carries and deposits sediment; outputs terrain, water depth and suspended sediment; an optional `hardness` field (0..1) drops the dissolving rate to a tenth on hard rock; an optional `rain` field (0..1, e.g. `jd.climate.rain@1`) scales `rain_rate` per cell",
     "inputs": [
       {
         "name": "in",
@@ -796,6 +852,11 @@
       },
       {
         "name": "hardness",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "rain",
         "ty": "heightfield",
         "required": false
       }

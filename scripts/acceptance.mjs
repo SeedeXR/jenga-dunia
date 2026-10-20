@@ -192,8 +192,11 @@ for (const profile of ["unity", "unreal"]) {
     try {
       const out = execFileSync("bash", ["scripts/unity-import-check.sh", path.join(proj, "exports", "unity")], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 900_000 });
       const rep = JSON.parse(readFileSync(path.join(proj, "exports", "unity", "jd-unity-import.json"), "utf8"));
-      unityVerified = Boolean(rep.ok);
-      mark(13, rep.ok ? "VERIFIED" : "FAILED", `Unity ${rep.unity} headless import of the unity profile: TerrainData ${rep.heightmap_resolution}² from a ${rep.source_px}² r16, size ${rep.terrain_size?.map((v) => v.toFixed(0)).join("×")} m, sampled height ${rep.sampled_height_min_max?.map((v) => v.toFixed(1)).join("…")} m, ${rep.alphamap_layers} terrain layers from the weightmaps${rep.trees ? `, ${rep.trees} trees` : ""}${rep.warnings?.length ? `; notes: ${rep.warnings.join(" | ")}` : ""}`);
+      // Registration: the snow weightmap must sit on the high ground of the rebuilt terrain (rows flipped → it lands low).
+      const snowIdx = rep.layers?.indexOf("weight_snow.png") ?? -1;
+      const snowHigh = snowIdx >= 0 && rep.layer_mean_height?.[snowIdx] > rep.mean_height;
+      unityVerified = Boolean(rep.ok) && snowHigh;
+      mark(13, unityVerified ? "VERIFIED" : "FAILED", `Unity ${rep.unity} headless import of the unity profile: TerrainData ${rep.heightmap_resolution}² from a ${rep.source_px}² r16, size ${rep.terrain_size?.map((v) => v.toFixed(0)).join("×")} m, sampled height ${rep.sampled_height_min_max?.map((v) => v.toFixed(1)).join("…")} m, ${rep.alphamap_layers} terrain layers from the weightmaps${rep.trees ? `, ${rep.trees} trees` : ""}; registration: snow layer mean height ${rep.layer_mean_height?.[snowIdx]?.toFixed(3)} vs terrain mean ${rep.mean_height?.toFixed(3)} (${snowHigh ? "snow sits high — weightmap rows match the heightmap" : "snow sits LOW — rows flipped"})${rep.warnings?.length ? `; notes: ${rep.warnings.join(" | ")}` : ""}`);
       void out;
     } catch (e) {
       mark(13, "FAILED", `unity profile: headless import did not complete: ${String(e).slice(0, 300)}`);

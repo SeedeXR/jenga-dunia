@@ -193,6 +193,9 @@ pub fn export_profile_with(
             }
         }
         let file = format!("weight_{name}.png");
+        if files.contains(&file) {
+            return Ok(file); // named in `masks` and as a material mask: one weightmap
+        }
         img.save(dir.join(&file)).map_err(|e| {
             JdError::new(
                 jd_types::ErrorCode::E_INTERNAL,

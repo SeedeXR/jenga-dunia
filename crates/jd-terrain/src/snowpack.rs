@@ -142,11 +142,14 @@ pub fn snowpack(
     if !(p.cover_depth_m > 0.0 && p.cover_depth_m.is_finite()) {
         return Err(JdError::invalid("cover_depth_m", "must be positive"));
     }
-    if !p.temperature_c.is_finite()
-        || !p.wind_azimuth_deg.is_finite()
-        || !p.sun_azimuth_deg.is_finite()
-    {
-        return Err(JdError::invalid("temperature_c", "must be finite"));
+    for (name, v) in [
+        ("temperature_c", p.temperature_c),
+        ("wind_azimuth_deg", p.wind_azimuth_deg),
+        ("sun_azimuth_deg", p.sun_azimuth_deg),
+    ] {
+        if !v.is_finite() {
+            return Err(JdError::invalid(name, "must be finite"));
+        }
     }
     if !spacing_m.iter().all(|s| *s > 0.0 && s.is_finite()) {
         return Err(JdError::invalid(

@@ -22,6 +22,7 @@ pub mod noise;
 pub mod ocean;
 pub mod preview;
 pub mod profiles;
+pub mod rain;
 pub mod rocks;
 pub mod scatter;
 pub mod sculpt;
@@ -65,6 +66,7 @@ pub use profiles::{
     EngineProfile, ProfileMaterial, ProfileReport, ProfileSettings, export_profile,
     export_profile_with,
 };
+pub use rain::{RainParams, orographic_rain};
 pub use rocks::{RockParams, rock_mesh};
 pub use scatter::{
     ScatterParams, ScatterPoint, exclude_near, parse_points_csv, read_points_csv, scatter_points,

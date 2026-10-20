@@ -4024,6 +4024,9 @@ pub mod terrain {
                 })?;
                 let mut warnings = Vec::new();
                 let materials = material_layers(ctx, &p.materials)?;
+                if !materials.is_empty() && !matches!(path.extension().and_then(|e| e.to_str()), None | Some("glb")) {
+                    warnings.push(Warning::new("W_EXPORT_LOSS", "`materials` are baked into GLB textures only; this format carries the base albedo (FBX) or no texture — export .glb or paint the layers in the engine from `terrain.export_profile`"));
+                }
                 let report = ctx.with_layer(&p.layer, |hf| {
                     let step = p.step.unwrap_or_else(|| jd_terrain::auto_step(hf.width(), hf.height(), p.max_vertices));
                     if p.step.is_none() && step > 1 {
@@ -4107,7 +4110,11 @@ pub mod terrain {
                     }
                     None => (0, Some(points)),
                 };
-                Ok((ScatterReport { path, count, excluded, bytes, spacing_m: p.scatter.spacing_m, points }, Vec::new()))
+                let warnings = (p.engine.is_some() && p.rock.is_some())
+                    .then(|| Warning::new("W_EXPORT_LOSS", "`rock` proxies are not written in an engine format: the file holds instances only"))
+                    .into_iter()
+                    .collect();
+                Ok((ScatterReport { path, count, excluded, bytes, spacing_m: p.scatter.spacing_m, points }, warnings))
             },
         );
         r.register::<TerrainExport, ExportReport, _>(

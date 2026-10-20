@@ -299,23 +299,29 @@ pub fn hydraulic_erode(
     p: &HydraulicParams,
     cancel: Option<&AtomicBool>,
 ) -> JdResult<HydraulicResult> {
-    hydraulic_erode_with(h, spacing_m, p, None, cancel)
+    hydraulic_erode_with(h, spacing_m, p, None, None, cancel)
 }
 
 /// [`hydraulic_erode`] with an optional per-cell `hardness` field (0..1): the dissolving constant
-/// drops to a tenth on hard rock, so water cuts shale and deposits on caprock as before.
+/// drops to a tenth on hard rock, so water cuts shale and deposits on caprock as before — and an
+/// optional `rain` field (0..1, e.g. `orographic_rain`) that scales `rain_rate` per cell.
 pub fn hydraulic_erode_with(
     h: &Heightfield,
     spacing_m: [f32; 2],
     p: &HydraulicParams,
     hardness: Option<&Heightfield>,
+    rain: Option<&Heightfield>,
     cancel: Option<&AtomicBool>,
 ) -> JdResult<HydraulicResult> {
-    if let Some(k) = hardness
-        && (k.width(), k.height()) != (h.width(), h.height())
-    {
-        return Err(JdError::invalid("hardness", "field size differs from `in`"));
+    for (name, f) in [("hardness", hardness), ("rain", rain)] {
+        if let Some(k) = f
+            && (k.width(), k.height()) != (h.width(), h.height())
+        {
+            return Err(JdError::invalid(name, "field size differs from `in`"));
+        }
     }
+    let rain_scale: Option<Vec<f32>> =
+        rain.map(|r| r.to_vec().iter().map(|v| v.clamp(0.0, 1.0)).collect());
     let soft: Option<Vec<f32>> = hardness.map(|k| {
         k.to_vec()
             .iter()
@@ -363,7 +369,11 @@ pub fn hydraulic_erode_with(
     for _ in 0..p.iterations {
         check_cancel(cancel)?;
         // 1. Rain.
-        let water_pre: Vec<f32> = water.iter().map(|d| d + p.rain_rate * p.dt).collect();
+        let water_pre: Vec<f32> = water
+            .iter()
+            .enumerate()
+            .map(|(i, d)| d + p.rain_rate * p.dt * rain_scale.as_ref().map_or(1.0, |s| s[i]))
+            .collect();
         // 2. Outflow flux per pipe, scaled so a cell never sends more water than it holds.
         let mut new_flux = vec![[0.0f32; 4]; n];
         new_flux
@@ -542,7 +552,8 @@ mod tests {
         let soft = hydraulic_erode(&valley, [10.0, 10.0], &p, None).expect("soft");
         let mut cap = Heightfield::new(48, 32, 64, 0).expect("k");
         cap.fill_with(|_, _| 1.0);
-        let hard = hydraulic_erode_with(&valley, [10.0, 10.0], &p, Some(&cap), None).expect("hard");
+        let hard =
+            hydraulic_erode_with(&valley, [10.0, 10.0], &p, Some(&cap), None, None).expect("hard");
         let moved = |f: &Heightfield| {
             (0..32)
                 .flat_map(|y| (0..48).map(move |x| (x, y)))
@@ -554,7 +565,7 @@ mod tests {
         let mut zero = Heightfield::new(48, 32, 64, 0).expect("z");
         zero.fill_with(|_, _| 0.0);
         let same =
-            hydraulic_erode_with(&valley, [10.0, 10.0], &p, Some(&zero), None).expect("zero");
+            hydraulic_erode_with(&valley, [10.0, 10.0], &p, Some(&zero), None, None).expect("zero");
         assert_eq!(same.height.to_vec(), soft.height.to_vec());
     }
 
