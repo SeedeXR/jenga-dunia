@@ -25,5 +25,7 @@ weights are normalised per texel; `nx`/`nz` in `trees_unity.json` are the normal
 square is placed on the next valid resolution with the edge value padding the last row/column —
 the report says so.
 
+`scripts/unity-import-check.sh --fbx <file.fbx>` runs the `Fbx` method instead: it copies the file into the scratch project, lets Unity's `ModelImporter` (the Autodesk FBX SDK behind it) import it and reports meshes, vertices, triangles and bounds — the cross-check for `jd export mesh terrain.fbx`.
+
 Verified on Unity 6000.4.8f1 (macOS) with the acceptance world — see `docs/user/cli-quickstart.md`.
 MIT, like the rest of the repository.

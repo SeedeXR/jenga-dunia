@@ -318,7 +318,9 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `22:00:00` **Acceptance refreshed**: item 13's final mark is conditional on the Unity run (`unityVerified`), so the report reads 14 VERIFIED, 4 PARTIAL, 0 UNVERIFIED — Unity import verified by Unity 6000.4.8f1, Unreal pending an engine build, browser viewer = the desktop viewport. Unreal search: launcher registry empty, `/Users/Shared/UnrealEngine` holds only `Launcher`; told the owner.
 
-### Open / next (as of 2026-10-21 22:00, head after acceptance-refresh commit)
+- `22:20:00` **FBX cross-checked in Unity**: `JengaDunia.Import.Fbx` (`-jdFbx`) copies the file into the scratch project, forces a synchronous `ModelImporter` import and reports meshes / vertices / triangles / bounds; runner `--fbx`. Acceptance `terrain.fbx` → 1 mesh, 262 144 verts, 522 242 tris, 5 110 × 1 232.5 × 5 110 m, min y 32.54 m, scale 1 file units — the Autodesk FBX SDK (inside Unity) reads our writer's output exactly as Blender and Optima did. Quickstart table row + integrations README.
+
+### Open / next (as of 2026-10-21 22:20, head after fbx-unity commit)
 0. **CI**: green through `76de799` on every job that ran; macOS jobs on stale heads showed `cancelled` from queue pile-up, and since `f00dbcf` the workflow cancels stale runs itself (`concurrency: ci-<ref>`), so a `cancelled` run on a superseded head is expected. `5472e25` had a one-off `terrain.spec.ts` 5-min timeout on ubuntu (no step detail in the log; passes locally on every gate run) — watch for a repeat. Red runs to re-check only if the newest head is red.
 1. **Disk**: `target/` grows ~3–4 GB per gate run (incremental + duplicate test binaries); `cargo clean` + rebuild was needed twice today. Run gates with `CARGO_INCREMENTAL=0` and delete `target/debug/incremental` between iterations; a full clean when free space < 8 GiB.
 2. **Figma**: connector unavailable this session; plugin OAuth pending on the owner's side → tutorial images stay in `docs/user/images/`; place them in file `fxyeV62hgLoNmG3dU1LX6G` when a connector works.

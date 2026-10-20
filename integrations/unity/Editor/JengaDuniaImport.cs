@@ -32,6 +32,52 @@ namespace JengaDunia
             return fallback;
         }
 
+        [Serializable] class FbxReport { public string unity, file; public int meshes, vertices, triangles; public float[] bounds_size, bounds_min; public string[] mesh_names; public List<string> warnings = new List<string>(); public bool ok; }
+
+        /// Import a Jenga Dunia FBX through Unity's own FBX importer (the Autodesk FBX SDK behind it) and report the mesh it produced:
+        ///   Unity -batchmode -nographics -quit -projectPath <proj> -executeMethod JengaDunia.Import.Fbx -jdFbx <file.fbx>
+        public static void Fbx()
+        {
+            var report = new FbxReport { unity = Application.unityVersion };
+            try
+            {
+                var src = Arg("-jdFbx") ?? throw new Exception("-jdFbx <file.fbx> is required");
+                report.file = src;
+                if (!AssetDatabase.IsValidFolder("Assets/JengaDunia")) AssetDatabase.CreateFolder("Assets", "JengaDunia");
+                var dst = "Assets/JengaDunia/" + Path.GetFileName(src);
+                File.Copy(src, dst, true);
+                AssetDatabase.ImportAsset(dst, ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
+                var names = new List<string>();
+                var size = Vector3.zero; var min = Vector3.positiveInfinity;
+                foreach (var obj in AssetDatabase.LoadAllAssetsAtPath(dst))
+                {
+                    if (!(obj is Mesh mesh)) continue;
+                    names.Add(mesh.name);
+                    report.meshes++;
+                    report.vertices += mesh.vertexCount;
+                    for (var i = 0; i < mesh.subMeshCount; i++) report.triangles += (int)(mesh.GetIndexCount(i) / 3);
+                    size = Vector3.Max(size, mesh.bounds.size); min = Vector3.Min(min, mesh.bounds.min);
+                }
+                if (report.meshes == 0) throw new Exception("Unity's importer produced no Mesh from " + dst + " (see the editor log for the importer's error)");
+                report.mesh_names = names.ToArray();
+                report.bounds_size = new[] { size.x, size.y, size.z };
+                report.bounds_min = new[] { min.x, min.y, min.z };
+                var importer = AssetImporter.GetAtPath(dst) as ModelImporter;
+                if (importer != null) report.warnings.Add($"ModelImporter: scale {importer.globalScale}, units {(importer.useFileUnits ? "file" : "unity")}, scale factor {importer.fileScale}");
+                report.ok = true;
+            }
+            catch (Exception e)
+            {
+                report.ok = false;
+                report.warnings.Add("ERROR: " + e.Message);
+                Debug.LogError(e);
+            }
+            var json = JsonUtility.ToJson(report, true);
+            Debug.Log("JD_UNITY_FBX " + json);
+            if (report.file != null) File.WriteAllText(report.file + ".jd-unity-import.json", json);
+            EditorApplication.Exit(report.ok ? 0 : 1);
+        }
+
         public static void Run()
         {
             var report = new Report { unity = Application.unityVersion };
