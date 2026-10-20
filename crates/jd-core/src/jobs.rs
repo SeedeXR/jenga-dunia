@@ -53,6 +53,8 @@ pub struct Jobs {
     finished: Mutex<BTreeMap<u64, serde_json::Value>>,
     /// Worker slots for detached jobs: (in use, max) + a condvar to wait on.
     slots: (Mutex<(usize, usize)>, Condvar),
+    /// FIFO tickets: jobs start in submission order (next to serve, last issued, cancelled while queued).
+    tickets: Mutex<(u64, u64, std::collections::BTreeSet<u64>)>,
 }
 
 impl Default for Jobs {
@@ -64,6 +66,7 @@ impl Default for Jobs {
             running: Mutex::new(BTreeMap::new()),
             finished: Mutex::new(BTreeMap::new()),
             slots: (Mutex::new((0, max)), Condvar::new()),
+            tickets: Mutex::new((1, 0, std::collections::BTreeSet::new())),
         }
     }
 }
@@ -169,9 +172,27 @@ impl Jobs {
         }
     }
 
-    /// Mark a detached job as waiting for a slot, then block until one is free. Returns false
-    /// when the job was cancelled while queued.
-    pub fn acquire_slot(&self, id: u64, cancel: &AtomicBool) -> bool {
+    /// Take a queue ticket at submission time (before the worker thread exists) so detached jobs
+    /// start in the order they were requested.
+    pub fn ticket(&self) -> u64 {
+        let Ok(mut t) = self.tickets.lock() else {
+            return 0;
+        };
+        t.1 += 1;
+        t.1
+    }
+
+    /// Is `ticket` the next one to serve? Skips tickets that were cancelled while queued.
+    fn at_head(t: &mut (u64, u64, std::collections::BTreeSet<u64>), ticket: u64) -> bool {
+        while t.2.remove(&t.0) {
+            t.0 += 1;
+        }
+        t.0 == ticket
+    }
+
+    /// Mark a detached job as waiting for a slot, then block until it is at the head of the queue
+    /// and a slot is free. Returns false when the job was cancelled while queued.
+    pub fn acquire_slot(&self, id: u64, ticket: u64, cancel: &AtomicBool) -> bool {
         let running_now = self
             .running
             .lock()
@@ -180,12 +201,28 @@ impl Jobs {
         if let Some(flag) = &running_now {
             flag.store(false, Ordering::Relaxed);
         }
+        let give_up = |this: &Self| {
+            if let Ok(mut t) = this.tickets.lock() {
+                t.2.insert(ticket);
+            }
+            this.slots.1.notify_all();
+            false
+        };
         let Ok(mut s) = self.slots.0.lock() else {
             return false;
         };
-        while s.0 >= s.1 {
+        loop {
+            let head = self
+                .tickets
+                .lock()
+                .map(|mut t| Self::at_head(&mut t, ticket))
+                .unwrap_or(false);
+            if head && s.0 < s.1 {
+                break;
+            }
             if cancel.load(Ordering::Relaxed) {
-                return false;
+                drop(s);
+                return give_up(self);
             }
             let (guard, _) = match self
                 .slots
@@ -198,10 +235,15 @@ impl Jobs {
             s = guard;
         }
         if cancel.load(Ordering::Relaxed) {
-            return false;
+            drop(s);
+            return give_up(self);
         }
         s.0 += 1;
+        if let Ok(mut t) = self.tickets.lock() {
+            t.0 += 1; // this ticket is served; the next one may start
+        }
         drop(s);
+        self.slots.1.notify_all();
         if let Some(flag) = running_now {
             flag.store(true, Ordering::Relaxed);
         }
@@ -212,8 +254,8 @@ impl Jobs {
     pub fn release_slot(&self) {
         if let Ok(mut s) = self.slots.0.lock() {
             s.0 = s.0.saturating_sub(1);
-            self.slots.1.notify_one();
         }
+        self.slots.1.notify_all();
     }
 
     /// Store a detached job's envelope for `jobs.result` (keeps the 64 most recent).

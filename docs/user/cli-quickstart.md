@@ -85,7 +85,7 @@ graph.evaluate_async (hydraulic × 2000) → job_id 2; jobs.list: 2:graph.evalua
 jobs.cancel 2        → true; jobs.result 2 → done: status error, E_CANCELLED, details.job_id 2
 ```
 
-Detached jobs run on a bounded pool (half the cores); extra ones wait with `state: queued` in `jobs.list`, and cancelling a queued job ends it without running. Pass `timeout_s` to `graph.evaluate_async` to have the job cancelled at a deadline — `jobs.result` then reports `E_TIMEOUT` with the job id.
+Detached jobs run on a bounded pool (half the cores) in submission order; extra ones wait with `state: queued` in `jobs.list`, and cancelling a queued job ends it without running. Pass `timeout_s` to `graph.evaluate_async` to have the job cancelled at a deadline — `jobs.result` then reports `E_TIMEOUT` with the job id.
 
 (One CLI invocation is one process, so `jd op graph.evaluate_async` alone is not useful — the job dies with the process; use `jd op graph.evaluate`.)
 

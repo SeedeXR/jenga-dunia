@@ -1333,13 +1333,14 @@ pub mod graph {
                 }
                 let guard = ctx.jobs.start_owned("graph.evaluate");
                 let id = guard.id;
+                let ticket = ctx.jobs.ticket(); // submission order, taken before the thread exists
                 let ctx2 = ctx.clone();
                 std::thread::Builder::new()
                     .name(format!("jd-job-{id}"))
                     .spawn(move || {
                         // Queue: wait for a worker slot (half the cores by default); a cancel while
                         // queued ends the job without running it.
-                        if !ctx2.jobs.acquire_slot(id, &guard.ctl.cancel) {
+                        if !ctx2.jobs.acquire_slot(id, ticket, &guard.ctl.cancel) {
                             let err = JdError::new(ErrorCode::E_CANCELLED, "cancelled while queued").detail("job_id", id);
                             ctx2.jobs.finish(id, serde_json::json!({ "status": "error", "error": err }));
                             drop(guard);
