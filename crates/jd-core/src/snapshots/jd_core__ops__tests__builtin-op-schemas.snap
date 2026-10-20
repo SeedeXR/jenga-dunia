@@ -2828,6 +2828,13 @@ expression: list
               "format": "uint8",
               "minimum": 0,
               "maximum": 255
+            },
+            "memory_budget_bytes": {
+              "description": "Evaluations whose pre-flight memory estimate exceeds this are refused (`E_RESOURCE_MEMORY`).\nDefault 4 GiB — the brief's ceiling (ADR-0008).",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0,
+              "default": 4294967296
             }
           },
           "required": [
@@ -3098,6 +3105,13 @@ expression: list
               "format": "uint8",
               "minimum": 0,
               "maximum": 255
+            },
+            "memory_budget_bytes": {
+              "description": "Evaluations whose pre-flight memory estimate exceeds this are refused (`E_RESOURCE_MEMORY`).\nDefault 4 GiB — the brief's ceiling (ADR-0008).",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0,
+              "default": 4294967296
             }
           },
           "required": [
@@ -3383,6 +3397,13 @@ expression: list
               "format": "uint8",
               "minimum": 0,
               "maximum": 255
+            },
+            "memory_budget_bytes": {
+              "description": "Evaluations whose pre-flight memory estimate exceeds this are refused (`E_RESOURCE_MEMORY`).\nDefault 4 GiB — the brief's ceiling (ADR-0008).",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0,
+              "default": 4294967296
             }
           },
           "required": [
@@ -3564,6 +3585,13 @@ expression: list
               "format": "uint8",
               "minimum": 0,
               "maximum": 255
+            },
+            "memory_budget_bytes": {
+              "description": "Evaluations whose pre-flight memory estimate exceeds this are refused (`E_RESOURCE_MEMORY`).\nDefault 4 GiB — the brief's ceiling (ADR-0008).",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0,
+              "default": 4294967296
             }
           },
           "required": [
@@ -3815,6 +3843,13 @@ expression: list
               "format": "uint8",
               "minimum": 0,
               "maximum": 255
+            },
+            "memory_budget_bytes": {
+              "description": "Evaluations whose pre-flight memory estimate exceeds this are refused (`E_RESOURCE_MEMORY`).\nDefault 4 GiB — the brief's ceiling (ADR-0008).",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0,
+              "default": 4294967296
             }
           },
           "required": [
@@ -3996,6 +4031,13 @@ expression: list
               "format": "uint8",
               "minimum": 0,
               "maximum": 255
+            },
+            "memory_budget_bytes": {
+              "description": "Evaluations whose pre-flight memory estimate exceeds this are refused (`E_RESOURCE_MEMORY`).\nDefault 4 GiB — the brief's ceiling (ADR-0008).",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0,
+              "default": 4294967296
             }
           },
           "required": [
@@ -4046,6 +4088,16 @@ expression: list
           "format": "uint8",
           "minimum": 0,
           "maximum": 255,
+          "default": null
+        },
+        "memory_budget_bytes": {
+          "description": "Memory budget for evaluations, bytes (≥ 256 MiB; default 4 GiB).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
           "default": null
         }
       },
@@ -4201,6 +4253,13 @@ expression: list
               "format": "uint8",
               "minimum": 0,
               "maximum": 255
+            },
+            "memory_budget_bytes": {
+              "description": "Evaluations whose pre-flight memory estimate exceeds this are refused (`E_RESOURCE_MEMORY`).\nDefault 4 GiB — the brief's ceiling (ADR-0008).",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0,
+              "default": 4294967296
             }
           },
           "required": [

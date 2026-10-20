@@ -47,7 +47,7 @@ vi.mock("@tauri-apps/api/core", () => ({
         return {
           ...base,
           status: "ok",
-          result: { project_id: "01PROJ", name: req.params.name, path: req.params.path, world: { extent_m: [4096, 4096], resolution_px: [2048, 2048], tile_size: 512, halo: 4, seed: 42 }, schema_version: 1, dirty: false, pending_journal: 0, settings: { autosave_interval_s: 120, cache_limit_bytes: 2147483648, preview_lod: 2 } },
+          result: { project_id: "01PROJ", name: req.params.name, path: req.params.path, world: { extent_m: [4096, 4096], resolution_px: [2048, 2048], tile_size: 512, halo: 4, seed: 42 }, schema_version: 1, dirty: false, pending_journal: 0, settings: { autosave_interval_s: 120, cache_limit_bytes: 2147483648, preview_lod: 2, memory_budget_bytes: 4294967296 } },
         };
       case "jobs.list":
         return { ...base, status: "ok", result: [] };

@@ -555,7 +555,7 @@ pub fn register_all(r: &mut Registry) {
                     field(i, "in")?,
                     spacing_m(ctx), tp.talus_deg, tp.iterations, tp.rate, Some(&ctx.cancel))?))
         },
-    ));
+    ).with_memory(8.0));
     r.register(NodeDef::new::<DropletParams, _>(
         "jd.erosion.droplet@1",
         "Particle (droplet) hydraulic erosion after Beyer: seeded droplets follow the slope with inertia, erode through a brush and deposit as they slow — gullies and fans; outputs the terrain and the signed `delta`",
@@ -566,7 +566,7 @@ pub fn register_all(r: &mut Registry) {
             let r = droplet_erode(field(i, "in")?, spacing_m(ctx), &dp, Some(&ctx.cancel))?;
             Ok(BTreeMap::from([("out".to_owned(), Value::field(r.terrain)), ("delta".to_owned(), Value::field(r.delta))]))
         },
-    ));
+    ).with_memory(8.0));
     r.register(NodeDef::new::<StreamPowerParams, _>(
         "jd.erosion.stream_power@1",
         "Fluvial (stream-power) erosion: channels incise in proportion to drainage area^m × slope, implicit and unconditionally stable; outputs the eroded terrain and an `incision` depth map",
@@ -580,7 +580,7 @@ pub fn register_all(r: &mut Registry) {
             incision.fill_with(|x, y| (input.get(x, y) - eroded.get(x, y)).max(0.0));
             Ok(BTreeMap::from([("out".to_owned(), Value::field(eroded)), ("incision".to_owned(), Value::field(incision))]))
         },
-    ));
+    ).with_memory(28.0));
     r.register(NodeDef::new::<TerraceParams, _>(
         "jd.filter.terrace@1",
         "Terraces: quantise heights into steps of `step_m` with a soft riser — mesas, rice paddies, strata",
@@ -679,7 +679,7 @@ pub fn register_all(r: &mut Registry) {
                 ("sediment".to_owned(), Value::field(r.sediment)),
             ]))
         },
-    ));
+    ).with_memory(40.0));
     r.register(NodeDef::new::<SculptParams, _>(
         "jd.sculpt.strokes@1",
         "Brush strokes (raise/lower with smooth falloff) recorded as data: non-destructive, replayable, undo removes a whole stroke",
@@ -689,7 +689,7 @@ pub fn register_all(r: &mut Registry) {
             let sp: SculptParams = params(p)?;
             Ok(out("out", apply_strokes(field(i, "in")?, spacing_m(ctx), &sp.strokes)?))
         },
-    ));
+    ).with_memory(12.0));
     r.register(NodeDef::new::<FlowParams, _>(
         "jd.analysis.flow@1",
         "D8 flow accumulation: upstream drainage area per cell (log-scaled 0..1 mask by default) — rivers, wetness, erosion seeding",
@@ -699,7 +699,7 @@ pub fn register_all(r: &mut Registry) {
             let fp: FlowParams = params(p)?;
             Ok(out("out", flow_accumulation_with(field(i, "in")?, spacing_m(ctx), fp.log_scale, fp.method)?))
         },
-    ));
+    ).with_memory(20.0));
     r.register(NodeDef::new::<InputParams, _>(
         "jd.input.heightmap@1",
         "Load a heightmap from the project's assets/ (PNG 16-bit, EXR, TIFF, RAW) and resample it onto the world grid",
@@ -735,7 +735,7 @@ pub fn register_all(r: &mut Registry) {
             let (filled, lakes) = fill_depressions(field(i, "in")?, fp.epsilon_m)?;
             Ok(BTreeMap::from([("out".to_owned(), Value::field(filled)), ("lakes".to_owned(), Value::field(lakes))]))
         },
-    ));
+    ).with_memory(24.0));
     r.register(NodeDef::new::<BiomeParams, _>(
         "jd.biome.classify@1",
         "Classify every cell into a biome by ordered rules on height, slope (0..1) and wetness (0..1); outputs the class id map (1-based rule index, 0 = none)",
@@ -821,14 +821,14 @@ pub fn register_all(r: &mut Registry) {
             let (carved, rivers) = carve_rivers(field(i, "in")?, spacing_m(ctx), rp.threshold, rp.depth_m, rp.method)?;
             Ok(BTreeMap::from([("out".to_owned(), Value::field(carved)), ("rivers".to_owned(), Value::field(rivers))]))
         },
-    ));
+    ).with_memory(32.0));
     r.register(NodeDef::new::<NoParams, _>(
         "jd.hydrology.wetness@1",
         "Topographic wetness index ln(a / tan β) normalised to 0..1 — wet valley floors high, steep ridges low (biome/moisture masks)",
         vec![port("in", PortType::Heightfield, true)],
         vec![port("out", PortType::Heightfield, false)],
         |ctx, _, i| Ok(out("out", wetness_index(field(i, "in")?, spacing_m(ctx))?)),
-    ));
+    ).with_memory(24.0));
     r.register(NodeDef::new::<OutputParams, _>(
         "jd.output.height@1",
         "Publishes its input as a named heightfield layer",

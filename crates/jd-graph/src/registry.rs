@@ -46,6 +46,8 @@ pub struct NodeDef {
     pub param_schema: Value,
     check: CheckFn,
     eval: EvalFn,
+    /// Peak scratch memory the kernel needs per cell, bytes (outputs are counted separately).
+    scratch_bytes_per_cell: f32,
 }
 
 impl NodeDef {
@@ -85,7 +87,21 @@ impl NodeDef {
             param_schema: serde_json::to_value(schemars::schema_for!(P)).unwrap_or(Value::Null),
             check,
             eval: Arc::new(eval),
+            scratch_bytes_per_cell: 0.0,
         }
+    }
+
+    /// Declare the kernel's peak scratch memory per cell (bytes) for the pre-flight estimate.
+    pub fn with_memory(mut self, scratch_bytes_per_cell: f32) -> Self {
+        self.scratch_bytes_per_cell = scratch_bytes_per_cell;
+        self
+    }
+
+    /// Estimated peak bytes to evaluate this node on `cells` samples: every output field plus
+    /// the kernel's scratch.
+    pub fn estimate_bytes(&self, cells: u64) -> u64 {
+        let outputs = self.outputs.len().max(1) as u64 * 4 * cells;
+        outputs + (self.scratch_bytes_per_cell as f64 * cells as f64) as u64
     }
 
     /// Add a semantic check on top of the schema check (ranges, ordering…): it runs before a

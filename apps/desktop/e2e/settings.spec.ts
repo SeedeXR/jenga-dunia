@@ -32,6 +32,7 @@ test.describe("project settings against the real core", () => {
     await expect(page.getByTestId("setting-autosave")).toHaveValue("120");
     await expect(page.getByTestId("setting-cache")).toHaveValue("2048");
     await expect(page.getByTestId("setting-lod")).toHaveValue("2");
+    await expect(page.getByTestId("setting-memory")).toHaveValue("4");
 
     // Autosave → 1 s: journaled mutation, persisted on save, out-of-range values refused by the core.
     const autosave = page.getByTestId("setting-autosave");

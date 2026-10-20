@@ -265,6 +265,10 @@ export default function App() {
                 Preview LOD
                 <input className={inputCls} type="number" min={0} max={8} key={`pl-${s.settingsRev}-${s.project.settings.preview_lod}`} defaultValue={s.project.settings.preview_lod} onBlur={(e) => { const v = Number(e.target.value); if (v !== s.project?.settings.preview_lod) void s.setSettings({ preview_lod: v }); }} data-testid="setting-lod" />
               </label>
+              <label className="mb-1 flex items-center justify-between gap-2 text-xs text-jd-fg-1" title="Evaluations whose memory estimate exceeds this are refused (E_RESOURCE_MEMORY)">
+                Memory budget (GB)
+                <input className={inputCls} type="number" min={0.25} step={0.25} key={`mb-${s.settingsRev}-${s.project?.settings.memory_budget_bytes ?? 0}`} defaultValue={(s.project?.settings.memory_budget_bytes ?? 4294967296) / 1073741824} onBlur={(e) => { const v = Math.round(Number(e.target.value) * 1073741824); if (v !== (s.project?.settings.memory_budget_bytes ?? 4294967296)) void s.setSettings({ memory_budget_bytes: v }); }} title="Evaluations whose memory estimate exceeds this are refused (E_RESOURCE_MEMORY)" data-testid="setting-memory" />
+              </label>
             </>
           )}
           <h2 className="mt-4 mb-2 text-[11px] font-semibold tracking-wide text-jd-fg-2 uppercase">Tasks</h2>

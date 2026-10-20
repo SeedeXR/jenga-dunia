@@ -411,6 +411,9 @@ pub mod builtin {
         /// Preview LOD hint (resolution ÷ 2^lod).
         #[serde(default)]
         pub preview_lod: Option<u8>,
+        /// Memory budget for evaluations, bytes (≥ 256 MiB; default 4 GiB).
+        #[serde(default)]
+        pub memory_budget_bytes: Option<u64>,
     }
 
     fn merged_settings(p: &Project, args: &ProjectSetSettings) -> crate::project::ProjectSettings {
@@ -423,6 +426,9 @@ pub mod builtin {
         }
         if let Some(v) = args.preview_lod {
             s.preview_lod = v;
+        }
+        if let Some(v) = args.memory_budget_bytes {
+            s.memory_budget_bytes = v;
         }
         s
     }
@@ -1105,8 +1111,26 @@ pub mod graph {
         job_id: u64,
         ctl: &jd_graph::JobCtl,
     ) -> JdResult<(EvaluateResult, Vec<Warning>)> {
-        let (graph, world, root) = ctx
-            .with_project(|p| Ok((p.graph.clone(), p.doc.world.clone(), p.root().to_path_buf())))?;
+        let (graph, world, root, budget) = ctx.with_project(|p| {
+            Ok((
+                p.graph.clone(),
+                p.doc.world.clone(),
+                p.root().to_path_buf(),
+                p.doc.settings.memory_budget_bytes,
+            ))
+        })?;
+        // Pre-flight: refuse evaluations the memory budget cannot hold instead of thrashing.
+        let estimate = Evaluator::new(registry(), cache()).estimate_bytes(&graph, &world, lod)?;
+        if estimate > budget {
+            return Err(JdError::new(
+                ErrorCode::E_RESOURCE_MEMORY,
+                format!("evaluation needs an estimated {} MiB, over the project's {} MiB budget", estimate >> 20, budget >> 20),
+            )
+            .why("Every node's outputs stay alive until consumed, plus the heaviest kernel's scratch.")
+            .next("Evaluate at a higher lod, reduce the world resolution, split the graph, or raise settings.memory_budget_bytes.")
+            .detail("estimated_bytes", estimate)
+            .detail("budget_bytes", budget));
+        }
         // Two outputs publishing the same layer would silently overwrite each other.
         let mut by_layer: BTreeMap<String, &NodeId> = BTreeMap::new();
         for (id, node) in &graph.nodes {
@@ -1731,6 +1755,135 @@ pub mod graph {
             assert!(
                 appended * 3 < replaced,
                 "append {appended} B vs set_param {replaced} B"
+            );
+        }
+
+        #[test]
+        fn memory_budget_refuses_oversized_evaluations_with_an_estimate() {
+            let reg = Registry::with_builtins();
+            let dir = tempfile::tempdir().expect("tmp");
+            let path = dir.path().join("m.jdproj");
+            let ctx = Context::default();
+            let world = WorldSettings {
+                resolution_px: [512, 512],
+                extent_m: [512.0, 512.0],
+                tile_size: 512,
+                halo: 4,
+                ..Default::default()
+            };
+            assert_eq!(
+                call(
+                    &reg,
+                    &ctx,
+                    "project.create",
+                    serde_json::json!({ "path": path, "name": "M", "world": world })
+                )
+                .status,
+                crate::envelope::Status::Ok
+            );
+            // 512² noise → output: ~2 MiB of outputs; a 256 MiB budget (the minimum) is plenty.
+            assert_eq!(
+                call(&reg, &ctx, "graph.evaluate", serde_json::json!({})).status,
+                crate::envelope::Status::Ok
+            );
+            // Shrink the budget to the minimum and add a hydraulic node (40 B/cell scratch) on a
+            // world large enough to exceed it: 4096² → outputs 4 × 64 MiB + scratch 640 MiB.
+            assert_eq!(
+                call(
+                    &reg,
+                    &ctx,
+                    "project.set_settings",
+                    serde_json::json!({ "memory_budget_bytes": 256 * 1024 * 1024 })
+                )
+                .status,
+                crate::envelope::Status::Ok
+            );
+            let too_small = call(
+                &reg,
+                &ctx,
+                "project.set_settings",
+                serde_json::json!({ "memory_budget_bytes": 1024 }),
+            );
+            assert_eq!(
+                too_small.error.map(|e| e.code),
+                Some(ErrorCode::E_INPUT_INVALID)
+            );
+            let big = WorldSettings {
+                resolution_px: [4096, 4096],
+                extent_m: [4096.0, 4096.0],
+                tile_size: 512,
+                halo: 4,
+                ..Default::default()
+            };
+            let path2 = dir.path().join("big.jdproj");
+            let ctx2 = Context::default();
+            assert_eq!(
+                call(
+                    &reg,
+                    &ctx2,
+                    "project.create",
+                    serde_json::json!({ "path": path2, "name": "Big", "world": big })
+                )
+                .status,
+                crate::envelope::Status::Ok
+            );
+            call(
+                &reg,
+                &ctx2,
+                "project.set_settings",
+                serde_json::json!({ "memory_budget_bytes": 256 * 1024 * 1024 }),
+            );
+            let view = call(&reg, &ctx2, "graph.list", serde_json::json!({}))
+                .result
+                .expect("view");
+            let noise = view["nodes"]
+                .as_array()
+                .expect("n")
+                .iter()
+                .find(|n| n["kind"].as_str().unwrap_or("").starts_with("jd.noise"))
+                .expect("noise")["id"]
+                .as_str()
+                .expect("id")
+                .to_owned();
+            let output = view["nodes"]
+                .as_array()
+                .expect("n")
+                .iter()
+                .find(|n| n["kind"].as_str().unwrap_or("").starts_with("jd.output"))
+                .expect("out")["id"]
+                .as_str()
+                .expect("id")
+                .to_owned();
+            let hid = call(&reg, &ctx2, "graph.add_node", serde_json::json!({ "kind": "jd.erosion.hydraulic@1", "params": { "iterations": 1 } })).result.expect("id")["id"].as_str().expect("s").to_owned();
+            call(
+                &reg,
+                &ctx2,
+                "graph.connect",
+                serde_json::json!({ "from": noise, "to": hid, "to_port": "in" }),
+            );
+            call(
+                &reg,
+                &ctx2,
+                "graph.connect",
+                serde_json::json!({ "from": hid, "from_port": "out", "to": output, "to_port": "in" }),
+            );
+            let r = call(&reg, &ctx2, "graph.evaluate", serde_json::json!({}));
+            let err = r.error.expect("refused");
+            assert_eq!(err.code, ErrorCode::E_RESOURCE_MEMORY);
+            let est = err.details["estimated_bytes"].as_u64().expect("estimate");
+            assert!(est > 256 * 1024 * 1024, "estimate {est}");
+            assert_eq!(err.details["budget_bytes"], 256 * 1024 * 1024);
+            // A coarser lod fits: 4096² / 16 at lod 4.
+            assert_eq!(
+                call(
+                    &reg,
+                    &ctx2,
+                    "graph.evaluate",
+                    serde_json::json!({ "lod": 4 })
+                )
+                .status,
+                crate::envelope::Status::Ok,
+                "lod 4 fits the budget"
             );
         }
 

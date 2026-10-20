@@ -455,6 +455,9 @@ export type ProjectSettings = {
   "cache_limit_bytes": number;
   /** Preview LOD (resolution divided by 2^lod). */
   "preview_lod": number;
+  /** Evaluations whose pre-flight memory estimate exceeds this are refused (`E_RESOURCE_MEMORY`).
+Default 4 GiB — the brief's ceiling (ADR-0008). */
+  "memory_budget_bytes"?: number;
 };
 
 export type ProjectCloseResult = {
@@ -649,6 +652,8 @@ export type ProjectSetSettingsRequest = {
   "cache_limit_bytes"?: number | null;
   /** Preview LOD hint (resolution ÷ 2^lod). */
   "preview_lod"?: number | null;
+  /** Memory budget for evaluations, bytes (≥ 256 MiB; default 4 GiB). */
+  "memory_budget_bytes"?: number | null;
 };
 
 export type ProjectSetSettingsResult = {

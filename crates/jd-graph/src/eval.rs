@@ -286,6 +286,24 @@ impl<'a> Evaluator<'a> {
         self.evaluate_job(graph, world, lod, assets_dir, &JobCtl::default())
     }
 
+    /// Pre-flight memory estimate for evaluating `graph` at `lod`: every node's outputs stay
+    /// alive until consumed, so the sum of all output fields is the floor; the largest kernel
+    /// scratch sits on top. Conservative by design — it is a gate, not a profiler.
+    pub fn estimate_bytes(&self, graph: &Graph, world: &WorldSettings, lod: u8) -> JdResult<u64> {
+        let lw = lod_world(world, lod);
+        let cells = lw.resolution_px[0] as u64 * lw.resolution_px[1] as u64;
+        let mut outputs = 0u64;
+        let mut scratch = 0u64;
+        for node in graph.nodes.values() {
+            let def = self.registry.get(&node.kind)?;
+            let est = def.estimate_bytes(cells);
+            let out = def.outputs.len().max(1) as u64 * 4 * cells;
+            outputs += out;
+            scratch = scratch.max(est - out);
+        }
+        Ok(outputs + scratch)
+    }
+
     /// [`Evaluator::evaluate_with`] under a job: progress per node, cancellable between nodes
     /// and inside long kernels (`E_CANCELLED`, nothing published).
     pub fn evaluate_job(

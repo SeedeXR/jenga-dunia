@@ -85,7 +85,7 @@ Undo and redo are operations like everything else (`graph.undo` / `graph.redo`, 
 
 ![Project panel with the Settings section: Autosave (s), Cache limit (MB), Preview LOD](images/desktop-settings.png)
 
-*Settings live in the project panel: **Autosave (s)**, **Cache limit (MB)** and **Preview LOD** are `project.json → settings`, edited through `project.set_settings` — a journaled mutation like everything else, so a crash mid-edit recovers it. The core validates every value (cache limit ≥ 16 MB, autosave ≤ a day, LOD ≤ 8) and a refused value snaps back to the stored one with the reason in the log. The UI-driven test `apps/desktop/e2e/settings.spec.ts` sets autosave to 1 s, tries an 8 MB cache (refused), edits a node and watches the project save itself.*
+*Settings live in the project panel: **Autosave (s)**, **Cache limit (MB)**, **Preview LOD** and **Memory budget (GB)** (evaluations whose pre-flight estimate exceeds it are refused with `E_RESOURCE_MEMORY` — the default 4 GB is the project's hard ceiling) are `project.json → settings`, edited through `project.set_settings` — a journaled mutation like everything else, so a crash mid-edit recovers it. The core validates every value (cache limit ≥ 16 MB, autosave ≤ a day, LOD ≤ 8) and a refused value snaps back to the stored one with the reason in the log. The UI-driven test `apps/desktop/e2e/settings.spec.ts` sets autosave to 1 s, tries an 8 MB cache (refused), edits a node and watches the project save itself.*
 
 ![Terrain menu with Generate Terrain and Evaluate Graph](images/desktop-menu-terrain.png)
 

@@ -55,6 +55,14 @@ pub struct ProjectSettings {
     pub cache_limit_bytes: u64,
     /// Preview LOD (resolution divided by 2^lod).
     pub preview_lod: u8,
+    /// Evaluations whose pre-flight memory estimate exceeds this are refused (`E_RESOURCE_MEMORY`).
+    /// Default 4 GiB — the brief's ceiling (ADR-0008).
+    #[serde(default = "default_memory_budget")]
+    pub memory_budget_bytes: u64,
+}
+
+fn default_memory_budget() -> u64 {
+    4 * 1024 * 1024 * 1024
 }
 
 impl Default for ProjectSettings {
@@ -63,6 +71,7 @@ impl Default for ProjectSettings {
             autosave_interval_s: 120,
             cache_limit_bytes: 2 * 1024 * 1024 * 1024,
             preview_lod: 2,
+            memory_budget_bytes: default_memory_budget(),
         }
     }
 }
@@ -496,6 +505,12 @@ impl Project {
             return Err(JdError::invalid(
                 "params.cache_limit_bytes",
                 "must be ≥ 16 MiB (one 2048² layer)",
+            ));
+        }
+        if s.memory_budget_bytes < 256 * 1024 * 1024 {
+            return Err(JdError::invalid(
+                "params.memory_budget_bytes",
+                "must be ≥ 256 MiB",
             ));
         }
         Ok(())

@@ -34,6 +34,16 @@
       "minimum": 0,
       "maximum": 255,
       "default": null
+    },
+    "memory_budget_bytes": {
+      "description": "Memory budget for evaluations, bytes (≥ 256 MiB; default 4 GiB).",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0,
+      "default": null
     }
   },
   "additionalProperties": false
