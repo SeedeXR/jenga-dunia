@@ -220,6 +220,43 @@
     }
   },
   {
+    "kind": "jd.hydrology.fill@1",
+    "description": "Priority-flood depression filling: raises pits to their spill level so every cell drains; `lakes` = water depth of the filled basins",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "lakes",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "FillParams",
+      "type": "object",
+      "properties": {
+        "epsilon_m": {
+          "description": "Extra rise per step across filled flats so they still drain (metres; 0 = perfectly flat lakes).",
+          "type": "number",
+          "format": "float",
+          "default": 0.0010000000474974513
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
     "kind": "jd.input.heightmap@1",
     "description": "Load a heightmap from the project's assets/ (PNG 16-bit, EXR, TIFF, RAW) and resample it onto the world grid",
     "inputs": [],

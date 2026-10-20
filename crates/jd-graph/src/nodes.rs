@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use jd_terrain::{
     ForeignImport, Heightfield, HydraulicParams, NoiseParams, Stroke, THERMAL_MAX_RATE,
-    apply_strokes, flow_accumulation, generate_noise, hydraulic_erode, read_foreign,
-    resample_to_world, slope_mask, thermal_erode,
+    apply_strokes, fill_depressions, flow_accumulation, generate_noise, hydraulic_erode,
+    read_foreign, resample_to_world, slope_mask, thermal_erode,
 };
 use jd_types::{JdError, JdResult};
 use rayon::prelude::*;
@@ -227,6 +227,17 @@ struct InputParams {
     /// How to read it (height range for quantised files, size for RAW, row order).
     #[serde(flatten)]
     import: ForeignImport,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct FillParams {
+    /// Extra rise per step across filled flats so they still drain (metres; 0 = perfectly flat lakes).
+    #[serde(default = "fill_eps")]
+    epsilon_m: f32,
+}
+fn fill_eps() -> f32 {
+    0.001
 }
 
 /// Tile-local box blur that reads neighbours through the halo (ADR-0005). Fails cleanly when
@@ -466,6 +477,17 @@ pub fn register_all(r: &mut Registry) {
             }
             let (data, w, h) = read_foreign(&file, &ip.import)?;
             Ok(out("out", resample_to_world(&data, w, h, ip.import.north_up, &ctx.lod_world)?))
+        },
+    ));
+    r.register(NodeDef::new::<FillParams, _>(
+        "jd.hydrology.fill@1",
+        "Priority-flood depression filling: raises pits to their spill level so every cell drains; `lakes` = water depth of the filled basins",
+        vec![port("in", PortType::Heightfield, true)],
+        vec![port("out", PortType::Heightfield, false), port("lakes", PortType::Heightfield, false)],
+        |_, p, i| {
+            let fp: FillParams = params(p)?;
+            let (filled, lakes) = fill_depressions(field(i, "in")?, fp.epsilon_m)?;
+            Ok(BTreeMap::from([("out".to_owned(), Value::field(filled)), ("lakes".to_owned(), Value::field(lakes))]))
         },
     ));
     r.register(NodeDef::new::<OutputParams, _>(

@@ -16,7 +16,7 @@ pub mod sculpt;
 pub mod sim;
 
 pub use export::{HeightmapFormat, export_heightmap};
-pub use flow::{d8_receivers, flow_accumulation};
+pub use flow::{d8_receivers, fill_depressions, flow_accumulation};
 pub use heightfield::{Heightfield, HeightfieldStats, Tile, TileCoord};
 pub use import::{ForeignImport, read_foreign, resample_to_world};
 pub use mesh::{MeshExportReport, auto_step, export_glb};

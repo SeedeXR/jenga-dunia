@@ -714,6 +714,11 @@ export type NodeParams_jd_filter_blur_1 = {
   "radius"?: number;
 };
 
+export type NodeParams_jd_hydrology_fill_1 = {
+  /** Extra rise per step across filled flats so they still drain (metres; 0 = perfectly flat lakes). */
+  "epsilon_m"?: number;
+};
+
 export type NodeParams_jd_input_heightmap_1 = {
   /** File inside the project's `assets/` directory (png, exr, tif/tiff, r16, r32). */
   "path": string;
@@ -858,6 +863,7 @@ export interface NodeKinds {
   "jd.erosion.hydraulic@1": NodeParams_jd_erosion_hydraulic_1;
   "jd.erosion.thermal@1": NodeParams_jd_erosion_thermal_1;
   "jd.filter.blur@1": NodeParams_jd_filter_blur_1;
+  "jd.hydrology.fill@1": NodeParams_jd_hydrology_fill_1;
   "jd.input.heightmap@1": NodeParams_jd_input_heightmap_1;
   "jd.math.add@1": NodeParams_jd_math_add_1;
   "jd.math.multiply@1": NodeParams_jd_math_multiply_1;
