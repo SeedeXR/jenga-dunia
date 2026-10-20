@@ -1568,6 +1568,8 @@ diffuse, unstructured lowering, more deepens the same gullies. */
   "radius"?: number;
 };
 
+export type Engine = "cpu" | "gpu";
+
 export type NodeParams_jd_erosion_hydraulic_1 = {
   /** Simulation steps (1..=2000). */
   "iterations"?: number;
@@ -1575,6 +1577,9 @@ export type NodeParams_jd_erosion_hydraulic_1 = {
   "dt"?: number;
   /** Rain in metres of water per second. */
   "rain_rate"?: number;
+  /** Where the steps run: `cpu` (default, bit-reproducible) or `gpu` (`jd-gpu`, the same passes in
+WGSL; ≈ 1e-5 relative to the CPU after 100 steps; E_DEPENDENCY_MISSING without an adapter). */
+  "engine"?: Engine;
   /** Evaporation per second (fraction of depth). */
   "evaporation"?: number;
   /** Sediment capacity constant Kc. */
@@ -1620,8 +1625,6 @@ in 20 steps; 1e-4 is subtle, 1e-2 is a badlands. */
   /** Flow routing used for the drainage area. */
   "method"?: FlowMethod;
 };
-
-export type Engine = "cpu" | "gpu";
 
 export type NodeParams_jd_erosion_thermal_1 = {
   /** Angle of repose in degrees (sand ≈ 30–35, scree ≈ 35–40). */

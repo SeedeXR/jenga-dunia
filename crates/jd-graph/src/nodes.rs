@@ -35,6 +35,17 @@ fn params<T: for<'de> Deserialize<'de>>(p: &Map<String, Json>) -> JdResult<T> {
 /// The world's shared wind fills in the named `wind_*` parameters a node leaves unset, so one
 /// setting drives dunes, yardangs, snow scour and the wind sea together (the node hash covers the
 /// world settings, so a wind change re-evaluates them).
+/// The shared headless device, or the error a node reports when the machine has none.
+fn gpu() -> JdResult<&'static jd_gpu::Gpu> {
+    jd_gpu::Gpu::shared().ok_or_else(|| {
+        JdError::new(
+            jd_types::ErrorCode::E_DEPENDENCY_MISSING,
+            "no GPU adapter on this machine",
+        )
+        .next("Set `engine: \"cpu\"` on the node.")
+    })
+}
+
 fn with_world_wind(ctx: &EvalCtx, p: &Map<String, Json>, keys: &[&str]) -> Map<String, Json> {
     let mut p = p.clone();
     for k in keys {
@@ -213,6 +224,10 @@ struct HydraulicNodeParams {
     /// Rain in metres of water per second.
     #[serde(default = "hyd_rain")]
     rain_rate: f32,
+    /// Where the steps run: `cpu` (default, bit-reproducible) or `gpu` (`jd-gpu`, the same passes in
+    /// WGSL; ≈ 1e-5 relative to the CPU after 100 steps; E_DEPENDENCY_MISSING without an adapter).
+    #[serde(default)]
+    engine: Engine,
     /// Evaporation per second (fraction of depth).
     #[serde(default = "hyd_evap")]
     evaporation: f32,
@@ -652,10 +667,7 @@ pub fn register_all(r: &mut Registry) {
                     if !(1..=1000).contains(&tp.iterations) {
                         return Err(JdError::invalid("iterations", "must be within 1..=1000"));
                     }
-                    let gpu = jd_gpu::Gpu::shared().ok_or_else(|| {
-                        JdError::new(jd_types::ErrorCode::E_DEPENDENCY_MISSING, "no GPU adapter on this machine")
-                            .next("Set `engine: \"cpu\"` on the node.")
-                    })?;
+                    let gpu = gpu()?;
                     gpu.thermal_erode(field(i, "in")?, spacing_m(ctx), tp.talus_deg, tp.iterations, tp.rate, hardness.map(|k| &**k))?
                 }
             };
@@ -815,7 +827,7 @@ pub fn register_all(r: &mut Registry) {
     ));
     r.register(NodeDef::new::<HydraulicNodeParams, _>(
         "jd.erosion.hydraulic@1",
-        "Hydraulic erosion (virtual pipes / shallow water): rain flows downhill, dissolves, carries and deposits sediment; outputs terrain, water depth and suspended sediment; an optional `hardness` field (0..1) drops the dissolving rate to a tenth on hard rock; an optional `rain` field (0..1, e.g. `jd.climate.rain@1`) scales `rain_rate` per cell",
+        "Hydraulic erosion (virtual pipes / shallow water): rain flows downhill, dissolves, carries and deposits sediment; outputs terrain, water depth and suspended sediment; an optional `hardness` field (0..1) drops the dissolving rate to a tenth on hard rock; an optional `rain` field (0..1, e.g. `jd.climate.rain@1`) scales `rain_rate` per cell; `engine: gpu` runs the same passes on the headless GPU",
         vec![port("in", PortType::Heightfield, true), port("hardness", PortType::Heightfield, false), port("rain", PortType::Heightfield, false)],
         vec![
             port("out", PortType::Heightfield, false),
@@ -829,10 +841,7 @@ pub fn register_all(r: &mut Registry) {
             }
             let hardness = i.get("hardness").map(|v| v.as_field());
             let rain = i.get("rain").map(|v| v.as_field());
-            let r = jd_terrain::hydraulic_erode_with(
-                field(i, "in")?,
-                spacing_m(ctx),
-                &HydraulicParams {
+            let hp2 = HydraulicParams {
                     iterations: hp.iterations,
                     dt: hp.dt,
                     rain_rate: hp.rain_rate,
@@ -842,7 +851,11 @@ pub fn register_all(r: &mut Registry) {
                     deposit_k: hp.deposit_k,
                     max_concentration: hp.max_concentration,
                     ..Default::default()
-                }, hardness.map(|k| &**k), rain.map(|k| &**k), Some(&ctx.cancel))?;
+                };
+            let r = match hp.engine {
+                Engine::Cpu => jd_terrain::hydraulic_erode_with(field(i, "in")?, spacing_m(ctx), &hp2, hardness.map(|k| &**k), rain.map(|k| &**k), Some(&ctx.cancel))?,
+                Engine::Gpu => gpu()?.hydraulic_erode(field(i, "in")?, spacing_m(ctx), &hp2, hardness.map(|k| &**k), rain.map(|k| &**k))?,
+            };
             Ok(BTreeMap::from([
                 ("out".to_owned(), Value::field(r.height)),
                 ("water".to_owned(), Value::field(r.water)),

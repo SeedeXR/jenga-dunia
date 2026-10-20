@@ -47,3 +47,8 @@ unwrap_used = "warn"
 expect_used = "warn"
 # JdError carries message/why/next/details by design (docs/spec/error-codes.md); it is not on hot paths.
 result_large_err = "allow"
+
+# Debug builds carry line tables only: full debuginfo made `target/debug` 13 GB (wgpu, test
+# binaries, clippy artefacts) and filled the disk twice a day; backtraces still show file:line.
+[profile.dev]
+debug = "line-tables-only"

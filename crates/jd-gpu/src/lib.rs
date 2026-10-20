@@ -1,9 +1,12 @@
 //! `jd-gpu`: headless wgpu compute for the terrain kernels (ADR-0003: all computation stays in
-//! Rust on a headless device; the viewport only receives tiles). First kernel: thermal erosion,
-//! a line-for-line port of `jd_terrain::sim::thermal_erode` to WGSL, parity-tested against it.
+//! Rust on a headless device; the viewport only receives tiles). Kernels: thermal erosion and
+//! hydraulic (virtual pipes) erosion, line-for-line ports of `jd_terrain::sim` to WGSL,
+//! parity-tested against the CPU.
 //!
 //! ponytail: one process-wide device (`Gpu::shared`), buffers re-created per call; the upgrade
 //! path is a per-kernel buffer pool and cached pipelines.
+
+mod hydraulic;
 
 use jd_terrain::Heightfield;
 use jd_types::{ErrorCode, JdError, JdResult};
@@ -241,7 +244,7 @@ impl Gpu {
     }
 }
 
-fn binding(index: u32, ty: wgpu::BufferBindingType) -> wgpu::BindGroupLayoutEntry {
+pub(crate) fn binding(index: u32, ty: wgpu::BufferBindingType) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding: index,
         visibility: wgpu::ShaderStages::COMPUTE,
