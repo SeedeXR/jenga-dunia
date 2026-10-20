@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { connectCore, installBridge } from "./bridge";
@@ -91,6 +91,20 @@ test.describe("hydrology nodes against the real core", () => {
     await page.screenshot({ path: testInfo.outputPath("hydrology-colour.png") }); // tutorial image source
     await page.getByTestId("color-pick").selectOption("");
     await expect(page.getByTestId("viewport-info")).not.toContainText("colour rivers");
+
+    // Scatter: instances placed from the rivers mask are drawn in the viewport; Export writes a GLB.
+    await page.getByTestId("scatter-mask").selectOption("rivers");
+    await page.getByTestId("scatter-spacing").fill("20");
+    await page.getByTestId("scatter-place").click();
+    await expect(page.getByTestId("log")).toContainText("terrain.scatter: ok");
+    await expect(page.getByTestId("scatter-count")).toHaveText(/^[1-9][\d,]* instances$/);
+    await expect(page.getByTestId("viewport-info")).toContainText(/ [1-9][\d,]* instances/);
+    // Zoom the orbit camera in (two wheel steps ≈ half the distance) so the cones read in the capture.
+    await page.getByTestId("viewport").hover();
+    for (let i = 0; i < 2; i++) await page.mouse.wheel(0, -300);
+    await page.screenshot({ path: testInfo.outputPath("hydrology-scatter.png") }); // tutorial image source
+    await page.getByTestId("scatter-export").click();
+    await expect.poll(() => existsSync(path.join(ws, "Hydro.jdproj", "exports", "rivers.glb"))).toBe(true);
 
     // Sea level is in the kinds list too, with its two outputs.
     await page.getByTestId("graph-kind").selectOption("jd.hydrology.sea_level@1");

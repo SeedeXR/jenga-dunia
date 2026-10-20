@@ -182,13 +182,16 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `10:00:00` **Scatter → GLB instances**: `terrain.scatter` path `.glb` writes one 1 m proxy pyramid + an `EXT_mesh_gpu_instancing` node (TRANSLATION in the terrain-mesh frame, ROTATION yaw from `r`, SCALE 0.75..1.25); `mesh::write_glb` factored out of `export_glb` (shared container writer). Forest recipe: 10 966 instances, 440 KB, 43 ms. Khronos validator: 0 errors / 0 warnings, `UNSUPPORTED_EXTENSION` info (it does not know the extension). Blender 5.2 headless import: 10 966 objects sharing 1 mesh, 393 distinct yaws, scales 0.75–1.25, z 293–907 m, 20/21 vertical rays hit the terrain within 0.55 m. CI validates `trees.glb` too. Capture `cli-scatter-glb.png` (Blender render, proxies ×12 for visibility, stated in the doc).
 
-### Open / next (as of 2026-10-20 10:00, head after scatter-GLB commit)
+- `10:35:00` **Queued-state fix** (`d84eaa9`): CI (ubuntu/windows) listed a just-submitted detached job as `running` before its thread reached `acquire_slot`; `start_owned` now clears `running_now` at submission. User edited the FBX backlog line in `memory/todo.md` (own FBX reader/writer from scratch, learn from Optima, verify against Blender/Autodesk/Maya/Unity/Unreal) — kept verbatim. **Desktop scatter**: `terrain.scatter` without `path` returns points inline (≤ 200 000, op test); state `scatter {mask, spacing_m, seed, points}` + `placeScatter`/`exportScatter`, re-placed after each evaluation while the mask is published; viewport `InstancedMesh` of cones (height 0.35 × spacing, yaw/scale from `r`), header `· N instances`; Scatter panel under Sun (mask select, spacing, seed, Place, Export .glb → `exports/<mask>.glb`). Hydrology e2e: place from `rivers` at 20 m → count + readout, export → file exists. Fixed a React update loop (effect depended on a fresh wrapper object). Capture `desktop-scatter.png`.
+
+### Open / next (as of 2026-10-20 10:35, head after desktop-scatter commit)
 1. **CI**: green through `c0cc8ae`; `02571d2` failed on the queue-order race, fixed in `97bb0f7`; `2c6840f` (colour-by-layer) and the priorities commit polling.
 2. **Figma**: connector unavailable this session; plugin OAuth pending on the owner's side → tutorial images stay in `docs/user/images/`; place them in file `fxyeV62hgLoNmG3dU1LX6G` when a connector works.
 3. **Native leftovers**: Edit-menu capture; native sculpt capture/recording (needs Accessibility); signed/notarised bundle (needs an Apple developer account).
 4. **Phase 3 follow-ups**: hydraulic concentration cap / layered materials / open drains; thermal + hydraulic WGSL twins (`jd-gpu`); particle hydraulic; D∞ ✔, MFD ✔ (`wetness` still D8-only); sea level ✔ (viewport water plane ✔; ocean shading/shoreline foam ☐); hydrology-first generation; smooth-brush blur done via summed-area table (whole-field blur is now O(N); tile-level dirty sets remain).
 5. **Phase 2 leftovers**: jobs scheduler complete (detached execution, queue slots, timeouts, memory budget, priorities ✔), CRS-aware GeoTIFF import (`jd-geo`; tags/nodata ✔), normal/roughness maps for GLB (albedo ✔), Windows/Linux measurements, tile-level `jd-cache` (LRU ✔).
-6. **Docs**: hydrology recipe ✔, `desktop-rivers.png` ✔; rivers inspector `method` capture ✔ (e2e); a *native* capture of the same needs the app rebuilt from this head.
+6. **Lint**: `pnpm --dir apps/desktop lint` (oxlint) exits 1 on a pre-existing `rules-of-hooks` error in `App.test.tsx:89` (plus fast-refresh warnings); lint is not in the gates or CI — fix the test and gate it.
+7. **Docs**: hydrology recipe ✔, `desktop-rivers.png` ✔; rivers inspector `method` capture ✔ (e2e); a *native* capture of the same needs the app rebuilt from this head.
 
 ---
 

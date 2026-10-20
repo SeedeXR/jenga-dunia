@@ -883,8 +883,9 @@ export type TerrainScatterRequest = {
   /** Height layer sampled for `z` (null = 0). */
   "height"?: string | null;
   /** Output `.csv`, `.json` or `.glb` (proxy mesh instanced with `EXT_mesh_gpu_instancing`);
-relative paths resolve against the project's `exports/`. */
-  "path": string;
+relative paths resolve against the project's `exports/`. Omit it to get the points
+back in the result instead (viewport preview; at most 200 000). */
+  "path"?: string | null;
   /** Target spacing between points in metres (grid cell size); must be ≥ one sample spacing. */
   "spacing_m": number;
   /** Random offset inside the cell, 0 (regular grid) .. 1 (anywhere in the cell). */
@@ -893,15 +894,28 @@ relative paths resolve against the project's `exports/`. */
   "seed"?: number;
 };
 
+export type ScatterPoint = {
+  /** Easting from the west edge, metres. */
+  "u": number;
+  /** Northing from the south edge, metres. */
+  "v": number;
+  /** Terrain height at the point (0 when no height layer is given). */
+  "z": number;
+  /** Deterministic 0..1 value per point for the caller's own variation (scale, rotation). */
+  "r": number;
+};
+
 export type TerrainScatterResult = {
-  /** Written file. */
-  "path": string;
-  /** Points written. */
+  /** Written file (null when the points were returned inline). */
+  "path"?: string | null;
+  /** Points placed. */
   "count": number;
-  /** Bytes written. */
+  /** Bytes written (0 inline). */
   "bytes": number;
-  /** Candidates per axis the grid had. */
+  /** Grid spacing used. */
   "spacing_m": number;
+  /** The points (`u` east, `v` north from the south edge, `z`, `r`) when no `path` was given. */
+  "points"?: ScatterPoint[] | null;
 };
 
 export type TerrainStatsRequest = {
@@ -1224,7 +1238,7 @@ export interface JdOps {
   "terrain.generate": { request: TerrainGenerateRequest; result: TerrainGenerateResult };
   /** Downsampled u16 preview of a layer (base64) for agents and viewers */
   "terrain.preview": { request: TerrainPreviewRequest; result: TerrainPreviewResult };
-  /** Scatter instance points over the world from a 0..1 density mask layer (stratified jittered grid, deterministic by seed) and write them as CSV or JSON with heights, or as GLB instances */
+  /** Scatter instance points over the world from a 0..1 density mask layer (stratified jittered grid, deterministic by seed): write CSV / JSON / GLB instances to `path`, or return the points when `path` is omitted */
   "terrain.scatter": { request: TerrainScatterRequest; result: TerrainScatterResult };
   /** Statistics and content hash of a layer */
   "terrain.stats": { request: TerrainStatsRequest; result: TerrainStatsResult };

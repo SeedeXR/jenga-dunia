@@ -5,31 +5,77 @@
   "type": "object",
   "properties": {
     "path": {
-      "description": "Written file.",
-      "type": "string"
+      "description": "Written file (null when the points were returned inline).",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "count": {
-      "description": "Points written.",
+      "description": "Points placed.",
       "type": "integer",
       "format": "uint64",
       "minimum": 0
     },
     "bytes": {
-      "description": "Bytes written.",
+      "description": "Bytes written (0 inline).",
       "type": "integer",
       "format": "uint64",
       "minimum": 0
     },
     "spacing_m": {
-      "description": "Candidates per axis the grid had.",
+      "description": "Grid spacing used.",
       "type": "number",
       "format": "float"
+    },
+    "points": {
+      "description": "The points (`u` east, `v` north from the south edge, `z`, `r`) when no `path` was given.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/$defs/ScatterPoint"
+      }
     }
   },
   "required": [
-    "path",
     "count",
     "bytes",
     "spacing_m"
-  ]
+  ],
+  "$defs": {
+    "ScatterPoint": {
+      "description": "A scattered instance in world metres (`u` east, `v` north from the south edge, `z` height).",
+      "type": "object",
+      "properties": {
+        "u": {
+          "description": "Easting from the west edge, metres.",
+          "type": "number",
+          "format": "float"
+        },
+        "v": {
+          "description": "Northing from the south edge, metres.",
+          "type": "number",
+          "format": "float"
+        },
+        "z": {
+          "description": "Terrain height at the point (0 when no height layer is given).",
+          "type": "number",
+          "format": "float"
+        },
+        "r": {
+          "description": "Deterministic 0..1 value per point for the caller's own variation (scale, rotation).",
+          "type": "number",
+          "format": "float"
+        }
+      },
+      "required": [
+        "u",
+        "v",
+        "z",
+        "r"
+      ]
+    }
+  }
 }

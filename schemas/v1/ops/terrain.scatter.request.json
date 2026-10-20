@@ -17,8 +17,12 @@
       "default": "height"
     },
     "path": {
-      "description": "Output `.csv`, `.json` or `.glb` (proxy mesh instanced with `EXT_mesh_gpu_instancing`);\nrelative paths resolve against the project's `exports/`.",
-      "type": "string"
+      "description": "Output `.csv`, `.json` or `.glb` (proxy mesh instanced with `EXT_mesh_gpu_instancing`);\nrelative paths resolve against the project's `exports/`. Omit it to get the points\nback in the result instead (viewport preview; at most 200 000).",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
     },
     "spacing_m": {
       "description": "Target spacing between points in metres (grid cell size); must be ≥ one sample spacing.",
@@ -42,7 +46,6 @@
   "additionalProperties": false,
   "required": [
     "mask",
-    "path",
     "spacing_m"
   ]
 }

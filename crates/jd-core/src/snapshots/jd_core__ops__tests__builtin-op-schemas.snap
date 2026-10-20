@@ -5132,7 +5132,7 @@ expression: list
   },
   {
     "id": "terrain.scatter",
-    "description": "Scatter instance points over the world from a 0..1 density mask layer (stratified jittered grid, deterministic by seed) and write them as CSV or JSON with heights, or as GLB instances",
+    "description": "Scatter instance points over the world from a 0..1 density mask layer (stratified jittered grid, deterministic by seed): write CSV / JSON / GLB instances to `path`, or return the points when `path` is omitted",
     "scope": "export",
     "request_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -5153,8 +5153,12 @@ expression: list
           "default": "height"
         },
         "path": {
-          "description": "Output `.csv`, `.json` or `.glb` (proxy mesh instanced with `EXT_mesh_gpu_instancing`);\nrelative paths resolve against the project's `exports/`.",
-          "type": "string"
+          "description": "Output `.csv`, `.json` or `.glb` (proxy mesh instanced with `EXT_mesh_gpu_instancing`);\nrelative paths resolve against the project's `exports/`. Omit it to get the points\nback in the result instead (viewport preview; at most 200 000).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         },
         "spacing_m": {
           "description": "Target spacing between points in metres (grid cell size); must be ≥ one sample spacing.",
@@ -5178,7 +5182,6 @@ expression: list
       "additionalProperties": false,
       "required": [
         "mask",
-        "path",
         "spacing_m"
       ]
     },
@@ -5189,33 +5192,79 @@ expression: list
       "type": "object",
       "properties": {
         "path": {
-          "description": "Written file.",
-          "type": "string"
+          "description": "Written file (null when the points were returned inline).",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "count": {
-          "description": "Points written.",
+          "description": "Points placed.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
         },
         "bytes": {
-          "description": "Bytes written.",
+          "description": "Bytes written (0 inline).",
           "type": "integer",
           "format": "uint64",
           "minimum": 0
         },
         "spacing_m": {
-          "description": "Candidates per axis the grid had.",
+          "description": "Grid spacing used.",
           "type": "number",
           "format": "float"
+        },
+        "points": {
+          "description": "The points (`u` east, `v` north from the south edge, `z`, `r`) when no `path` was given.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/ScatterPoint"
+          }
         }
       },
       "required": [
-        "path",
         "count",
         "bytes",
         "spacing_m"
-      ]
+      ],
+      "$defs": {
+        "ScatterPoint": {
+          "description": "A scattered instance in world metres (`u` east, `v` north from the south edge, `z` height).",
+          "type": "object",
+          "properties": {
+            "u": {
+              "description": "Easting from the west edge, metres.",
+              "type": "number",
+              "format": "float"
+            },
+            "v": {
+              "description": "Northing from the south edge, metres.",
+              "type": "number",
+              "format": "float"
+            },
+            "z": {
+              "description": "Terrain height at the point (0 when no height layer is given).",
+              "type": "number",
+              "format": "float"
+            },
+            "r": {
+              "description": "Deterministic 0..1 value per point for the caller's own variation (scale, rotation).",
+              "type": "number",
+              "format": "float"
+            }
+          },
+          "required": [
+            "u",
+            "v",
+            "z",
+            "r"
+          ]
+        }
+      }
     }
   },
   {

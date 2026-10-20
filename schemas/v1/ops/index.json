@@ -171,7 +171,7 @@
   },
   {
     "id": "terrain.scatter",
-    "description": "Scatter instance points over the world from a 0..1 density mask layer (stratified jittered grid, deterministic by seed) and write them as CSV or JSON with heights, or as GLB instances",
+    "description": "Scatter instance points over the world from a 0..1 density mask layer (stratified jittered grid, deterministic by seed): write CSV / JSON / GLB instances to `path`, or return the points when `path` is omitted",
     "scope": "export"
   },
   {

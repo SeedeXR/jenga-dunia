@@ -179,7 +179,7 @@ export default function App() {
           </label>
         )}
         <span className={`${s.lastEval && Object.keys(s.lastEval.layers).length > 1 ? "" : "ml-auto "}text-xs text-jd-fg-2`} data-testid="viewport-info">
-          viewport: {vp.backend} · {vp.triangles.toLocaleString()} tris{vp.seaM !== undefined ? ` · sea ${vp.seaM} m` : ""}{vp.sun ? ` · sun ${vp.sun.elevationDeg}°/${vp.sun.azimuthDeg}°` : ""}{s.colorLayer && s.colorPreview ? ` · colour ${s.colorLayer}` : ""}
+          viewport: {vp.backend} · {vp.triangles.toLocaleString()} tris{vp.seaM !== undefined ? ` · sea ${vp.seaM} m` : ""}{vp.sun ? ` · sun ${vp.sun.elevationDeg}°/${vp.sun.azimuthDeg}°` : ""}{s.colorLayer && s.colorPreview ? ` · colour ${s.colorLayer}` : ""}{vp.instances ? ` · ${vp.instances.toLocaleString()} instances` : ""}
           {s.previewStats ? ` · preview lod ${s.previewStats.lod}, ${(s.previewStats.bytes / 1048576).toFixed(2)} MB in ${s.previewStats.ms.toFixed(0)} ms` : ""}
         </span>
         {(s.busy || s.jobs.length > 0) &&
@@ -327,7 +327,7 @@ export default function App() {
         {/* Center: viewport (top) + node graph (bottom, toggle) */}
         <main className={`relative grid bg-jd-bg-0 ${showGraph ? "grid-rows-[1fr_300px]" : "grid-rows-[1fr]"}`}>
           <div className="relative min-h-0">
-            <TerrainView preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} sculpt={{ enabled: s.sculpting && sculptNode !== undefined, radiusM: s.brush.radius_m, onStroke: (pts) => void s.addStroke(pts) }} seaLevelM={seaLevelM} sun={{ azimuthDeg: s.sun.azimuth_deg, elevationDeg: s.sun.elevation_deg }} overlay={s.colorPreview} />
+            <TerrainView preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} sculpt={{ enabled: s.sculpting && sculptNode !== undefined, radiusM: s.brush.radius_m, onStroke: (pts) => void s.addStroke(pts) }} seaLevelM={seaLevelM} sun={{ azimuthDeg: s.sun.azimuth_deg, elevationDeg: s.sun.elevation_deg }} overlay={s.colorPreview} instances={s.scatter.points ? { points: s.scatter.points, sizeM: Math.max(s.scatter.spacing_m * 0.35, (s.project?.world.extent_m[0] ?? 0) * 0.012) } : null} />
             <button
               className={`btn absolute top-2 right-28 ${s.sculpting ? "text-jd-accent" : ""}`}
               title={s.sculpting ? "Sculpting: drag on the terrain to paint a stroke (click to stop)" : "Sculpt: adds a stroke node before the output and paints with the brush"}
@@ -390,6 +390,32 @@ export default function App() {
           <Field label={`Elevation ${s.sun.elevation_deg}°`}>
             <input className="w-28" type="range" min={3} max={90} value={s.sun.elevation_deg} onChange={(e) => s.setSun({ elevation_deg: Number(e.target.value) })} title="Height of the sun above the horizon; low sun is warm and long-shadowed" data-testid="sun-elevation" />
           </Field>
+          <h2 className="mt-4 mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Scatter</h2>
+          <Field label="Mask">
+            <select className={inputCls} value={s.scatter.mask ?? ""} onChange={(e) => s.setScatter({ mask: e.target.value || null })} title="0..1 layer used as the instance density (a class mask, rivers, wetness…)" data-testid="scatter-mask">
+              <option value="">none</option>
+              {Object.keys(s.lastEval?.layers ?? {}).map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Spacing (m)">
+            <input className={inputCls} type="number" min={1} value={s.scatter.spacing_m} onChange={(e) => s.setScatter({ spacing_m: Number(e.target.value) })} data-testid="scatter-spacing" />
+          </Field>
+          <Field label="Seed">
+            <input className={inputCls} type="number" value={s.scatter.seed} onChange={(e) => s.setScatter({ seed: Number(e.target.value) })} data-testid="scatter-seed" />
+          </Field>
+          <div className="flex items-center gap-2 py-1">
+            <button className="btn" onClick={() => void s.placeScatter()} disabled={!s.scatter.mask || s.busy} title="Place instances from the mask (one jittered candidate per spacing cell, kept with probability = mask value)" data-testid="scatter-place">
+              Place
+            </button>
+            <button className="btn" onClick={() => void s.exportScatter()} disabled={!s.scatter.points?.length || s.busy} title="Write exports/<mask>.glb: 1 m proxy mesh instanced with EXT_mesh_gpu_instancing" data-testid="scatter-export">
+              Export .glb
+            </button>
+            <span className="text-xs text-jd-fg-2" data-testid="scatter-count">{s.scatter.points ? `${s.scatter.points.length.toLocaleString()} instances` : ""}</span>
+          </div>
           <h2 className="mt-4 mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Terrain · Noise</h2>
           <Field label="Lattice">
             <select className={inputCls} value={s.noise.kind} onChange={(e) => s.setNoise({ kind: e.target.value as NoiseKind })}>

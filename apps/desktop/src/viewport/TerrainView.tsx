@@ -12,6 +12,8 @@ export interface ViewportInfo {
   seaM?: number;
   /** Sun direction currently lighting the scene, degrees. */
   sun?: { azimuthDeg: number; elevationDeg: number };
+  /** Scatter instances drawn, when any. */
+  instances?: number;
 }
 
 interface Props {
@@ -27,6 +29,9 @@ interface Props {
   seaLevelM?: number | null;
   /** Sun direction: azimuth clockwise from north (0 = light from the north), elevation above the horizon. */
   sun?: { azimuthDeg: number; elevationDeg: number };
+  /** Scatter instances (layer metres: u east, v north from the south edge, z height, r 0..1) drawn as
+   *  `sizeM`-tall cones — a preview marker, the exported GLB carries 1 m proxies. */
+  instances?: { points: { u: number; v: number; z: number; r: number }[]; sizeM: number } | null;
 }
 
 function isWebGPU(r: WebGPURenderer): boolean {
@@ -140,6 +145,7 @@ interface SceneState {
   sky: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>;
   sunDeg: { azimuthDeg: number; elevationDeg: number };
   orbit: { theta: number; phi: number; radius: number; minR: number; maxR: number };
+  instances: THREE.InstancedMesh<THREE.ConeGeometry, THREE.MeshStandardMaterial> | null;
 }
 
 function placeCamera(s: SceneState) {
@@ -150,10 +156,10 @@ function placeCamera(s: SceneState) {
 
 /** One report shape for every effect, so a later report never drops a field an earlier one set. */
 function infoOf(s: SceneState): ViewportInfo {
-  return { backend: s.backend, triangles: s.triangles, ...(s.sea ? { seaM: s.sea.position.y } : {}), sun: s.sunDeg };
+  return { backend: s.backend, triangles: s.triangles, ...(s.sea ? { seaM: s.sea.position.y } : {}), sun: s.sunDeg, ...(s.instances ? { instances: s.instances.count } : {}) };
 }
 
-export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevelM = null, sun, overlay = null }: Props) {
+export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevelM = null, sun, overlay = null, instances = null }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<SceneState | null>(null);
   // Latest sculpt props without re-creating the renderer effect.
@@ -228,6 +234,7 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
       sky,
       sunDeg: { azimuthDeg: 140, elevationDeg: 35 },
       orbit: { theta: 0.6, phi: 1.0, radius: 5200, minR: 200, maxR: 100000 },
+      instances: null,
     };
     sceneRef.current = state;
     placeCamera(state);
@@ -345,6 +352,10 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
         state.mesh.geometry.dispose();
         state.mesh.material.dispose();
       }
+      if (state.instances) {
+        state.instances.geometry.dispose();
+        state.instances.material.dispose();
+      }
       renderer.dispose();
       el.removeChild(renderer.domElement);
       sceneRef.current = null;
@@ -421,6 +432,42 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
     }
     onInfo?.(infoOf(s));
   }, [seaLevelM, extentM, preview, onInfo]);
+
+  // Scatter instances: one InstancedMesh of cones in the terrain frame (x = u − extent/2, z = extent/2 − v),
+  // yaw and a 0.75..1.25 scale from `r` exactly as the GLB export writes them.
+  useEffect(() => {
+    const s = sceneRef.current;
+    if (!s) return;
+    if (s.instances) {
+      s.scene.remove(s.instances);
+      s.instances.geometry.dispose();
+      s.instances.material.dispose();
+      s.instances = null;
+    }
+    if (instances && instances.points.length > 0 && extentM) {
+      const geo = new THREE.ConeGeometry(0.3, 1, 6);
+      geo.translate(0, 0.5, 0); // base on the ground
+      const mesh = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ color: 0x3c9a4c, roughness: 0.8 }), instances.points.length);
+      const m = new THREE.Matrix4();
+      const q = new THREE.Quaternion();
+      const pos = new THREE.Vector3();
+      const scl = new THREE.Vector3();
+      const up = new THREE.Vector3(0, 1, 0);
+      instances.points.forEach((p, i) => {
+        const k = instances.sizeM * (0.75 + 0.5 * ((p.r * 7.31) % 1));
+        m.compose(pos.set(p.u - extentM[0] / 2, p.z, extentM[1] / 2 - p.v), q.setFromAxisAngle(up, 2 * Math.PI * p.r), scl.set(k, k, k));
+        mesh.setMatrixAt(i, m);
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      mesh.frustumCulled = false; // the base geometry's bounds do not cover the instances
+      s.instances = mesh;
+      s.scene.add(mesh);
+    }
+    onInfo?.(infoOf(s));
+    // Depend on the parts, not the wrapper object: App builds a fresh `{ points, sizeM }` every
+    // render and onInfo → setState would otherwise loop ("Maximum update depth exceeded").
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [instances?.points, instances?.sizeM, extentM, onInfo]);
 
   return <div ref={host} className="h-full w-full" data-testid="viewport" />;
 }

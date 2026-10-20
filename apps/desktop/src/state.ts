@@ -1,6 +1,6 @@
 // Frontend store: a mirror of what the core reports, never the source of truth (docs/architecture/12-ui-workspace.md).
 import { create } from "zustand";
-import type { Edge, GraphEvaluateResult, GraphListResult, HeightmapFormat, JdOps, JobInfo as JobInfoGen, NodeDefInfo, NodeView, NoiseParams, OpId, ProjectOpenResult, ProjectSaveResult, TerrainStatsResult } from "./lib/ops.gen";
+import type { Edge, GraphEvaluateResult, GraphListResult, HeightmapFormat, JdOps, JobInfo as JobInfoGen, NodeDefInfo, NodeView, NoiseParams, OpId, ProjectOpenResult, ProjectSaveResult, ScatterPoint, TerrainStatsResult } from "./lib/ops.gen";
 import { layerPreview, op, type JdError, type Preview, type Response, type Warning } from "./lib/api";
 
 export type ProjectSummary = ProjectOpenResult;
@@ -62,6 +62,11 @@ interface State {
   /** Viewport sun direction (not part of the project). */
   sun: { azimuth_deg: number; elevation_deg: number };
   setSun: (patch: Partial<{ azimuth_deg: number; elevation_deg: number }>) => void;
+  /** Scatter preview: instances placed from a 0..1 mask layer and drawn in the viewport; export writes a GLB. */
+  scatter: { mask: string | null; spacing_m: number; seed: number; points: ScatterPoint[] | null };
+  setScatter: (patch: Partial<{ mask: string | null; spacing_m: number; seed: number }>) => void;
+  placeScatter: () => Promise<void>;
+  exportScatter: () => Promise<void>;
   setBrush: (patch: Partial<{ radius_m: number; strength_m: number; mode: "raise" | "smooth" | "flatten"; amount: number }>) => void;
   /** Insert a sculpt node in front of the first output (or select the existing one) and enter sculpt mode. */
   startSculpting: () => Promise<void>;
@@ -196,6 +201,19 @@ export const useStore = create<State>((set, get) => {
       await refreshPreview();
     }
   };
+  // Scatter request from the panel settings; heights come from the `height` layer when published.
+  const scatterReq = () => {
+    const { scatter, lastEval } = get();
+    const names = Object.keys(lastEval?.layers ?? {});
+    return { mask: scatter.mask ?? "", height: names.includes("height") ? "height" : (names[0] ?? "height"), spacing_m: scatter.spacing_m, seed: scatter.seed };
+  };
+  // Scatter instances follow the evaluation: re-placed while the mask is still published, dropped otherwise.
+  const refreshScatter = async () => {
+    const { scatter, lastEval } = get();
+    if (!scatter.mask) return;
+    if (lastEval && !(scatter.mask in lastEval.layers)) return set({ scatter: { ...scatter, mask: null, points: null } });
+    await get().placeScatter();
+  };
   // After an evaluation: keep showing the layer the user is looking at (same name, or its
   // full-res/preview twin) when the graph still publishes it; otherwise the first one.
   const adopt = async (report: EvalReport) => {
@@ -205,6 +223,7 @@ export const useStore = create<State>((set, get) => {
     const current = get().layer?.layer.split("#")[0];
     const keep = names.find((n) => n.split("#")[0] === current);
     await showLayer(keep ?? names[0]!);
+    await refreshScatter();
   };
   // Preview LOD keeps live evaluations ≤ 512² so edits feel immediate; Evaluate/export use lod 0.
   const previewLod = () => {
@@ -320,6 +339,19 @@ export const useStore = create<State>((set, get) => {
     brush: { radius_m: 150, strength_m: 40, mode: "raise", amount: 0.5 },
     sun: { azimuth_deg: 140, elevation_deg: 35 },
     setSun: (patch) => set((s) => ({ sun: { ...s.sun, ...patch } })),
+    scatter: { mask: null, spacing_m: 40, seed: 1, points: null },
+    setScatter: (patch) => set((s) => ({ scatter: { ...s.scatter, ...patch, points: null } })),
+    placeScatter: async () => {
+      if (!get().scatter.mask) return;
+      const r = await op<JdOps["terrain.scatter"]["result"]>("terrain.scatter", scatterReq());
+      log(r);
+      if (r.status === "ok" && r.result) set((s) => ({ scatter: { ...s.scatter, points: r.result?.points ?? [] } }));
+    },
+    exportScatter: async () => {
+      const { mask } = get().scatter;
+      if (!mask) return;
+      log(await op("terrain.scatter", { ...scatterReq(), path: `${mask}.glb` }));
+    },
     setBrush: (patch) => set((s) => ({ brush: { ...s.brush, ...patch } })),
     startSculpting: async () => {
       const g = get().graph;

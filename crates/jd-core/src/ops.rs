@@ -2674,8 +2674,10 @@ pub mod terrain {
         #[serde(default = "default_layer_opt")]
         pub height: Option<String>,
         /// Output `.csv`, `.json` or `.glb` (proxy mesh instanced with `EXT_mesh_gpu_instancing`);
-        /// relative paths resolve against the project's `exports/`.
-        pub path: PathBuf,
+        /// relative paths resolve against the project's `exports/`. Omit it to get the points
+        /// back in the result instead (viewport preview; at most 200 000).
+        #[serde(default)]
+        pub path: Option<PathBuf>,
         /// Spacing, jitter, seed.
         #[serde(flatten)]
         pub scatter: jd_terrain::ScatterParams,
@@ -2688,14 +2690,17 @@ pub mod terrain {
     /// `terrain.scatter` result.
     #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
     pub struct ScatterReport {
-        /// Written file.
-        pub path: PathBuf,
-        /// Points written.
+        /// Written file (null when the points were returned inline).
+        pub path: Option<PathBuf>,
+        /// Points placed.
         pub count: u64,
-        /// Bytes written.
+        /// Bytes written (0 inline).
         pub bytes: u64,
-        /// Candidates per axis the grid had.
+        /// Grid spacing used.
         pub spacing_m: f32,
+        /// The points (`u` east, `v` north from the south edge, `z`, `r`) when no `path` was given.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub points: Option<Vec<jd_terrain::ScatterPoint>>,
     }
 
     /// `terrain.export_mesh` params.
@@ -2878,11 +2883,11 @@ pub mod terrain {
         );
         r.register::<TerrainScatter, ScatterReport, _>(
             "terrain.scatter",
-            "Scatter instance points over the world from a 0..1 density mask layer (stratified jittered grid, deterministic by seed) and write them as CSV or JSON with heights, or as GLB instances",
+            "Scatter instance points over the world from a 0..1 density mask layer (stratified jittered grid, deterministic by seed): write CSV / JSON / GLB instances to `path`, or return the points when `path` is omitted",
             Scope::Export,
             |ctx, p| {
                 let (path, extent) = ctx.with_project(|proj| {
-                    let path = if p.path.is_absolute() { p.path.clone() } else { proj.root().join("exports").join(&p.path) };
+                    let path = p.path.as_ref().map(|f| if f.is_absolute() { f.clone() } else { proj.root().join("exports").join(f) });
                     Ok((path, proj.doc.world.extent_m))
                 })?;
                 // Two layers: clone the mask out first (the layer lock is not re-entrant).
@@ -2891,8 +2896,16 @@ pub mod terrain {
                     Some(h) => ctx.with_layer(h, |hf| jd_terrain::scatter_points(&mask, Some(hf), extent, &p.scatter))?,
                     None => jd_terrain::scatter_points(&mask, None, extent, &p.scatter)?,
                 };
-                let bytes = jd_terrain::write_points(&path, &points, extent)?;
-                Ok((ScatterReport { path, count: points.len() as u64, bytes, spacing_m: p.scatter.spacing_m }, Vec::new()))
+                let count = points.len() as u64;
+                let (bytes, points) = match &path {
+                    Some(f) => (jd_terrain::write_points(f, &points, extent)?, None),
+                    None if count > 200_000 => {
+                        return Err(JdError::invalid("spacing_m", format!("{count} points is too many to return inline (max 200 000)"))
+                            .next("Give a `path` to write a file, or use a larger spacing."));
+                    }
+                    None => (0, Some(points)),
+                };
+                Ok((ScatterReport { path, count, bytes, spacing_m: p.scatter.spacing_m, points }, Vec::new()))
             },
         );
         r.register::<TerrainExport, ExportReport, _>(
@@ -2961,6 +2974,59 @@ pub mod terrain {
             let pv = jd_terrain::preview::Preview::from_bytes(&bytes).expect("wire format");
             assert_eq!((pv.width, pv.height), (32, 24));
             assert_eq!(pv.data.len(), 32 * 24);
+        }
+
+        #[test]
+        fn scatter_returns_points_inline_without_a_path() {
+            let reg = Registry::with_builtins();
+            let dir = tempfile::tempdir().expect("tmp");
+            let ctx = Context::default();
+            let world = WorldSettings {
+                resolution_px: [64, 64],
+                extent_m: [640.0, 640.0],
+                tile_size: 64,
+                halo: 0,
+                ..Default::default()
+            };
+            reg.invoke(&ctx, Request::new("project.create", serde_json::json!({ "path": dir.path().join("s.jdproj"), "name": "S", "world": world })));
+            reg.invoke(
+                &ctx,
+                Request::new(
+                    "terrain.generate",
+                    serde_json::json!({ "noise": { "height_range_m": [1.0, 2.0] } }),
+                ),
+            );
+            // Heights ≥ 1 clamp to density 1: every 40 m cell keeps its candidate.
+            let r = reg.invoke(
+                &ctx,
+                Request::new(
+                    "terrain.scatter",
+                    serde_json::json!({ "mask": "height", "spacing_m": 40.0 }),
+                ),
+            );
+            let res = r.result.expect("inline points");
+            assert_eq!(
+                (res["count"].as_u64(), res["bytes"].as_u64()),
+                (Some(256), Some(0))
+            );
+            assert!(res["path"].is_null());
+            let pts = res["points"].as_array().expect("points");
+            assert_eq!(pts.len(), 256);
+            assert!(
+                pts.iter()
+                    .all(|q| q["z"].as_f64().is_some_and(|z| (1.0..=2.0).contains(&z)))
+            );
+            // With a path the points go to the file and are not echoed.
+            let r = reg.invoke(
+                &ctx,
+                Request::new(
+                    "terrain.scatter",
+                    serde_json::json!({ "mask": "height", "spacing_m": 40.0, "path": "pts.json" }),
+                ),
+            );
+            let res = r.result.expect("file");
+            assert!(res["points"].is_null() && res["bytes"].as_u64() > Some(0));
+            assert!(dir.path().join("s.jdproj/exports/pts.json").exists());
         }
 
         #[test]
