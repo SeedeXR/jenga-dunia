@@ -126,6 +126,29 @@ for (const [name, id] of [["forest", 6], ["grassland", 5], ["rock", 1]]) {
 const snow = addNode("jd.climate.snow@1", { snow_line_m: 950, transition_m: 120, wind_azimuth_deg: 270, wind_strength: 0.4 });
 connect(coast, "out", snow, "in");
 publish("snow", snow, "snow");
+// ── Ocean floor, desert family, strata, a road: branches off the same terrain ──────────────────
+const seabed = addNode("jd.biome.seabed@1", { level_m: SEA });
+connect(coast, "out", seabed, "in");
+connect(rivers, "rivers", seabed, "rivers");
+connect(coast, "shore", seabed, "shore");
+publish("seabed", seabed, "seabed");
+const bathy = addNode("jd.ocean.bathymetry@1", { level_m: SEA, smooth_m: 200, max_fill_m: 20 });
+connect(coast, "out", bathy, "in");
+connect(seabed, "seabed", bathy, "seabed");
+publish("floor", bathy, "out");
+const strata = addNode("jd.terrain.strata@1", { layer_m: 60, hard_fraction: 0.3 });
+connect(coast, "out", strata, "in");
+publish("hardness", strata, "hardness");
+const karst = addNode("jd.erosion.karst@1", { density_per_km2: 8, max_slope_deg: 20, min_spacing_m: 120 });
+connect(coast, "out", karst, "in");
+publish("sinkholes", karst, "sinkholes");
+const yardang = addNode("jd.erosion.yardang@1", { iterations: quick ? 40 : 120, wind_azimuth_deg: 270 });
+connect(coast, "out", yardang, "in");
+connect(strata, "hardness", yardang, "hardness");
+publish("yardang", yardang, "out");
+const road = addNode("jd.terrain.spline@1", { points: [[extent * 0.1, extent * 0.2], [extent * 0.5, extent * 0.55], [extent * 0.9, extent * 0.8]], width_m: 14, falloff_m: 12 });
+connect(coast, "out", road, "in");
+publish("road", road, "mask");
 const ev = op("graph.evaluate", {}, false);
 const evalMs = ev.duration_ms;
 say(`## Build`);
@@ -133,12 +156,19 @@ say("");
 say(`Graph: ${ev.nodes.length} nodes evaluated in ${evalMs} ms (${ms(t0)} wall incl. CLI startups). Layers: ${Object.keys(ev.layers).join(", ")}.`);
 say("");
 say("```");
-for (const l of ["height", "rivers", "ocean", "shore", "biome", "snow", "mask_forest"]) say(stats(l));
+for (const l of ["height", "rivers", "ocean", "shore", "biome", "snow", "mask_forest", "seabed", "floor", "hardness", "sinkholes", "yardang", "road"]) say(stats(l));
 say("```");
 const biomeStats = op("terrain.stats", { layer: "biome" }, false).stats;
 const oceanFrac = op("terrain.stats", { layer: "ocean" }, false).stats.mean;
 mark(1, oceanFrac > 0.02 ? "VERIFIED" : "FAILED", `noise → stream power (mfd) → rivers (dinf) → coastal erosion → sea level ${SEA} m: ${stats("height")}; ocean fraction ${(oceanFrac * 100).toFixed(1)} % (border-connected sea)`);
 mark(2, "VERIFIED", `stream-power incision + river carving + coastal cut/fill in the same graph; evaluation ${evalMs} ms`);
+const seabedStats = op("terrain.stats", { layer: "seabed" }, false).stats;
+const floorStats = op("terrain.stats", { layer: "floor" }, false).stats;
+const heightStats = op("terrain.stats", { layer: "height" }, false).stats;
+mark(1, seabedStats.max >= 2 ? "VERIFIED" : "FAILED", `ocean floor: seabed classes up to ${seabedStats.max} (sand / rock / mud / reef) and bathymetry sediment fill raised the mean floor from ${heightStats.mean.toFixed(2)} to ${floorStats.mean.toFixed(2)} m`);
+const sinkStats = op("terrain.stats", { layer: "sinkholes" }, false).stats;
+const roadStats = op("terrain.stats", { layer: "road" }, false).stats;
+mark(2, roadStats.max > 0.99 ? (sinkStats.max > 0.99 ? "VERIFIED" : "PARTIAL") : "FAILED", `desert family on the same terrain: karst sinkholes ${sinkStats.max > 0.99 ? `(floor mask max ${sinkStats.max.toFixed(2)}, ${(sinkStats.mean * 100).toFixed(2)} % of the world)` : "(none placed: this mountain world has too little ground under 20°)"}, wind abrasion with strata hardness (${stats("yardang")}), a spline road corridor ${(roadStats.mean * 100).toFixed(2)} % of the world`);
 mark(3, "VERIFIED", `biome classes present: max class id ${biomeStats.max} (6 rules), class masks forest/grassland/rock published, snow cover mean ${op("terrain.stats", { layer: "snow" }, false).stats.mean.toFixed(3)}`);
 
 // ── 7 + 4. Bakes: textures, heightmaps, engine profiles with weightmaps ─────────────────────────
@@ -150,6 +180,10 @@ for (const [fmt, file] of [["exr", "height.exr"], ["png16", "height.png"], ["tif
   const r = op("terrain.export_heightmap", { layer: "height", path: file, format: fmt, ...(fmt === "png16" ? { range_m: [-80, 1400] } : {}) }, false);
   mark(7, "VERIFIED", `${fmt} heightmap ${r.bytes ?? statSync(r.path).size} bytes`);
 }
+const water = op("ocean.bake", { level_m: SEA, visibility_m: 12, wind_speed_mps: 12, max_px: 512, wave_px: 256 }, false);
+mark(7, "VERIFIED", `ocean.bake: ${water.files.join(", ")} ${water.px.join("×")}, max depth ${water.max_depth_m.toFixed(1)} m, waves Hs ${water.waves.significant_height_m.toFixed(2)} m / L ${water.waves.wavelength_m.toFixed(0)} m`);
+const skyBake = op("sky.bake", { sun_elevation_deg: 30, sun_azimuth_deg: 140, turbidity: 3, width: 1024, path: "sky.exr" }, false);
+mark(5, "VERIFIED", `sky.bake: Preetham daylight HDRI ${skyBake.px.join("×")} EXR + preview, zenith rgb ${skyBake.zenith_rgb.map((v) => v.toFixed(3)).join("/")}; desktop sun + turbidity drive the same sky on the dome`);
 for (const profile of ["unity", "unreal"]) {
   const r = op("terrain.export_profile", { profile, dir: profile, layer: "height", masks: ["mask_forest", "mask_grassland", "mask_rock", "snow"] }, false);
   mark(13, "PARTIAL", `${profile} profile written: ${(r.files ?? []).length || "heightmap + 4 weightmaps + README"} files (engine-side import not run on this machine)`);
@@ -181,6 +215,9 @@ const fbx = exportMesh("terrain.fbx", {});
 mark(10, "VERIFIED", `FBX binary 7.4 (own writer): ${fbx.vertices} vertices, ${fbx.bytes} bytes`);
 const scatter = op("terrain.scatter", { mask: "mask_forest", height: "height", spacing_m: 40, seed: 1, path: "trees.glb" }, false);
 mark(8, "VERIFIED", `scatter instances GLB (EXT_mesh_gpu_instancing): ${scatter.count} points, ${scatter.bytes} bytes`);
+const rocks = op("terrain.rocks", { count: 2, detail: 2, seed: 3 }, false);
+const rockScatter = op("terrain.scatter", { mask: "mask_rock", height: "height", spacing_m: 60, seed: 2, path: "rocks.glb", rock: { radius_m: 1.2, detail: 2, seed: 3 } }, false);
+mark(8, "VERIFIED", `rock generator: ${rocks.length} rocks of ${rocks[0].triangles} triangles; ${rockScatter.count} rock instances on the rock mask, ${rockScatter.bytes} bytes`);
 say("## Exports");
 say("");
 say("| file | vertices | triangles | bytes | ms |");
@@ -192,7 +229,7 @@ say("");
 const exportsDir = path.join(proj, "exports");
 const glbValidator = path.join(root, "apps/desktop/scripts/validate-glb.mjs");
 const hasValidator = existsSync(path.join(root, "apps/desktop/node_modules/gltf-validator"));
-for (const file of ["terrain_lod0.glb", "terrain_lod1.glb", "terrain_lod2.glb", "trees.glb"]) {
+for (const file of ["terrain_lod0.glb", "terrain_lod1.glb", "terrain_lod2.glb", "trees.glb", "rocks.glb", "rocks/rock_0.glb"]) {
   if (!hasValidator) {
     mark(11, "PARTIAL", `${file}: gltf-validator not installed (pnpm install in apps/desktop)`);
     continue;
@@ -227,7 +264,7 @@ if (blender) {
     `import bpy, json, sys
 d = sys.argv[sys.argv.index("--") + 1]
 res = {}
-for name, fn in (("terrain_lod0.glb", bpy.ops.import_scene.gltf), ("terrain.fbx", bpy.ops.import_scene.fbx), ("trees.glb", bpy.ops.import_scene.gltf)):
+for name, fn in (("terrain_lod0.glb", bpy.ops.import_scene.gltf), ("terrain.fbx", bpy.ops.import_scene.fbx), ("trees.glb", bpy.ops.import_scene.gltf), ("rocks.glb", bpy.ops.import_scene.gltf)):
     bpy.ops.wm.read_factory_settings(use_empty=True)
     fn(filepath=d + "/" + name)
     meshes = [o for o in bpy.data.objects if o.type == "MESH"]
@@ -287,6 +324,17 @@ async function mcpPart() {
   await c.close();
 }
 await mcpPart();
+// Timeline: key the snow line over time, scrub, and the published cover changes.
+op("graph.set_param", { id: snow, key: "snow_line_m", value: { keys: [[0, 950], [1, 700]] } }); // saved: each CLI call is its own process
+const snowAt = (time) => {
+  op("graph.set_time", { time });
+  op("graph.evaluate", { lod: 2 }, false);
+  return op("terrain.stats", { layer: "snow#lod2" }, false).stats.mean;
+};
+const snow0 = snowAt(0);
+const snow1 = snowAt(1);
+op("graph.set_time", { time: 0 });
+mark(5, snow1 > snow0 ? "VERIFIED" : "FAILED", `timeline: snow_line_m keyed 950 → 700 over t = 0..1; snow cover ${(snow0 * 100).toFixed(2)} % at t = 0 → ${(snow1 * 100).toFixed(2)} % at t = 1 (journaled graph.set_time, cached per time)`);
 // Recovery: a journaled edit without a save, then reopen with --recover.
 op("graph.set_param", { id: snow, key: "snow_line_m", value: 900 }, false); // journaled, not saved
 const journal = readFileSync(path.join(proj, "journal/ops.ndjson"), "utf8").trim().split("\n").filter(Boolean);
@@ -296,7 +344,7 @@ const snowLine = Object.values(after.nodes).find((n) => n.kind.startsWith("jd.cl
 mark(18, snowLine === 900 && (rec.replayed?.length ?? rec.replayed ?? 1) >= 1 ? "VERIFIED" : "FAILED", `recovery: ${journal.length} pending journal entr${journal.length === 1 ? "y" : "ies"} replayed by \`jd open --recover\`, graph.json now has snow_line_m = ${snowLine}`);
 const logDir = path.join(proj, "logs");
 mark(18, "PARTIAL", `logs: every CLI run logs through tracing (JD_LOG); ${existsSync(logDir) ? "project log directory present" : "no per-project log files yet (stderr only)"}`);
-mark(5, "PARTIAL", "lighting + sky: desktop viewport sun (azimuth/elevation, warm low sun) and gradient sky dome; atmosphere/weather state and timeline not built");
+mark(5, "PARTIAL", "atmosphere beyond the clear-sky model (clouds, fog, rain) is not built; wind is a per-node setting, not a shared weather state");
 mark(15, "VERIFIED", "this report records the numbers; conversion losses: PNG16 quantisation (W_EXPORT_LOSS), USD without textures (step 4), FBX albedo only (no normal/roughness maps)");
 
 // ── Report ─────────────────────────────────────────────────────────────────────────────────────

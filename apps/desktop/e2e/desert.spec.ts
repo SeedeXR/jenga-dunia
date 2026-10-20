@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, fitView, installBridge, logCount, wire } from "./bridge";
+import { connectCore, fitView, installBridge, logCount, selectNode, wire } from "./bridge";
 
 const NOISE = "01JDGRAPH000000000000N01SE"; // starter graph ids (jd_graph::nodes)
 const HEIGHT = "01JDGRAPH0000000000HE1GHT0";
@@ -50,7 +50,7 @@ test.describe("desert landscapes against the real core", () => {
     await page.getByTestId("graph-add").click();
     const dunes = panel.locator(".react-flow__node", { hasText: "jd.erosion.aeolian@1" });
     await fitView(page, dunes);
-    await dunes.click({ force: true });
+    await selectNode(dunes);
     await expect(inspector).toContainText("jd.erosion.aeolian@1");
     const steps = inspector.locator("label", { hasText: "iterations" }).locator("input");
     await steps.fill("60");
@@ -63,7 +63,7 @@ test.describe("desert landscapes against the real core", () => {
     await page.getByTestId("graph-add").click();
     const karst = panel.locator(".react-flow__node", { hasText: "jd.erosion.karst@1" });
     await fitView(page, karst);
-    await karst.click({ force: true });
+    await selectNode(karst);
     const density = inspector.locator("label", { hasText: "density_per_km2" }).locator("input");
     await expect(density).toHaveAttribute("placeholder", "3");
     await density.fill("6");
@@ -82,7 +82,7 @@ test.describe("desert landscapes against the real core", () => {
     const out2 = panel.locator(".react-flow__node", { hasText: "jd.output.height@1" }).last();
     await expect(panel.locator(".react-flow__node", { hasText: "jd.output.height@1" })).toHaveCount(2);
     await fitView(page, out2);
-    await out2.click({ force: true });
+    await selectNode(out2);
     const layer = inspector.locator("label", { hasText: "layer" }).locator("input");
     await layer.fill("sinkholes");
     await layer.blur();

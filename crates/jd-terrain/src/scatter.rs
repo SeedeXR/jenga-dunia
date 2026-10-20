@@ -248,30 +248,46 @@ fn write_instances_glb(
         f32s(&mut bin, &[s, s, s]);
     }
     let n = points.len();
+    // Buffer views and accessors: the NORMAL pair exists only when the proxy brings normals
+    // (an empty view or a zero-count accessor is invalid glTF).
+    let mut views = vec![
+        serde_json::json!({ "buffer": 0, "byteOffset": 0, "byteLength": nrm_off, "target": 34962 }),
+    ];
+    let mut accessors = vec![
+        serde_json::json!({ "bufferView": 0, "componentType": 5126, "count": n_verts, "type": "VEC3", "min": vmin, "max": vmax }),
+    ];
+    let mut attributes = serde_json::json!({ "POSITION": 0 });
+    if nrms.is_some() {
+        views.push(serde_json::json!({ "buffer": 0, "byteOffset": nrm_off, "byteLength": idx_off - nrm_off, "target": 34962 }));
+        accessors.push(serde_json::json!({ "bufferView": 1, "componentType": 5126, "count": n_verts, "type": "VEC3" }));
+        attributes["NORMAL"] = serde_json::json!(1);
+    }
+    let base = views.len();
+    views.push(serde_json::json!({ "buffer": 0, "byteOffset": idx_off, "byteLength": tr_off - idx_off, "target": 34963 }));
+    views.push(
+        serde_json::json!({ "buffer": 0, "byteOffset": tr_off, "byteLength": rot_off - tr_off }),
+    );
+    views.push(
+        serde_json::json!({ "buffer": 0, "byteOffset": rot_off, "byteLength": sc_off - rot_off }),
+    );
+    views.push(
+        serde_json::json!({ "buffer": 0, "byteOffset": sc_off, "byteLength": bin.len() - sc_off }),
+    );
+    accessors.push(serde_json::json!({ "bufferView": base, "componentType": 5125, "count": idx.len(), "type": "SCALAR" }));
+    accessors.push(serde_json::json!({ "bufferView": base + 1, "componentType": 5126, "count": n, "type": "VEC3", "min": min, "max": max }));
+    accessors.push(serde_json::json!({ "bufferView": base + 2, "componentType": 5126, "count": n, "type": "VEC4" }));
+    accessors.push(serde_json::json!({ "bufferView": base + 3, "componentType": 5126, "count": n, "type": "VEC3" }));
+    let (idx_acc, tr_acc, rot_acc, sc_acc) = (base, base + 1, base + 2, base + 3);
     let json = serde_json::json!({
         "asset": { "version": "2.0", "generator": format!("jenga-dunia {}", env!("CARGO_PKG_VERSION")) },
         "extensionsUsed": ["EXT_mesh_gpu_instancing"],
         "extensionsRequired": ["EXT_mesh_gpu_instancing"],
         "buffers": [{ "byteLength": bin.len() }],
-        "bufferViews": [
-            { "buffer": 0, "byteOffset": 0, "byteLength": nrm_off, "target": 34962 },
-            { "buffer": 0, "byteOffset": nrm_off, "byteLength": idx_off - nrm_off, "target": 34962 },
-            { "buffer": 0, "byteOffset": idx_off, "byteLength": tr_off - idx_off, "target": 34963 },
-            { "buffer": 0, "byteOffset": tr_off, "byteLength": rot_off - tr_off },
-            { "buffer": 0, "byteOffset": rot_off, "byteLength": sc_off - rot_off },
-            { "buffer": 0, "byteOffset": sc_off, "byteLength": bin.len() - sc_off }
-        ],
-        "accessors": [
-            { "bufferView": 0, "componentType": 5126, "count": n_verts, "type": "VEC3", "min": vmin, "max": vmax },
-            { "bufferView": 1, "componentType": 5126, "count": if nrms.is_some() { n_verts } else { 0 }, "type": "VEC3" },
-            { "bufferView": 2, "componentType": 5125, "count": idx.len(), "type": "SCALAR" },
-            { "bufferView": 3, "componentType": 5126, "count": n, "type": "VEC3", "min": min, "max": max },
-            { "bufferView": 4, "componentType": 5126, "count": n, "type": "VEC4" },
-            { "bufferView": 5, "componentType": 5126, "count": n, "type": "VEC3" }
-        ],
+        "bufferViews": views,
+        "accessors": accessors,
         "materials": [{ "name": "proxy", "pbrMetallicRoughness": { "baseColorFactor": if proxy.is_some() { [0.45, 0.42, 0.38, 1.0] } else { [0.2, 0.5, 0.2, 1.0] }, "metallicFactor": 0.0, "roughnessFactor": 0.9 } }],
-        "meshes": [{ "name": if proxy.is_some() { "rock" } else { "proxy" }, "primitives": [{ "attributes": if nrms.is_some() { serde_json::json!({ "POSITION": 0, "NORMAL": 1 }) } else { serde_json::json!({ "POSITION": 0 }) }, "indices": 2, "material": 0, "mode": 4 }] }],
-        "nodes": [{ "mesh": 0, "name": "instances", "extensions": { "EXT_mesh_gpu_instancing": { "attributes": { "TRANSLATION": 3, "ROTATION": 4, "SCALE": 5 } } } }],
+        "meshes": [{ "name": if proxy.is_some() { "rock" } else { "proxy" }, "primitives": [{ "attributes": attributes, "indices": idx_acc, "material": 0, "mode": 4 }] }],
+        "nodes": [{ "mesh": 0, "name": "instances", "extensions": { "EXT_mesh_gpu_instancing": { "attributes": { "TRANSLATION": tr_acc, "ROTATION": rot_acc, "SCALE": sc_acc } } } }],
         "scenes": [{ "nodes": [0] }],
         "scene": 0
     });

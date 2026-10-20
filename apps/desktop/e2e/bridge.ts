@@ -119,6 +119,19 @@ export async function fitView(page: Page, node: Locator): Promise<void> {
   }
 }
 
+/** Select a node: click until React Flow marks it `selected` (under load a click lands while the graph re-renders and is lost). */
+export async function selectNode(node: Locator): Promise<void> {
+  for (let i = 0; ; i++) {
+    await node.click({ force: true });
+    try {
+      await expect(node).toHaveClass(/selected/, { timeout: 2000 });
+      return;
+    } catch (e) {
+      if (i >= 4) throw e;
+    }
+  }
+}
+
 /** How many lines of the op log contain `text` (assert on a count, not on text that an earlier op already logged). */
 export function logCount(page: Page, text: string): Promise<number> {
   return page.getByTestId("log").locator("div", { hasText: text }).count();

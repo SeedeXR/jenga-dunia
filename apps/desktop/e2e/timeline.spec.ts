@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, fitView, installBridge, logCount, wire } from "./bridge";
+import { connectCore, fitView, installBridge, logCount, selectNode, wire } from "./bridge";
 
 const NOISE = "01JDGRAPH000000000000N01SE"; // starter graph ids (jd_graph::nodes)
 const HEIGHT = "01JDGRAPH0000000000HE1GHT0";
@@ -41,7 +41,7 @@ test.describe("timeline against the real core", () => {
     await page.getByTestId("graph-add").click();
     const thermal = panel.locator(".react-flow__node", { hasText: "jd.erosion.thermal@1" });
     await fitView(page, thermal);
-    await thermal.click({ force: true });
+    await selectNode(thermal);
     const steps = inspector.locator("label", { hasText: "iterations" }).locator("input");
     await steps.fill("0:1, 1:300");
     await steps.blur();
