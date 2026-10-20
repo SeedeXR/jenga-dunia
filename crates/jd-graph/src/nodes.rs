@@ -95,6 +95,56 @@ fn rate_default() -> f32 {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct TerraceParams {
+    /// Step height in metres (> 0).
+    #[serde(default = "terrace_step")]
+    step_m: f32,
+    /// 0 = hard steps, 1 = untouched; in between blends the step edge over that fraction of the riser.
+    #[serde(default = "terrace_softness")]
+    softness: f32,
+    /// Shift the step boundaries by this many metres.
+    #[serde(default)]
+    offset_m: f32,
+}
+fn terrace_step() -> f32 {
+    25.0
+}
+fn terrace_softness() -> f32 {
+    0.2
+}
+
+/// Terrace a height: quantise to `step_m` with a smoothstep riser of width `softness · step`.
+fn terrace(h: f32, step_m: f32, softness: f32, offset_m: f32) -> f32 {
+    let t = (h - offset_m) / step_m;
+    let base = t.floor();
+    let frac = t - base;
+    let riser = softness.clamp(0.0, 1.0).max(1e-6);
+    // Flat tread, then a smoothstep riser occupying the last `riser` fraction of the step.
+    let u = ((frac - (1.0 - riser)) / riser).clamp(0.0, 1.0);
+    let s = u * u * (3.0 - 2.0 * u);
+    offset_m + (base + s) * step_m
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CurvatureParams {
+    /// Curvature (1/m) that maps to ±1; smaller values exaggerate.
+    #[serde(default = "curvature_scale")]
+    scale: f32,
+    /// Stencil half-width in samples (1..=16): 1 reacts to every bump, larger radii read
+    /// ridges and valleys at landscape scale.
+    #[serde(default = "one_px")]
+    radius_px: u32,
+}
+fn curvature_scale() -> f32 {
+    0.01
+}
+fn one_px() -> u32 {
+    1
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct SlopeParams {
     /// Slope that maps to 1.0 in the mask (degrees, (0, 90]).
     #[serde(default = "ninety")]
@@ -531,6 +581,57 @@ pub fn register_all(r: &mut Registry) {
             Ok(BTreeMap::from([("out".to_owned(), Value::field(eroded)), ("incision".to_owned(), Value::field(incision))]))
         },
     ));
+    r.register(NodeDef::new::<TerraceParams, _>(
+        "jd.filter.terrace@1",
+        "Terraces: quantise heights into steps of `step_m` with a soft riser — mesas, rice paddies, strata",
+        vec![port("in", PortType::Heightfield, true)],
+        vec![port("out", PortType::Heightfield, false)],
+        |_, p, i| {
+            let tp: TerraceParams = params(p)?;
+            if !(tp.step_m > 0.0 && tp.step_m.is_finite()) {
+                return Err(JdError::invalid("step_m", "must be positive"));
+            }
+            if !(0.0..=1.0).contains(&tp.softness) {
+                return Err(JdError::invalid("softness", "must be within 0..=1"));
+            }
+            if tp.softness >= 1.0 {
+                return Ok(out("out", (**field(i, "in")?).clone()));
+            }
+            Ok(out("out", map1(field(i, "in")?, |h| terrace(h, tp.step_m, tp.softness, tp.offset_m))?))
+        },
+    ));
+    r.register(NodeDef::new::<CurvatureParams, _>(
+        "jd.analysis.curvature@1",
+        "Curvature (Laplacian of height, 1/m) mapped to −1..1: positive on ridges and convex breaks, negative in valleys and hollows — for rock exposure, soil and sediment masks",
+        vec![port("in", PortType::Heightfield, true)],
+        vec![port("out", PortType::Heightfield, false)],
+        |ctx, p, i| {
+            let cp: CurvatureParams = params(p)?;
+            if !(cp.scale > 0.0 && cp.scale.is_finite()) {
+                return Err(JdError::invalid("scale", "must be positive"));
+            }
+            if !(1..=16).contains(&cp.radius_px) {
+                return Err(JdError::invalid("radius_px", "must be within 1..=16"));
+            }
+            let h = field(i, "in")?;
+            let [sx, sy] = spacing_m(ctx);
+            let r = cp.radius_px as i64;
+            let (dx, dy) = (sx * r as f32, sy * r as f32);
+            let (w, hh) = (h.width(), h.height());
+            let mut o = Heightfield::new(w, hh, h.tile_size(), h.halo())?;
+            o.fill_with(|x, y| {
+                let g = |xx: i64, yy: i64| h.get(xx.clamp(0, w as i64 - 1) as u32, yy.clamp(0, hh as i64 - 1) as u32);
+                let (x, y) = (x as i64, y as i64);
+                // f64 for the second differences: f32 cancellation on ~500 m heights leaves 1e-3 noise.
+                let c = g(x, y) as f64;
+                let d2x = (g(x + r, y) as f64 - 2.0 * c + g(x - r, y) as f64) / (dx as f64 * dx as f64);
+                let d2y = (g(x, y + r) as f64 - 2.0 * c + g(x, y - r) as f64) / (dy as f64 * dy as f64);
+                // Convex (ridge) = height falls away on both sides = negative Laplacian → +1.
+                (-(d2x + d2y) / cp.scale as f64).clamp(-1.0, 1.0) as f32
+            });
+            Ok(out("out", o))
+        },
+    ));
     r.register(NodeDef::new::<SlopeParams, _>(
         "jd.analysis.slope@1",
         "Slope mask 0..1 (gradient angle / max_deg) — feed into multiply to attenuate by steepness",
@@ -854,6 +955,80 @@ mod tests {
                 port: bp.into(),
             },
         });
+    }
+
+    #[test]
+    fn terrace_quantises_with_soft_risers_and_curvature_signs_ridges_and_valleys() {
+        // Terrace: a ramp 0..100 m with 25 m steps, softness 0.2 → treads are flat, risers span 20 % of a step.
+        assert_eq!(terrace(10.0, 25.0, 0.2, 0.0), 0.0);
+        assert_eq!(
+            terrace(19.0, 25.0, 0.2, 0.0),
+            0.0,
+            "tread holds until the riser starts at 80 %"
+        );
+        assert!(
+            (terrace(22.5, 25.0, 0.2, 0.0) - 12.5).abs() < 1e-4,
+            "riser midpoint sits mid-step"
+        );
+        assert!((terrace(25.0, 25.0, 0.2, 0.0) - 25.0).abs() < 1e-4);
+        assert_eq!(terrace(60.0, 25.0, 0.0001, 0.0), 50.0, "hard steps");
+        assert_eq!(
+            terrace(55.0, 25.0, 0.2, 10.0),
+            35.0,
+            "offset shifts the step grid (steps at 10, 35, 60)"
+        );
+        // Curvature through the graph: a paraboloid bowl is concave (−), a dome convex (+), a plane 0.
+        let reg = Registry::with_builtins();
+        let run = |h: fn(u32, u32) -> f32| -> Vec<f32> {
+            let mut f = Heightfield::new(128, 96, 64, 4).expect("hf");
+            f.fill_with(h);
+            let def = reg
+                .get(&NodeKind("jd.analysis.curvature@1".into()))
+                .expect("def");
+            let ctx = EvalCtx {
+                lod_world: world(),
+                assets_dir: None,
+                cancel: Default::default(),
+            };
+            let params = serde_json::json!({ "scale": 0.01 })
+                .as_object()
+                .cloned()
+                .unwrap_or_default();
+            let outs = def
+                .evaluate(
+                    &ctx,
+                    &params,
+                    &BTreeMap::from([("in".to_owned(), Value::field(f))]),
+                )
+                .expect("eval");
+            outs["out"].as_field().to_vec()
+        };
+        // world(): 256 m over 128 × 96 px → 2 m × 2.67 m cells (anisotropic on purpose). Bowl: z = 0.01·r² → Laplacian 0.04 → −0.04/0.01 = −1 (clamped) in the interior.
+        let bowl = run(|x, y| {
+            0.01 * (((x as f32 - 64.0) * 2.0).powi(2)
+                + ((y as f32 - 48.0) * (256.0 / 96.0)).powi(2))
+        });
+        assert!(
+            (bowl[48 * 128 + 64] + 1.0).abs() < 1e-3,
+            "bowl centre is concave: {}",
+            bowl[48 * 128 + 64]
+        );
+        let dome = run(|x, y| {
+            -0.001
+                * (((x as f32 - 64.0) * 2.0).powi(2) + ((y as f32 - 48.0) * (256.0 / 96.0)).powi(2))
+        });
+        assert!(
+            (dome[48 * 128 + 64] - 0.4).abs() < 1e-3,
+            "dome: Laplacian −0.004 → +0.4: {}",
+            dome[48 * 128 + 64]
+        );
+        let plane = run(|x, y| 3.0 * x as f32 + 2.0 * y as f32);
+        for y in 1..95u32 {
+            for x in 1..127u32 {
+                let v = plane[(y * 128 + x) as usize];
+                assert!(v.abs() < 1e-4, "a plane has no curvature: ({x},{y}) = {v}");
+            }
+        }
     }
 
     #[test]

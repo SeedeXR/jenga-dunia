@@ -912,6 +912,14 @@ export type TerrainStatsResult = {
   "duration_ms": number;
 };
 
+export type NodeParams_jd_analysis_curvature_1 = {
+  /** Curvature (1/m) that maps to ±1; smaller values exaggerate. */
+  "scale"?: number;
+  /** Stencil half-width in samples (1..=16): 1 reacts to every bump, larger radii read
+ridges and valleys at landscape scale. */
+  "radius_px"?: number;
+};
+
 export type FlowMethod = "d8" | "dinf" | "mfd";
 
 export type NodeParams_jd_analysis_flow_1 = {
@@ -1015,6 +1023,15 @@ export type NodeParams_jd_erosion_thermal_1 = {
 export type NodeParams_jd_filter_blur_1 = {
   /** Box-blur radius in pixels (1..=4; must not exceed the world's tile halo). */
   "radius"?: number;
+};
+
+export type NodeParams_jd_filter_terrace_1 = {
+  /** Step height in metres (> 0). */
+  "step_m"?: number;
+  /** 0 = hard steps, 1 = untouched; in between blends the step edge over that fraction of the riser. */
+  "softness"?: number;
+  /** Shift the step boundaries by this many metres. */
+  "offset_m"?: number;
 };
 
 export type NodeParams_jd_hydrology_fill_1 = {
@@ -1203,6 +1220,7 @@ export type OpId = keyof JdOps;
 
 /** Parameter types of every built-in node kind. */
 export interface NodeKinds {
+  "jd.analysis.curvature@1": NodeParams_jd_analysis_curvature_1;
   "jd.analysis.flow@1": NodeParams_jd_analysis_flow_1;
   "jd.analysis.slope@1": NodeParams_jd_analysis_slope_1;
   "jd.biome.classify@1": NodeParams_jd_biome_classify_1;
@@ -1211,6 +1229,7 @@ export interface NodeKinds {
   "jd.erosion.stream_power@1": NodeParams_jd_erosion_stream_power_1;
   "jd.erosion.thermal@1": NodeParams_jd_erosion_thermal_1;
   "jd.filter.blur@1": NodeParams_jd_filter_blur_1;
+  "jd.filter.terrace@1": NodeParams_jd_filter_terrace_1;
   "jd.hydrology.fill@1": NodeParams_jd_hydrology_fill_1;
   "jd.hydrology.rivers@1": NodeParams_jd_hydrology_rivers_1;
   "jd.hydrology.sea_level@1": NodeParams_jd_hydrology_sea_level_1;
