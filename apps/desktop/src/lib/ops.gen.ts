@@ -1679,6 +1679,25 @@ export type NodeParams_jd_hydrology_fill_1 = {
   "epsilon_m"?: number;
 };
 
+export type Mouths = "south" | "north" | "west" | "east" | "border";
+
+export type NodeParams_jd_hydrology_network_1 = {
+  /** Seed of the network. */
+  "seed"?: number;
+  /** Which edge(s) the rivers drain to. */
+  "mouths"?: Mouths;
+  /** Height at the mouths, metres. */
+  "base_m"?: number;
+  /** Stream slope of first-order (headwater) channels, metres per km (> 0). */
+  "slope_m_per_km"?: number;
+  /** Each higher Strahler order multiplies the slope by this (0..1): big rivers run flat. */
+  "order_falloff"?: number;
+  /** How much the seeded noise bends the network (0 = straight parallel drainage, 1 = wild). */
+  "roughness"?: number;
+  /** Strahler order from which a channel counts as a river in the `rivers` output (≥ 1). */
+  "river_order"?: number;
+};
+
 export type NodeParams_jd_hydrology_rivers_1 = {
   /** Log-scaled flow accumulation (0..1) above which a cell is a river channel. */
   "threshold"?: number;
@@ -1975,6 +1994,7 @@ export interface NodeKinds {
   "jd.filter.blur@1": NodeParams_jd_filter_blur_1;
   "jd.filter.terrace@1": NodeParams_jd_filter_terrace_1;
   "jd.hydrology.fill@1": NodeParams_jd_hydrology_fill_1;
+  "jd.hydrology.network@1": NodeParams_jd_hydrology_network_1;
   "jd.hydrology.rivers@1": NodeParams_jd_hydrology_rivers_1;
   "jd.hydrology.sea_level@1": NodeParams_jd_hydrology_sea_level_1;
   "jd.hydrology.wetness@1": NodeParams_jd_hydrology_wetness_1;

@@ -18,6 +18,7 @@ pub mod heightfield;
 pub mod import;
 pub mod karst;
 pub mod mesh;
+pub mod network;
 pub mod noise;
 pub mod ocean;
 pub mod preview;
@@ -59,6 +60,7 @@ pub use mesh::{
     export_mesh_with, export_obj, export_ply, export_stl, export_usda, export_usdc, export_usdz,
     mesh_topology, write_usdc,
 };
+pub use network::{Mouths, NetworkParams, hydrology_first};
 pub use noise::{FractalKind, NoiseKind, NoiseParams, generate_noise};
 pub use ocean::{
     WaterLook, WaterMaps, WaveComponent, WaveParams, WaveSpectrum, bake_water, bake_water_with,

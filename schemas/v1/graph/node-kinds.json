@@ -1432,6 +1432,112 @@
     }
   },
   {
+    "kind": "jd.hydrology.network@1",
+    "description": "Hydrology-first terrain: a seeded drainage network is grown from the river mouths first and the heights are built along it (headwaters steep, big rivers flat), so every cell drains by construction — `out` heights, `rivers` (Strahler order ≥ `river_order`, 0..1) and `order`",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "rivers",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "order",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "NetworkParams",
+      "description": "Hydrology-first generator settings.",
+      "type": "object",
+      "properties": {
+        "seed": {
+          "description": "Seed of the network.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "mouths": {
+          "description": "Which edge(s) the rivers drain to.",
+          "$ref": "#/$defs/Mouths",
+          "default": "south"
+        },
+        "base_m": {
+          "description": "Height at the mouths, metres.",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        },
+        "slope_m_per_km": {
+          "description": "Stream slope of first-order (headwater) channels, metres per km (> 0).",
+          "type": "number",
+          "format": "float",
+          "default": 60.0
+        },
+        "order_falloff": {
+          "description": "Each higher Strahler order multiplies the slope by this (0..1): big rivers run flat.",
+          "type": "number",
+          "format": "float",
+          "default": 0.550000011920929
+        },
+        "roughness": {
+          "description": "How much the seeded noise bends the network (0 = straight parallel drainage, 1 = wild).",
+          "type": "number",
+          "format": "float",
+          "default": 0.800000011920929
+        },
+        "river_order": {
+          "description": "Strahler order from which a channel counts as a river in the `rivers` output (≥ 1).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 3
+        }
+      },
+      "additionalProperties": false,
+      "$defs": {
+        "Mouths": {
+          "description": "Where the rivers leave the field.",
+          "oneOf": [
+            {
+              "description": "Every cell of the south edge (row 0) is a possible mouth.",
+              "type": "string",
+              "const": "south"
+            },
+            {
+              "description": "The north edge.",
+              "type": "string",
+              "const": "north"
+            },
+            {
+              "description": "The west edge.",
+              "type": "string",
+              "const": "west"
+            },
+            {
+              "description": "The east edge.",
+              "type": "string",
+              "const": "east"
+            },
+            {
+              "description": "The whole border: an island.",
+              "type": "string",
+              "const": "border"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
     "kind": "jd.hydrology.rivers@1",
     "description": "Carve river channels where flow accumulates (depressions filled first); outputs the carved terrain and a 0..1 river mask",
     "inputs": [

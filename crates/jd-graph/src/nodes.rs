@@ -570,6 +570,18 @@ pub fn register_all(r: &mut Registry) {
             Ok(out("out", generate_noise(&ctx.lod_world, &np)?))
         },
     ));
+    r.register(NodeDef::new::<jd_terrain::NetworkParams, _>(
+        "jd.hydrology.network@1",
+        "Hydrology-first terrain: a seeded drainage network is grown from the river mouths first and the heights are built along it (headwaters steep, big rivers flat), so every cell drains by construction — `out` heights, `rivers` (Strahler order ≥ `river_order`, 0..1) and `order`",
+        vec![],
+        vec![port("out", PortType::Heightfield, false), port("rivers", PortType::Heightfield, false), port("order", PortType::Heightfield, false)],
+        |ctx: &EvalCtx, p, _| {
+            let np: jd_terrain::NetworkParams = params(p)?;
+            let w = &ctx.lod_world;
+            let (out_h, rivers, order) = jd_terrain::hydrology_first(w.resolution_px[0], w.resolution_px[1], w.tile_size, w.halo, spacing_m(ctx), &np)?;
+            Ok(BTreeMap::from([("out".to_owned(), Value::field(out_h)), ("rivers".to_owned(), Value::field(rivers)), ("order".to_owned(), Value::field(order))]))
+        },
+    ).with_memory(14.0));
     r.register(NodeDef::new::<NoParams, _>(
         "jd.math.add@1",
         "a + b",

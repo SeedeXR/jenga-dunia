@@ -1,0 +1,36 @@
+{
+  "src": "/tmp/jd-scratch/cli-network-raw.png",
+  "out": "cli-network.png",
+  "annotations": [
+    {
+      "type": "arrow",
+      "x1": 140,
+      "y1": 296,
+      "x2": 140,
+      "y2": 250,
+      "text": "1  mouths: the south edge sits at the base height",
+      "tx": 16,
+      "ty": 318
+    },
+    {
+      "type": "circle",
+      "cx": 80,
+      "cy": 60,
+      "r": 30,
+      "label": "2",
+      "text": "2  headwaters climb 60 m/km; each order halves it",
+      "tx": 16,
+      "ty": 342
+    },
+    {
+      "type": "circle",
+      "cx": 420,
+      "cy": 150,
+      "r": 36,
+      "label": "3",
+      "text": "3  order \u2265 5 trunks; a fill node finds no pit (lakes 0)",
+      "tx": 16,
+      "ty": 366
+    }
+  ]
+}
