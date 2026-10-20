@@ -23,7 +23,7 @@ export interface Response<T = unknown> {
   request_id: string;
   status: "ok" | "accepted" | "error";
   result?: T;
-  job_id?: string;
+  job_id?: number;
   error?: JdError;
   warnings?: Warning[];
 }

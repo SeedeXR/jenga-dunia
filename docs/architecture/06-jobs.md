@@ -22,7 +22,7 @@ stateDiagram-v2
   TimedOut --> [*]
 ```
 
-**Shipped (slice 1, 2026-10-20):** a process-wide job table in `jd-core::jobs` — `graph.evaluate` registers a job, reports per-node progress (`done/total`, current kind) and polls a cancel flag before every node and inside every thermal/hydraulic iteration; `jobs.list` and `jobs.cancel {id}` are ordinary operations, so the GUI header (progress + **Cancel**), the CLI and MCP agents share them. Cancellation returns `E_CANCELLED` with `job_id` and publishes nothing. Queues, budgets, timeouts and detached execution (below) come next.
+**Shipped (slice 1, 2026-10-20):** a process-wide job table in `jd-core::jobs` — `graph.evaluate` registers a job, reports per-node progress (`done/total`, current kind) and polls a cancel flag before every node and inside every thermal/hydraulic iteration; `jobs.list` and `jobs.cancel {id}` are ordinary operations, so the GUI header (progress + **Cancel**), the CLI and MCP agents share them. Cancellation returns `E_CANCELLED` with `job_id` and publishes nothing. **Slice 2 — detached execution:** `graph.evaluate_async` runs the same evaluation on a worker thread (owned job guard) and answers at once with `status: accepted` + `job_id`; `jobs.list` shows its progress, `jobs.cancel` stops it, and `jobs.result {id}` hands over the finished op's envelope (`status`/`result`/`error`/`warnings`) exactly once — the table keeps the last 64 finished envelopes. One thread per detached job; queues, budgets and timeouts (below) come next.
 
 ## Scheduler architecture
 

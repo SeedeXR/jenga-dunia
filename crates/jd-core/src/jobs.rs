@@ -1,7 +1,11 @@
 //! Running jobs: progress and cancellation shared by GUI, CLI and MCP (`06-jobs.md`, slice 1).
 //!
-//! ponytail: synchronous ops report progress through a shared table and poll a cancel flag; the
-//! async scheduler (queues, budgets, timeouts, broadcast progress) comes when ops run detached.
+//! Detached execution (`graph.evaluate_async`): the op spawns a thread holding an owned guard,
+//! the caller gets `status: accepted` + `job_id`, polls `jobs.list` for progress and collects the
+//! envelope with `jobs.result {id}` (kept for the last 64 finished jobs).
+//!
+//! ponytail: one thread per detached job, no queue/budget/timeout — the scheduler (06-jobs.md)
+//! comes when agents submit more work than cores.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -42,6 +46,38 @@ pub struct JobInfo {
 pub struct Jobs {
     next: AtomicU64,
     running: Mutex<BTreeMap<u64, Entry>>,
+    /// Envelopes of detached jobs that finished, until collected (bounded).
+    finished: Mutex<BTreeMap<u64, serde_json::Value>>,
+}
+
+/// Owned variant of [`JobGuard`] for detached jobs (lives on the worker thread).
+pub struct OwnedJobGuard {
+    jobs: Arc<Jobs>,
+    /// Job id.
+    pub id: u64,
+    /// Flag + progress sink to hand to the evaluator.
+    pub ctl: JobCtl,
+}
+
+impl Drop for OwnedJobGuard {
+    fn drop(&mut self) {
+        if let Ok(mut r) = self.jobs.running.lock() {
+            r.remove(&self.id);
+        }
+    }
+}
+
+/// What `jobs.result` reports.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct JobResult {
+    /// Job id asked for.
+    pub id: u64,
+    /// `running`, `done` (envelope attached, now collected) or `unknown` (never existed or already collected).
+    pub state: String,
+    /// Progress while running.
+    pub info: Option<JobInfo>,
+    /// The finished op's envelope fields: `status`, `result` / `error`, `warnings`.
+    pub response: Option<serde_json::Value>,
 }
 
 /// Removes the job from the table when the op returns (success, error or panic unwinding).
@@ -91,6 +127,55 @@ impl Jobs {
             jobs: self,
             id,
             ctl,
+        }
+    }
+
+    /// Register a detached job; the guard is owned so a worker thread can carry it.
+    pub fn start_owned(self: &Arc<Self>, op: &str) -> OwnedJobGuard {
+        let g = self.start(op);
+        let (id, ctl) = (g.id, g.ctl.clone());
+        std::mem::forget(g); // the owned guard below removes the entry instead
+        OwnedJobGuard {
+            jobs: Arc::clone(self),
+            id,
+            ctl,
+        }
+    }
+
+    /// Store a detached job's envelope for `jobs.result` (keeps the 64 most recent).
+    pub fn finish(&self, id: u64, envelope: serde_json::Value) {
+        if let Ok(mut f) = self.finished.lock() {
+            f.insert(id, envelope);
+            while f.len() > 64 {
+                let oldest = f.keys().next().copied();
+                if let Some(k) = oldest {
+                    f.remove(&k);
+                }
+            }
+        }
+    }
+
+    /// State of a job: running (with progress), done (envelope handed over once) or unknown.
+    pub fn result(&self, id: u64) -> JobResult {
+        if let Some(info) = self.list().into_iter().find(|j| j.id == id) {
+            return JobResult {
+                id,
+                state: "running".into(),
+                info: Some(info),
+                response: None,
+            };
+        }
+        let response = self.finished.lock().ok().and_then(|mut f| f.remove(&id));
+        JobResult {
+            id,
+            state: if response.is_some() {
+                "done"
+            } else {
+                "unknown"
+            }
+            .into(),
+            info: None,
+            response,
         }
     }
 

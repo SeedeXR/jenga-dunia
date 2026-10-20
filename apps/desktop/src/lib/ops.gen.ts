@@ -211,6 +211,16 @@ export type GraphEvaluateResult = {
   "layers": Record<string, string>;
 };
 
+export type GraphEvaluateAsyncRequest = {
+  /** Level of detail (0 = full resolution). */
+  "lod"?: number;
+};
+
+export type GraphEvaluateAsyncResult = {
+  /** Job id for `jobs.list` / `jobs.cancel` / `jobs.result`. */
+  "job_id": number;
+};
+
 export type GraphKindsRequest = Record<string, unknown>;
 
 export type PortType = "heightfield";
@@ -379,6 +389,22 @@ export type JobInfo = {
 };
 
 export type JobsListResult = JobInfo[];
+
+export type JobsResultRequest = {
+  /** Job id from `jobs.list`. */
+  "id": number;
+};
+
+export type JobsResultResult = {
+  /** Job id asked for. */
+  "id": number;
+  /** `running`, `done` (envelope attached, now collected) or `unknown` (never existed or already collected). */
+  "state": string;
+  /** Progress while running. */
+  "info"?: JobInfo | null;
+  /** The finished op's envelope fields: `status`, `result` / `error`, `warnings`. */
+  "response"?: unknown;
+};
 
 export type ProjectCacheGcRequest = Record<string, unknown>;
 
@@ -970,6 +996,8 @@ export interface JdOps {
   "graph.disconnect": { request: GraphDisconnectRequest; result: GraphDisconnectResult };
   /** Validate and evaluate the graph incrementally; publishes output nodes as layers (`<layer>#lod<N>` when lod > 0) */
   "graph.evaluate": { request: GraphEvaluateRequest; result: GraphEvaluateResult };
+  /** Start graph.evaluate on a worker thread and return at once with `status: accepted` + `job_id`; follow it with jobs.list, cancel with jobs.cancel, collect the envelope with jobs.result */
+  "graph.evaluate_async": { request: GraphEvaluateAsyncRequest; result: GraphEvaluateAsyncResult };
   /** List available node kinds with ports and parameter schemas */
   "graph.kinds": { request: GraphKindsRequest; result: GraphKindsResult };
   /** Nodes and edges of the open project's graph */
@@ -990,6 +1018,8 @@ export interface JdOps {
   "jobs.cancel": { request: JobsCancelRequest; result: JobsCancelResult };
   /** Running jobs with progress (steps done/total, current node) — poll while an evaluation runs */
   "jobs.list": { request: JobsListRequest; result: JobsListResult };
+  /** State of a job: running (progress), done (the finished op's envelope, handed over once) or unknown */
+  "jobs.result": { request: JobsResultRequest; result: JobsResultResult };
   /** Evict the oldest cached layer blobs until the project's cache fits `settings.cache_limit_bytes` (the cache is disposable); reports what is left */
   "project.cache_gc": { request: ProjectCacheGcRequest; result: ProjectCacheGcResult };
   /** Close the open project (unsaved changes stay in the journal) */

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AcceptedJob",
+  "description": "Result of a detached op: the job to follow.",
+  "type": "object",
+  "properties": {
+    "job_id": {
+      "description": "Job id for `jobs.list` / `jobs.cancel` / `jobs.result`.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "job_id"
+  ]
+}

@@ -988,6 +988,45 @@ expression: list
     }
   },
   {
+    "id": "graph.evaluate_async",
+    "description": "Start graph.evaluate on a worker thread and return at once with `status: accepted` + `job_id`; follow it with jobs.list, cancel with jobs.cancel, collect the envelope with jobs.result",
+    "scope": "project-write",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "Evaluate",
+      "description": "`graph.evaluate` params.",
+      "type": "object",
+      "properties": {
+        "lod": {
+          "description": "Level of detail (0 = full resolution).",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "AcceptedJob",
+      "description": "Result of a detached op: the job to follow.",
+      "type": "object",
+      "properties": {
+        "job_id": {
+          "description": "Job id for `jobs.list` / `jobs.cancel` / `jobs.result`.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "job_id"
+      ]
+    }
+  },
+  {
     "id": "graph.kinds",
     "description": "List available node kinds with ports and parameter schemas",
     "scope": "none",
@@ -2374,6 +2413,118 @@ expression: list
       "items": {
         "$ref": "#/$defs/JobInfo"
       },
+      "$defs": {
+        "JobInfo": {
+          "description": "A running job as reported by `jobs.list`.",
+          "type": "object",
+          "properties": {
+            "id": {
+              "description": "Job id (process-local, increasing).",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "op": {
+              "description": "Operation running.",
+              "type": "string"
+            },
+            "elapsed_ms": {
+              "description": "Milliseconds since the job started.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "done": {
+              "description": "Steps finished (graph nodes).",
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "total": {
+              "description": "Total steps.",
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "current": {
+              "description": "What is running now (node kind).",
+              "type": "string"
+            },
+            "cancelling": {
+              "description": "Cancel requested.",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id",
+            "op",
+            "elapsed_ms",
+            "done",
+            "total",
+            "current",
+            "cancelling"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "id": "jobs.result",
+    "description": "State of a job: running (progress), done (the finished op's envelope, handed over once) or unknown",
+    "scope": "none",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "CancelJob",
+      "description": "`jobs.cancel` params.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Job id from `jobs.list`.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ]
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "JobResult",
+      "description": "What `jobs.result` reports.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Job id asked for.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "state": {
+          "description": "`running`, `done` (envelope attached, now collected) or `unknown` (never existed or already collected).",
+          "type": "string"
+        },
+        "info": {
+          "description": "Progress while running.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JobInfo"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "response": {
+          "description": "The finished op's envelope fields: `status`, `result` / `error`, `warnings`."
+        }
+      },
+      "required": [
+        "id",
+        "state"
+      ],
       "$defs": {
         "JobInfo": {
           "description": "A running job as reported by `jobs.list`.",

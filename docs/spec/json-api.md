@@ -13,7 +13,7 @@ Normative companion to `docs/architecture/07-agent-interfaces.md`. JSON Schemas 
 | `client` | optional | — | `{kind: gui|cli|mcp|plugin, name, scopes[]}` for audit |
 | `status` | — | `ok` \| `accepted` \| `error` | |
 | `result` | — | object | validated against `<op>.result.json` |
-| `job_id` | — | with `accepted` | ULID |
+| `job_id` | — | with `accepted` | integer, process-local (the id `jobs.list` / `jobs.cancel` / `jobs.result` use) |
 | `warnings` | — | `[{code: "W_…", message, details}]` | non-fatal |
 | `error` | — | `{code, message, why, next, details}` | see `error-codes.md` |
 

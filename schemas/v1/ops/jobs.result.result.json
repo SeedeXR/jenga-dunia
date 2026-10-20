@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "JobResult",
+  "description": "What `jobs.result` reports.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "Job id asked for.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "state": {
+      "description": "`running`, `done` (envelope attached, now collected) or `unknown` (never existed or already collected).",
+      "type": "string"
+    },
+    "info": {
+      "description": "Progress while running.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/JobInfo"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "response": {
+      "description": "The finished op's envelope fields: `status`, `result` / `error`, `warnings`."
+    }
+  },
+  "required": [
+    "id",
+    "state"
+  ],
+  "$defs": {
+    "JobInfo": {
+      "description": "A running job as reported by `jobs.list`.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Job id (process-local, increasing).",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "op": {
+          "description": "Operation running.",
+          "type": "string"
+        },
+        "elapsed_ms": {
+          "description": "Milliseconds since the job started.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "done": {
+          "description": "Steps finished (graph nodes).",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "total": {
+          "description": "Total steps.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "current": {
+          "description": "What is running now (node kind).",
+          "type": "string"
+        },
+        "cancelling": {
+          "description": "Cancel requested.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "op",
+        "elapsed_ms",
+        "done",
+        "total",
+        "current",
+        "cancelling"
+      ]
+    }
+  }
+}

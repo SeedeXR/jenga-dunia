@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CancelJob",
+  "description": "`jobs.cancel` params.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "Job id from `jobs.list`.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id"
+  ]
+}

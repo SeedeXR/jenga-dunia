@@ -170,6 +170,8 @@ pub struct Operation {
     /// JSON Schema of `result`.
     pub result_schema: Value,
     handler: Handler,
+    /// Returns `status: accepted` with the job id instead of a result.
+    detached: bool,
 }
 
 /// Machine-readable description of an operation (no handler).
@@ -185,6 +187,13 @@ pub struct OperationInfo {
     pub request_schema: Value,
     /// Result schema.
     pub result_schema: Value,
+}
+
+/// Result of a detached op: the job to follow.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AcceptedJob {
+    /// Job id for `jobs.list` / `jobs.cancel` / `jobs.result`.
+    pub job_id: u64,
 }
 
 /// The registry.
@@ -229,8 +238,29 @@ impl Registry {
                 request_schema: schema_of::<P>(),
                 result_schema: schema_of::<R>(),
                 handler,
+                detached: false,
             },
         );
+    }
+
+    /// Register an op that starts a detached job: the handler returns the job id and the caller
+    /// receives `status: accepted`, `job_id` and `result: { "job_id": N }`.
+    pub fn register_detached<P, F>(
+        &mut self,
+        id: &'static str,
+        description: &'static str,
+        scope: Scope,
+        f: F,
+    ) where
+        P: for<'de> Deserialize<'de> + schemars::JsonSchema,
+        F: Fn(&Context, P) -> JdResult<u64> + Send + Sync + 'static,
+    {
+        self.register::<P, AcceptedJob, _>(id, description, scope, move |ctx, p| {
+            Ok((AcceptedJob { job_id: f(ctx, p)? }, Vec::new()))
+        });
+        if let Some(op) = self.ops.get_mut(id) {
+            op.detached = true;
+        }
     }
 
     /// All operations, sorted by id.
@@ -275,6 +305,7 @@ impl Registry {
         let _enter = span.enter();
         let started = std::time::Instant::now();
         let handler = op.handler.clone();
+        let detached = op.detached;
         let Request {
             op: op_id, params, ..
         } = req;
@@ -284,11 +315,16 @@ impl Registry {
             Ok((result, warnings)) => {
                 tracing::info!(
                     duration_ms,
-                    outcome = "ok",
+                    outcome = if detached { "accepted" } else { "ok" },
                     warnings = warnings.len(),
                     "operation completed"
                 );
-                Response::ok(&op_id, request_id, result, warnings)
+                let mut r = Response::ok(&op_id, request_id, result, warnings);
+                if detached {
+                    r.status = crate::envelope::Status::Accepted;
+                    r.job_id = r.result.as_ref().and_then(|v| v["job_id"].as_u64());
+                }
+                r
             }
             Err(e) => {
                 tracing::warn!(
@@ -691,6 +727,12 @@ pub mod builtin {
             Scope::None,
             |ctx, j| Ok((ctx.jobs.cancel(j.id), Vec::new())),
         );
+        r.register::<CancelJob, crate::jobs::JobResult, _>(
+            "jobs.result",
+            "State of a job: running (progress), done (the finished op's envelope, handed over once) or unknown",
+            Scope::None,
+            |ctx, j| Ok((ctx.jobs.result(j.id), Vec::new())),
+        );
         r.register::<NoParams, jd_cache::GcReport, _>(
             "project.cache_gc",
             "Evict the oldest cached layer blobs until the project's cache fits `settings.cache_limit_bytes` (the cache is disposable); reports what is left",
@@ -1053,6 +1095,67 @@ pub mod graph {
         Ok(())
     }
 
+    /// Evaluate the open project's graph under a job control handle and publish its outputs.
+    fn evaluate(
+        ctx: &Context,
+        lod: u8,
+        job_id: u64,
+        ctl: &jd_graph::JobCtl,
+    ) -> JdResult<(EvaluateResult, Vec<Warning>)> {
+        let (graph, world, root) = ctx
+            .with_project(|p| Ok((p.graph.clone(), p.doc.world.clone(), p.root().to_path_buf())))?;
+        // Two outputs publishing the same layer would silently overwrite each other.
+        let mut by_layer: BTreeMap<String, &NodeId> = BTreeMap::new();
+        for (id, node) in &graph.nodes {
+            if node.kind.0.starts_with("jd.output.height@")
+                && let Some(other) =
+                    by_layer.insert(jd_graph::nodes::output_layer_name(&node.params), id)
+            {
+                return Err(JdError::new(
+                    ErrorCode::E_INPUT_INVALID,
+                    format!(
+                        "two output nodes publish the layer `{}`",
+                        jd_graph::nodes::output_layer_name(&node.params)
+                    ),
+                )
+                .next("Give one of them a different `layer` parameter.")
+                .detail("nodes", vec![other.to_string(), id.to_string()]));
+            }
+        }
+        let (outputs, report) = Evaluator::new(registry(), cache())
+            .evaluate_job(&graph, &world, lod, Some(&root.join("assets")), ctl)
+            .map_err(|err| {
+                if err.code == ErrorCode::E_CANCELLED {
+                    err.detail("job_id", job_id)
+                } else {
+                    err
+                }
+            })?;
+        let mut layers = BTreeMap::new();
+        for (id, node) in &graph.nodes {
+            if node.kind.0.starts_with("jd.output.height@")
+                && let Some(v) = outputs.get(&(id.clone(), "out".to_owned()))
+            {
+                let mut name = jd_graph::nodes::output_layer_name(&node.params);
+                if lod > 0 {
+                    // Never overwrite the full-resolution layer with a preview.
+                    name = format!("{name}#lod{}", lod);
+                }
+                let hf = v.as_field();
+                layers.insert(name.clone(), v.content_hash().to_hex().to_string());
+                ctx.set_layer_for(&root, &name, (**hf).clone())?;
+            }
+        }
+        let mut warnings = Vec::new();
+        if layers.is_empty() {
+            warnings.push(Warning::new(
+                "W_NO_OUTPUT",
+                "graph has no jd.output.height node; nothing was published as a layer",
+            ));
+        }
+        Ok((EvaluateResult { report, layers }, warnings))
+    }
+
     /// Register graph ops.
     pub fn register_all(r: &mut Registry) {
         r.register::<NoParams, Vec<jd_graph::registry::NodeDefInfo>, _>(
@@ -1186,51 +1289,31 @@ pub mod graph {
             "Validate and evaluate the graph incrementally; publishes output nodes as layers (`<layer>#lod<N>` when lod > 0)",
             Scope::ProjectWrite,
             |ctx, e| {
-                let (graph, world, root) = ctx.with_project(|p| {
-                    Ok((p.graph.clone(), p.doc.world.clone(), p.root().to_path_buf()))
-                })?;
-                // Two outputs publishing the same layer would silently overwrite each other.
-                let mut by_layer: BTreeMap<String, &NodeId> = BTreeMap::new();
-                for (id, node) in &graph.nodes {
-                    if node.kind.0.starts_with("jd.output.height@")
-                        && let Some(other) = by_layer
-                            .insert(jd_graph::nodes::output_layer_name(&node.params), id)
-                    {
-                        return Err(JdError::new(
-                            ErrorCode::E_INPUT_INVALID,
-                            format!("two output nodes publish the layer `{}`", jd_graph::nodes::output_layer_name(&node.params)),
-                        )
-                        .next("Give one of them a different `layer` parameter.")
-                        .detail("nodes", vec![other.to_string(), id.to_string()]));
-                    }
-                }
                 let job = ctx.jobs.start("graph.evaluate");
-                let (outputs, report) = Evaluator::new(registry(), cache())
-                    .evaluate_job(&graph, &world, e.lod, Some(&root.join("assets")), &job.ctl)
-                    .map_err(|err| if err.code == ErrorCode::E_CANCELLED { err.detail("job_id", job.id) } else { err })?;
-                let mut layers = BTreeMap::new();
-                for (id, node) in &graph.nodes {
-                    if node.kind.0.starts_with("jd.output.height@")
-                        && let Some(v) = outputs.get(&(id.clone(), "out".to_owned()))
-                    {
-                        let mut name = jd_graph::nodes::output_layer_name(&node.params);
-                        if e.lod > 0 {
-                            // Never overwrite the full-resolution layer with a preview.
-                            name = format!("{name}#lod{}", e.lod);
-                        }
-                        let hf = v.as_field();
-                        layers.insert(name.clone(), v.content_hash().to_hex().to_string());
-                        ctx.set_layer_for(&root, &name, (**hf).clone())?;
-                    }
-                }
-                let mut warnings = Vec::new();
-                if layers.is_empty() {
-                    warnings.push(Warning::new(
-                        "W_NO_OUTPUT",
-                        "graph has no jd.output.height node; nothing was published as a layer",
-                    ));
-                }
-                Ok((EvaluateResult { report, layers }, warnings))
+                evaluate(ctx, e.lod, job.id, &job.ctl)
+            },
+        );
+        r.register_detached::<Evaluate, _>(
+            "graph.evaluate_async",
+            "Start graph.evaluate on a worker thread and return at once with `status: accepted` + `job_id`; follow it with jobs.list, cancel with jobs.cancel, collect the envelope with jobs.result",
+            Scope::ProjectWrite,
+            |ctx, e| {
+                ctx.with_project(|_| Ok(()))?; // fail now, not on the thread, when nothing is open
+                let guard = ctx.jobs.start_owned("graph.evaluate");
+                let id = guard.id;
+                let ctx2 = ctx.clone();
+                std::thread::Builder::new()
+                    .name(format!("jd-job-{id}"))
+                    .spawn(move || {
+                        let envelope = match evaluate(&ctx2, e.lod, id, &guard.ctl) {
+                            Ok((r, w)) => serde_json::json!({ "status": "ok", "result": r, "warnings": w }),
+                            Err(err) => serde_json::json!({ "status": "error", "error": err }),
+                        };
+                        ctx2.jobs.finish(id, envelope);
+                        drop(guard);
+                    })
+                    .map_err(|e| JdError::new(ErrorCode::E_INTERNAL, format!("cannot spawn job thread: {e}")))?;
+                Ok(id)
             },
         );
     }
@@ -1241,6 +1324,150 @@ pub mod graph {
 
         fn call(reg: &Registry, ctx: &Context, op: &str, params: Value) -> Response {
             reg.invoke(ctx, Request::new(op, params))
+        }
+
+        fn wait_done(reg: &Registry, ctx: &Context, id: u64) -> Value {
+            for _ in 0..600 {
+                let r = call(reg, ctx, "jobs.result", serde_json::json!({ "id": id }));
+                let res = r.result.expect("result");
+                if res["state"] == "done" {
+                    return res["response"].clone();
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            panic!("job {id} did not finish");
+        }
+
+        #[test]
+        fn detached_evaluate_is_accepted_then_collected_and_can_be_cancelled() {
+            let reg = Registry::with_builtins();
+            let dir = tempfile::tempdir().expect("tmp");
+            let path = dir.path().join("d.jdproj");
+            let ctx = Context::default();
+            let world = WorldSettings {
+                resolution_px: [64, 64],
+                extent_m: [64.0, 64.0],
+                tile_size: 64,
+                halo: 4,
+                ..Default::default()
+            };
+            assert_eq!(
+                call(
+                    &reg,
+                    &ctx,
+                    "project.create",
+                    serde_json::json!({ "path": path, "name": "D", "world": world })
+                )
+                .status,
+                crate::envelope::Status::Ok
+            );
+            // Nothing open → the error comes back synchronously, not from a thread.
+            let closed = Context::default();
+            assert_eq!(
+                call(&reg, &closed, "graph.evaluate_async", serde_json::json!({})).status,
+                crate::envelope::Status::Error
+            );
+            // Accepted + job id; the envelope arrives through jobs.result exactly once.
+            let r = call(&reg, &ctx, "graph.evaluate_async", serde_json::json!({}));
+            assert_eq!(r.status, crate::envelope::Status::Accepted, "{:?}", r.error);
+            let id_u64 = r.job_id.expect("job id");
+            let env = wait_done(&reg, &ctx, id_u64);
+            assert_eq!(env["status"], "ok", "{env}");
+            assert!(env["result"]["layers"]["height"].is_string(), "{env}");
+            assert_eq!(
+                call(
+                    &reg,
+                    &ctx,
+                    "jobs.result",
+                    serde_json::json!({ "id": id_u64 })
+                )
+                .result
+                .expect("r")["state"],
+                "unknown",
+                "collected once"
+            );
+            assert_eq!(
+                call(
+                    &reg,
+                    &ctx,
+                    "terrain.stats",
+                    serde_json::json!({ "layer": "height" })
+                )
+                .status,
+                crate::envelope::Status::Ok
+            );
+            // A long detached job can be cancelled; its envelope carries E_CANCELLED.
+            let add = call(
+                &reg,
+                &ctx,
+                "graph.add_node",
+                serde_json::json!({ "kind": "jd.erosion.hydraulic@1", "params": { "iterations": 2000 } }),
+            );
+            let hid = add.result.expect("id")["id"]
+                .as_str()
+                .expect("str")
+                .to_owned();
+            let view = call(&reg, &ctx, "graph.list", serde_json::json!({}))
+                .result
+                .expect("view");
+            let noise = view["nodes"]
+                .as_array()
+                .expect("nodes")
+                .iter()
+                .find(|n| n["kind"].as_str().unwrap_or("").starts_with("jd.noise"))
+                .expect("noise")["id"]
+                .as_str()
+                .expect("id")
+                .to_owned();
+            let output = view["nodes"]
+                .as_array()
+                .expect("nodes")
+                .iter()
+                .find(|n| n["kind"].as_str().unwrap_or("").starts_with("jd.output"))
+                .expect("out")["id"]
+                .as_str()
+                .expect("id")
+                .to_owned();
+            call(
+                &reg,
+                &ctx,
+                "graph.connect",
+                serde_json::json!({ "from": noise, "to": hid, "to_port": "in" }),
+            );
+            call(
+                &reg,
+                &ctx,
+                "graph.connect",
+                serde_json::json!({ "from": hid, "from_port": "out", "to": output, "to_port": "in" }),
+            );
+            let r = call(&reg, &ctx, "graph.evaluate_async", serde_json::json!({}));
+            assert_eq!(r.status, crate::envelope::Status::Accepted, "{:?}", r.error);
+            let id2 = r.job_id.expect("id");
+            // Visible in jobs.list while running, then cancelled.
+            let mut seen = false;
+            for _ in 0..200 {
+                let listed = call(&reg, &ctx, "jobs.list", serde_json::json!({}))
+                    .result
+                    .expect("list");
+                if listed
+                    .as_array()
+                    .expect("arr")
+                    .iter()
+                    .any(|j| j["id"] == id2)
+                {
+                    seen = true;
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            assert!(seen, "detached job never showed in jobs.list");
+            assert_eq!(
+                call(&reg, &ctx, "jobs.cancel", serde_json::json!({ "id": id2 })).result,
+                Some(serde_json::json!(true))
+            );
+            let env = wait_done(&reg, &ctx, id2);
+            assert_eq!(env["status"], "error", "{env}");
+            assert_eq!(env["error"]["code"], "E_CANCELLED", "{env}");
         }
 
         #[test]

@@ -24,15 +24,13 @@
       "description": "Result payload when `status == ok`."
     },
     "job_id": {
-      "description": "Job id when `status == accepted`.",
-      "anyOf": [
-        {
-          "$ref": "#/$defs/JobId"
-        },
-        {
-          "type": "null"
-        }
-      ]
+      "description": "Job id when `status == accepted` (process-local, as listed by `jobs.list`).",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0
     },
     "error": {
       "description": "Error when `status == error`.",
@@ -89,10 +87,6 @@
           "const": "error"
         }
       ]
-    },
-    "JobId": {
-      "description": "Identifies a background job.",
-      "type": "string"
     },
     "JdError": {
       "description": "The error envelope: what happened, why it matters, what to do next, plus machine context.",

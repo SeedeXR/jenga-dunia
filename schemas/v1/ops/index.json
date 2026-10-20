@@ -35,6 +35,11 @@
     "scope": "project-write"
   },
   {
+    "id": "graph.evaluate_async",
+    "description": "Start graph.evaluate on a worker thread and return at once with `status: accepted` + `job_id`; follow it with jobs.list, cancel with jobs.cancel, collect the envelope with jobs.result",
+    "scope": "project-write"
+  },
+  {
     "id": "graph.kinds",
     "description": "List available node kinds with ports and parameter schemas",
     "scope": "none"
@@ -82,6 +87,11 @@
   {
     "id": "jobs.list",
     "description": "Running jobs with progress (steps done/total, current node) — poll while an evaluation runs",
+    "scope": "none"
+  },
+  {
+    "id": "jobs.result",
+    "description": "State of a job: running (progress), done (the finished op's envelope, handed over once) or unknown",
     "scope": "none"
   },
   {

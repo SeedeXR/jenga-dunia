@@ -74,6 +74,19 @@ $ jd schema project.create      # full request/result JSON Schema
 
 Long operations register a job: `jd op jobs.list` shows running jobs with progress (`done/total`, current node) and `jd op jobs.cancel --params '{"id":1}'` stops one with `E_CANCELLED` (exit code 5). In one CLI process this is mostly useful to agents driving the MCP server, where `jobs.list` / `jobs.cancel` are tools like any other.
 
+**Detached evaluation for agents.** In a long-lived process (the MCP server, the desktop app) `graph.evaluate_async` returns immediately with `status: accepted` and a `job_id`; `jobs.list` shows its progress, `jobs.cancel {id}` stops it, and `jobs.result {id}` hands over the finished op's envelope exactly once (`state: running | done | unknown`). Driven through the real MCP server on a 1024² world:
+
+```
+graph.evaluate_async → status accepted, job_id 1, returned after 3 ms
+jobs.result 1        → running 0/2 jd.noise.fbm@1 … running 1/2 jd.output.height@1
+jobs.result 1        → done after 444 ms: envelope status ok, layers ["height"]
+jobs.result 1        → unknown (collected once)
+graph.evaluate_async (hydraulic × 2000) → job_id 2; jobs.list: 2:graph.evaluate 1/3 jd.erosion.hydraulic@1
+jobs.cancel 2        → true; jobs.result 2 → done: status error, E_CANCELLED, details.job_id 2
+```
+
+(One CLI invocation is one process, so `jd op graph.evaluate_async` alone is not useful — the job dies with the process; use `jd op graph.evaluate`.)
+
 ## 4. Generate terrain and export a heightmap
 
 `jd terrain generate` opens the project, generates a noise heightfield for the project's world (extent, resolution, tiles from `project.json`) and optionally exports it in one go. The format follows the extension: `.exr` (32-bit float, exact), `.tif` (32-bit float TIFF, exact — GIS/DCC tools), `.png` (16-bit, quantised), `.r16` (Unity/Unreal raw), `.r32` (raw float).

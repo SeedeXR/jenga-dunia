@@ -1,6 +1,6 @@
 //! JSON request/response envelope (`docs/spec/json-api.md`).
 
-use jd_types::{JdError, JobId, RequestId, SchemaVersion};
+use jd_types::{JdError, RequestId, SchemaVersion};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -99,9 +99,9 @@ pub struct Response {
     /// Result payload when `status == ok`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result: Option<Value>,
-    /// Job id when `status == accepted`.
+    /// Job id when `status == accepted` (process-local, as listed by `jobs.list`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub job_id: Option<JobId>,
+    pub job_id: Option<u64>,
     /// Error when `status == error`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<JdError>,
