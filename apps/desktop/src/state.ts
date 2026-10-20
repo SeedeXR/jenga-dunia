@@ -1,6 +1,6 @@
 // Frontend store: a mirror of what the core reports, never the source of truth (docs/architecture/12-ui-workspace.md).
 import { create } from "zustand";
-import type { Edge, GraphEvaluateResult, GraphListResult, HeightmapFormat, JdOps, JobInfo as JobInfoGen, NodeDefInfo, NodeView, NoiseParams, OpId, ProjectOpenResult, TerrainStatsResult } from "./lib/ops.gen";
+import type { Edge, GraphEvaluateResult, GraphListResult, HeightmapFormat, JdOps, JobInfo as JobInfoGen, NodeDefInfo, NodeView, NoiseParams, OpId, ProjectOpenResult, ProjectSaveResult, TerrainStatsResult } from "./lib/ops.gen";
 import { layerPreview, op, type JdError, type Preview, type Response, type Warning } from "./lib/api";
 
 export type ProjectSummary = ProjectOpenResult;
@@ -201,10 +201,28 @@ export const useStore = create<State>((set, get) => {
     }, 150);
   };
   type GraphView = GraphListResult;
+  // Autosave: a debounced project.save after any journaled edit, so `dirty` / `journal` return to
+  // false / 0 on their own (the WAL already survives crashes; this is about never losing work on
+  // quit). `?autosave=<ms>` overrides the delay; 0 disables it (tests that inspect the journal).
+  // ponytail: no preference UI; add one when someone asks for a longer interval.
+  const AUTOSAVE_MS = Number(new URLSearchParams(location.search).get("autosave") ?? 2000);
+  let autosaveTimer: ReturnType<typeof setTimeout> | undefined;
+  const scheduleAutosave = () => {
+    if (!(AUTOSAVE_MS > 0)) return;
+    clearTimeout(autosaveTimer);
+    autosaveTimer = setTimeout(() => void autosave(), AUTOSAVE_MS);
+  };
+  const autosave = async () => {
+    if (get().busy || get().jobs.length > 0 || !get().project) return scheduleAutosave();
+    const r = await op<ProjectSaveResult>("project.save");
+    log(r);
+    if (r.status === "ok" && r.result) set({ project: r.result });
+  };
   const applyGraph = (r: Response<GraphView>) => {
     if (r.status === "ok" && r.result) {
       set({ graph: r.result });
       liveEvaluate();
+      scheduleAutosave();
     }
   };
   const loadGraph = async () => {

@@ -20,7 +20,7 @@ test.describe("node graph editor against the real core", () => {
     await installBridge(page, core);
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(String(e)));
-    await page.goto("/");
+    await page.goto("/?autosave=0"); // this test reads the journal; autosave would truncate it
     const proj = path.join(ws, "Graph.jdproj");
     await page.getByTestId("project-path").fill(proj);
     await page.getByLabel("Extent (m)").fill("1024");

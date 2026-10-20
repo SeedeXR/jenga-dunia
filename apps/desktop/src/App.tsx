@@ -245,9 +245,9 @@ export default function App() {
               <dt>id</dt>
               <dd className="truncate font-mono text-jd-fg-1">{s.project.project_id}</dd>
               <dt>dirty</dt>
-              <dd>{String(s.project.dirty)}</dd>
+              <dd data-testid="project-dirty">{String(s.project.dirty)}</dd>
               <dt>journal</dt>
-              <dd>{s.project.pending_journal}</dd>
+              <dd data-testid="project-journal">{s.project.pending_journal}</dd>
             </dl>
           )}
         </aside>

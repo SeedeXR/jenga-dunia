@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { connectCore, installBridge } from "./bridge";
@@ -89,6 +89,14 @@ test.describe("hydrology nodes against the real core", () => {
     await expect(page.getByTestId("log")).toContainText("graph.set_param: ok");
     await expect(page.getByTestId("viewport-info")).toContainText("sea 250 m");
     await page.screenshot({ path: testInfo.outputPath("hydrology-sea.png") }); // tutorial image source
+
+    // Autosave: ~2 s after the last edit the project is saved — journal truncated, documents on disk current.
+    await expect(page.getByTestId("log")).toContainText("project.save: ok", { timeout: 10_000 });
+    await expect(page.getByTestId("project-journal")).toHaveText("0");
+    await expect(page.getByTestId("project-dirty")).toHaveText("false");
+    const saved = JSON.parse(readFileSync(path.join(ws, "Hydro.jdproj", "graph.json"), "utf8")) as { nodes: Record<string, { kind: string; params?: { level_m?: number } }> };
+    expect(Object.values(saved.nodes).some((n) => n.kind.startsWith("jd.hydrology.sea_level@") && n.params?.level_m === 250)).toBe(true);
+    expect(readFileSync(path.join(ws, "Hydro.jdproj", "journal", "ops.ndjson"), "utf8")).toBe("");
 
     expect(errors, "no uncaught page errors").toEqual([]);
     await core.close();

@@ -81,6 +81,8 @@ Every project starts with a two-node graph (`Noise → Height`), the same `graph
 
 Undo and redo are operations like everything else (`graph.undo` / `graph.redo`, journaled as `graph.restore`), so a crash in the middle of undoing recovers to exactly what you saw. Connect nodes by dragging from an output handle (right) to an input handle (left); an input holds one edge, so dropping a new connection replaces the old one. Cycles, wrong ports and type mismatches are refused by the core (`E_GRAPH_CYCLE`, `E_INPUT_INVALID`, `E_GRAPH_TYPE_MISMATCH`). Evaluating while a required input is unconnected reports `E_GRAPH_MISSING_INPUT` with the node and port.
 
+**Autosave.** Every edit is journaled first (crash-safe), and about two seconds after the last edit the app saves the project on its own: the log shows `project.save: ok`, the project panel's **dirty** returns to `false` and **journal** to `0`, and `graph.json` on disk is current. Press **Save** (⌘S) to save immediately. The UI-driven test `apps/desktop/e2e/hydrology.spec.ts` checks the saved `graph.json` and the truncated journal. (For debugging, `?autosave=<ms>` in the dev URL changes the delay; `0` disables it.)
+
 ![Terrain menu with Generate Terrain and Evaluate Graph](images/desktop-menu-terrain.png)
 
 **Screen recording:** [`videos/graph-editor.mp4`](videos/graph-editor.mp4) (17 s, 1440×900) — the whole flow above: edit the seed, add a blur node, connect it by dragging the handles, move a node, evaluate, delete with the keyboard, undo and redo. It is the UI-driven test `apps/desktop/e2e/graph.spec.ts` running against the real core, recorded with `JD_VIDEO=1 pnpm exec playwright test e2e/graph.spec.ts` (actions slowed to human pace), so it is regenerated whenever the editor changes.

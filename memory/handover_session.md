@@ -124,8 +124,10 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `14:35:00` Sea plane pushed as `7e0be28`. **Generated types adopted in `state.ts`**: `run<K extends OpId>(id, params?: JdOps[K]["request"])` returns `Response<JdOps[K]["result"]>`; the hand-written `ProjectSummary`/`LayerInfo`/`GraphNode`/`GraphEdge`/`GraphKind`/`JobInfo`/`EvalReport`/`NoiseSettings` are now aliases of the generated types (−70/+30 lines). Turned on `strict` + `noUncheckedIndexedAccess` in `tsconfig.app.json` (it was *off*): 10 errors, all real narrowings (optional `params`, `HeightmapFormat`/`NoiseKind`/`FractalKind` unions instead of `string`, typed-array indexing). Gotcha: `pnpm exec tsc --noEmit` checks **nothing** here (solution-style `tsconfig.json` with `files: []`) — use `tsc -b`, which is what `pnpm build` runs.
 
-### Open / next (as of 2026-10-20 14:40, head after typed-ops commit)
-1. **CI**: everything through `effe6e5` green; `7e0be28` (sea plane) and the typed-ops commit polling.
+- `14:55:00` Typed ops pushed as `fc3128e`. **Autosave** (desktop): `scheduleAutosave()` after every successful graph mutation (`applyGraph`) → debounced 2 s `project.save` via `op` (skipped and rescheduled while busy / jobs running), response refreshes `project` so dirty/journal read false/0. `?autosave=<ms>` overrides, `0` disables — `graph.spec` uses that because it asserts the journal contents (save truncates the WAL by design). hydrology e2e asserts `project.save: ok`, `project-dirty`/`project-journal` test ids, `graph.json` holds `level_m: 250`, `journal/ops.ndjson` empty.
+
+### Open / next (as of 2026-10-20 15:00, head after autosave commit)
+1. **CI**: everything through `effe6e5` green; `7e0be28`, `fc3128e` and the autosave commit polling.
 2. **Figma**: connector unavailable this session; plugin OAuth pending on the owner's side → tutorial images stay in `docs/user/images/`; place them in file `fxyeV62hgLoNmG3dU1LX6G` when a connector works.
 3. **Native leftovers**: Edit-menu capture; native sculpt capture/recording (needs Accessibility); signed/notarised bundle (needs an Apple developer account).
 4. **Phase 3 follow-ups**: hydraulic concentration cap / layered materials / open drains; thermal + hydraulic WGSL twins (`jd-gpu`); particle hydraulic; MFD (D∞ ✔; `wetness` still D8-only); sea level ✔ (viewport water plane ✔; ocean shading/shoreline foam ☐); hydrology-first generation; smooth-brush blur done via summed-area table (whole-field blur is now O(N); tile-level dirty sets remain).
