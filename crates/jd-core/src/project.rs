@@ -172,6 +172,9 @@ pub struct Project {
     pub pending_journal: Vec<JournalEntry>,
     /// Undo/redo stacks of graph snapshots (session-only; the journal is the durable record).
     pub history: History,
+    /// Bumped by every journaled mutation (session-only): an evaluation that started on an older
+    /// revision publishes nothing, so a slow run can never overwrite a newer graph's layers.
+    pub revision: u64,
     dirty: bool,
     lock_nonce: String,
 }
@@ -381,6 +384,7 @@ impl Project {
             scene: SceneDocument::default(),
             pending_journal: Vec::new(),
             history: History::default(),
+            revision: 0,
             dirty: true,
             lock_nonce: String::new(),
         };
@@ -438,6 +442,7 @@ impl Project {
             scene,
             pending_journal,
             history: History::default(),
+            revision: 0,
             dirty: false,
             lock_nonce: String::new(),
         };

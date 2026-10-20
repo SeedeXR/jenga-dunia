@@ -96,6 +96,8 @@ priority=urgent → E_INPUT_INVALID must be one of low, normal, high
 
 (One CLI invocation is one process, so `jd op graph.evaluate_async` alone is not useful — the job dies with the process; use `jd op graph.evaluate`.)
 
+**Overlapping evaluations.** Every journaled edit bumps the open project's revision, and an evaluation remembers the revision it started on. If the graph was edited while it ran — an agent editing behind a long job, the desktop's live preview racing a Generate — the finished evaluation publishes **no** layers and returns `W_STALE_GRAPH` ("evaluate again"), so a slow run can never overwrite a newer graph's result. Verified by a core test that edits a seed while a 2 000-step hydraulic job runs.
+
 ## 4. Generate terrain and export a heightmap
 
 `jd terrain generate` opens the project, generates a noise heightfield for the project's world (extent, resolution, tiles from `project.json`) and optionally exports it in one go. The format follows the extension: `.exr` (32-bit float, exact), `.tif` (32-bit float TIFF, exact — GIS/DCC tools), `.png` (16-bit, quantised), `.r16` (Unity/Unreal raw), `.r32` (raw float).

@@ -571,6 +571,7 @@ pub mod builtin {
         // how undo/redo themselves apply, so it must not be recorded as a new edit.
         let before = (op.starts_with("graph.") && op != "graph.restore").then(|| p.graph.clone());
         apply_mutation(p, op, &params)?;
+        p.revision += 1;
         if let Some(g) = before {
             p.history.record(g);
         }
@@ -1134,12 +1135,13 @@ pub mod graph {
         job_id: u64,
         ctl: &jd_graph::JobCtl,
     ) -> JdResult<(EvaluateResult, Vec<Warning>)> {
-        let (graph, world, root, budget) = ctx.with_project(|p| {
+        let (graph, world, root, budget, revision) = ctx.with_project(|p| {
             Ok((
                 p.graph.clone(),
                 p.doc.world.clone(),
                 p.root().to_path_buf(),
                 p.doc.settings.memory_budget_bytes,
+                p.revision,
             ))
         })?;
         // Pre-flight: refuse evaluations the memory budget cannot hold instead of thrashing.
@@ -1182,6 +1184,21 @@ pub mod graph {
                 }
             })?;
         let mut layers = BTreeMap::new();
+        // Two evaluations of one project may overlap (an agent and the desktop's live preview, or
+        // Generate right behind the starter preview); each snapshots the graph at its start, so
+        // the one that started on an older graph must not publish over the newer result.
+        let stale = ctx
+            .with_project(|p| Ok(p.revision != revision))
+            .unwrap_or(true);
+        if stale {
+            return Ok((
+                EvaluateResult { report, layers },
+                vec![Warning::new(
+                    "W_STALE_GRAPH",
+                    "the graph changed while this evaluation ran: its layers were not published — evaluate again",
+                )],
+            ));
+        }
         for (id, node) in &graph.nodes {
             if node.kind.0.starts_with("jd.output.height@")
                 && let Some(v) = outputs.get(&(id.clone(), "out".to_owned()))
@@ -2055,6 +2072,121 @@ pub mod graph {
                 ops,
                 vec!["project.set_settings"],
                 "the refused edit was never journaled"
+            );
+        }
+
+        #[test]
+        fn an_evaluation_that_outlives_a_graph_edit_publishes_nothing() {
+            let reg = Registry::with_builtins();
+            let dir = tempfile::tempdir().expect("tmp");
+            let path = dir.path().join("s.jdproj");
+            let ctx = Context::default();
+            let world = WorldSettings {
+                resolution_px: [96, 96],
+                extent_m: [960.0, 960.0],
+                tile_size: 64,
+                halo: 4,
+                ..Default::default()
+            };
+            assert_eq!(
+                call(
+                    &reg,
+                    &ctx,
+                    "project.create",
+                    serde_json::json!({ "path": path, "name": "S", "world": world })
+                )
+                .status,
+                crate::envelope::Status::Ok
+            );
+            let noise = jd_graph::nodes::STARTER_NOISE_ID.to_string();
+            let out = jd_graph::nodes::STARTER_OUTPUT_ID.to_string();
+            // A slow node between noise and the output: thousands of hydraulic steps.
+            let hyd = call(
+                &reg,
+                &ctx,
+                "graph.add_node",
+                serde_json::json!({ "kind": "jd.erosion.hydraulic@1", "params": { "iterations": 2000 } }),
+            )
+            .result
+            .expect("hydraulic")["id"]
+                .as_str()
+                .expect("id")
+                .to_owned();
+            assert_eq!(
+                call(
+                    &reg,
+                    &ctx,
+                    "graph.disconnect",
+                    serde_json::json!({ "from": noise, "to": out, "to_port": "in" })
+                )
+                .status,
+                crate::envelope::Status::Ok
+            );
+            for (from, to) in [(noise.as_str(), hyd.as_str()), (hyd.as_str(), out.as_str())] {
+                assert_eq!(
+                    call(
+                        &reg,
+                        &ctx,
+                        "graph.connect",
+                        serde_json::json!({ "from": from, "to": to, "to_port": "in" })
+                    )
+                    .status,
+                    crate::envelope::Status::Ok
+                );
+            }
+            // Start the long evaluation and wait until it has snapshotted the graph and is inside
+            // the hydraulic node (jobs.list: 1 of 3 steps done), then edit the graph under it.
+            let started = call(&reg, &ctx, "graph.evaluate_async", serde_json::json!({}));
+            let id = started.job_id.expect("job id");
+            let mut running = false;
+            for _ in 0..600 {
+                let jobs = call(&reg, &ctx, "jobs.list", serde_json::json!({}))
+                    .result
+                    .expect("jobs");
+                if jobs.as_array().is_some_and(|j| {
+                    j.iter()
+                        .any(|x| x["id"] == id && x["done"].as_u64() >= Some(1))
+                }) {
+                    running = true;
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            assert!(running, "the job never reported progress");
+            let r = call(
+                &reg,
+                &ctx,
+                "graph.set_param",
+                serde_json::json!({ "id": noise, "key": "seed", "value": 9 }),
+            );
+            assert_eq!(r.status, crate::envelope::Status::Ok, "{r:?}");
+            let done = wait_done(&reg, &ctx, id); // the finished op's envelope
+            let env = &done;
+            assert_eq!(env["status"], "ok", "{done:?}");
+            assert!(
+                env["warnings"]
+                    .as_array()
+                    .is_some_and(|w| w.iter().any(|x| x["code"] == "W_STALE_GRAPH")),
+                "stale warning expected: {done:?}"
+            );
+            assert!(
+                env["result"]["layers"]
+                    .as_object()
+                    .is_some_and(|l| l.is_empty()),
+                "no layers published: {done:?}"
+            );
+            // A fresh evaluation on the edited graph publishes as usual.
+            let r = call(
+                &reg,
+                &ctx,
+                "graph.evaluate",
+                serde_json::json!({ "lod": 2 }),
+            );
+            assert_eq!(r.status, crate::envelope::Status::Ok, "{r:?}");
+            assert!(
+                r.result.expect("result")["layers"]
+                    .as_object()
+                    .is_some_and(|l| !l.is_empty())
             );
         }
 
