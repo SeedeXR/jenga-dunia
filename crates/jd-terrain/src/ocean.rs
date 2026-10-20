@@ -308,6 +308,28 @@ pub fn bake_water(
     breaking_depth_m: f32,
     max_px: u32,
 ) -> JdResult<WaterMaps> {
+    bake_water_with(hf, level_m, look, breaking_depth_m, max_px, None)
+}
+
+/// [`bake_water`] with the coastal node's `shore` mask (0..1, the wave-cut band): its value is
+/// added to the foam map on water cells and on the shore band itself, so exposed, eroding shores
+/// wash white while sheltered ones keep only the thin depth band.
+pub fn bake_water_with(
+    hf: &crate::Heightfield,
+    level_m: f32,
+    look: &WaterLook,
+    breaking_depth_m: f32,
+    max_px: u32,
+    shore: Option<&crate::Heightfield>,
+) -> JdResult<WaterMaps> {
+    if let Some(s) = shore
+        && (s.width(), s.height()) != (hf.width(), hf.height())
+    {
+        return Err(JdError::invalid(
+            "shore",
+            "field size differs from the layer",
+        ));
+    }
     if !(look.visibility_m > 0.0 && look.visibility_m.is_finite()) {
         return Err(JdError::invalid("visibility_m", "must be positive"));
     }
@@ -339,11 +361,17 @@ pub fn bake_water(
                 0.0
             };
             let (rgb, _) = water_colour(d, look);
-            let foam = if d > 0.0 && d < foam_m {
+            let mut foam = if d > 0.0 && d < foam_m {
                 1.0 - d / foam_m
             } else {
                 0.0
             };
+            if let Some(s) = shore {
+                let wash = s.get(sx, sy).clamp(0.0, 1.0);
+                if d > 0.0 || wash > 0.0 {
+                    foam = foam.max(wash);
+                }
+            }
             let srgb = |v: f32| (v.clamp(0.0, 1.0).powf(1.0 / 2.2) * 255.0).round() as u8;
             depth_px.put_pixel(
                 x,
@@ -503,6 +531,37 @@ pub fn bake_wave_displacement(
 #[cfg(test)]
 mod bake_tests {
     use super::*;
+
+    #[test]
+    fn the_shore_mask_adds_wash_foam() {
+        let mut h = crate::Heightfield::new(64, 16, 64, 0).expect("hf");
+        h.fill_with(|x, _| x as f32 / 63.0 * 300.0);
+        let mut shore = crate::Heightfield::new(64, 16, 64, 0).expect("s");
+        shore.fill_with(|x, _| f32::from((20..=26).contains(&x))); // the wave-cut band around the 110 m waterline (x ≈ 23)
+        let plain = bake_water(&h, 110.0, &WaterLook::default(), 0.0, 64).expect("plain");
+        let washed = bake_water_with(&h, 110.0, &WaterLook::default(), 0.0, 64, Some(&shore))
+            .expect("washed");
+        let foam = |m: &WaterMaps| image::load_from_memory(&m.foam).expect("png").to_luma8();
+        let (a, b) = (foam(&plain), foam(&washed));
+        assert_eq!(b.get_pixel(20, 8)[0], 255, "washed where the shore mask is");
+        assert!(
+            a.get_pixel(20, 8)[0] < 255,
+            "the depth band alone is thinner"
+        );
+        assert_eq!(b.get_pixel(0, 8)[0], 0, "deep water unchanged");
+        assert_eq!(b.get_pixel(40, 8)[0], 0, "dry land unchanged");
+        assert!(
+            bake_water_with(
+                &h,
+                110.0,
+                &WaterLook::default(),
+                0.0,
+                64,
+                Some(&crate::Heightfield::new(4, 4, 64, 0).expect("x"))
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn displacement_tile_is_zero_mean_bounded_and_wraps() {

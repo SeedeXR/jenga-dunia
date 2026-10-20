@@ -3019,6 +3019,14 @@ expression: list
           "format": "float",
           "default": null
         },
+        "shore": {
+          "description": "Optional 0..1 shore layer (the coastal node's `shore` output): added to the foam as wash along exposed, eroding shores.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "dir": {
           "description": "Output directory; relative paths resolve against the project's `exports/`.",
           "type": "string",

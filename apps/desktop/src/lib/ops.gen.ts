@@ -495,6 +495,8 @@ export type OceanBakeRequest = {
   "wave_px"?: number;
   /** World size the wave tile covers, metres; omit for a quarter of the world's width. */
   "wave_tile_m"?: number | null;
+  /** Optional 0..1 shore layer (the coastal node's `shore` output): added to the foam as wash along exposed, eroding shores. */
+  "shore"?: string | null;
   /** Output directory; relative paths resolve against the project's `exports/`. */
   "dir"?: string;
 };

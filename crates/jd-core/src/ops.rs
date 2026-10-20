@@ -3646,6 +3646,9 @@ pub mod terrain {
         /// World size the wave tile covers, metres; omit for a quarter of the world's width.
         #[serde(default)]
         pub wave_tile_m: Option<f32>,
+        /// Optional 0..1 shore layer (the coastal node's `shore` output): added to the foam as wash along exposed, eroding shores.
+        #[serde(default)]
+        pub shore: Option<String>,
         /// Output directory; relative paths resolve against the project's `exports/`.
         #[serde(default = "default_water_dir")]
         pub dir: PathBuf,
@@ -3859,7 +3862,9 @@ pub mod terrain {
                     Ok((dir, proj.doc.world.extent_m))
                 })?;
                 let waves = jd_terrain::wave_spectrum(&p.wind)?;
-                let maps = ctx.with_layer(&p.layer, |hf| jd_terrain::bake_water(hf, p.level_m, &p.look, waves.breaking_depth_m, p.max_px))?;
+                // Two layers: clone the shore mask out first (the layer lock is not re-entrant).
+                let shore = p.shore.as_ref().map(|s| ctx.with_layer(s, |hf| Ok(hf.clone()))).transpose()?;
+                let maps = ctx.with_layer(&p.layer, |hf| jd_terrain::bake_water_with(hf, p.level_m, &p.look, waves.breaking_depth_m, p.max_px, shore.as_ref()))?;
                 let tile_m = p.wave_tile_m.unwrap_or((extent[0] / 4.0) as f32);
                 let (normal, tile_components) = jd_terrain::bake_wave_normal(&waves.components, tile_m, p.wave_px)?;
                 let (displacement, displacement_scale_m) = jd_terrain::bake_wave_displacement(&tile_components, tile_m, p.wave_px)?;
