@@ -126,9 +126,15 @@ test.describe("hydrology nodes against the real core", () => {
     await expect(page.getByTestId("log")).toContainText("project.save: ok", { timeout: 10_000 });
     await expect(page.getByTestId("project-journal")).toHaveText("0");
     await expect(page.getByTestId("project-dirty")).toHaveText("false");
-    const saved = JSON.parse(readFileSync(path.join(ws, "Hydro.jdproj", "graph.json"), "utf8")) as { nodes: Record<string, { kind: string; params?: { level_m?: number } }> };
-    expect(Object.values(saved.nodes).some((n) => n.kind.startsWith("jd.hydrology.sea_level@") && n.params?.level_m === 250)).toBe(true);
-    expect(readFileSync(path.join(ws, "Hydro.jdproj", "journal", "ops.ndjson"), "utf8")).toBe("");
+    // Poll the files: "project.save: ok" / dirty=false may come from an earlier autosave (the
+    // scatter steps above take longer than the 2 s interval), so wait for the save that holds
+    // the level_m edit and leaves the journal empty.
+    const savedLevel = () => {
+      const saved = JSON.parse(readFileSync(path.join(ws, "Hydro.jdproj", "graph.json"), "utf8")) as { nodes: Record<string, { kind: string; params?: { level_m?: number } }> };
+      return Object.values(saved.nodes).some((n) => n.kind.startsWith("jd.hydrology.sea_level@") && n.params?.level_m === 250);
+    };
+    await expect.poll(savedLevel, { timeout: 10_000 }).toBe(true);
+    await expect.poll(() => readFileSync(path.join(ws, "Hydro.jdproj", "journal", "ops.ndjson"), "utf8"), { timeout: 10_000 }).toBe("");
 
     expect(errors, "no uncaught page errors").toEqual([]);
     await core.close();
