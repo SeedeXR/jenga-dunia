@@ -373,7 +373,7 @@ pub fn register_all(r: &mut Registry) {
             }
             Ok(out("out", thermal_erode(
                     field(i, "in")?,
-                    spacing_m(ctx), tp.talus_deg, tp.iterations, tp.rate)?))
+                    spacing_m(ctx), tp.talus_deg, tp.iterations, tp.rate, Some(&ctx.cancel))?))
         },
     ));
     r.register(NodeDef::new::<SlopeParams, _>(
@@ -415,8 +415,7 @@ pub fn register_all(r: &mut Registry) {
                     dissolve_k: hp.dissolve_k,
                     deposit_k: hp.deposit_k,
                     ..Default::default()
-                },
-            )?;
+                }, Some(&ctx.cancel))?;
             Ok(BTreeMap::from([
                 ("out".to_owned(), Value::field(r.height)),
                 ("water".to_owned(), Value::field(r.water)),

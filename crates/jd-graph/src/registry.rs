@@ -16,6 +16,8 @@ pub struct EvalCtx {
     /// The open project's `assets/` directory, when evaluating inside a project (file-reading
     /// nodes resolve relative paths here and never outside it).
     pub assets_dir: Option<std::path::PathBuf>,
+    /// Set when the job is cancelled; long kernels poll it and return `E_CANCELLED`.
+    pub cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 type EvalFn = Arc<

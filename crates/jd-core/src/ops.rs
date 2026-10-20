@@ -46,6 +46,8 @@ pub struct Context {
     /// project's on-disk cache (`jd-cache`), so layers outlive the process and the CLI can
     /// evaluate in one invocation and export in the next.
     layers: Arc<Mutex<BTreeMap<String, jd_terrain::Heightfield>>>,
+    /// Running jobs (progress + cancel), see `jobs.list` / `jobs.cancel`.
+    pub jobs: Arc<crate::jobs::Jobs>,
 }
 
 impl Context {
@@ -396,6 +398,14 @@ pub mod builtin {
         pub bytes: u64,
     }
 
+    /// `jobs.cancel` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct CancelJob {
+        /// Job id from `jobs.list`.
+        pub id: u64,
+    }
+
     /// `project.recover` params.
     #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
@@ -608,6 +618,18 @@ pub mod builtin {
                 let bytes = std::fs::copy(&a.path, &dest)?;
                 Ok((ImportedAsset { name, bytes }, Vec::new()))
             },
+        );
+        r.register::<NoParams, Vec<crate::jobs::JobInfo>, _>(
+            "jobs.list",
+            "Running jobs with progress (steps done/total, current node) — poll while an evaluation runs",
+            Scope::None,
+            |ctx, _| Ok((ctx.jobs.list(), Vec::new())),
+        );
+        r.register::<CancelJob, bool, _>(
+            "jobs.cancel",
+            "Request cancellation of a running job; it stops at the next node or kernel iteration with E_CANCELLED",
+            Scope::None,
+            |ctx, j| Ok((ctx.jobs.cancel(j.id), Vec::new())),
         );
         r.register::<NoParams, crate::diag::EnvInfo, _>(
             "diag.env",
@@ -1064,12 +1086,10 @@ pub mod graph {
                         .detail("nodes", vec![other.to_string(), id.to_string()]));
                     }
                 }
-                let (outputs, report) = Evaluator::new(registry(), cache()).evaluate_with(
-                    &graph,
-                    &world,
-                    e.lod,
-                    Some(&root.join("assets")),
-                )?;
+                let job = ctx.jobs.start("graph.evaluate");
+                let (outputs, report) = Evaluator::new(registry(), cache())
+                    .evaluate_job(&graph, &world, e.lod, Some(&root.join("assets")), &job.ctl)
+                    .map_err(|err| if err.code == ErrorCode::E_CANCELLED { err.detail("job_id", job.id) } else { err })?;
                 let mut layers = BTreeMap::new();
                 for (id, node) in &graph.nodes {
                     if node.kind.0.starts_with("jd.output.height@")
@@ -1423,6 +1443,88 @@ pub mod graph {
                     "{bad}"
                 );
             }
+        }
+
+        #[test]
+        fn a_running_evaluation_is_listed_and_can_be_cancelled() {
+            let reg = Arc::new(Registry::with_builtins());
+            let dir = tempfile::tempdir().expect("tmp");
+            let ctx = Context::default();
+            let path = dir.path().join("j.jdproj");
+            call(
+                &reg,
+                &ctx,
+                "project.create",
+                serde_json::json!({ "path": path, "name": "J", "world": WorldSettings { resolution_px: [96, 96], extent_m: [96.0, 96.0], tile_size: 64, halo: 4, ..Default::default() } }),
+            );
+            // A long hydraulic run between the starter noise and output.
+            let g = call(&reg, &ctx, "graph.list", serde_json::json!({}))
+                .result
+                .expect("graph");
+            let noise = g["nodes"]
+                .as_array()
+                .expect("nodes")
+                .iter()
+                .find(|n| n["kind"] == "jd.noise.fbm@1")
+                .expect("noise")["id"]
+                .as_str()
+                .expect("id")
+                .to_owned();
+            let out = g["nodes"]
+                .as_array()
+                .expect("nodes")
+                .iter()
+                .find(|n| n["kind"] == "jd.output.height@1")
+                .expect("out")["id"]
+                .as_str()
+                .expect("id")
+                .to_owned();
+            let hy = call(&reg, &ctx, "graph.add_node", serde_json::json!({ "kind": "jd.erosion.hydraulic@1", "params": { "iterations": 2000 } })).result.expect("added")["id"].as_str().expect("id").to_owned();
+            call(
+                &reg,
+                &ctx,
+                "graph.connect",
+                serde_json::json!({ "from": noise, "to": hy, "to_port": "in" }),
+            );
+            call(
+                &reg,
+                &ctx,
+                "graph.connect",
+                serde_json::json!({ "from": hy, "to": out, "to_port": "in" }),
+            );
+            assert!(ctx.jobs.list().is_empty());
+            let (reg2, ctx2) = (reg.clone(), ctx.clone());
+            let worker = std::thread::spawn(move || {
+                call(&reg2, &ctx2, "graph.evaluate", serde_json::json!({}))
+            });
+            // Wait until the job shows up, then cancel it through the op.
+            let mut listed = None;
+            for _ in 0..200 {
+                let jobs = ctx.jobs.list();
+                if let Some(j) = jobs.first() {
+                    listed = Some(j.clone());
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            let job = listed.expect("job listed while running");
+            assert_eq!(job.op, "graph.evaluate");
+            let r = call(
+                &reg,
+                &ctx,
+                "jobs.cancel",
+                serde_json::json!({ "id": job.id }),
+            );
+            assert_eq!(r.result, Some(serde_json::json!(true)));
+            let r = worker.join().expect("worker");
+            let err = r.error.expect("cancelled");
+            assert_eq!(err.code, ErrorCode::E_CANCELLED, "{err:?}");
+            assert_eq!(err.details["job_id"], serde_json::json!(job.id));
+            assert!(ctx.jobs.list().is_empty(), "finished jobs leave the table");
+            assert_eq!(
+                call(&reg, &ctx, "jobs.cancel", serde_json::json!({ "id": 999 })).result,
+                Some(serde_json::json!(false))
+            );
         }
 
         #[test]

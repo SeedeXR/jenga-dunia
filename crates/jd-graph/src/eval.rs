@@ -97,6 +97,27 @@ pub struct EvalReport {
     pub duration_ms: u64,
 }
 
+/// Progress callback: (nodes done, nodes total, kind about to run).
+pub type ProgressFn = Arc<dyn Fn(usize, usize, &str) + Send + Sync>;
+
+/// Cancellation flag and progress sink for one evaluation (`docs/architecture/06-jobs.md`).
+#[derive(Clone)]
+pub struct JobCtl {
+    /// Set to cancel; checked before every node and inside long kernels.
+    pub cancel: Arc<std::sync::atomic::AtomicBool>,
+    /// Called before each node.
+    pub progress: ProgressFn,
+}
+
+impl Default for JobCtl {
+    fn default() -> Self {
+        Self {
+            cancel: Arc::default(),
+            progress: Arc::new(|_, _, _| {}),
+        }
+    }
+}
+
 /// Evaluates graphs against a registry and cache.
 pub struct Evaluator<'a> {
     registry: &'a Registry,
@@ -262,18 +283,39 @@ impl<'a> Evaluator<'a> {
         lod: u8,
         assets_dir: Option<&std::path::Path>,
     ) -> JdResult<(Outputs, EvalReport)> {
+        self.evaluate_job(graph, world, lod, assets_dir, &JobCtl::default())
+    }
+
+    /// [`Evaluator::evaluate_with`] under a job: progress per node, cancellable between nodes
+    /// and inside long kernels (`E_CANCELLED`, nothing published).
+    pub fn evaluate_job(
+        &self,
+        graph: &Graph,
+        world: &WorldSettings,
+        lod: u8,
+        assets_dir: Option<&std::path::Path>,
+        job: &JobCtl,
+    ) -> JdResult<(Outputs, EvalReport)> {
         let started = Instant::now();
         let order = self.validate(graph)?;
         let ctx = EvalCtx {
             lod_world: lod_world(world, lod),
             assets_dir: assets_dir.map(|p| p.to_path_buf()),
+            cancel: job.cancel.clone(),
         };
         let lod_world_bytes = serde_json::to_vec(&ctx.lod_world)?;
         let input_map = graph.input_map();
         let mut produced: BTreeMap<NodeId, NodeOutputs> = BTreeMap::new();
         let mut reports = Vec::with_capacity(order.len());
-        for id in &order {
+        for (done, id) in order.iter().enumerate() {
             let node = &graph.nodes[id];
+            if job.cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err(JdError::new(ErrorCode::E_CANCELLED, "evaluation cancelled")
+                    .why("The job's cancel flag was set before this node ran.")
+                    .next("Nothing was published; re-run when ready.")
+                    .detail("node", id.to_string()));
+            }
+            (job.progress)(done, order.len(), &node.kind.0);
             let def = self.registry.get(&node.kind)?;
             let mut inputs: NodeOutputs = BTreeMap::new();
             let mut hasher = blake3::Hasher::new();

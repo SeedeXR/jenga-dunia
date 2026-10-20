@@ -169,7 +169,19 @@ export default function App() {
           viewport: {vp.backend} · {vp.triangles.toLocaleString()} tris
           {s.previewStats ? ` · preview lod ${s.previewStats.lod}, ${(s.previewStats.bytes / 1048576).toFixed(2)} MB in ${s.previewStats.ms.toFixed(0)} ms` : ""}
         </span>
-        {s.busy && <span className="text-xs text-jd-accent">working…</span>}
+        {s.busy &&
+          (s.jobs.length > 0 ? (
+            <span className="flex items-center gap-2 text-xs text-jd-accent" data-testid="job-progress">
+              {s.jobs[0]!.op}
+              {s.jobs[0]!.total > 0 ? ` · node ${Math.min(s.jobs[0]!.done + 1, s.jobs[0]!.total)}/${s.jobs[0]!.total} ${s.jobs[0]!.current.split("@")[0]?.split(".").pop() ?? ""}` : ""}
+              {` · ${(s.jobs[0]!.elapsed_ms / 1000).toFixed(1)} s`}
+              <button className="btn px-1.5 py-0" onClick={() => void s.cancelJob(s.jobs[0]!.id)} disabled={s.jobs[0]!.cancelling} data-testid="job-cancel">
+                {s.jobs[0]!.cancelling ? "cancelling…" : "Cancel"}
+              </button>
+            </span>
+          ) : (
+            <span className="text-xs text-jd-accent">working…</span>
+          ))}
       </header>
 
       <div className="grid grid-cols-[260px_1fr_280px] overflow-hidden">

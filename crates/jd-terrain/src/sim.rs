@@ -9,6 +9,7 @@
 use crate::Heightfield;
 use jd_types::{JdError, JdResult};
 use rayon::prelude::*;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// 8-neighbourhood offsets; `NEIGHBOURS[7 - k]` is the opposite direction of `k`.
 const NEIGHBOURS: [(i64, i64); 8] = [
@@ -31,6 +32,16 @@ fn neighbour_dist(spacing: [f32; 2]) -> [f32; 8] {
 /// Largest `rate` for which a cell cannot receive more than it is below its 8 neighbours in one
 /// step (inflow ≤ 8·rate·(H−t)/2 ≤ H−t); above it a pit can overshoot into a spike.
 pub const THERMAL_MAX_RATE: f32 = 0.25;
+
+/// Cooperative cancellation: long kernels poll the job's flag once per iteration.
+fn check_cancel(cancel: Option<&AtomicBool>) -> JdResult<()> {
+    if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
+        return Err(JdError::new(jd_types::ErrorCode::E_CANCELLED, "cancelled")
+            .why("The job's cancel flag was set.")
+            .next("Nothing was published; re-run when ready."));
+    }
+    Ok(())
+}
 
 fn check_spacing(spacing_m: [f32; 2]) -> JdResult<()> {
     if spacing_m.iter().all(|s| *s > 0.0 && s.is_finite()) {
@@ -132,6 +143,7 @@ pub fn thermal_erode(
     talus_deg: f32,
     iterations: u32,
     rate: f32,
+    cancel: Option<&AtomicBool>,
 ) -> JdResult<Heightfield> {
     if !(0.0..90.0).contains(&talus_deg) {
         return Err(JdError::invalid("talus_deg", "must be within 0..90"));
@@ -148,6 +160,7 @@ pub fn thermal_erode(
     let (w, hh) = (h.width() as i64, h.height() as i64);
     let mut cur = h.to_vec();
     for _ in 0..iterations {
+        check_cancel(cancel)?;
         let g = Grid { h: &cur, w, hh };
         let shed = shed_factors(&g, tan_t, &dist, rate);
         cur = gather(&g, &shed, tan_t, &dist);
@@ -194,6 +207,7 @@ impl Default for HydraulicParams {
 }
 
 /// Layers produced by hydraulic erosion.
+#[derive(Debug)]
 pub struct HydraulicResult {
     /// Eroded terrain (metres).
     pub height: Heightfield,
@@ -219,6 +233,7 @@ pub fn hydraulic_erode(
     h: &Heightfield,
     spacing_m: [f32; 2],
     p: &HydraulicParams,
+    cancel: Option<&AtomicBool>,
 ) -> JdResult<HydraulicResult> {
     check_spacing(spacing_m)?;
     if !(p.dt > 0.0 && p.dt <= 1.0) {
@@ -256,6 +271,7 @@ pub fn hydraulic_erode(
     let idx = |x: i64, y: i64| (y * w + x) as usize;
 
     for _ in 0..p.iterations {
+        check_cancel(cancel)?;
         // 1. Rain.
         let water_pre: Vec<f32> = water.iter().map(|d| d + p.rain_rate * p.dt).collect();
         // 2. Outflow flux per pipe, scaled so a cell never sends more water than it holds.
@@ -421,7 +437,7 @@ mod tests {
         let mut h = Heightfield::new(64, 48, 32, 4).expect("hf");
         h.fill_with(|x, y| if (x, y) == (30, 20) { 500.0 } else { 0.0 });
         let before = sum(&h);
-        let after = thermal_erode(&h, [10.0, 10.0], 35.0, 40, 0.25).expect("erode");
+        let after = thermal_erode(&h, [10.0, 10.0], 35.0, 40, 0.25, None).expect("erode");
         assert!(
             (sum(&after) - before).abs() < 1e-2 * before.abs().max(1.0),
             "mass drifted: {before} → {}",
@@ -439,7 +455,7 @@ mod tests {
         assert_eq!(after.stats().non_finite, 0);
         // Deterministic: same input, same output.
         assert_eq!(
-            thermal_erode(&h, [10.0, 10.0], 35.0, 40, 0.25)
+            thermal_erode(&h, [10.0, 10.0], 35.0, 40, 0.25, None)
                 .expect("again")
                 .content_hash(),
             after.content_hash()
@@ -450,20 +466,21 @@ mod tests {
     fn thermal_leaves_gentle_terrain_alone_and_rejects_bad_params() {
         let mut h = Heightfield::new(40, 40, 32, 4).expect("hf");
         h.fill_with(|x, _| x as f32 * 0.1); // 0.1 m rise per 10 m pixel ≈ 0.6°, far below talus
-        let after = thermal_erode(&h, [10.0, 10.0], 35.0, 5, 0.25).expect("erode");
+        let after = thermal_erode(&h, [10.0, 10.0], 35.0, 5, 0.25, None).expect("erode");
         assert_eq!(after.content_hash(), h.content_hash());
-        assert!(thermal_erode(&h, [10.0, 10.0], 95.0, 1, 0.25).is_err());
-        assert!(thermal_erode(&h, [10.0, 10.0], 35.0, 1, 0.0).is_err());
+        assert!(thermal_erode(&h, [10.0, 10.0], 95.0, 1, 0.25, None).is_err());
+        assert!(thermal_erode(&h, [10.0, 10.0], 35.0, 1, 0.0, None).is_err());
         assert!(
-            thermal_erode(&h, [10.0, 10.0], 35.0, 1, 0.5).is_err(),
+            thermal_erode(&h, [10.0, 10.0], 35.0, 1, 0.5, None).is_err(),
             "above the stability bound"
         );
-        assert!(thermal_erode(&h, [0.0, 10.0], 35.0, 1, 0.25).is_err());
+        assert!(thermal_erode(&h, [0.0, 10.0], 35.0, 1, 0.25, None).is_err());
         // A one-cell pit in a plateau fills from all 8 sides in one step but never rises above the
         // plateau it sat in (the THERMAL_MAX_RATE bound); at 0.5 it would overshoot to ~198 m.
         let mut pit = Heightfield::new(16, 16, 16, 0).expect("hf");
         pit.fill_with(|x, y| if (x, y) == (8, 8) { 0.0 } else { 100.0 });
-        let after = thermal_erode(&pit, [1.0, 1.0], 35.0, 1, THERMAL_MAX_RATE).expect("erode");
+        let after =
+            thermal_erode(&pit, [1.0, 1.0], 35.0, 1, THERMAL_MAX_RATE, None).expect("erode");
         assert!(
             after.get(8, 8) > 50.0 && after.get(8, 8) <= 100.0 + 1e-3,
             "pit {}",
@@ -474,13 +491,15 @@ mod tests {
         // when the y spacing is honoured.
         let mut ramp = Heightfield::new(16, 16, 16, 0).expect("hf");
         ramp.fill_with(|_, y| y as f32 * 2.0 * 30f32.to_radians().tan() * 0.99);
-        let kept = thermal_erode(&ramp, [1.0, 2.0], 30.0, 3, THERMAL_MAX_RATE).expect("erode");
+        let kept =
+            thermal_erode(&ramp, [1.0, 2.0], 30.0, 3, THERMAL_MAX_RATE, None).expect("erode");
         assert_eq!(
             kept.content_hash(),
             ramp.content_hash(),
             "below talus along y with 2 m spacing"
         );
-        let moved = thermal_erode(&ramp, [1.0, 1.0], 30.0, 3, THERMAL_MAX_RATE).expect("erode");
+        let moved =
+            thermal_erode(&ramp, [1.0, 1.0], 30.0, 3, THERMAL_MAX_RATE, None).expect("erode");
         assert_ne!(
             moved.content_hash(),
             ramp.content_hash(),
@@ -498,7 +517,7 @@ mod tests {
             iterations: 60,
             ..Default::default()
         };
-        let r = hydraulic_erode(&h, [4.0, 4.0], &p).expect("erode");
+        let r = hydraulic_erode(&h, [4.0, 4.0], &p, None).expect("erode");
         let before = sum(&h);
         let after = sum(&r.height) + sum(&r.sediment);
         assert!(
@@ -525,7 +544,7 @@ mod tests {
         assert!(r.water.stats().min >= 0.0 && r.sediment.stats().min >= 0.0);
         // Deterministic.
         assert_eq!(
-            hydraulic_erode(&h, [4.0, 4.0], &p)
+            hydraulic_erode(&h, [4.0, 4.0], &p, None)
                 .expect("again")
                 .height
                 .content_hash(),
@@ -539,7 +558,8 @@ mod tests {
                 &HydraulicParams {
                     dt: 2.0,
                     ..Default::default()
-                }
+                },
+                None
             )
             .is_err()
         );
@@ -550,10 +570,26 @@ mod tests {
                 &HydraulicParams {
                     evaporation: 100.0,
                     ..Default::default()
-                }
+                },
+                None
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn kernels_stop_when_the_cancel_flag_is_set() {
+        let mut h = Heightfield::new(16, 16, 16, 0).expect("hf");
+        h.fill_with(|x, _| x as f32 * 30.0);
+        let flag = AtomicBool::new(true);
+        let e = thermal_erode(&h, [1.0, 1.0], 30.0, 10, THERMAL_MAX_RATE, Some(&flag))
+            .expect_err("cancelled");
+        assert_eq!(e.code, jd_types::ErrorCode::E_CANCELLED);
+        let e = hydraulic_erode(&h, [1.0, 1.0], &HydraulicParams::default(), Some(&flag))
+            .expect_err("cancelled");
+        assert_eq!(e.code, jd_types::ErrorCode::E_CANCELLED);
+        let clear = AtomicBool::new(false);
+        assert!(thermal_erode(&h, [1.0, 1.0], 30.0, 2, THERMAL_MAX_RATE, Some(&clear)).is_ok());
     }
 
     #[test]

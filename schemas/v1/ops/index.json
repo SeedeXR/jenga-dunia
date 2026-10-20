@@ -65,6 +65,16 @@
     "scope": "project-write"
   },
   {
+    "id": "jobs.cancel",
+    "description": "Request cancellation of a running job; it stops at the next node or kernel iteration with E_CANCELLED",
+    "scope": "none"
+  },
+  {
+    "id": "jobs.list",
+    "description": "Running jobs with progress (steps done/total, current node) — poll while an evaluation runs",
+    "scope": "none"
+  },
+  {
     "id": "project.close",
     "description": "Close the open project (unsaved changes stay in the journal)",
     "scope": "project-read"

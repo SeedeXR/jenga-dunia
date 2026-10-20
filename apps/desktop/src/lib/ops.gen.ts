@@ -298,6 +298,34 @@ export type GraphUndoResult = {
   "redo_depth": number;
 };
 
+export type JobsCancelRequest = {
+  /** Job id from `jobs.list`. */
+  "id": number;
+};
+
+export type JobsCancelResult = boolean;
+
+export type JobsListRequest = Record<string, unknown>;
+
+export type JobInfo = {
+  /** Job id (process-local, increasing). */
+  "id": number;
+  /** Operation running. */
+  "op": string;
+  /** Milliseconds since the job started. */
+  "elapsed_ms": number;
+  /** Steps finished (graph nodes). */
+  "done": number;
+  /** Total steps. */
+  "total": number;
+  /** What is running now (node kind). */
+  "current": string;
+  /** Cancel requested. */
+  "cancelling": boolean;
+};
+
+export type JobsListResult = JobInfo[];
+
 export type ProjectCloseRequest = Record<string, unknown>;
 
 export type WorldSettings = {
@@ -789,6 +817,10 @@ export interface JdOps {
   "graph.set_param": { request: GraphSetParamRequest; result: GraphSetParamResult };
   /** Take back the last graph edit (journaled as graph.restore) */
   "graph.undo": { request: GraphUndoRequest; result: GraphUndoResult };
+  /** Request cancellation of a running job; it stops at the next node or kernel iteration with E_CANCELLED */
+  "jobs.cancel": { request: JobsCancelRequest; result: JobsCancelResult };
+  /** Running jobs with progress (steps done/total, current node) — poll while an evaluation runs */
+  "jobs.list": { request: JobsListRequest; result: JobsListResult };
   /** Close the open project (unsaved changes stay in the journal) */
   "project.close": { request: ProjectCloseRequest; result: ProjectCloseResult };
   /** Create a new project directory and open it */

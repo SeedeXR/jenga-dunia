@@ -49,6 +49,8 @@ vi.mock("@tauri-apps/api/core", () => ({
           status: "ok",
           result: { project_id: "01PROJ", name: req.params.name, path: req.params.path, world: { extent_m: [4096, 4096], resolution_px: [2048, 2048], tile_size: 512, halo: 4, seed: 42 }, schema_version: 1, dirty: false, pending_journal: 0 },
         };
+      case "jobs.list":
+        return { ...base, status: "ok", result: [] };
       case "graph.add_node":
         sculptAdded = true;
         return { ...base, status: "ok", result: { id: "01SCULPT00000000000000000A" } };
@@ -109,7 +111,7 @@ describe("App", () => {
     dialog.open = null;
     dialog.save = null;
     // The store is module-global; reset the mirrored state between tests.
-    useStore.setState({ project: null, layer: null, preview: null, previewStats: null, log: [], busy: false, graph: { nodes: [], edges: [] }, graphKinds: [], lastEval: null, live: true, selectedNode: null, sculpting: false });
+    useStore.setState({ project: null, layer: null, preview: null, previewStats: null, log: [], busy: false, graph: { nodes: [], edges: [] }, graphKinds: [], lastEval: null, live: true, selectedNode: null, sculpting: false, jobs: [] });
   });
 
   it("creates a project, generates terrain, shows stats and preview, exports with a loss warning", async () => {

@@ -22,6 +22,8 @@ stateDiagram-v2
   TimedOut --> [*]
 ```
 
+**Shipped (slice 1, 2026-10-20):** a process-wide job table in `jd-core::jobs` — `graph.evaluate` registers a job, reports per-node progress (`done/total`, current kind) and polls a cancel flag before every node and inside every thermal/hydraulic iteration; `jobs.list` and `jobs.cancel {id}` are ordinary operations, so the GUI header (progress + **Cancel**), the CLI and MCP agents share them. Cancellation returns `E_CANCELLED` with `job_id` and publishes nothing. Queues, budgets, timeouts and detached execution (below) come next.
+
 ## Scheduler architecture
 
 ```mermaid

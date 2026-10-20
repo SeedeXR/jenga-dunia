@@ -58,6 +58,16 @@ export interface GraphKind {
   param_schema: unknown;
 }
 
+export interface JobInfo {
+  id: number;
+  op: string;
+  elapsed_ms: number;
+  done: number;
+  total: number;
+  current: string;
+  cancelling: boolean;
+}
+
 export interface EvalReport {
   lod: number;
   duration_ms: number;
@@ -81,6 +91,9 @@ interface State {
   setLive: (on: boolean) => void;
   /** Show a published layer (height, height#lod2, water, sediment, …) in the viewport. */
   viewLayer: (name: string) => Promise<void>;
+  /** Jobs running in the core (polled while an operation is in flight). */
+  jobs: JobInfo[];
+  cancelJob: (id: number) => Promise<void>;
   /** Node selected in the graph editor (also the sculpt target when it is a sculpt node). */
   selectedNode: string | null;
   setSelectedNode: (id: string | null) => void;
@@ -142,8 +155,26 @@ export const useStore = create<State>((set, get) => {
     const text = typeof err === "string" ? err : err && typeof err === "object" && "code" in err ? `${err.code} ${err.message ?? ""}${err.next ? ` — ${err.next}` : ""}` : String(e);
     set((s) => ({ log: [...s.log.slice(-199), { ts: Date.now(), level: "error", text: `${what}: ${text}` }] }));
   };
+  // While an op is in flight, poll the core's job table so long evaluations show progress and
+  // can be cancelled; the poll uses `op` directly so it never appears in the log.
+  let pollers = 0;
+  let pollTimer: ReturnType<typeof setInterval> | undefined;
+  const startPolling = () => {
+    if (pollers++ > 0) return;
+    pollTimer = setInterval(() => {
+      void op<JobInfo[]>("jobs.list")
+        .then((r) => set({ jobs: r.status === "ok" && r.result ? r.result : [] }))
+        .catch(() => undefined);
+    }, 250);
+  };
+  const stopPolling = () => {
+    if (--pollers > 0) return;
+    clearInterval(pollTimer);
+    set({ jobs: [] });
+  };
   const run = async <T,>(id: string, params: Record<string, unknown> = {}): Promise<Response<T>> => {
     set({ busy: true });
+    startPolling();
     try {
       const r = await op<T>(id, params);
       log(r);
@@ -152,6 +183,7 @@ export const useStore = create<State>((set, get) => {
       logFailure(id, e);
       return { op: id, schema_version: 1, request_id: "", status: "error", error: { code: "E_INTERNAL", message: String(e) } };
     } finally {
+      stopPolling();
       set({ busy: false });
     }
   };
@@ -235,6 +267,10 @@ export const useStore = create<State>((set, get) => {
     lastEval: null,
     live: true,
     viewLayer: showLayer,
+    jobs: [],
+    cancelJob: async (id) => {
+      await op("jobs.cancel", { id }).catch((e) => logFailure("jobs.cancel", e));
+    },
     selectedNode: null,
     setSelectedNode: (id) => set({ selectedNode: id }),
     sculpting: false,
