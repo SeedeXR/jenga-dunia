@@ -718,11 +718,11 @@ pub fn register_all(r: &mut Registry) {
     ).with_memory(12.0));
     r.register(NodeDef::new::<CoastalParams, _>(
         "jd.erosion.coastal@1",
-        "Coastal erosion: waves cut the shore within `band_m` above `level_m` by its ocean exposure and lay the material on the adjacent sea floor — cliff retreat, wave-cut platforms, beaches; outputs the terrain and a `shore` mask of wave work",
+        "Coastal erosion: waves cut the shore within `band_m` above `level_m` by its ocean exposure and lay the material on the adjacent sea floor — cliff retreat, wave-cut platforms, beaches; `drift` > 0 adds fetch (windward shores erode more) and longshore drift (deposits move downwind: spits, bars) from the wind; outputs the terrain and a `shore` mask of wave work",
         vec![port("in", PortType::Heightfield, true)],
         vec![port("out", PortType::Heightfield, false), port("shore", PortType::Heightfield, false)],
         |ctx, p, i| {
-            let cp: CoastalParams = params(p)?;
+            let cp: CoastalParams = params(&with_world_wind(ctx, p, &["wind_azimuth_deg"]))?;
             if !(1..=1000).contains(&cp.iterations) {
                 return Err(JdError::invalid("iterations", "must be within 1..=1000"));
             }

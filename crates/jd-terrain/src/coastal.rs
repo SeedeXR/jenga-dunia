@@ -33,6 +33,15 @@ pub struct CoastalParams {
     /// Metres taken off a fully exposed shore cell per step (> 0).
     #[serde(default = "d_rate")]
     pub rate_m: f32,
+    /// Direction the waves come from (the wind), degrees clockwise from north. In a graph, unset →
+    /// the world's shared wind. Only matters when `drift` > 0.
+    #[serde(default)]
+    pub wind_azimuth_deg: Option<f32>,
+    /// Fetch and longshore drift, 0..1: shores facing the wind erode up to (1 + drift)× more than
+    /// sheltered ones, and the eroded material is laid down preferentially on the sea floor
+    /// downwind — spits and bars grow along the coast. 0 = isotropic waves (the plain model).
+    #[serde(default)]
+    pub drift: f32,
 }
 
 fn d_band() -> f32 {
@@ -52,6 +61,8 @@ impl Default for CoastalParams {
             band_m: d_band(),
             iterations: d_iterations(),
             rate_m: d_rate(),
+            wind_azimuth_deg: None,
+            drift: 0.0,
         }
     }
 }
@@ -72,6 +83,14 @@ pub fn coastal_erode(
     if !(p.rate_m > 0.0 && p.rate_m.is_finite()) {
         return Err(JdError::invalid("rate_m", "must be positive"));
     }
+    if !(0.0..=1.0).contains(&p.drift) {
+        return Err(JdError::invalid("drift", "must be within 0..=1"));
+    }
+    // Wave travel direction as (east, north) components: the wind blows towards azimuth + 180°.
+    let travel = {
+        let to = (p.wind_azimuth_deg.unwrap_or(270.0) + 180.0).to_radians();
+        (to.sin(), to.cos())
+    };
     let (w, hh) = (h.width() as i64, h.height() as i64);
     let n = (w * hh) as usize;
     let mut cur = h.clone();
@@ -100,16 +119,27 @@ pub fn coastal_erode(
                 if sea[i] || v[i] > p.level_m + p.band_m {
                     continue;
                 }
-                let wet: Vec<usize> = neighbours
+                // Ocean neighbours with their unit direction from this cell (east, north).
+                let wet: Vec<(usize, (f32, f32))> = neighbours
                     .iter()
                     .filter(|(dx, dy)| (0..w).contains(&(x + dx)) && (0..hh).contains(&(y + dy)))
-                    .map(|(dx, dy)| at(x + dx, y + dy))
-                    .filter(|&j| sea[j])
+                    .filter(|(dx, dy)| sea[at(x + dx, y + dy)])
+                    .map(|(dx, dy)| {
+                        let len = ((dx * dx + dy * dy) as f32).sqrt();
+                        (at(x + dx, y + dy), (*dx as f32 / len, *dy as f32 / len))
+                    })
                     .collect();
                 if wet.is_empty() {
                     continue;
                 }
-                let exposure = wet.len() as f32 / 8.0;
+                // Fetch: waves arriving from an ocean neighbour travel along −dir; the more that
+                // agrees with the wind's travel the harder they hit. Drift 0 counts every neighbour once.
+                let exposure = (wet
+                    .iter()
+                    .map(|(_, d)| 1.0 + p.drift * (-(d.0 * travel.0 + d.1 * travel.1)))
+                    .sum::<f32>()
+                    / 8.0)
+                    .min(1.0);
                 // The notch cuts down to one step below the level, so the cell floods next step
                 // and exposes the next one inland: that is how the cliff retreats and a
                 // wave-cut platform just under the surface is left behind.
@@ -119,9 +149,14 @@ pub fn coastal_erode(
                 }
                 delta[i] -= cut;
                 work[i] += cut;
-                let share = cut / wet.len() as f32;
-                for j in wet {
-                    delta[j] += share;
+                // Longshore drift: the material goes to the sea floor downwind first.
+                let weights: Vec<f32> = wet
+                    .iter()
+                    .map(|(_, d)| 1.0 + p.drift * (d.0 * travel.0 + d.1 * travel.1))
+                    .collect();
+                let total: f32 = weights.iter().sum();
+                for ((j, _), wgt) in wet.iter().zip(&weights) {
+                    delta[*j] += cut * wgt / total;
                 }
             }
         }
@@ -141,6 +176,104 @@ mod tests {
     use super::*;
 
     #[test]
+    fn drift_moves_the_deposits_downwind_and_keeps_the_mass() {
+        // A 20 m island on a 64² sea at −10 m; westerly waves travel east.
+        let mut h = Heightfield::new(64, 64, 64, 0).expect("hf");
+        h.fill_with(|x, y| {
+            let d = ((x as f32 - 32.0).powi(2) + (y as f32 - 32.0).powi(2)).sqrt();
+            (20.0 - d * 1.5).max(-10.0)
+        });
+        let base = CoastalParams {
+            level_m: 0.0,
+            band_m: 6.0,
+            iterations: 30,
+            rate_m: 0.5,
+            wind_azimuth_deg: Some(270.0),
+            ..CoastalParams::default()
+        };
+        let run = |drift: f32| {
+            coastal_erode(
+                &h,
+                &CoastalParams {
+                    drift,
+                    ..base.clone()
+                },
+                None,
+            )
+            .expect("coast")
+            .0
+        };
+        let (plain, drifted) = (run(0.0), run(0.8));
+        let sum = |f: &Heightfield| f.to_vec().iter().map(|v| *v as f64).sum::<f64>();
+        assert!(
+            (sum(&h) - sum(&drifted)).abs() < 1e-2,
+            "mass kept under drift"
+        );
+        assert_ne!(plain.content_hash(), drifted.content_hash());
+        // Longshore drift on a straight north–south coast under a northerly: the deposits' centroid
+        // moves south (rows grow north), where the isotropic model keeps it on the mid row.
+        let mut ramp = Heightfield::new(64, 32, 64, 0).expect("ramp");
+        ramp.fill_with(|x, _| -20.0 + x as f32 * 1.25);
+        let along = |drift: f32| {
+            let f = coastal_erode(
+                &ramp,
+                &CoastalParams {
+                    drift,
+                    wind_azimuth_deg: Some(0.0),
+                    ..base.clone()
+                },
+                None,
+            )
+            .expect("ramp")
+            .0;
+            let (mut m, mut my) = (0.0f64, 0.0f64);
+            for y in 0..32 {
+                for x in 0..64 {
+                    let d = (f.get(x, y) - ramp.get(x, y)).max(0.0) as f64;
+                    m += d;
+                    my += d * y as f64;
+                }
+            }
+            my / m.max(1e-9)
+        };
+        assert!(
+            (along(0.0) - 15.5).abs() < 0.3,
+            "isotropic deposits centre on the mid row: {}",
+            along(0.0)
+        );
+        assert!(
+            along(0.8) < along(0.0) - 0.5,
+            "deposits move downwind (south): {} → {}",
+            along(0.0),
+            along(0.8)
+        );
+        // Exposure follows the wind: the west (windward) shore is cut more than the east shore.
+        let cut = |f: &Heightfield, x0: u32, x1: u32| {
+            (x0..x1)
+                .flat_map(|x| (0..64).map(move |y| (x, y)))
+                .map(|(x, y)| (h.get(x, y) - f.get(x, y)).max(0.0) as f64)
+                .sum::<f64>()
+        };
+        assert!(
+            cut(&drifted, 0, 32) > cut(&drifted, 32, 64) * 1.2,
+            "windward shore cut harder: {} vs {}",
+            cut(&drifted, 0, 32),
+            cut(&drifted, 32, 64)
+        );
+        assert!(
+            coastal_erode(
+                &h,
+                &CoastalParams {
+                    drift: 1.5,
+                    ..base.clone()
+                },
+                None
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn waves_cut_the_shore_fill_the_shallows_and_keep_the_mass() {
         // A ramp from −20 m (west, sea) to +60 m (east, land); sea level 0 crosses at column 16.
         let mut h = Heightfield::new(64, 16, 64, 0).expect("hf");
@@ -150,6 +283,7 @@ mod tests {
             band_m: 8.0,
             iterations: 40,
             rate_m: 0.5,
+            ..CoastalParams::default()
         };
         let (out, shore) = coastal_erode(&h, &p, None).expect("coast");
         let sum = |f: &Heightfield| f.to_vec().iter().map(|v| *v as f64).sum::<f64>();

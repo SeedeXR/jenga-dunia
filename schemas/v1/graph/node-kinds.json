@@ -514,7 +514,7 @@
   },
   {
     "kind": "jd.erosion.coastal@1",
-    "description": "Coastal erosion: waves cut the shore within `band_m` above `level_m` by its ocean exposure and lay the material on the adjacent sea floor — cliff retreat, wave-cut platforms, beaches; outputs the terrain and a `shore` mask of wave work",
+    "description": "Coastal erosion: waves cut the shore within `band_m` above `level_m` by its ocean exposure and lay the material on the adjacent sea floor — cliff retreat, wave-cut platforms, beaches; `drift` > 0 adds fetch (windward shores erode more) and longshore drift (deposits move downwind: spits, bars) from the wind; outputs the terrain and a `shore` mask of wave work",
     "inputs": [
       {
         "name": "in",
@@ -564,6 +564,21 @@
           "type": "number",
           "format": "float",
           "default": 0.25
+        },
+        "wind_azimuth_deg": {
+          "description": "Direction the waves come from (the wind), degrees clockwise from north. In a graph, unset →\nthe world's shared wind. Only matters when `drift` > 0.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float",
+          "default": null
+        },
+        "drift": {
+          "description": "Fetch and longshore drift, 0..1: shores facing the wind erode up to (1 + drift)× more than\nsheltered ones, and the eroded material is laid down preferentially on the sea floor\ndownwind — spits and bars grow along the coast. 0 = isotropic waves (the plain model).",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
         }
       },
       "additionalProperties": false

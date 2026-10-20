@@ -1444,6 +1444,13 @@ export type NodeParams_jd_erosion_coastal_1 = {
   "iterations"?: number;
   /** Metres taken off a fully exposed shore cell per step (> 0). */
   "rate_m"?: number;
+  /** Direction the waves come from (the wind), degrees clockwise from north. In a graph, unset →
+the world's shared wind. Only matters when `drift` > 0. */
+  "wind_azimuth_deg"?: number | null;
+  /** Fetch and longshore drift, 0..1: shores facing the wind erode up to (1 + drift)× more than
+sheltered ones, and the eroded material is laid down preferentially on the sea floor
+downwind — spits and bars grow along the coast. 0 = isotropic waves (the plain model). */
+  "drift"?: number;
 };
 
 export type NodeParams_jd_erosion_droplet_1 = {
