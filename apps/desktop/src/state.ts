@@ -30,6 +30,10 @@ interface State {
   project: ProjectSummary | null;
   layer: LayerInfo | null;
   preview: Preview | null;
+  /** Layer whose values colour the terrain instead of the height ramp (null = ramp). */
+  colorLayer: string | null;
+  colorPreview: Preview | null;
+  setColorLayer: (name: string | null) => Promise<void>;
   previewStats: { bytes: number; ms: number; lod: number } | null;
   noise: NoiseSettings;
   busy: boolean;
@@ -162,8 +166,22 @@ export const useStore = create<State>((set, get) => {
     try {
       const { preview, bytes, ms } = await layerPreview(layer.layer, lod);
       set({ preview, previewStats: { bytes, ms, lod } });
+      await refreshColor(lod);
     } catch (e) {
       logFailure("layer_preview", e);
+    }
+  };
+  // The colour layer is fetched at the same LOD as the shown layer; a layer that vanished from
+  // the last evaluation drops back to the height ramp.
+  const refreshColor = async (lod: number) => {
+    const { colorLayer, lastEval } = get();
+    if (!colorLayer) return;
+    if (lastEval && !(colorLayer in lastEval.layers)) return set({ colorLayer: null, colorPreview: null });
+    try {
+      const { preview } = await layerPreview(colorLayer, lod);
+      set({ colorPreview: preview });
+    } catch (e) {
+      logFailure("layer_preview (colour)", e);
     }
   };
   // After an evaluation: adopt the first published layer (stats + viewport preview).
@@ -262,6 +280,12 @@ export const useStore = create<State>((set, get) => {
     project: null,
     layer: null,
     preview: null,
+    colorLayer: null,
+    colorPreview: null,
+    setColorLayer: async (name) => {
+      set({ colorLayer: name, colorPreview: null });
+      if (name) await refreshColor(get().previewStats?.lod ?? 0);
+    },
     previewStats: null,
     noise: defaultNoise,
     busy: false,

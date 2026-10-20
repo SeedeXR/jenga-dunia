@@ -16,6 +16,8 @@ export interface ViewportInfo {
 
 interface Props {
   preview: Preview | null;
+  /** Colour vertices from this layer's preview instead of the height ramp. */
+  overlay?: Preview | null;
   extentM: [number, number] | null;
   onInfo?: (info: ViewportInfo) => void;
   /** Sculpt mode: pointer drags paint a stroke on the terrain instead of orbiting. Points are
@@ -61,12 +63,31 @@ const RAMP: Float32Array = (() => {
   return out;
 })();
 
-export function buildTerrainGeometry(p: Preview, extent: [number, number]): THREE.BufferGeometry {
+/** Vertex colour from an overlay layer: class maps (small integers) get a palette, masks a
+ *  dark→accent gradient. The overlay may be a different size than the height preview. */
+function overlayColor(o: Preview, u: number, v: number, out: THREE.Color): void {
+  const x = Math.min(o.width - 1, Math.max(0, Math.round(u * (o.width - 1))));
+  const y = Math.min(o.height - 1, Math.max(0, Math.round(v * (o.height - 1))));
+  const q = o.data[y * o.width + x] ?? 0;
+  const value = o.min + (q / 65535) * (o.max - o.min);
+  const classes = o.max <= 32 && o.min >= 0 && Number.isInteger(o.max) && Number.isInteger(o.min);
+  if (classes) {
+    const id = Math.round(value);
+    if (id <= 0) out.setRGB(0.12, 0.12, 0.14);
+    else out.setHSL(((id - 1) * 0.618034) % 1, 0.55, 0.45); // golden-angle palette
+  } else {
+    const t = o.max > o.min ? (value - o.min) / (o.max - o.min) : 0;
+    out.setRGB(0.1 + 0.15 * t, 0.12 + 0.6 * t, 0.16 + 0.75 * t);
+  }
+}
+
+export function buildTerrainGeometry(p: Preview, extent: [number, number], overlay: Preview | null = null): THREE.BufferGeometry {
   const { width, height, min, max, data } = p;
   const geo = new THREE.PlaneGeometry(extent[0], extent[1], width - 1, height - 1);
   geo.rotateX(-Math.PI / 2); // plane in XZ, +Y up (glTF frame)
   const pos = geo.attributes.position as THREE.BufferAttribute;
   const colors = new Float32Array(pos.count * 3);
+  const tmp = new THREE.Color();
   const range = max - min || 1;
   for (let j = 0; j < height; j++) {
     // PlaneGeometry rows run from +Z (front) to -Z; the preview's row 0 is south (+Z after rotation).
@@ -74,6 +95,13 @@ export function buildTerrainGeometry(p: Preview, extent: [number, number]): THRE
       const vi = j * width + i;
       const q = data[(height - 1 - j) * width + i] ?? 0;
       pos.setY(vi, min + (q / 65535) * range);
+      if (overlay) {
+        overlayColor(overlay, i / Math.max(1, width - 1), (height - 1 - j) / Math.max(1, height - 1), tmp);
+        colors[vi * 3] = tmp.r;
+        colors[vi * 3 + 1] = tmp.g;
+        colors[vi * 3 + 2] = tmp.b;
+        continue;
+      }
       const r = (q >> 8) * 3;
       colors[vi * 3] = RAMP[r] ?? 0;
       colors[vi * 3 + 1] = RAMP[r + 1] ?? 0;
@@ -84,7 +112,7 @@ export function buildTerrainGeometry(p: Preview, extent: [number, number]): THRE
   geo.computeVertexNormals();
   // Steep faces read as rock regardless of altitude: blend by (1 − normal.y), i.e. slope.
   const nrm = geo.attributes.normal as THREE.BufferAttribute;
-  for (let vi = 0; vi < pos.count; vi++) {
+  for (let vi = 0; vi < pos.count && !overlay; vi++) {
     const slope = Math.min(1, Math.max(0, (1 - nrm.getY(vi)) * 1.4));
     const [r, g, b] = [colors[vi * 3] ?? 0, colors[vi * 3 + 1] ?? 0, colors[vi * 3 + 2] ?? 0];
     colors[vi * 3] = r + (ROCK.r - r) * slope;
@@ -125,7 +153,7 @@ function infoOf(s: SceneState): ViewportInfo {
   return { backend: s.backend, triangles: s.triangles, ...(s.sea ? { seaM: s.sea.position.y } : {}), sun: s.sunDeg };
 }
 
-export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevelM = null, sun }: Props) {
+export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevelM = null, sun, overlay = null }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<SceneState | null>(null);
   // Latest sculpt props without re-creating the renderer effect.
@@ -334,7 +362,7 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
       s.triangles = 0;
     }
     if (!preview || !extentM) return;
-    const geo = buildTerrainGeometry(preview, extentM);
+    const geo = buildTerrainGeometry(preview, extentM, overlay);
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
     s.mesh = new THREE.Mesh(geo, mat);
     s.scene.add(s.mesh);
@@ -354,7 +382,7 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
     s.camera.updateProjectionMatrix();
     placeCamera(s);
     onInfo?.(infoOf(s));
-  }, [preview, extentM, onInfo]);
+  }, [preview, extentM, overlay, onInfo]);
 
   // Sun: direction from azimuth/elevation; low sun goes warm and dimmer, the sky light follows.
   useEffect(() => {

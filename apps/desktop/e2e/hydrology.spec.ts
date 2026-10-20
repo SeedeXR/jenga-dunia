@@ -74,6 +74,24 @@ test.describe("hydrology nodes against the real core", () => {
     await expect(page.getByTestId("layer-stats")).toBeVisible();
     await expect(page.getByTestId("viewport-info")).toContainText(/ [1-9][\d,]* tris/);
 
+    // A second output publishes the rivers mask; the header can then colour the terrain by it.
+    await page.getByTestId("graph-kind").selectOption("jd.output.height@1");
+    await page.getByTestId("graph-add").click();
+    const out2 = panel.locator(`.react-flow__node:not([data-id="${HEIGHT}"])`, { hasText: "jd.output.height@1" });
+    await out2.click();
+    const layerInput = inspector.locator("label", { hasText: "layer" }).locator("input");
+    await layerInput.fill("rivers");
+    await layerInput.blur();
+    await expect(page.getByTestId("log")).toContainText("graph.set_param: ok");
+    await wire(page, rivers, out2, "rivers");
+    await page.getByTestId("graph-evaluate").click();
+    await expect(page.getByTestId("layer-pick")).toBeVisible();
+    await page.getByTestId("color-pick").selectOption("rivers");
+    await expect(page.getByTestId("viewport-info")).toContainText("colour rivers");
+    await page.screenshot({ path: testInfo.outputPath("hydrology-colour.png") }); // tutorial image source
+    await page.getByTestId("color-pick").selectOption("");
+    await expect(page.getByTestId("viewport-info")).not.toContainText("colour rivers");
+
     // Sea level is in the kinds list too, with its two outputs.
     await page.getByTestId("graph-kind").selectOption("jd.hydrology.sea_level@1");
     await page.getByTestId("graph-add").click();
