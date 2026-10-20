@@ -69,7 +69,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [ ] Streaming, origin rebasing, 16k+ worlds under 4 GB
 - [ ] GPU kernels + parity tests
 - [ ] `jd-geo` (DEM/OSM/contours with attribution) and `jd-vision` (MoGe-2, DA3 via ONNX; licence gate)
-- [ ] Fuzzing, signed releases ( no signed releases since we don't have an apple developer account.), diagnostic bundles
+- [~] Fuzzing: FBX reader hardened (nesting ≤ 64, arrays ≤ 1 GiB, bounded zlib) + proptest mutation test ✔ · cargo-fuzz targets / other parsers ☐ · signed releases ✗ (no Apple developer account) · diagnostic bundles ☐
 - [ ] Acceptance scenario §20 green
 
 ## Deferred (with reasons)

@@ -204,7 +204,7 @@ fbx_in    min 51.978  max 1085.047  mean 567.398
 fbx_diff  min -0.0    max 0.0       mean -0.0
 ```
 
-Blender stores positions as 32-bit floats in centimetres, so boundary vertices jitter by ~0.2 mm; the rasteriser's coverage test has ~1 cm of slack for exactly that (a strict test left the north and south edge rows uncovered on the first run). A third-party FBX 7500 file written by another tool (a 23 MB zlib-compressed character from Optima's samples) parses in 0.37 s — nonsense as terrain, but it proves the 64-bit record layout and compressed arrays. ASCII FBX is refused with `E_FORMAT_UNSUPPORTED`.
+Blender stores positions as 32-bit floats in centimetres, so boundary vertices jitter by ~0.2 mm; the rasteriser's coverage test has ~1 cm of slack for exactly that (a strict test left the north and south edge rows uncovered on the first run). A third-party FBX 7500 file written by another tool (a 23 MB zlib-compressed character from Optima's samples) parses in 0.37 s — nonsense as terrain, but it proves the 64-bit record layout and compressed arrays. ASCII FBX is refused with `E_FORMAT_UNSUPPORTED`. The reader is hardened for untrusted files: record nesting is capped at 64 levels, an array may declare at most 1 GiB and its zlib stream is read only up to the declared size, and a 256-case property test corrupts a valid file at random (flipped bytes, truncation, a spliced 2³¹-element array header) and requires a clean `Ok` or `Err` every time — never a panic or a runaway allocation.
  Worlds above ~1 M vertices are sampled every `step` pixels (`W_MESH_DECIMATED`); pass `--step 1` for the full grid.
 
 ### Hydrology recipe: rivers, lakes and wetness

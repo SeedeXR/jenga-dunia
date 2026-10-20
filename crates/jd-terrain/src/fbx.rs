@@ -724,11 +724,25 @@ fn read_array(b: &[u8], pos: usize, elem: usize) -> JdResult<(Vec<u8>, usize, us
         .get(pos + 12..pos + 12 + len)
         .ok_or_else(|| corrupt("truncated array"))?;
     let raw = match encoding {
-        0 => data.to_vec(),
+        0 => {
+            if data.len() != count.saturating_mul(elem) {
+                return Err(corrupt("array length does not match its count"));
+            }
+            data.to_vec()
+        }
         1 => {
             use std::io::Read as _;
-            let mut out = Vec::with_capacity(count * elem);
+            // Bounded: a crafted header could claim gigabytes; the decoded stream is capped at
+            // the declared size + 1 so an over-long stream is detected, not swallowed.
+            let want = count
+                .checked_mul(elem)
+                .ok_or_else(|| corrupt("array size overflows"))?;
+            if want > MAX_ARRAY_BYTES {
+                return Err(corrupt("array larger than 1 GiB"));
+            }
+            let mut out = Vec::with_capacity(want.min(1 << 20));
             flate2::read::ZlibDecoder::new(data)
+                .take(want as u64 + 1)
                 .read_to_end(&mut out)
                 .map_err(|e| corrupt(&format!("zlib array: {e}")))?;
             out
@@ -822,7 +836,17 @@ fn parse_prop(b: &[u8], pos: usize) -> JdResult<(RP, usize)> {
 }
 
 /// One record at `pos`; `None` for a null record. `big` = 64-bit header fields (≥ 7500).
-fn parse_node(b: &[u8], pos: usize, big: bool) -> JdResult<Option<(RN, usize)>> {
+/// Largest array a record may declare (1 GiB).
+const MAX_ARRAY_BYTES: usize = 1 << 30;
+
+/// Deepest record nesting accepted (real files stay under ~10; a crafted one could otherwise
+/// recurse until the stack overflows).
+const MAX_DEPTH: u32 = 64;
+
+fn parse_node(b: &[u8], pos: usize, big: bool, depth: u32) -> JdResult<Option<(RN, usize)>> {
+    if depth > MAX_DEPTH {
+        return Err(corrupt("records nested deeper than 64 levels"));
+    }
     let (end, n_props, props_len, mut p) = if big {
         (
             le_u64(b, pos)? as usize,
@@ -849,7 +873,7 @@ fn parse_node(b: &[u8], pos: usize, big: bool) -> JdResult<Option<(RN, usize)>> 
     )
     .into_owned();
     p += name_len;
-    let mut props = Vec::with_capacity(n_props);
+    let mut props = Vec::with_capacity(n_props.min(64));
     for _ in 0..n_props {
         let (v, next) = parse_prop(b, p)?;
         props.push(v);
@@ -857,7 +881,7 @@ fn parse_node(b: &[u8], pos: usize, big: bool) -> JdResult<Option<(RN, usize)>> 
     }
     let mut kids = Vec::new();
     while p < end {
-        match parse_node(b, p, big)? {
+        match parse_node(b, p, big, depth + 1)? {
             Some((kid, next)) => {
                 kids.push(kid);
                 p = next;
@@ -886,7 +910,7 @@ fn parse_document(b: &[u8]) -> JdResult<Vec<RN>> {
     let mut pos = 27;
     let mut top = Vec::new();
     while pos < b.len() {
-        match parse_node(b, pos, big)? {
+        match parse_node(b, pos, big, 0)? {
             Some((node, next)) => {
                 top.push(node);
                 pos = next;
@@ -956,6 +980,7 @@ impl RN {
 
 /// A mesh read from an FBX file: positions in metres in the terrain frame (+X east, +Y up,
 /// +Z south), triangles as vertex indices.
+#[derive(Debug)]
 pub struct FbxMesh {
     /// Vertex positions.
     pub positions: Vec<[f64; 3]>,
@@ -1190,6 +1215,90 @@ pub fn read_fbx_heightfield(
 #[cfg(test)]
 mod read_tests {
     use super::*;
+    use proptest::prelude::*;
+
+    fn small_fbx() -> Vec<u8> {
+        let dir = tempfile::tempdir().expect("tmp");
+        let mut hf = Heightfield::new(6, 5, 8, 0).expect("hf");
+        hf.fill_with(|x, y| 10.0 + x as f32 + y as f32 * 0.5);
+        let p = dir.path().join("f.fbx");
+        export_fbx(&hf, [60.0, 50.0], &p, 1, false).expect("export");
+        fs::read(&p).expect("read")
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(256))]
+        /// Any corruption of a valid file (flipped bytes, truncation, a spliced-in huge array
+        /// header) ends in Ok or a clean Err — never a panic, never a runaway allocation.
+        #[test]
+        fn mutated_fbx_never_panics(
+            edits in prop::collection::vec((0usize..4096, 0u8..=255u8), 1..12),
+            cut in 0usize..4096,
+            splice in prop::option::of(0usize..4096),
+        ) {
+            let mut bytes = small_fbx();
+            for (at, v) in edits {
+                let i = at % bytes.len();
+                bytes[i] = v;
+            }
+            if let Some(at) = splice {
+                // A float array claiming 2^31 elements, raw encoding.
+                let i = at % bytes.len();
+                let hdr = [b'd', 0, 0, 0, 0x80, 0, 0, 0, 0, 0, 0, 0, 0];
+                let end = (i + hdr.len()).min(bytes.len());
+                bytes[i..end].copy_from_slice(&hdr[..end - i]);
+            }
+            bytes.truncate((cut % bytes.len()).max(1));
+            let dir = tempfile::tempdir().expect("tmp");
+            let p = dir.path().join("m.fbx");
+            fs::write(&p, &bytes).expect("write");
+            let _ = read_fbx_mesh(&p).map(|m| m.triangles.len());
+            let _ = read_fbx_heightfield(&p, Some([4, 4]));
+        }
+    }
+
+    #[test]
+    fn deep_nesting_and_huge_arrays_are_refused() {
+        // 70 nested empty records (32-bit headers): each claims to end at the file end.
+        let mut bytes = MAGIC.to_vec();
+        bytes.extend_from_slice(&7400u32.to_le_bytes());
+        let total = 27 + 70 * 14 + 13;
+        for _ in 0..70 {
+            bytes.extend_from_slice(&(total as u32).to_le_bytes());
+            bytes.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0, 1, b'a']);
+        }
+        bytes.extend_from_slice(&[0u8; 13]);
+        let dir = tempfile::tempdir().expect("tmp");
+        let p = dir.path().join("deep.fbx");
+        fs::write(&p, &bytes).expect("write");
+        let err = read_fbx_mesh(&p).expect_err("too deep");
+        assert!(err.message.contains("nested"), "{}", err.message);
+        // A record with a 1-element f64 array that declares 1.5 GiB.
+        let mut bytes = MAGIC.to_vec();
+        bytes.extend_from_slice(&7400u32.to_le_bytes());
+        let mut prop = vec![b'd'];
+        prop.extend_from_slice(&((1usize << 28) as u32).to_le_bytes()); // 2^28 doubles = 2 GiB
+        prop.extend_from_slice(&1u32.to_le_bytes()); // zlib
+        prop.extend_from_slice(&4u32.to_le_bytes());
+        prop.extend_from_slice(&[0x78, 0x9c, 0, 0]);
+        let rec_len = 13 + 1 + prop.len();
+        bytes.extend_from_slice(&((27 + rec_len) as u32).to_le_bytes());
+        bytes.extend_from_slice(&1u32.to_le_bytes());
+        bytes.extend_from_slice(&(prop.len() as u32).to_le_bytes());
+        bytes.push(1);
+        bytes.push(b'V');
+        bytes.extend_from_slice(&prop);
+        bytes.extend_from_slice(&[0u8; 13]);
+        fs::write(&p, &bytes).expect("write");
+        let err = read_fbx_mesh(&p).expect_err("too big");
+        assert!(
+            err.message.contains("larger")
+                || err.message.contains("length")
+                || err.message.contains("zlib"),
+            "{}",
+            err.message
+        );
+    }
 
     #[test]
     fn our_fbx_reads_back_to_the_same_heights() {

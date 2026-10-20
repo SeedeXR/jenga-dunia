@@ -39,7 +39,7 @@ flowchart LR
 ## Untrusted file parsing
 
 - Every importer runs with: max file size, max element counts (vertices, nodes, textures), max image dimensions, decompression bomb limits, timeouts, and `std::panic::catch_unwind` converting panics to `E_FORMAT_CORRUPT`.
-- Fuzz targets (`cargo-fuzz`) for every parser we write; crate-provided parsers are fuzzed through our wrapper.
+- Fuzz targets (`cargo-fuzz`) for every parser we write; crate-provided parsers are fuzzed through our wrapper. Shipped so far: the FBX reader runs a 256-case proptest mutation test on every `cargo test` (byte flips, truncation, spliced huge array headers) plus crafted deep-nesting and 2 GiB-array inputs; limits: 64 nesting levels, 1 GiB per array, zlib streams read only to the declared size.
 - Fixtures: `fixtures/malformed/` with truncated, oversized, cyclic-hierarchy, NaN-laden files; CI runs them.
 
 ## Unsafe and FFI inventory

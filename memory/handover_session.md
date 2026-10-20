@@ -212,7 +212,9 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `19:10:00` **QEM decimation**: `jd_terrain::decimate` (quadric edge collapse, area-weighted plane quadrics, border pins via perpendicular planes, optimum clamped to the footprint, flip test requires n.y > 0 so the output stays a heightfield, lazy heap with vertex versions, compaction + recomputed normals + planar UVs). Writers split into `export_*` (grid) / `write_*` (any mesh); new `write_glb_mesh` (tangents + full-field maps). `export_mesh(..., target_triangles)`, op + CLI `--target-triangles`; FBX refuses it. Unit test (ridge keeps > ½ the faces, footprint equal to the source bbox, worst vertex error < 6 m, all faces CCW). CLI: 512² land → 60 000 tris (11.5 %) in 12.7 s debug; validator 0/0; Optima compare (40 k samples, lenient): mean 0.00025 diag, p99 0.0013, Hausdorff 0.0031, SSIM 0.96/0.99 — pass. `cli-decimate.png` from Optima's sheet.
 
-### Open / next (as of 2026-10-20 19:10, head after decimation commit)
+- `19:40:00` **FBX reader hardening** (Phase 5 fuzzing, first slice): `parse_node` depth limit 64, `read_array` caps at 1 GiB with `checked_mul`, zlib `take(want + 1)`, raw length check before copying, `props` capacity capped; proptest (256 cases: byte flips, truncation, spliced 2³¹-element header) over `read_fbx_mesh`/`read_fbx_heightfield`, plus crafted deep-nesting and 2 GiB-array files → clean errors. Docs: quickstart FBX paragraph, 10-security.md.
+
+### Open / next (as of 2026-10-20 19:40, head after fbx-hardening commit)
 1. **CI**: green through `e74faf2` (snow) except `a4f7150` (vitest timing flake, fixed in `f976369`) and `dad6256` (priorities; fixed by `d84eaa9`); `827109f` (aeolian) polling.
 2. **Figma**: connector unavailable this session; plugin OAuth pending on the owner's side → tutorial images stay in `docs/user/images/`; place them in file `fxyeV62hgLoNmG3dU1LX6G` when a connector works.
 3. **Native leftovers**: Edit-menu capture; native sculpt capture/recording (needs Accessibility); signed/notarised bundle (needs an Apple developer account).
