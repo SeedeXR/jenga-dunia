@@ -242,6 +242,31 @@ struct BiomeParams {
     rules: Vec<BiomeRule>,
 }
 
+/// Every given range must be a proper half-open interval (refused before journaling).
+fn validate_biome_rules(bp: &BiomeParams) -> JdResult<()> {
+    for (k, rule) in bp.rules.iter().enumerate() {
+        for (what, range) in [
+            ("height_m", rule.height_m),
+            ("slope", rule.slope),
+            ("wetness", rule.wetness),
+        ] {
+            if let Some([lo, hi]) = range
+                && (lo >= hi || lo.is_nan() || hi.is_nan())
+            {
+                return Err(JdError::invalid(
+                    "rules",
+                    format!(
+                        "rule {} ({}): {what} range must have min < max",
+                        k + 1,
+                        rule.name
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn default_biome_rules() -> Vec<BiomeRule> {
     let r = |name: &str, h: Option<[f32; 2]>, s: Option<[f32; 2]>| BiomeRule {
         name: name.to_owned(),
@@ -610,16 +635,8 @@ pub fn register_all(r: &mut Registry) {
         vec![port("biome", PortType::Heightfield, false)],
         |_, p, i| {
             let bp: BiomeParams = params(p)?;
+            validate_biome_rules(&bp)?;
             let rules = if bp.rules.is_empty() { default_biome_rules() } else { bp.rules };
-            for (k, rule) in rules.iter().enumerate() {
-                for (what, range) in [("height_m", rule.height_m), ("slope", rule.slope), ("wetness", rule.wetness)] {
-                    if let Some([lo, hi]) = range
-                        && (lo >= hi || lo.is_nan() || hi.is_nan())
-                    {
-                        return Err(JdError::invalid("rules", format!("rule {} ({}): {what} range must have min < max", k + 1, rule.name)));
-                    }
-                }
-            }
             let h = field(i, "height")?;
             let slope = i.get("slope").map(|v| v.as_field());
             let wet = i.get("wetness").map(|v| v.as_field());
@@ -654,7 +671,7 @@ pub fn register_all(r: &mut Registry) {
             });
             Ok(out("biome", out_f))
         },
-    ));
+    ).with_check(validate_biome_rules));
     r.register(NodeDef::new::<ClassMaskParams, _>(
         "jd.mask.class@1",
         "0/1 mask of the cells whose class id equals `id` (feed a `jd.biome.classify@1` map)",

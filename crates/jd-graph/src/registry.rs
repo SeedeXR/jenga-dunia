@@ -88,6 +88,23 @@ impl NodeDef {
         }
     }
 
+    /// Add a semantic check on top of the schema check (ranges, ordering…): it runs before a
+    /// mutation is journaled, so the editor hears about a bad value immediately, not at evaluation.
+    pub fn with_check<P, F>(mut self, f: F) -> Self
+    where
+        P: for<'de> serde::Deserialize<'de>,
+        F: Fn(&P) -> JdResult<()> + Send + Sync + 'static,
+    {
+        let schema_check = self.check.clone();
+        self.check = Arc::new(move |p: &Map<String, Value>| {
+            schema_check(p)?;
+            let typed: P = serde_json::from_value(Value::Object(p.clone()))
+                .map_err(|e| JdError::invalid("params", e.to_string()))?;
+            f(&typed)
+        });
+        self
+    }
+
     /// Validate params against the kind's parameter type (used before journaling mutations).
     pub fn check_params(&self, params: &Map<String, Value>) -> JdResult<()> {
         (self.check)(params)

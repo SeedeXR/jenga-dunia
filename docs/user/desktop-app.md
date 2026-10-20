@@ -103,6 +103,10 @@ Undo and redo are operations like everything else (`graph.undo` / `graph.redo`, 
 
 ![Viewport with a translucent water plane at 250 m cutting through the terrain; sea_level node selected](images/desktop-sea-level.png)
 
+![Inspector with the biome rules table: one row named scree with a slope range, add-row button](images/desktop-biome-rules.png)
+
+*Rules as a table: for parameters that are lists of records (biome rules) the inspector shows a table — **+ row** adds a rule, each cell applies on blur (`min,max` for ranges, empty for "no constraint"), the bin removes a row. Every edit is one journaled `graph.set_param`; a value the core refuses (an inverted range) is reported in the log before anything is journaled and the table keeps the last good value. Recorded brush strokes stay a count — they are data, not something to type. UI-driven test: `apps/desktop/e2e/biomes.spec.ts`.*
+
 *Sea in the viewport: as soon as the graph contains a `jd.hydrology.sea_level@1` node (1) the viewport draws a translucent water plane at its `level_m` — edit the value (2) and the plane moves with it; the header's viewport line reports the height (boxed, top right). The plane is only drawn while the **height** layer is shown (masks like `ocean` or `rivers` are 0..1 and would hide under it). Same e2e test.*
 
 ## Tutorial: sculpting
