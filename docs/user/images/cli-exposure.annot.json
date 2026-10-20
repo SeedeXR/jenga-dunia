@@ -1,0 +1,36 @@
+{
+  "src": "/tmp/jd-scratch/cli-exposure-raw.png",
+  "out": "cli-exposure.png",
+  "annotations": [
+    {
+      "type": "arrow",
+      "x1": 296,
+      "y1": 296,
+      "x2": 296,
+      "y2": 150,
+      "text": "1  west border = open sea: full exposure comes in",
+      "tx": 16,
+      "ty": 318
+    },
+    {
+      "type": "circle",
+      "cx": 365,
+      "cy": 165,
+      "r": 28,
+      "label": "2",
+      "text": "2  lee of a headland: the fetch restarts, exposure near 0",
+      "tx": 16,
+      "ty": 342
+    },
+    {
+      "type": "circle",
+      "cx": 480,
+      "cy": 165,
+      "r": 28,
+      "label": "3",
+      "text": "3  it recovers as \u221a(open water / 10 km) downwind",
+      "tx": 16,
+      "ty": 366
+    }
+  ]
+}

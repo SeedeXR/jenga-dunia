@@ -1091,9 +1091,9 @@ pub fn register_all(r: &mut Registry) {
     ));
     r.register(NodeDef::new::<SeaLevelParams, _>(
         "jd.hydrology.sea_level@1",
-        "Ocean mask (1 below `level_m` where connected to the border; inland basins stay dry) with a soft shoreline, and water `depth` in metres",
+        "Ocean mask (1 below `level_m` where connected to the border; inland basins stay dry) with a soft shoreline, water `depth` in metres, and the wave `exposure` 0..1 of every water cell — the open-water fetch upwind of it (the wind and `fetch_km` of the node or the world), low in the lee of islands and headlands",
         vec![port("in", PortType::Heightfield, true)],
-        vec![port("ocean", PortType::Heightfield, false), port("depth", PortType::Heightfield, false)],
+        vec![port("ocean", PortType::Heightfield, false), port("depth", PortType::Heightfield, false), port("exposure", PortType::Heightfield, false)],
         |ctx, p, i| {
             let sp: SeaLevelParams = params(&with_world_wind(ctx, p, &["wind_azimuth_deg", "wind_speed_mps"]))?;
             if !(sp.visibility_m > 0.0 && sp.visibility_m.is_finite()) {
@@ -1109,7 +1109,8 @@ pub fn register_all(r: &mut Registry) {
                 wind_azimuth_deg: sp.wind_azimuth_deg,
             })?;
             let (ocean, depth) = sea_level(field(i, "in")?, sp.level_m, sp.shore_m)?;
-            Ok(BTreeMap::from([("ocean".to_owned(), Value::field(ocean)), ("depth".to_owned(), Value::field(depth))]))
+            let exposure = jd_terrain::wave_exposure(&ocean, spacing_m(ctx), sp.wind_azimuth_deg, sp.fetch_km.unwrap_or(50.0))?; // no fetch limit set: a 50 km open-coast scale
+            Ok(BTreeMap::from([("ocean".to_owned(), Value::field(ocean)), ("depth".to_owned(), Value::field(depth)), ("exposure".to_owned(), Value::field(exposure))]))
         },
     ));
     r.register(NodeDef::new::<RiversParams, _>(

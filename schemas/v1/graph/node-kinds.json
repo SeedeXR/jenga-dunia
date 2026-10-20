@@ -1648,7 +1648,7 @@
   },
   {
     "kind": "jd.hydrology.sea_level@1",
-    "description": "Ocean mask (1 below `level_m` where connected to the border; inland basins stay dry) with a soft shoreline, and water `depth` in metres",
+    "description": "Ocean mask (1 below `level_m` where connected to the border; inland basins stay dry) with a soft shoreline, water `depth` in metres, and the wave `exposure` 0..1 of every water cell — the open-water fetch upwind of it (the wind and `fetch_km` of the node or the world), low in the lee of islands and headlands",
     "inputs": [
       {
         "name": "in",
@@ -1664,6 +1664,11 @@
       },
       {
         "name": "depth",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "exposure",
         "ty": "heightfield",
         "required": false
       }

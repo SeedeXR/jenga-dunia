@@ -14,6 +14,7 @@
 //! a seeded directional spectrum with dozens of components is the upgrade when the surface needs
 //! to look less regular.
 
+use crate::Heightfield;
 use jd_types::{JdError, JdResult};
 use serde::{Deserialize, Serialize};
 
@@ -141,8 +142,95 @@ pub fn wave_spectrum(p: &WaveParams) -> JdResult<WaveSpectrum> {
     })
 }
 
+/// Wave exposure 0..1 per water cell: the open-water fetch upwind of it (land resets it, the field
+/// border counts as open sea), as a share of `fetch_km`, square-rooted because wave height grows
+/// with the square root of the fetch. Lee shores behind islands and headlands read low — the
+/// wave shadow — and open coasts 1. Land is 0. One upwind sweep with the wind rounded to an
+/// 8-neighbour direction (like the orographic rain).
+pub fn wave_exposure(
+    ocean: &Heightfield,
+    spacing_m: [f32; 2],
+    wind_azimuth_deg: f32,
+    fetch_km: f32,
+) -> JdResult<Heightfield> {
+    if !(fetch_km > 0.0 && fetch_km.is_finite()) {
+        return Err(JdError::invalid("fetch_km", "must be positive"));
+    }
+    if !wind_azimuth_deg.is_finite() {
+        return Err(JdError::invalid("wind_azimuth_deg", "must be finite"));
+    }
+    if !spacing_m.iter().all(|s| *s > 0.0 && s.is_finite()) {
+        return Err(JdError::invalid(
+            "spacing_m",
+            "sample spacing must be positive",
+        ));
+    }
+    let (w, h) = (ocean.width() as i64, ocean.height() as i64);
+    let to = (wind_azimuth_deg + 180.0).to_radians();
+    let (ddx, ddy) = (to.sin().round() as i64, to.cos().round() as i64);
+    let step_m = ((ddx as f32 * spacing_m[0]).powi(2) + (ddy as f32 * spacing_m[1]).powi(2)).sqrt();
+    let fetch_m = fetch_km * 1000.0;
+    let mut reach = vec![0.0f32; (w * h) as usize];
+    let xs = |k: i64| if ddx >= 0 { k } else { w - 1 - k };
+    let ys = |k: i64| if ddy >= 0 { k } else { h - 1 - k };
+    for y in (0..h).map(ys) {
+        for x in (0..w).map(xs) {
+            let i = (y * w + x) as usize;
+            if ocean.get(x as u32, y as u32) <= 0.5 {
+                continue; // land: the fetch starts over downwind of it
+            }
+            let (ux, uy) = (x - ddx, y - ddy);
+            reach[i] = if ux >= 0 && uy >= 0 && ux < w && uy < h {
+                (reach[(uy * w + ux) as usize] + step_m).min(fetch_m)
+            } else {
+                fetch_m
+            };
+        }
+    }
+    let mut out = Heightfield::new(
+        ocean.width(),
+        ocean.height(),
+        ocean.tile_size(),
+        ocean.halo(),
+    )?;
+    out.fill_with(|x, y| (reach[(y as i64 * w + x as i64) as usize] / fetch_m).sqrt());
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn an_island_casts_a_wave_shadow_downwind_and_open_coasts_read_full() {
+        // 64 × 32 sea, 50 m cells, with an island block in the middle; a westerly, 1 km fetch.
+        let mut ocean = Heightfield::new(64, 32, 64, 0).expect("o");
+        ocean.fill_with(|x, y| {
+            if (24..40).contains(&x) && (10..22).contains(&y) {
+                0.0
+            } else {
+                1.0
+            }
+        });
+        let e = wave_exposure(&ocean, [50.0, 50.0], 270.0, 1.0).expect("exposure");
+        assert_eq!(e.get(0, 16), 1.0, "the upwind border is open sea");
+        assert_eq!(e.get(30, 16), 0.0, "land is 0");
+        assert!(e.get(40, 16) < 0.3, "just in the lee: {}", e.get(40, 16));
+        assert!(
+            e.get(63, 16) > e.get(40, 16) && e.get(63, 16) > 0.9,
+            "the shadow fades downwind: {}",
+            e.get(63, 16)
+        );
+        assert_eq!(e.get(63, 2), 1.0, "a row with no island is fully exposed");
+        // An easterly mirrors the shadow to the west side.
+        let w = wave_exposure(&ocean, [50.0, 50.0], 90.0, 1.0).expect("easterly");
+        assert!(
+            w.get(23, 16) < 0.3 && w.get(40, 16) > 0.9,
+            "{} / {}",
+            w.get(23, 16),
+            w.get(40, 16)
+        );
+        assert!(wave_exposure(&ocean, [50.0, 50.0], 270.0, 0.0).is_err());
+    }
     use super::*;
 
     #[test]

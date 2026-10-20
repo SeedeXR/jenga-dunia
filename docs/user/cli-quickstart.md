@@ -635,6 +635,20 @@ lakes   min 0  max 0  mean 0                 ← the fill finds nothing: every c
 
 `jd.hydrology.network@1` builds the terrain the way Génevaux et al. (2013) argue it should be built — network first. The river mouths are the cells of one edge (`mouths`: south / north / west / east, or the whole border for an island); a spanning tree grown from them over a smooth seeded cost field (two octaves of lattice noise, so cheap corridors — the valleys — hold their course for a dozen cells; `roughness` 0 = straight parallel drainage, 1 = the noise alone) is the drainage network; Strahler orders come from a post-order pass; then each cell sits above its downstream parent by the slope of its order times the step (`slope_m_per_km` for headwaters, × `order_falloff` per higher order, so big rivers run flat). Every cell drains to a mouth by construction — the unit test and the CLI run above both confirm that priority-flood filling changes nothing. `rivers` marks channels of `river_order` and up; `order` is the raw Strahler number. Not modelled: valley cross-sections (run the erosion nodes on the result), Génevaux's primitive blending.
 
+### Wave shadow: where the sea is sheltered
+
+```
+$ jd op graph.add_node --project Coast.jdproj --save --params '{"kind":"jd.hydrology.sea_level@1","params":{"level_m":0,"fetch_km":10}}'
+# sea.ocean → `ocean`, sea.exposure → `exposure`            (noise −300..300 m, 25.6 km, westerly from the world)
+jd.hydrology.sea_level@1  102 ms (512²)
+ocean     mean 0.507                 exposure  min 0  max 1  mean 0.270
+$ jd op terrain.export_heightmap --project Coast.jdproj --params '{"layer":"exposure","path":"exposure.png","format":"png16","range_m":[0,1]}'
+```
+
+![Two panels: the height field with the sea below 0 m, and the wave exposure — bright open water on the windward side of every landmass, dark strips in the lee](images/cli-exposure.png)
+
+`exposure` is the sea-level node's third output: for every water cell, the open water upwind of it (the wind is the node's or the world's; land resets the count, the field border counts as open sea) as a share of `fetch_km` (50 km when no fetch limit is set), square-rooted because wave height grows with the square root of the fetch. Lee shores behind islands and headlands read near 0 — the wave shadow — and open coasts 1, so it scales foam, wash and wave amplitude per shore: feed it to `jd.erosion.coastal@1` through a multiply, or export it as a mask for the engine's water material. One upwind sweep with the wind rounded to a compass neighbour (hence the row-wise streaks); refraction around headlands is not modelled.
+
 ### Timeline: keyframed parameters
 
 ```
