@@ -383,7 +383,7 @@
           "default": 0.5
         },
         "wind_azimuth_deg": {
-          "description": "Compass direction the wind blows from, degrees clockwise from north.",
+          "description": "Compass direction the wind blows from, degrees clockwise from north. In a graph, unset → the\nworld's shared wind.",
           "type": "number",
           "format": "float",
           "default": 270.0
@@ -434,7 +434,7 @@
           "default": 20
         },
         "wind_azimuth_deg": {
-          "description": "Compass direction the wind blows from, degrees clockwise from north (270 = westerly).",
+          "description": "Compass direction the wind blows from, degrees clockwise from north (270 = westerly). In a\ngraph, unset → the world's shared wind.",
           "type": "number",
           "format": "float",
           "default": 270.0
@@ -1028,7 +1028,7 @@
           "default": 100
         },
         "wind_azimuth_deg": {
-          "description": "Compass direction the wind blows from, degrees clockwise from north (270 = westerly).",
+          "description": "Compass direction the wind blows from, degrees clockwise from north (270 = westerly). In a\ngraph, unset → the world's shared wind.",
           "type": "number",
           "format": "float",
           "default": 270.0
@@ -1306,7 +1306,7 @@
           ]
         },
         "wind_speed_mps": {
-          "description": "Wind speed 10 m above the sea, m/s (0 = calm): 3 ripples, 8 a moderate sea, 20 a gale. Sets\nthe wave height and length the viewport animates (`ocean.waves`: JONSWAP growth capped at\nthe fully developed Pierson–Moskowitz sea); the ocean mask ignores it.",
+          "description": "Wind speed 10 m above the sea, m/s (0 = calm): 3 ripples, 8 a moderate sea, 20 a gale. Unset\n→ the world's shared wind. Sets\nthe wave height and length the viewport animates (`ocean.waves`: JONSWAP growth capped at\nthe fully developed Pierson–Moskowitz sea); the ocean mask ignores it.",
           "type": "number",
           "format": "float",
           "default": 8.0
@@ -1321,7 +1321,7 @@
           "default": null
         },
         "wind_azimuth_deg": {
-          "description": "Where the wind blows FROM, degrees clockwise from north; waves travel the opposite way.",
+          "description": "Where the wind blows FROM, degrees clockwise from north; waves travel the opposite way. Unset\n→ the world's shared wind.",
           "type": "number",
           "format": "float",
           "default": 270.0

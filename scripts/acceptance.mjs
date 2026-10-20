@@ -123,7 +123,7 @@ for (const [name, id] of [["forest", 6], ["grassland", 5], ["rock", 1]]) {
   connect(biome, "biome", m, "classes");
   publish(`mask_${name}`, m, "out");
 }
-const snow = addNode("jd.climate.snow@1", { snow_line_m: 950, transition_m: 120, wind_azimuth_deg: 270, wind_strength: 0.4 });
+const snow = addNode("jd.climate.snow@1", { snow_line_m: 950, transition_m: 120, wind_strength: 0.4 }); // no wind of its own: follows the world's shared wind
 connect(coast, "out", snow, "in");
 publish("snow", snow, "snow");
 // ── Ocean floor, desert family, strata, a road: branches off the same terrain ──────────────────
@@ -334,6 +334,14 @@ const snowAt = (time) => {
 const snow0 = snowAt(0);
 const snow1 = snowAt(1);
 op("graph.set_time", { time: 0 });
+// Shared weather state: turn the world's wind and every wind-driven node without its own setting re-evaluates.
+op("graph.evaluate", { lod: 2 }, false);
+const snowWesterly = op("terrain.stats", { layer: "snow#lod2" }, false);
+op("project.set_settings", { wind: { azimuth_deg: 90, speed_mps: 8 } });
+op("graph.evaluate", { lod: 2 }, false);
+const snowEasterly = op("terrain.stats", { layer: "snow#lod2" }, false);
+op("project.set_settings", { wind: { azimuth_deg: 270, speed_mps: 8 } });
+mark(5, snowWesterly.content_hash !== snowEasterly.content_hash ? "VERIFIED" : "FAILED", `shared weather state: project.set_settings {wind 270° → 90°} re-evaluates the snow node, which has no wind of its own (cover hash ${snowWesterly.content_hash.slice(0, 8)} → ${snowEasterly.content_hash.slice(0, 8)}, mean ${(snowWesterly.stats.mean * 100).toFixed(2)} % → ${(snowEasterly.stats.mean * 100).toFixed(2)} %); dunes, yardangs and the wind sea follow the same setting`);
 mark(5, snow1 > snow0 ? "VERIFIED" : "FAILED", `timeline: snow_line_m keyed 950 → 700 over t = 0..1; snow cover ${(snow0 * 100).toFixed(2)} % at t = 0 → ${(snow1 * 100).toFixed(2)} % at t = 1 (journaled graph.set_time, cached per time)`);
 // Recovery: a journaled edit without a save, then reopen with --recover.
 op("graph.set_param", { id: snow, key: "snow_line_m", value: 900 }, false); // journaled, not saved
@@ -344,7 +352,7 @@ const snowLine = Object.values(after.nodes).find((n) => n.kind.startsWith("jd.cl
 mark(18, snowLine === 900 && (rec.replayed?.length ?? rec.replayed ?? 1) >= 1 ? "VERIFIED" : "FAILED", `recovery: ${journal.length} pending journal entr${journal.length === 1 ? "y" : "ies"} replayed by \`jd open --recover\`, graph.json now has snow_line_m = ${snowLine}`);
 const logDir = path.join(proj, "logs");
 mark(18, "PARTIAL", `logs: every CLI run logs through tracing (JD_LOG); ${existsSync(logDir) ? "project log directory present" : "no per-project log files yet (stderr only)"}`);
-mark(5, "PARTIAL", "atmosphere beyond the clear-sky model (clouds, fog, rain) is not built; wind is a per-node setting, not a shared weather state");
+mark(5, "PARTIAL", "atmosphere beyond the clear-sky model (clouds, fog, rain) is not built");
 mark(15, "VERIFIED", "this report records the numbers; conversion losses: PNG16 quantisation (W_EXPORT_LOSS), USD without textures (step 4), FBX albedo only (no normal/roughness maps)");
 
 // ── Report ─────────────────────────────────────────────────────────────────────────────────────

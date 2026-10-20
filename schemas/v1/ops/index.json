@@ -156,7 +156,7 @@
   },
   {
     "id": "project.set_settings",
-    "description": "Change project settings (autosave interval, cache limit, preview LOD); fields left out keep their value — journaled like every mutation",
+    "description": "Change project settings (autosave interval, cache limit, preview LOD, memory budget, the world's shared wind); fields left out keep their value — journaled like every mutation",
     "scope": "project-write"
   },
   {

@@ -33,6 +33,8 @@ test.describe("project settings against the real core", () => {
     await expect(page.getByTestId("setting-cache")).toHaveValue("2048");
     await expect(page.getByTestId("setting-lod")).toHaveValue("2");
     await expect(page.getByTestId("setting-memory")).toHaveValue("4");
+    await expect(page.getByTestId("wind-azimuth")).toHaveValue("270");
+    await expect(page.getByTestId("wind-speed")).toHaveValue("8");
 
     // Autosave → 1 s: journaled mutation, persisted on save, out-of-range values refused by the core.
     const autosave = page.getByTestId("setting-autosave");
@@ -44,6 +46,12 @@ test.describe("project settings against the real core", () => {
     await cache.blur();
     await expect(page.getByTestId("log")).toContainText("project.set_settings: E_INPUT_INVALID");
     await expect(page.getByTestId("setting-cache")).toHaveValue("2048");
+    // The world's shared wind lives in the same op: an easterly for every wind-driven node.
+    const wind = page.getByTestId("wind-azimuth");
+    await wind.fill("90");
+    await wind.blur();
+    await expect(page.getByTestId("log")).toContainText("project.set_settings: ok");
+    await expect(page.getByTestId("wind-azimuth")).toHaveValue("90");
 
     // An edit now autosaves after ~1 s: dirty/journal return to false/0 and project.json holds the setting.
     const panel = page.getByTestId("graph-panel");
@@ -54,9 +62,10 @@ test.describe("project settings against the real core", () => {
     await expect(page.getByTestId("log")).toContainText("graph.set_param: ok");
     await expect(page.getByTestId("log")).toContainText("project.save: ok", { timeout: 8_000 });
     await expect(page.getByTestId("project-journal")).toHaveText("0");
-    const doc = JSON.parse(readFileSync(path.join(proj, "project.json"), "utf8")) as { settings: { autosave_interval_s: number; cache_limit_bytes: number } };
+    const doc = JSON.parse(readFileSync(path.join(proj, "project.json"), "utf8")) as { settings: { autosave_interval_s: number; cache_limit_bytes: number }; world: { wind: { azimuth_deg: number; speed_mps: number } } };
     expect(doc.settings.autosave_interval_s).toBe(1);
     expect(doc.settings.cache_limit_bytes).toBe(2147483648);
+    expect(doc.world.wind).toEqual({ azimuth_deg: 90, speed_mps: 8 });
     await page.screenshot({ path: testInfo.outputPath("settings.png") }); // tutorial image source
 
     expect(errors, "no uncaught page errors").toEqual([]);

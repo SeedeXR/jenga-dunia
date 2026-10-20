@@ -61,9 +61,11 @@ export default function App() {
   const seaTint = seaNode?.params?.tint;
   const water = seaNode ? { visibilityM: Number(seaNode.params?.visibility_m ?? 15), tint: (Array.isArray(seaTint) && seaTint.length === 3 ? seaTint.map(Number) : [0.1, 0.35, 0.4]) as [number, number, number], breakingDepthM: s.waves?.breaking_depth_m ?? 0 } : null;
   // The wind sea is the core's call (`ocean.waves`): re-fetched when the node's wind changes.
-  const windSpeed = seaNode ? Number(seaNode.params?.wind_speed_mps ?? 8) : null;
+  // A sea node without its own wind follows the world's shared wind (Settings ▸ Wind).
+  const worldWind = s.project?.world.wind ?? { azimuth_deg: 270, speed_mps: 8 };
+  const windSpeed = seaNode ? Number(seaNode.params?.wind_speed_mps ?? worldWind.speed_mps) : null;
   const fetchKm = seaNode?.params?.fetch_km == null ? null : Number(seaNode.params.fetch_km);
-  const windAzimuth = seaNode ? Number(seaNode.params?.wind_azimuth_deg ?? 270) : null;
+  const windAzimuth = seaNode ? Number(seaNode.params?.wind_azimuth_deg ?? worldWind.azimuth_deg) : null;
   const refreshSky = s.refreshSky;
   useEffect(() => {
     void refreshSky(); // the dome shows the physical sky from the first frame; later sun edits re-bake it
@@ -327,6 +329,14 @@ export default function App() {
               <label className="mb-1 flex items-center justify-between gap-2 text-xs text-jd-fg-1" title="Evaluations whose memory estimate exceeds this are refused (E_RESOURCE_MEMORY)">
                 Memory budget (GB)
                 <input className={inputCls} type="number" min={0.25} step={0.25} key={`mb-${s.settingsRev}-${s.project?.settings.memory_budget_bytes ?? 0}`} defaultValue={(s.project?.settings.memory_budget_bytes ?? 4294967296) / 1073741824} onBlur={(e) => { const v = Math.round(Number(e.target.value) * 1073741824); if (v !== (s.project?.settings.memory_budget_bytes ?? 4294967296)) void s.setSettings({ memory_budget_bytes: v }); }} title="Evaluations whose memory estimate exceeds this are refused (E_RESOURCE_MEMORY)" data-testid="setting-memory" />
+              </label>
+              <label className="mb-1 flex items-center justify-between gap-2 text-xs text-jd-fg-1" title="Shared wind: dunes, yardangs, snow scour and the wind sea follow it unless a node sets its own wind">
+                Wind from (°)
+                <input className={inputCls} type="number" min={0} max={360} key={`wa-${s.settingsRev}-${worldWind.azimuth_deg}`} defaultValue={worldWind.azimuth_deg} onBlur={(e) => { const v = Number(e.target.value); if (v !== worldWind.azimuth_deg) void s.setSettings({ wind: { azimuth_deg: v, speed_mps: worldWind.speed_mps ?? 8 } }); }} data-testid="wind-azimuth" />
+              </label>
+              <label className="mb-1 flex items-center justify-between gap-2 text-xs text-jd-fg-1" title="Shared wind speed 10 m above the ground, m/s: 3 a breeze, 8 moderate, 20 a gale">
+                Wind (m/s)
+                <input className={inputCls} type="number" min={0} step={0.5} key={`ws-${s.settingsRev}-${worldWind.speed_mps}`} defaultValue={worldWind.speed_mps} onBlur={(e) => { const v = Number(e.target.value); if (v !== worldWind.speed_mps) void s.setSettings({ wind: { azimuth_deg: worldWind.azimuth_deg ?? 270, speed_mps: v } }); }} data-testid="wind-speed" />
               </label>
             </>
           )}

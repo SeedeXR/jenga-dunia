@@ -30,7 +30,8 @@ pub struct SnowParams {
     /// How much sun-facing slopes lose, 0..1 (0 = aspect ignored).
     #[serde(default = "default_half")]
     pub sun_strength: f32,
-    /// Compass direction the wind blows from, degrees clockwise from north.
+    /// Compass direction the wind blows from, degrees clockwise from north. In a graph, unset → the
+    /// world's shared wind.
     #[serde(default = "default_west")]
     pub wind_azimuth_deg: f32,
     /// How much windward slopes lose to scouring, 0..1 (0 = wind ignored).

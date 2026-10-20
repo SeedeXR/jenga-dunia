@@ -35,6 +35,18 @@
       "maximum": 255,
       "default": null
     },
+    "wind": {
+      "description": "Shared wind of the world: every wind-driven node without its own `wind_*` setting follows it.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Wind"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "memory_budget_bytes": {
       "description": "Memory budget for evaluations, bytes (≥ 256 MiB; default 4 GiB).",
       "type": [
@@ -46,5 +58,28 @@
       "default": null
     }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "$defs": {
+    "Wind": {
+      "description": "Shared weather state: the prevailing wind. Every wind-driven node (dunes, yardangs, snow\nscour, the wind sea) follows it unless the node sets its own `wind_*` parameter.",
+      "type": "object",
+      "properties": {
+        "azimuth_deg": {
+          "description": "Direction the wind blows FROM, degrees clockwise from north (270 = westerly).",
+          "type": "number",
+          "format": "float"
+        },
+        "speed_mps": {
+          "description": "Speed 10 m above the ground, m/s (8 = a moderate breeze).",
+          "type": "number",
+          "format": "float"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "azimuth_deg",
+        "speed_mps"
+      ]
+    }
+  }
 }

@@ -50,6 +50,26 @@ impl Default for Units {
     }
 }
 
+/// Shared weather state: the prevailing wind. Every wind-driven node (dunes, yardangs, snow
+/// scour, the wind sea) follows it unless the node sets its own `wind_*` parameter.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Wind {
+    /// Direction the wind blows FROM, degrees clockwise from north (270 = westerly).
+    pub azimuth_deg: f32,
+    /// Speed 10 m above the ground, m/s (8 = a moderate breeze).
+    pub speed_mps: f32,
+}
+
+impl Default for Wind {
+    fn default() -> Self {
+        Self {
+            azimuth_deg: 270.0,
+            speed_mps: 8.0,
+        }
+    }
+}
+
 /// World extent, resolution and tiling (`docs/spec/project-format.md`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WorldSettings {
@@ -68,6 +88,9 @@ pub struct WorldSettings {
     pub crs: Option<String>,
     /// Master seed for all procedural randomness.
     pub seed: u64,
+    /// Prevailing wind shared by the wind-driven nodes.
+    #[serde(default)]
+    pub wind: Wind,
 }
 
 impl Default for WorldSettings {
@@ -80,6 +103,7 @@ impl Default for WorldSettings {
             origin: [0.0, 0.0],
             crs: None,
             seed: 42,
+            wind: Wind::default(),
         }
     }
 }
@@ -103,6 +127,14 @@ impl WorldSettings {
             return Err(format!(
                 "extent_m must be finite and positive, got {:?}",
                 self.extent_m
+            ));
+        }
+        if !self.wind.azimuth_deg.is_finite()
+            || !(self.wind.speed_mps >= 0.0 && self.wind.speed_mps.is_finite())
+        {
+            return Err(format!(
+                "wind must have a finite azimuth and a speed ≥ 0, got {:?}",
+                self.wind
             ));
         }
         if self.halo > self.tile_size / 2 {

@@ -28,7 +28,8 @@ pub struct YardangParams {
     /// Abrasion steps (1..=2000).
     #[serde(default = "d_iterations")]
     pub iterations: u32,
-    /// Compass direction the wind blows from, degrees clockwise from north (270 = westerly).
+    /// Compass direction the wind blows from, degrees clockwise from north (270 = westerly). In a
+    /// graph, unset → the world's shared wind.
     #[serde(default = "d_wind")]
     pub wind_azimuth_deg: f32,
     /// Depth removed per step from a fully exposed, unsheltered face, metres (> 0).

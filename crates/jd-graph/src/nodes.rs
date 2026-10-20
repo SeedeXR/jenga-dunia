@@ -32,6 +32,21 @@ fn params<T: for<'de> Deserialize<'de>>(p: &Map<String, Json>) -> JdResult<T> {
         .map_err(|e| JdError::invalid("params", e.to_string()))
 }
 
+/// The world's shared wind fills in the named `wind_*` parameters a node leaves unset, so one
+/// setting drives dunes, yardangs, snow scour and the wind sea together (the node hash covers the
+/// world settings, so a wind change re-evaluates them).
+fn with_world_wind(ctx: &EvalCtx, p: &Map<String, Json>, keys: &[&str]) -> Map<String, Json> {
+    let mut p = p.clone();
+    for k in keys {
+        let v = match *k {
+            "wind_speed_mps" => ctx.lod_world.wind.speed_mps,
+            _ => ctx.lod_world.wind.azimuth_deg,
+        };
+        p.entry(*k).or_insert(Json::from(v));
+    }
+    p
+}
+
 fn field<'a>(inputs: &'a BTreeMap<String, Value>, name: &str) -> JdResult<&'a Arc<Heightfield>> {
     Ok(inputs
         .get(name)
@@ -403,7 +418,8 @@ struct SeaLevelParams {
     /// plankton, brown silt, green algae. Dominates as the water gets murkier.
     #[serde(default = "tint")]
     tint: [f32; 3],
-    /// Wind speed 10 m above the sea, m/s (0 = calm): 3 ripples, 8 a moderate sea, 20 a gale. Sets
+    /// Wind speed 10 m above the sea, m/s (0 = calm): 3 ripples, 8 a moderate sea, 20 a gale. Unset
+    /// → the world's shared wind. Sets
     /// the wave height and length the viewport animates (`ocean.waves`: JONSWAP growth capped at
     /// the fully developed Pierson–Moskowitz sea); the ocean mask ignores it.
     #[serde(default = "wind_speed_mps")]
@@ -411,7 +427,8 @@ struct SeaLevelParams {
     /// Fetch, km: how far the wind has blown over open water. Omit for a fully developed sea.
     #[serde(default)]
     fetch_km: Option<f32>,
-    /// Where the wind blows FROM, degrees clockwise from north; waves travel the opposite way.
+    /// Where the wind blows FROM, degrees clockwise from north; waves travel the opposite way. Unset
+    /// → the world's shared wind.
     #[serde(default = "wind_azimuth_deg")]
     wind_azimuth_deg: f32,
 }
@@ -690,7 +707,7 @@ pub fn register_all(r: &mut Registry) {
         vec![port("in", PortType::Heightfield, true), port("sand", PortType::Heightfield, false)],
         vec![port("out", PortType::Heightfield, false)],
         |ctx, p, i| {
-            let ap: AeolianParams = params(p)?;
+            let ap: AeolianParams = params(&with_world_wind(ctx, p, &["wind_azimuth_deg"]))?;
             if !(1..=500).contains(&ap.iterations) {
                 return Err(JdError::invalid("iterations", "must be within 1..=500"));
             }
@@ -718,7 +735,7 @@ pub fn register_all(r: &mut Registry) {
         vec![port("in", PortType::Heightfield, true)],
         vec![port("snow", PortType::Heightfield, false)],
         |ctx, p, i| {
-            let sp: SnowParams = params(p)?;
+            let sp: SnowParams = params(&with_world_wind(ctx, p, &["wind_azimuth_deg"]))?;
             Ok(out("snow", snow_cover(field(i, "in")?, spacing_m(ctx), &sp)?))
         },
     ));
@@ -918,7 +935,7 @@ pub fn register_all(r: &mut Registry) {
         vec![port("in", PortType::Heightfield, true), port("hardness", PortType::Heightfield, false)],
         vec![port("out", PortType::Heightfield, false)],
         |ctx, p, i| {
-            let yp: jd_terrain::YardangParams = params(p)?;
+            let yp: jd_terrain::YardangParams = params(&with_world_wind(ctx, p, &["wind_azimuth_deg"]))?;
             let hardness = i.get("hardness").map(|v| v.as_field());
             Ok(out("out", jd_terrain::wind_abrasion(field(i, "in")?, spacing_m(ctx), hardness.map(|k| &**k), &yp, Some(&ctx.cancel))?))
         },
@@ -983,8 +1000,8 @@ pub fn register_all(r: &mut Registry) {
         "Ocean mask (1 below `level_m` where connected to the border; inland basins stay dry) with a soft shoreline, and water `depth` in metres",
         vec![port("in", PortType::Heightfield, true)],
         vec![port("ocean", PortType::Heightfield, false), port("depth", PortType::Heightfield, false)],
-        |_, p, i| {
-            let sp: SeaLevelParams = params(p)?;
+        |ctx, p, i| {
+            let sp: SeaLevelParams = params(&with_world_wind(ctx, p, &["wind_azimuth_deg", "wind_speed_mps"]))?;
             if !(sp.visibility_m > 0.0 && sp.visibility_m.is_finite()) {
                 return Err(JdError::invalid("visibility_m", "must be positive"));
             }

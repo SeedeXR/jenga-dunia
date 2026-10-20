@@ -206,6 +206,7 @@ pub fn bench(p: &BenchParams) -> jd_types::JdResult<BenchReport> {
         origin: [0.0, 0.0],
         crs: None,
         seed: 7,
+        wind: Default::default(),
     };
     let spacing = [4.0f32, 4.0f32];
     let mut stages = Vec::new();

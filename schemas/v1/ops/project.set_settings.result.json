@@ -109,6 +109,14 @@
           "type": "integer",
           "format": "uint64",
           "minimum": 0
+        },
+        "wind": {
+          "description": "Prevailing wind shared by the wind-driven nodes.",
+          "$ref": "#/$defs/Wind",
+          "default": {
+            "azimuth_deg": 270.0,
+            "speed_mps": 8.0
+          }
         }
       },
       "required": [
@@ -118,6 +126,27 @@
         "halo",
         "origin",
         "seed"
+      ]
+    },
+    "Wind": {
+      "description": "Shared weather state: the prevailing wind. Every wind-driven node (dunes, yardangs, snow\nscour, the wind sea) follows it unless the node sets its own `wind_*` parameter.",
+      "type": "object",
+      "properties": {
+        "azimuth_deg": {
+          "description": "Direction the wind blows FROM, degrees clockwise from north (270 = westerly).",
+          "type": "number",
+          "format": "float"
+        },
+        "speed_mps": {
+          "description": "Speed 10 m above the ground, m/s (8 = a moderate breeze).",
+          "type": "number",
+          "format": "float"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "azimuth_deg",
+        "speed_mps"
       ]
     },
     "SchemaVersion": {

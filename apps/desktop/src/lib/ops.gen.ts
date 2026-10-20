@@ -571,6 +571,13 @@ export type ProjectCacheGcResult = {
 
 export type ProjectCloseRequest = Record<string, unknown>;
 
+export type Wind = {
+  /** Direction the wind blows FROM, degrees clockwise from north (270 = westerly). */
+  "azimuth_deg": number;
+  /** Speed 10 m above the ground, m/s (8 = a moderate breeze). */
+  "speed_mps": number;
+};
+
 export type WorldSettings = {
   /** Extent in metres, [x, y]. */
   "extent_m": [number, number];
@@ -586,6 +593,8 @@ export type WorldSettings = {
   "crs"?: string | null;
   /** Master seed for all procedural randomness. */
   "seed": number;
+  /** Prevailing wind shared by the wind-driven nodes. */
+  "wind"?: Wind;
 };
 
 export type SchemaVersion = number;
@@ -794,6 +803,8 @@ export type ProjectSetSettingsRequest = {
   "cache_limit_bytes"?: number | null;
   /** Preview LOD hint (resolution ÷ 2^lod). */
   "preview_lod"?: number | null;
+  /** Shared wind of the world: every wind-driven node without its own `wind_*` setting follows it. */
+  "wind"?: Wind | null;
   /** Memory budget for evaluations, bytes (≥ 256 MiB; default 4 GiB). */
   "memory_budget_bytes"?: number | null;
 };
@@ -1347,7 +1358,8 @@ export type NodeParams_jd_climate_snow_1 = {
   "sun_azimuth_deg"?: number;
   /** How much sun-facing slopes lose, 0..1 (0 = aspect ignored). */
   "sun_strength"?: number;
-  /** Compass direction the wind blows from, degrees clockwise from north. */
+  /** Compass direction the wind blows from, degrees clockwise from north. In a graph, unset → the
+world's shared wind. */
   "wind_azimuth_deg"?: number;
   /** How much windward slopes lose to scouring, 0..1 (0 = wind ignored). */
   "wind_strength"?: number;
@@ -1356,7 +1368,8 @@ export type NodeParams_jd_climate_snow_1 = {
 export type NodeParams_jd_erosion_aeolian_1 = {
   /** Steps; every step moves up to one slab per sandy cell. */
   "iterations"?: number;
-  /** Compass direction the wind blows from, degrees clockwise from north (270 = westerly). */
+  /** Compass direction the wind blows from, degrees clockwise from north (270 = westerly). In a
+graph, unset → the world's shared wind. */
   "wind_azimuth_deg"?: number;
   /** Saltation hop length in metres (≥ one cell). Default: 4 cells. */
   "hop_m"?: number | null;
@@ -1477,7 +1490,8 @@ export type NodeParams_jd_erosion_thermal_1 = {
 export type NodeParams_jd_erosion_yardang_1 = {
   /** Abrasion steps (1..=2000). */
   "iterations"?: number;
-  /** Compass direction the wind blows from, degrees clockwise from north (270 = westerly). */
+  /** Compass direction the wind blows from, degrees clockwise from north (270 = westerly). In a
+graph, unset → the world's shared wind. */
   "wind_azimuth_deg"?: number;
   /** Depth removed per step from a fully exposed, unsheltered face, metres (> 0). */
   "rate_m"?: number;
@@ -1529,13 +1543,15 @@ absorption per colour channel and the baked water maps; the ocean mask itself ig
   /** Colour of the suspended matter that scatters back out of the water (RGB 0..1): blue-green
 plankton, brown silt, green algae. Dominates as the water gets murkier. */
   "tint"?: [number, number, number];
-  /** Wind speed 10 m above the sea, m/s (0 = calm): 3 ripples, 8 a moderate sea, 20 a gale. Sets
+  /** Wind speed 10 m above the sea, m/s (0 = calm): 3 ripples, 8 a moderate sea, 20 a gale. Unset
+→ the world's shared wind. Sets
 the wave height and length the viewport animates (`ocean.waves`: JONSWAP growth capped at
 the fully developed Pierson–Moskowitz sea); the ocean mask ignores it. */
   "wind_speed_mps"?: number;
   /** Fetch, km: how far the wind has blown over open water. Omit for a fully developed sea. */
   "fetch_km"?: number | null;
-  /** Where the wind blows FROM, degrees clockwise from north; waves travel the opposite way. */
+  /** Where the wind blows FROM, degrees clockwise from north; waves travel the opposite way. Unset
+→ the world's shared wind. */
   "wind_azimuth_deg"?: number;
 };
 
@@ -1743,7 +1759,7 @@ export interface JdOps {
   "project.save": { request: ProjectSaveRequest; result: ProjectSaveResult };
   /** Rename the open project */
   "project.set_name": { request: ProjectSetNameRequest; result: ProjectSetNameResult };
-  /** Change project settings (autosave interval, cache limit, preview LOD); fields left out keep their value — journaled like every mutation */
+  /** Change project settings (autosave interval, cache limit, preview LOD, memory budget, the world's shared wind); fields left out keep their value — journaled like every mutation */
   "project.set_settings": { request: ProjectSetSettingsRequest; result: ProjectSetSettingsResult };
   /** Bake a physical sky (Preetham daylight model: sun azimuth/elevation, turbidity) as an equirectangular HDRI — OpenEXR RGB f32 for engines and renderers, with a tonemapped PNG preview beside it */
   "sky.bake": { request: SkyBakeRequest; result: SkyBakeResult };

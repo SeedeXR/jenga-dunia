@@ -635,9 +635,9 @@ export const useStore = create<State>((set, get) => {
         level_m: Number(p.level_m ?? 0),
         visibility_m: Number(p.visibility_m ?? 15),
         ...(tint ? { tint } : {}),
-        wind_speed_mps: Number(p.wind_speed_mps ?? 8),
+        wind_speed_mps: Number(p.wind_speed_mps ?? get().project?.world.wind?.speed_mps ?? 8),
         fetch_km: p.fetch_km == null ? null : Number(p.fetch_km),
-        wind_azimuth_deg: Number(p.wind_azimuth_deg ?? 270),
+        wind_azimuth_deg: Number(p.wind_azimuth_deg ?? get().project?.world.wind?.azimuth_deg ?? 270),
       });
     },
     exportHeightmap: async (path, format) => {

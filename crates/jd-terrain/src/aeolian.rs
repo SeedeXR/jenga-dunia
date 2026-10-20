@@ -30,7 +30,8 @@ pub struct AeolianParams {
     /// Steps; every step moves up to one slab per sandy cell.
     #[serde(default = "d_iterations")]
     pub iterations: u32,
-    /// Compass direction the wind blows from, degrees clockwise from north (270 = westerly).
+    /// Compass direction the wind blows from, degrees clockwise from north (270 = westerly). In a
+    /// graph, unset → the world's shared wind.
     #[serde(default = "d_wind")]
     pub wind_azimuth_deg: f32,
     /// Saltation hop length in metres (≥ one cell). Default: 4 cells.

@@ -376,6 +376,20 @@ coastal node 3.6 s for 256² × 120 steps (debug build)
 
 `jd.erosion.coastal@1` re-floods the ocean from the field border every step (the same rule as `jd.hydrology.sea_level@1`, so inland basins are not coasts), then every land cell within `band_m` above `level_m` that touches the sea loses `rate_m × exposure` (exposure = share of its eight neighbours that are ocean) down to one step below the level, and that material is shared among those ocean neighbours. A cut cell floods on the next step and exposes the one behind it — cliff retreat with a wave-cut platform just under the surface — while the deposits build beaches that can rise above the level and become land again. The `shore` output is the wave work per cell normalised to the busiest one, a ready mask for beach and cliff materials. No fetch, wave direction or longshore drift yet, so spits, bars and deltas are a later term.
 
+### Weather: one wind for the world
+
+```
+$ jd --json op project.set_settings --project Dunes.jdproj --save --params '{"wind":{"azimuth_deg":90,"speed_mps":8}}'
+{"status":"ok","result":{"world":{"…","wind":{"azimuth_deg":90.0,"speed_mps":8.0}},…}}
+$ jd --json op graph.evaluate --project Dunes.jdproj          # every wind-driven node without its own wind re-evaluates
+westerly (270°)  height hash 12911047…  min −75.2  max 92.3  mean 19.96 m
+easterly (90°)   height hash 59af5df8…  min −71.6  max 91.8  mean 19.96 m    (25 s each: 300 aeolian steps at 256²)
+```
+
+![Dune field after 300 aeolian steps under the default westerly: north–south ridges across the wind](images/cli-wind-270.png) ![The same plain with the world wind turned to an easterly: ridges still across the wind, but a different field — the slabs hopped the other way](images/cli-wind-90.png)
+
+The world carries one **wind** (`project.json` → `world.wind`, default a westerly at 8 m/s): dunes (`jd.erosion.aeolian@1`), yardangs (`jd.erosion.yardang@1`), snow scour (`jd.climate.snow@1`) and the wind sea (`jd.hydrology.sea_level@1`, azimuth and speed) read it whenever they leave their own `wind_*` parameters unset, so one journaled `project.set_settings` turns the whole weather of a world. A node that sets its own wind keeps it — a local sea breeze under a continental westerly. The node hash covers the world settings, so a wind change re-evaluates exactly the nodes that depend on it; in the desktop the Settings panel's **Wind from (°)** / **Wind (m/s)** fields edit the same value, and the viewport's waves follow it.
+
 ### Waves: wind speed and fetch
 
 ```

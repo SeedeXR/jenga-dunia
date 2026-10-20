@@ -411,6 +411,9 @@ pub mod builtin {
         /// Preview LOD hint (resolution ÷ 2^lod).
         #[serde(default)]
         pub preview_lod: Option<u8>,
+        /// Shared wind of the world: every wind-driven node without its own `wind_*` setting follows it.
+        #[serde(default)]
+        pub wind: Option<jd_types::Wind>,
         /// Memory budget for evaluations, bytes (≥ 256 MiB; default 4 GiB).
         #[serde(default)]
         pub memory_budget_bytes: Option<u64>,
@@ -534,6 +537,15 @@ pub mod builtin {
             }
             "project.set_settings" => {
                 let args: ProjectSetSettings = serde_json::from_value(params.clone())?;
+                if let Some(w) = args.wind {
+                    let world = WorldSettings {
+                        wind: w,
+                        ..p.doc.world.clone()
+                    };
+                    world
+                        .validate()
+                        .map_err(|e| JdError::invalid("params.wind", e))?;
+                }
                 Project::validate_settings(&merged_settings(p, &args))
             }
             _ if op.starts_with("graph.") => super::graph::validate_mutation(p, op, params),
@@ -556,7 +568,11 @@ pub mod builtin {
             "project.set_settings" => {
                 let args: ProjectSetSettings = serde_json::from_value(params.clone())?;
                 let merged = merged_settings(p, &args);
-                p.set_settings(merged)
+                p.set_settings(merged)?;
+                if let Some(w) = args.wind {
+                    p.doc.world.wind = w;
+                }
+                Ok(())
             }
             _ if op.starts_with("graph.") => super::graph::apply_mutation(p, op, params),
             _ => unreachable!("validate_mutation rejects unknown ops"),
@@ -646,7 +662,7 @@ pub mod builtin {
         );
         r.register::<ProjectSetSettings, ProjectSummary, _>(
             "project.set_settings",
-            "Change project settings (autosave interval, cache limit, preview LOD); fields left out keep their value — journaled like every mutation",
+            "Change project settings (autosave interval, cache limit, preview LOD, memory budget, the world's shared wind); fields left out keep their value — journaled like every mutation",
             Scope::ProjectWrite,
             |ctx, args| {
                 ctx.with_project(|p| {
@@ -1582,6 +1598,90 @@ pub mod graph {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn the_world_wind_drives_wind_nodes_unless_they_set_their_own() {
+            use crate::envelope::Status;
+            let reg = Registry::with_builtins();
+            let dir = tempfile::tempdir().expect("tmp");
+            let ctx = Context::default();
+            let world = WorldSettings {
+                resolution_px: [64, 64],
+                extent_m: [640.0, 640.0],
+                tile_size: 64,
+                halo: 0,
+                ..Default::default()
+            };
+            reg.invoke(&ctx, Request::new("project.create", serde_json::json!({ "path": dir.path().join("w.jdproj"), "name": "W", "world": world })));
+            let nodes = call(&reg, &ctx, "graph.list", serde_json::json!({}))
+                .result
+                .expect("list")["nodes"]
+                .clone();
+            let id_of = |kind: &str| {
+                nodes
+                    .as_array()
+                    .expect("nodes")
+                    .iter()
+                    .find(|n| n["kind"] == kind)
+                    .expect(kind)["id"]
+                    .clone()
+            };
+            let (noise, height) = (id_of("jd.noise.fbm@1"), id_of("jd.output.height@1"));
+            let dunes = call(&reg, &ctx, "graph.add_node", serde_json::json!({ "kind": "jd.erosion.aeolian@1", "params": { "iterations": 20 } })).result.expect("add")["id"].clone();
+            call(
+                &reg,
+                &ctx,
+                "graph.connect",
+                serde_json::json!({ "from": noise, "from_port": "out", "to": dunes, "to_port": "in" }),
+            );
+            call(
+                &reg,
+                &ctx,
+                "graph.connect",
+                serde_json::json!({ "from": dunes, "from_port": "out", "to": height, "to_port": "in" }),
+            );
+            let hash = |reg: &Registry, ctx: &Context| {
+                call(reg, ctx, "graph.evaluate", serde_json::json!({}))
+                    .result
+                    .expect("eval")["layers"]["height"]
+                    .clone()
+            };
+            let westerly = hash(&reg, &ctx);
+            let r = call(
+                &reg,
+                &ctx,
+                "project.set_settings",
+                serde_json::json!({ "wind": { "azimuth_deg": 90.0, "speed_mps": 8.0 } }),
+            );
+            assert_eq!(r.status, Status::Ok, "{:?}", r.error);
+            assert_eq!(
+                r.result.expect("summary")["world"]["wind"]["azimuth_deg"],
+                90.0
+            );
+            let easterly = hash(&reg, &ctx);
+            assert_ne!(
+                westerly, easterly,
+                "the shared wind turned: the dunes differ"
+            );
+            // The node's own setting wins over the world's.
+            call(
+                &reg,
+                &ctx,
+                "graph.set_param",
+                serde_json::json!({ "id": dunes, "key": "wind_azimuth_deg", "value": 270.0 }),
+            );
+            assert_eq!(hash(&reg, &ctx), westerly);
+            assert_eq!(
+                call(
+                    &reg,
+                    &ctx,
+                    "project.set_settings",
+                    serde_json::json!({ "wind": { "azimuth_deg": 90.0, "speed_mps": -1.0 } })
+                )
+                .status,
+                Status::Error
+            );
+        }
 
         #[test]
         fn timeline_export_writes_one_frame_per_time_with_a_shared_range() {

@@ -13,4 +13,4 @@ pub mod world;
 pub use error::{ErrorCode, JdError, JdResult};
 pub use ids::{JobId, NodeId, ProjectId, RequestId};
 pub use version::SchemaVersion;
-pub use world::{Handedness, Units, UpAxis, WorldSettings};
+pub use world::{Handedness, Units, UpAxis, Wind, WorldSettings};
