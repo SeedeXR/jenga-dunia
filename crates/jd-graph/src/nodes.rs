@@ -385,9 +385,24 @@ struct SeaLevelParams {
     /// Shoreline softness: the ocean mask fades from 1 to 0 over this many metres above the level.
     #[serde(default = "shore_m")]
     shore_m: f32,
+    /// Water clarity as the depth (metres) at which the bottom fades out: ~30 for crystal-clear
+    /// tropical water, ~15 open ocean, ~3 for a murky estuary. Drives the viewport's Beer–Lambert
+    /// absorption per colour channel and the baked water maps; the ocean mask itself ignores it.
+    #[serde(default = "visibility_m")]
+    visibility_m: f32,
+    /// Colour of the suspended matter that scatters back out of the water (RGB 0..1): blue-green
+    /// plankton, brown silt, green algae. Dominates as the water gets murkier.
+    #[serde(default = "tint")]
+    tint: [f32; 3],
 }
 fn shore_m() -> f32 {
     2.0
+}
+fn visibility_m() -> f32 {
+    15.0
+}
+fn tint() -> [f32; 3] {
+    [0.1, 0.35, 0.4]
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -846,6 +861,12 @@ pub fn register_all(r: &mut Registry) {
         vec![port("ocean", PortType::Heightfield, false), port("depth", PortType::Heightfield, false)],
         |_, p, i| {
             let sp: SeaLevelParams = params(p)?;
+            if !(sp.visibility_m > 0.0 && sp.visibility_m.is_finite()) {
+                return Err(JdError::invalid("visibility_m", "must be positive"));
+            }
+            if sp.tint.iter().any(|c| !(0.0..=1.0).contains(c)) {
+                return Err(JdError::invalid("tint", "components must be within 0..=1"));
+            }
             let (ocean, depth) = sea_level(field(i, "in")?, sp.level_m, sp.shore_m)?;
             Ok(BTreeMap::from([("ocean".to_owned(), Value::field(ocean)), ("depth".to_owned(), Value::field(depth))]))
         },

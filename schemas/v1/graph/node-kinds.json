@@ -987,6 +987,27 @@
           "type": "number",
           "format": "float",
           "default": 2.0
+        },
+        "visibility_m": {
+          "description": "Water clarity as the depth (metres) at which the bottom fades out: ~30 for crystal-clear\ntropical water, ~15 open ocean, ~3 for a murky estuary. Drives the viewport's Beer–Lambert\nabsorption per colour channel and the baked water maps; the ocean mask itself ignores it.",
+          "type": "number",
+          "format": "float",
+          "default": 15.0
+        },
+        "tint": {
+          "description": "Colour of the suspended matter that scatters back out of the water (RGB 0..1): blue-green\nplankton, brown silt, green algae. Dominates as the water gets murkier.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "minItems": 3,
+          "maxItems": 3,
+          "default": [
+            0.10000000149011612,
+            0.3499999940395355,
+            0.4000000059604645
+          ]
         }
       },
       "additionalProperties": false

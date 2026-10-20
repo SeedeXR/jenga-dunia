@@ -29,6 +29,8 @@ interface Props {
   sculpt?: { enabled: boolean; radiusM: number; onStroke: (points: [number, number][]) => void };
   /** Draw a translucent water plane at this height (metres); null hides it. */
   seaLevelM?: number | null;
+  /** Water clarity and tint (from the sea-level node); defaults to open-ocean water. */
+  water?: WaterLook | null;
   /** Sun direction: azimuth clockwise from north (0 = light from the north), elevation above the horizon. */
   sun?: { azimuthDeg: number; elevationDeg: number };
   /** Baked albedo/normal/roughness maps for the shown layer; textured when set and no overlay is active. */
@@ -132,20 +134,49 @@ export function buildTerrainGeometry(p: Preview, extent: [number, number], overl
   return geo;
 }
 
+/** Water clarity settings mirrored from the sea-level node. */
+export interface WaterLook {
+  /** Depth at which the bottom fades out (m): ~30 crystal clear, ~15 ocean, ~3 murky estuary. */
+  visibilityM: number;
+  /** Colour of the suspended matter that scatters back (linear RGB 0..1). */
+  tint: [number, number, number];
+}
+
+/** Pure-water absorption per channel in m⁻¹ (Pope & Fry 1997, rounded): red dies first, blue last. */
+const PURE_WATER_ABSORPTION: [number, number, number] = [0.4, 0.07, 0.005];
+const DEFAULT_WATER: WaterLook = { visibilityM: 15, tint: [0.1, 0.35, 0.4] };
+
+/** What a sea floor of a given depth looks like through the water: the sandy bottom seen through
+ *  Beer–Lambert transmittance per channel (absorption scaled by 15 m / visibility, light travels
+ *  down and back up), plus the tint scattered back in proportion to what was absorbed. */
+export function waterColour(depthM: number, look: WaterLook, out: THREE.Color): { alpha: number; clarity: number } {
+  const k = 15 / Math.max(0.5, look.visibilityM);
+  const bottom = [0.62, 0.55, 0.38]; // wet sand, linear
+  const rgb = [0, 0, 0];
+  let seen = 0;
+  for (let c = 0; c < 3; c++) {
+    const t = Math.exp(-PURE_WATER_ABSORPTION[c]! * k * depthM * 2);
+    rgb[c] = bottom[c]! * t + (look.tint[c] ?? 0) * (1 - t);
+    seen += t;
+  }
+  const clarity = seen / 3;
+  out.setRGB(rgb[0]!, rgb[1]!, rgb[2]!);
+  // Murkier or deeper water hides more: opacity grows as the bottom disappears.
+  return { alpha: 0.35 + 0.55 * (1 - clarity), clarity };
+}
+
 /** Water surface at `seaM`: a flat grid whose vertex colour and alpha follow the depth of the terrain
- *  below it — turquoise and translucent in the shallows, navy and opaque out deep, a pale foam band
- *  where the depth is within `foamM` of the shore, fully transparent over land. */
-export function buildSeaGeometry(p: Preview, extent: [number, number], seaM: number): THREE.BufferGeometry {
+ *  below it and the water's clarity — the sandy bottom shows through clear shallows, the tint takes
+ *  over as depth or turbidity grows; a pale foam band where the depth is within `foamM` of the
+ *  shore, fully transparent over land. */
+export function buildSeaGeometry(p: Preview, extent: [number, number], seaM: number, look: WaterLook = DEFAULT_WATER): THREE.BufferGeometry {
   const { width, height, min, max, data } = p;
   const geo = new THREE.PlaneGeometry(extent[0], extent[1], width - 1, height - 1);
   geo.rotateX(-Math.PI / 2);
   const pos = geo.attributes.position as THREE.BufferAttribute;
   const colors = new Float32Array(pos.count * 4);
   const range = max - min || 1;
-  const efold = Math.max(1, range * 0.12); // depth at which the water has gone ~63 % of the way to deep
   const foamM = Math.max(0.5, range * 0.01);
-  const shallow = new THREE.Color(0x4fb8c8);
-  const deep = new THREE.Color(0x0e2f5c);
   const foam = new THREE.Color(0xdff3f5);
   const c = new THREE.Color();
   for (let j = 0; j < height; j++) {
@@ -155,16 +186,14 @@ export function buildSeaGeometry(p: Preview, extent: [number, number], seaM: num
       const depth = seaM - (min + (q / 65535) * range);
       let alpha = 0;
       if (depth > 0) {
-        const t = 1 - Math.exp(-depth / efold);
-        c.copy(shallow).lerp(deep, t);
-        alpha = 0.45 + 0.4 * t;
+        alpha = waterColour(depth, look, c).alpha;
         if (depth < foamM) {
           const f = 1 - depth / foamM;
           c.lerp(foam, f);
           alpha = Math.max(alpha, 0.5 + 0.45 * f);
         }
       } else {
-        c.copy(shallow);
+        waterColour(0, look, c);
       }
       colors[vi * 4] = c.r;
       colors[vi * 4 + 1] = c.g;
@@ -216,7 +245,7 @@ function infoOf(s: SceneState): ViewportInfo {
   };
 }
 
-export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevelM = null, sun, overlay = null, instances = null, maps = null }: Props) {
+export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevelM = null, water = null, sun, overlay = null, instances = null, maps = null }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<SceneState | null>(null);
   // Latest sculpt props without re-creating the renderer effect.
@@ -495,14 +524,15 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
       s.sea = null;
     }
     if (seaLevelM !== null && extentM && preview) {
-      const geo = buildSeaGeometry(preview, extentM, seaLevelM);
+      const geo = buildSeaGeometry(preview, extentM, seaLevelM, water ?? DEFAULT_WATER);
       const mat = new THREE.MeshStandardMaterial({ vertexColors: true, transparent: true, roughness: 0.2, metalness: 0.05, depthWrite: false });
       s.sea = new THREE.Mesh(geo, mat);
       s.sea.position.y = seaLevelM;
       s.scene.add(s.sea);
     }
     onInfo?.(infoOf(s));
-  }, [seaLevelM, extentM, preview, onInfo]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seaLevelM, water?.visibilityM, water?.tint?.[0], water?.tint?.[1], water?.tint?.[2], extentM, preview, onInfo]);
 
   // Scatter instances: one InstancedMesh of cones in the terrain frame (x = u − extent/2, z = extent/2 − v),
   // yaw and a 0.75..1.25 scale from `r` exactly as the GLB export writes them.

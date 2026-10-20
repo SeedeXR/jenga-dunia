@@ -1156,6 +1156,13 @@ export type NodeParams_jd_hydrology_sea_level_1 = {
   "level_m"?: number;
   /** Shoreline softness: the ocean mask fades from 1 to 0 over this many metres above the level. */
   "shore_m"?: number;
+  /** Water clarity as the depth (metres) at which the bottom fades out: ~30 for crystal-clear
+tropical water, ~15 open ocean, ~3 for a murky estuary. Drives the viewport's Beer–Lambert
+absorption per colour channel and the baked water maps; the ocean mask itself ignores it. */
+  "visibility_m"?: number;
+  /** Colour of the suspended matter that scatters back out of the water (RGB 0..1): blue-green
+plankton, brown silt, green algae. Dominates as the water gets murkier. */
+  "tint"?: [number, number, number];
 };
 
 export type NodeParams_jd_hydrology_wetness_1 = Record<string, unknown>;

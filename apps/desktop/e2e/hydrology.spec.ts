@@ -106,6 +106,13 @@ test.describe("hydrology nodes against the real core", () => {
     await level.blur();
     await expect(page.getByTestId("log")).toContainText("graph.set_param: ok");
     await expect(page.getByTestId("viewport-info")).toContainText("sea 250 m");
+    // Water clarity is a node parameter: a murky 4 m visibility is journaled like any other edit.
+    const visibility = inspector.locator("label", { hasText: "visibility_m" }).locator("input");
+    await expect(visibility).toHaveAttribute("placeholder", "15");
+    await visibility.fill("4");
+    await visibility.blur();
+    await expect(page.getByTestId("log")).toContainText("graph.set_param: ok");
+    await expect(sea).toContainText("visibility_m=4");
     // Back out to the overview (undo the two zoom steps above) so the whole shoreline is in frame.
     await page.getByTestId("viewport").hover();
     for (let i = 0; i < 2; i++) await page.mouse.wheel(0, 300);
