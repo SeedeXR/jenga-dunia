@@ -3,6 +3,7 @@ import { create } from "zustand";
 import type { Edge, GraphEvaluateResult, GraphListResult, HeightmapFormat, JdOps, JobInfo as JobInfoGen, NodeDefInfo, NodeView, NoiseParams, OceanWavesRequest, OceanWavesResult, OpId, ProjectOpenResult, ProjectSaveResult, ScatterPoint, TerrainStatsResult } from "./lib/ops.gen";
 import { horizonPreview, layerPreview, layerTextures, op, skyPreview, type JdError, type LayerMaps, type Preview, type Response, type Warning } from "./lib/api";
 import { adaptLodBias } from "./lib/previewLod";
+import type { MaterialSpec } from "./lib/ops.gen";
 
 export type ProjectSummary = ProjectOpenResult;
 
@@ -49,6 +50,9 @@ interface State {
   mapsMs: number;
   /** Texture the viewport with the baked maps (off = height ramp vertex colours). */
   pbr: boolean;
+  /** The material layer stack the viewport bakes with (mask layer + colour + roughness, in order). */
+  materials: MaterialSpec[];
+  setMaterials: (materials: MaterialSpec[]) => void;
   /** Wind sea of the sea-level node (`ocean.waves`), drawn by the viewport; null without a sea. */
   waves: OceanWavesResult | null;
   loadWaves: (wind: OceanWavesRequest | null) => Promise<void>;
@@ -240,7 +244,7 @@ export const useStore = create<State>((set, get) => {
     }
     if ((lastEval?.lod ?? 0) > 0 || sculpting) return;
     try {
-      const r = await layerTextures(layer.layer);
+      const r = await layerTextures(layer.layer, 1024, get().materials);
       // Toggled off or moved to another layer while baking: this result is stale.
       if (!get().pbr || get().layer?.layer !== layer.layer) {
         if (r) for (const b of [r.maps.albedo, r.maps.normal, r.maps.roughness]) b.close();
@@ -248,6 +252,10 @@ export const useStore = create<State>((set, get) => {
       }
       dropMaps();
       set({ maps: r?.maps ?? null, mapsMs: r?.ms ?? 0 });
+      if (r) {
+        const n = get().materials.length;
+        set((st) => ({ log: [...st.log.slice(-199), { ts: Date.now(), level: "info", text: `terrain.textures: ok ${r.maps.px[0]}×${r.maps.px[1]}${n ? ` with ${n} material layer${n === 1 ? "" : "s"}` : ""} in ${r.ms.toFixed(0)} ms` }] }));
+      }
     } catch (e) {
       logFailure("terrain.textures", e);
       dropMaps();
@@ -437,6 +445,11 @@ export const useStore = create<State>((set, get) => {
       if (!wind) return set({ waves: null });
       const r = await run("ocean.waves", wind);
       set({ waves: r.status === "ok" ? (r.result ?? null) : null });
+    },
+    materials: [],
+    setMaterials: (materials) => {
+      set({ materials });
+      void refreshMaps();
     },
     pbr: true,
     setPbr: (on) => {

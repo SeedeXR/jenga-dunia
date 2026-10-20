@@ -1,5 +1,6 @@
 // Thin typed client over the Tauri commands. Mirrors docs/spec/json-api.md.
 import { invoke } from "@tauri-apps/api/core";
+import type { MaterialSpec } from "./ops.gen";
 
 export const SCHEMA_VERSION = 1;
 
@@ -105,9 +106,9 @@ export async function skyPreview(sun: { sun_azimuth_deg: number; sun_elevation_d
   return { bitmap, px: [r.result.width, r.result.height] };
 }
 
-export async function layerTextures(layer: string, maxPx = 1024): Promise<{ maps: LayerMaps; ms: number } | null> {
+export async function layerTextures(layer: string, maxPx = 1024, materials: MaterialSpec[] = []): Promise<{ maps: LayerMaps; ms: number } | null> {
   const t0 = performance.now();
-  const r = await op<{ width: number; height: number; albedo_png_base64: string; normal_png_base64: string; roughness_png_base64: string }>("terrain.textures", { layer, max_px: maxPx });
+  const r = await op<{ width: number; height: number; albedo_png_base64: string; normal_png_base64: string; roughness_png_base64: string }>("terrain.textures", { materials, layer, max_px: maxPx });
   if (r.status !== "ok" || !r.result) return null;
   const decode = (b64: string) => createImageBitmap(new Blob([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], { type: "image/png" }));
   const [albedo, normal, roughness] = await Promise.all([decode(r.result.albedo_png_base64), decode(r.result.normal_png_base64), decode(r.result.roughness_png_base64)]);

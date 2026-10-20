@@ -187,6 +187,12 @@ Undo and redo are operations like everything else (`graph.undo` / `graph.redo`, 
 
 *Roads: click **Road** (1) and the next drag on the terrain becomes a `jd.terrain.spline@1` node (2) spliced in front of the height output — the corridor is flattened onto the line's smoothed grade with soft shoulders, exactly what the CLI node does (quickstart, "Roads, paths and canals") — and the button returns to orbiting, so each drag is one road. The node's width, falloff, mode (flatten, cut, raise) and the point list are ordinary parameters in the inspector (3); its `mask` output can be published and used for the road surface and the verges' scatter. The UI-driven test `apps/desktop/e2e/road.spec.ts` draws one road and checks the published height changes.*
 
+## Materials
+
+![Right panel with the Materials section: one layer row with mask snow, a near-white colour swatch and roughness 0.9, and a + layer button; the textured viewport behind](images/desktop-materials.png)
+
+*The material layer stack: a row (1) is a mask layer from the last evaluation (or *everywhere*), a colour swatch and a roughness; **+ layer** adds one (2), and every change re-bakes the viewport's PBR maps with the stack blended over the hypsometric base in row order (the log reads `terrain.textures: ok … with N material layers`). A snow mask with a white, smoother layer whitens the summits here. The same stack is what `terrain.textures` and `terrain.export_mesh {materials}` take, so an export carries what the viewport shows. UI-driven check: `apps/desktop/e2e/biomes.spec.ts`.*
+
 ## Timeline
 
 ![Graph toolbar with the timeline slider at 1.00 and a thermal node whose summary reads iterations=⏱2 keys, eroding the terrain with 300 steps](images/desktop-timeline.png)

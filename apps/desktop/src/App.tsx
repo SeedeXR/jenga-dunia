@@ -37,6 +37,15 @@ export const NOISE_PRESETS: { label: string; patch: Partial<NoiseSettings> }[] =
   { label: "Desert plain 0..40 m", patch: { fractal: "fbm", feature_size_m: 1200, octaves: 3, gain: 0.5, height_range_m: [0, 40] } },
 ];
 
+/** sRGB 0..1 triple ↔ `#rrggbb` for the colour input. */
+export function hexOf(rgb: [number, number, number]): string {
+  return `#${rgb.map((c) => Math.round(Math.min(1, Math.max(0, c)) * 255).toString(16).padStart(2, "0")).join("")}`;
+}
+export function rgbOf(hex: string): [number, number, number] {
+  const n = Number.parseInt(hex.slice(1), 16);
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+}
+
 export function formatFor(path: string): HeightmapFormat {
   const ext = path.split(".").pop()?.toLowerCase();
   return ext === "png" ? "png16" : ext === "r16" ? "raw_r16" : ext === "r32" ? "raw_r32" : ext === "tif" || ext === "tiff" ? "tiff32" : "exr";
@@ -513,6 +522,53 @@ export default function App() {
             </button>
             <span className="text-xs text-jd-fg-2" data-testid="scatter-count">{s.scatter.points ? `${s.scatter.points.length.toLocaleString()} instances` : ""}</span>
           </div>
+          <h2 className="mt-4 mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Materials</h2>
+          {s.materials.map((m, i) => (
+            <div className="mb-1 flex items-center gap-1" key={i} data-testid={`material-${i}`}>
+              <select
+                className={`${inputCls} w-24 text-left`}
+                value={m.mask ?? ""}
+                onChange={(e) => s.setMaterials(s.materials.map((x, k) => (k === i ? { ...x, mask: e.target.value || null } : x)))}
+                title="0..1 mask layer that weights this material (everywhere when empty)"
+                data-testid={`material-mask-${i}`}
+              >
+                <option value="">everywhere</option>
+                {Object.keys(s.lastEval?.layers ?? {}).map((n) => (
+                  <option key={n}>{n}</option>
+                ))}
+              </select>
+              <input
+                type="color"
+                value={hexOf(m.albedo)}
+                onChange={(e) => s.setMaterials(s.materials.map((x, k) => (k === i ? { ...x, albedo: rgbOf(e.target.value) } : x)))}
+                title="Base colour"
+                data-testid={`material-color-${i}`}
+              />
+              <input
+                className={`${inputCls} w-14`}
+                type="number"
+                min={0}
+                max={1}
+                step={0.05}
+                value={m.roughness ?? 0.9}
+                onChange={(e) => s.setMaterials(s.materials.map((x, k) => (k === i ? { ...x, roughness: Number(e.target.value) } : x)))}
+                title="Roughness 0..1"
+                data-testid={`material-rough-${i}`}
+              />
+              <button className="btn px-1.5" onClick={() => s.setMaterials(s.materials.filter((_, k) => k !== i))} title="Remove this layer" data-testid={`material-remove-${i}`}>
+                ×
+              </button>
+            </div>
+          ))}
+          <button
+            className="btn"
+            onClick={() => s.setMaterials([...s.materials, { mask: null, albedo: [0.5, 0.5, 0.5], roughness: 0.9 }])}
+            disabled={!s.project}
+            title="Add a material layer: the stack blends albedo and roughness over the base, each layer by its mask, in order (terrain.textures / export materials)"
+            data-testid="material-add"
+          >
+            + layer
+          </button>
           <h2 className="mt-4 mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Terrain · Noise</h2>
           <Field label="Preset">
             <select

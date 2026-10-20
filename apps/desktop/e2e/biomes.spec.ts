@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, installBridge, wire } from "./bridge";
+import { connectCore, installBridge, logCount, wire } from "./bridge";
 
 const NOISE = "01JDGRAPH000000000000N01SE";
 const HEIGHT = "01JDGRAPH0000000000HE1GHT0";
@@ -93,6 +93,15 @@ test.describe("biome rules editor against the real core", () => {
     await page.getByTestId("color-pick").selectOption("snow");
     await expect(page.getByTestId("viewport-info")).toContainText("colour snow");
     await page.screenshot({ path: testInfo.outputPath("biomes-snow.png") }); // tutorial image source
+
+    // Materials: a white layer weighted by the snow mask re-bakes the viewport's PBR maps.
+    const baked = await logCount(page, "terrain.textures: ok");
+    await page.getByTestId("material-add").click();
+    await page.getByTestId("material-mask-0").selectOption("snow");
+    await page.getByTestId("material-color-0").fill("#f4f6fa");
+    await expect.poll(() => logCount(page, "terrain.textures: ok"), { timeout: 30_000 }).toBeGreaterThan(baked);
+    await page.getByTestId("color-pick").selectOption("");
+    await page.screenshot({ path: testInfo.outputPath("materials.png") }); // tutorial image source
     expect(errors, "no uncaught page errors").toEqual([]);
     await core.close();
   });
