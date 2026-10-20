@@ -6,8 +6,8 @@ use std::sync::Arc;
 use jd_terrain::{
     AeolianParams, CoastalParams, DropletParams, FlowMethod, ForeignImport, Heightfield,
     HydraulicParams, NoiseParams, SeabedParams, SnowParams, StreamPowerParams, Stroke,
-    THERMAL_MAX_RATE, aeolian_transport, apply_strokes, carve_rivers, classify_seabed,
-    coastal_erode, droplet_erode, fill_depressions, flow_accumulation_with, generate_noise,
+    THERMAL_MAX_RATE, aeolian_transport, apply_strokes, carve_rivers_with, classify_seabed,
+    coastal_erode, droplet_erode, fill_depressions_with, flow_accumulation_with, generate_noise,
     read_foreign, resample_to_world, sea_level, slope_mask, snow_cover, wetness_index_with,
 };
 use jd_types::{JdError, JdResult};
@@ -844,12 +844,13 @@ pub fn register_all(r: &mut Registry) {
     ));
     r.register(NodeDef::new::<FillParams, _>(
         "jd.hydrology.fill@1",
-        "Priority-flood depression filling: raises pits to their spill level so every cell drains; `lakes` = water depth of the filled basins",
-        vec![port("in", PortType::Heightfield, true)],
+        "Priority-flood depression filling: raises pits to their spill level so every cell drains; `lakes` = water depth of the filled basins. Optional `drains` mask (> 0.5): underground outlets such as karst sinkholes — no lake forms there and nothing spills past them",
+        vec![port("in", PortType::Heightfield, true), port("drains", PortType::Heightfield, false)],
         vec![port("out", PortType::Heightfield, false), port("lakes", PortType::Heightfield, false)],
         |_, p, i| {
             let fp: FillParams = params(p)?;
-            let (filled, lakes) = fill_depressions(field(i, "in")?, fp.epsilon_m)?;
+            let drains = i.get("drains").map(|v| v.as_field());
+            let (filled, lakes) = fill_depressions_with(field(i, "in")?, fp.epsilon_m, drains.map(|d| &**d))?;
             Ok(BTreeMap::from([("out".to_owned(), Value::field(filled)), ("lakes".to_owned(), Value::field(lakes))]))
         },
     ).with_memory(24.0));
@@ -1021,11 +1022,12 @@ pub fn register_all(r: &mut Registry) {
     r.register(NodeDef::new::<RiversParams, _>(
         "jd.hydrology.rivers@1",
         "Carve river channels where flow accumulates (depressions filled first); outputs the carved terrain and a 0..1 river mask",
-        vec![port("in", PortType::Heightfield, true)],
+        vec![port("in", PortType::Heightfield, true), port("drains", PortType::Heightfield, false)],
         vec![port("out", PortType::Heightfield, false), port("rivers", PortType::Heightfield, false)],
         |ctx, p, i| {
             let rp: RiversParams = params(p)?;
-            let (carved, rivers) = carve_rivers(field(i, "in")?, spacing_m(ctx), rp.threshold, rp.depth_m, rp.method)?;
+            let drains = i.get("drains").map(|v| v.as_field());
+            let (carved, rivers) = carve_rivers_with(field(i, "in")?, spacing_m(ctx), rp.threshold, rp.depth_m, rp.method, drains.map(|d| &**d))?;
             Ok(BTreeMap::from([("out".to_owned(), Value::field(carved)), ("rivers".to_owned(), Value::field(rivers))]))
         },
     ).with_memory(32.0));

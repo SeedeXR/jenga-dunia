@@ -239,6 +239,18 @@ pub fn flow_accumulation_with(
 /// ponytail: serial whole-field pass; the tiled parallel variant (Barnes 2016) comes with
 /// tile-level evaluation.
 pub fn fill_depressions(h: &Heightfield, epsilon_m: f32) -> JdResult<(Heightfield, Heightfield)> {
+    fill_depressions_with(h, epsilon_m, None)
+}
+
+/// [`fill_depressions`] with underground drainage: cells where `drains` > 0.5 are outlets like
+/// the border — water reaching them leaves the surface (a karst sinkhole, a soakaway), so no lake
+/// forms there and the basins that spill into them are not raised. The desert's dolines and
+/// swallow holes (`jd.erosion.karst@1`'s `sinkholes` mask) are the use.
+pub fn fill_depressions_with(
+    h: &Heightfield,
+    epsilon_m: f32,
+    drains: Option<&Heightfield>,
+) -> JdResult<(Heightfield, Heightfield)> {
     if !(epsilon_m >= 0.0 && epsilon_m.is_finite()) {
         return Err(JdError::invalid("epsilon_m", "must be finite and ≥ 0"));
     }
@@ -262,12 +274,18 @@ pub fn fill_depressions(h: &Heightfield, epsilon_m: f32) -> JdResult<(Heightfiel
             o.0.total_cmp(&self.0).then(o.1.cmp(&self.1))
         }
     }
+    if let Some(d) = drains
+        && (d.width(), d.height()) != (h.width(), h.height())
+    {
+        return Err(JdError::invalid("drains", "field size differs from `in`"));
+    }
     let mut filled = orig.clone();
     let mut seen = vec![false; w * hh];
     let mut heap = BinaryHeap::new();
     for y in 0..hh {
         for x in 0..w {
-            if x == 0 || y == 0 || x == w - 1 || y == hh - 1 {
+            let border = x == 0 || y == 0 || x == w - 1 || y == hh - 1;
+            if border || drains.is_some_and(|d| d.get(x as u32, y as u32) > 0.5) {
                 let i = y * w + x;
                 seen[i] = true;
                 heap.push(Item(orig[i], i as u32));
@@ -316,13 +334,27 @@ pub fn carve_rivers(
     depth_m: f32,
     method: FlowMethod,
 ) -> JdResult<(Heightfield, Heightfield)> {
+    carve_rivers_with(h, spacing_m, threshold, depth_m, method, None)
+}
+
+/// [`carve_rivers`] with underground drainage: `drains` > 0.5 cells are outlets (see
+/// [`fill_depressions_with`]) — a wadi that ends in a swallow hole stops there instead of
+/// ponding and spilling on.
+pub fn carve_rivers_with(
+    h: &Heightfield,
+    spacing_m: [f32; 2],
+    threshold: f32,
+    depth_m: f32,
+    method: FlowMethod,
+    drains: Option<&Heightfield>,
+) -> JdResult<(Heightfield, Heightfield)> {
     if !(0.0..1.0).contains(&threshold) {
         return Err(JdError::invalid("threshold", "must be within 0..1"));
     }
     if !(depth_m >= 0.0 && depth_m.is_finite()) {
         return Err(JdError::invalid("depth_m", "must be finite and ≥ 0"));
     }
-    let (filled, _) = fill_depressions(h, 0.001)?;
+    let (filled, _) = fill_depressions_with(h, 0.001, drains)?;
     let acc = flow_accumulation_with(&filled, spacing_m, true, method)?;
     let mut mask = Heightfield::new(h.width(), h.height(), h.tile_size(), h.halo())?;
     mask.fill_with(|x, y| {
@@ -514,6 +546,32 @@ mod tests {
             eps.content_hash()
         );
         assert!(fill_depressions(&h, -1.0).is_err());
+        // Underground drainage: a swallow hole at the pit floor drains the basin — no lake, no fill.
+        let mut drains =
+            Heightfield::new(h.width(), h.height(), h.tile_size(), h.halo()).expect("d");
+        let (lx, ly) = {
+            let mut best = (0, 0, f32::MAX);
+            for y in 0..h.height() {
+                for x in 0..h.width() {
+                    if lakes.get(x, y) > best.2 || best.2 == f32::MAX && lakes.get(x, y) > 0.0 {
+                        best = (x, y, lakes.get(x, y));
+                    }
+                }
+            }
+            (best.0, best.1)
+        };
+        drains.fill_with(|x, y| f32::from(x == lx && y == ly));
+        let (drained, dry) = fill_depressions_with(&h, 0.0, Some(&drains)).expect("drained");
+        assert_eq!(dry.get(lx, ly), 0.0, "the drain cell holds no water");
+        assert!(
+            dry.to_vec().iter().sum::<f32>() < lakes.to_vec().iter().sum::<f32>() * 0.5,
+            "the basin drained"
+        );
+        assert_eq!(drained.get(lx, ly), h.get(lx, ly));
+        assert!(
+            fill_depressions_with(&h, 0.0, Some(&Heightfield::new(4, 4, 64, 0).expect("s")))
+                .is_err()
+        );
     }
 
     #[test]

@@ -565,7 +565,7 @@ karst node 102 ms (256²)   height min −7.9 (a pit floor)  max 55.9  mean 29.3
 
 ![Sinkhole floor mask on the 4 km desert plain: white discs of 40–120 m radius, at least 200 m apart](images/cli-karst-sinkholes.png) ![The carved height map: the same pits as dark dips in the low-relief plain](images/cli-karst-height.png)
 
-`jd.erosion.karst@1` places dolines where soluble rock dissolves: a seeded stream proposes cells, each accepted when the ground is gentler than `max_slope_deg`, the optional `soluble` mask (0..1) allows it, and it keeps `min_spacing_m` from every accepted centre; `density_per_km2` is counted against the *eligible* area, so steep ground never dilutes it. Each sinkhole draws its radius and depth from the given ranges and is carved as a smooth subsidence `bowl` (raised cosine) or a steep-rimmed `collapse` pit with a flat floor; overlapping pits take the deeper cut. The `sinkholes` output is 1 at the floors and fades to 0 at the rims — colour by it, scatter rubble from it, or mask a material. Same seed, same holes. Not modelled: underground drainage (a sinkhole is a closed basin to `jd.hydrology.fill@1`), caves, doline chains along joints.
+`jd.erosion.karst@1` places dolines where soluble rock dissolves: a seeded stream proposes cells, each accepted when the ground is gentler than `max_slope_deg`, the optional `soluble` mask (0..1) allows it, and it keeps `min_spacing_m` from every accepted centre; `density_per_km2` is counted against the *eligible* area, so steep ground never dilutes it. Each sinkhole draws its radius and depth from the given ranges and is carved as a smooth subsidence `bowl` (raised cosine) or a steep-rimmed `collapse` pit with a flat floor; overlapping pits take the deeper cut. The `sinkholes` output is 1 at the floors and fades to 0 at the rims — colour by it, scatter rubble from it, or mask a material. Same seed, same holes. **Underground drainage:** feed the `sinkholes` mask to the new `drains` input of `jd.hydrology.fill@1` and `jd.hydrology.rivers@1` — cells above 0.5 become outlets like the map edge, so water that reaches a doline leaves the surface: no lake forms in it, nothing spills past it, and a wadi that runs into a swallow hole ends there. Not modelled: caves, doline chains along joints.
 
 ### Yardangs: wind abrasion
 
@@ -595,6 +595,14 @@ wadi         0..0.92, mean 0.011   (1 % of the plain is an ephemeral channel at 
 ```
 
 ![Playa mask: every closed basin of the desert plain filled level — the sinkholes read as bright discs, the broad hollows as soft blobs](images/cli-desert-playa.png) ![Wadi mask: a sparse dendritic network of ephemeral channels across the plain](images/cli-desert-wadi.png)
+
+```
+# karst.sinkholes → fill.drains and → rivers.drains on the same plain (256², karst 6/km²):
+playa  depth max 14.9 → 6.9 m, mean 0.78 → 0.17 m     (the dolines no longer pond; only hollows without a swallow hole fill)
+salt   crust ≥ 0.5 m: 20.4 % → 7.4 % of the plain
+wadi   mask mean 1.08 % → 0.69 %                        (streams sink into the dolines instead of running on)
+fill 107 ms · rivers 159 ms
+```
 
 Two desert landforms need no new node. A **playa** (salt pan) is a closed basin whose floods evaporate: `jd.hydrology.fill@1` levels every closed hollow — on this plain that is each sinkhole and the broad low ground between the dunes — and its `lakes` output is the depth of water that would stand there, so `lakes > 0` is the evaporite floor and `out` the flat pan surface; give it a bright, rough salt material through a biome rule on that mask. A **wadi** (arroyo) is a channel that only runs in flash floods: `jd.hydrology.rivers@1` with a low `threshold` and a shallow `depth_m` on the plain cuts the braided, sparse network above, and `method: dinf` keeps it from locking to the grid. Both are static: no flood timing, no salt crust growth.
 

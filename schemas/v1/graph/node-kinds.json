@@ -1140,12 +1140,17 @@
   },
   {
     "kind": "jd.hydrology.fill@1",
-    "description": "Priority-flood depression filling: raises pits to their spill level so every cell drains; `lakes` = water depth of the filled basins",
+    "description": "Priority-flood depression filling: raises pits to their spill level so every cell drains; `lakes` = water depth of the filled basins. Optional `drains` mask (> 0.5): underground outlets such as karst sinkholes — no lake forms there and nothing spills past them",
     "inputs": [
       {
         "name": "in",
         "ty": "heightfield",
         "required": true
+      },
+      {
+        "name": "drains",
+        "ty": "heightfield",
+        "required": false
       }
     ],
     "outputs": [
@@ -1183,6 +1188,11 @@
         "name": "in",
         "ty": "heightfield",
         "required": true
+      },
+      {
+        "name": "drains",
+        "ty": "heightfield",
+        "required": false
       }
     ],
     "outputs": [

@@ -55,7 +55,7 @@ test.describe("hydrology nodes against the real core", () => {
     await page.screenshot({ path: testInfo.outputPath("hydrology-inspector.png") }); // tutorial image source
 
     // Wire noise → rivers (in) and rivers.out → height output, replacing the starter edge, then evaluate.
-    await wire(page, noise, rivers);
+    await wire(page, noise, rivers, "out", "in"); // the rivers node also has a `drains` input
     await expect(page.getByTestId("log")).toContainText("graph.connect: ok");
     await wire(page, rivers, height, "out");
     await expect(panel.locator(".react-flow__edge")).toHaveCount(2);
