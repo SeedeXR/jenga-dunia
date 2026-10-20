@@ -56,7 +56,7 @@ Banned / avoided: `bincode` 3 (tombstone), `rend3`, `sled`, `simdnoise` (dormant
 ## External tools (process boundary, never linked)
 | Tool | Licence | Use |
 |---|---|---|
-| Blender 5.2 LTS | GPL-3.0-or-later | subprocess for bridge/round-trip; our add-on in a separate GPL-3.0-or-later repo (Extensions Platform requirement) |
+| Blender 5.2 LTS | GPL-3.0-or-later | subprocess for bridge/round-trip; our add-on `integrations/blender/jenga_dunia_bridge` is GPL-3.0-or-later (own `LICENSE`, talks to the core only via the `jd` CLI); move to a separate repo before an Extensions Platform submission |
 | Apple USD Tools (`usdchecker`, `usdzip`, …) 0.25.11 | Apple/TOST | validation on macOS |
 | gltf-validator / @gltf-transform/cli | Apache-2.0 / MIT | validation |
 | KTX-Software `toktx` 4.4.2 | Apache-2.0 | KTX2 encoding |

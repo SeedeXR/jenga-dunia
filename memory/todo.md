@@ -60,7 +60,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [~] USD: USDA writer ✔ + USDZ via system `usdzip` ✔, both `usdchecker`-clean; native USDC ☐ (openusd crate); OBJ/STL/PLY ✔ (`jd export mesh x.obj|stl|ply`, shared grid, PLY vertex colours; validated in an external importer); GeoTIFF ✔ (export writes pixel scale / tie point / EPSG GeoKeys; import reads them)
 - [ ] QEM decimation, LOD chains, MikkTSpace, topology validation + stats
 - [ ] Material translation layer + loss reports
-- [ ] Blender bridge add-on (separate licence) + headless round-trip test
+- [~] Blender bridge add-on ✔ (`integrations/blender/jenga_dunia_bridge`, GPL-3.0-or-later, manifest validates, File ▸ Import operator via `jd` CLI) + headless round-trip test ✔ (`test_bridge.py`, Blender 5.2) · separate repo / Extensions Platform submission ☐ (needs owner)
 - [~] Unity/Unreal export profiles ✔ (`terrain.export_profile`: engine-specific heightmap encoding/row order, 8-bit weightmaps, README with Terrain Height / Z scale; size warnings) · engine-side import verified on a real Unity/Unreal ☐ · Unity C# TerrainData import script ☐
 - [ ] FBX SDK  adapter for fbx we build our own high performance accurate reader and writer , exporter from sratch you can learn from optima it's in Software Projects , but also you can verify against blender headless , api , autodesk fbx  , maya , unity and unreal we build our own fbx dsk reader
 

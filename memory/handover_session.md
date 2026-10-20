@@ -188,7 +188,9 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `11:00:00` **Lint gated**: `pnpm lint` (oxlint) now runs in `scripts/pre-push.sh` and CI before the build; fixed the one error (the vitest GraphPanel mock is a named component so `rules-of-hooks` accepts its `useStore()`), dropped `gen-types.mjs`'s unused import and dead `hint` parameter (generated `ops.gen.ts` byte-identical). Remaining warnings: `only-export-components` on `App.tsx`/`TerrainView.tsx` helper exports (fast-refresh advice, warn level).
 
-### Open / next (as of 2026-10-20 11:00, head after lint-gate commit)
+- `11:30:00` **Blender bridge**: `integrations/blender/jenga_dunia_bridge/` (GPL-3.0-or-later, own LICENSE copied from Blender's SPDX texts; `blender_manifest.toml` validates with `blender --command extension validate`, builds to a 3.2 KB zip). Operator `jd.import_project` (File ▸ Import): `jd export mesh` + optional `jd op terrain.scatter … .glb` → glTF import into collection `JD <project>`; preferences hold the `jd` path ($JD_BIN / PATH fallback). Headless test `test_bridge.py`: fresh 2048 m/256² project → 65 536-vertex terrain 2040 m across, 1024 instances sharing one mesh, 25/25 rays within 0.71 m. Docs `docs/user/blender.md` + render `blender-bridge.png`. Register row updated: the add-on lives in-repo for now; the "separate repo" from the register needs the owner (outward action).
+
+### Open / next (as of 2026-10-20 11:30, head after blender-bridge commit)
 1. **CI**: green through `c0cc8ae`; `02571d2` failed on the queue-order race, fixed in `97bb0f7`; `2c6840f` (colour-by-layer) and the priorities commit polling.
 2. **Figma**: connector unavailable this session; plugin OAuth pending on the owner's side → tutorial images stay in `docs/user/images/`; place them in file `fxyeV62hgLoNmG3dU1LX6G` when a connector works.
 3. **Native leftovers**: Edit-menu capture; native sculpt capture/recording (needs Accessibility); signed/notarised bundle (needs an Apple developer account).

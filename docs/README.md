@@ -9,7 +9,7 @@ Round 1 (2026-10-19): research and architecture only; no code. Diagrams are Merm
 - [`research/brief/WorldCreator-JengaDunia.md`](research/brief/WorldCreator-JengaDunia.md) — the master brief (authoritative scope)
 
 ## User guides (`user/`)
-[Index](user/README.md) — [CLI quickstart](user/cli-quickstart.md) · [MCP setup](user/mcp-setup.md)
+[Index](user/README.md) — [CLI quickstart](user/cli-quickstart.md) · [MCP setup](user/mcp-setup.md) · [Blender bridge](user/blender.md)
 
 ## Architecture (`architecture/`)
 | # | Doc |

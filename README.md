@@ -21,6 +21,7 @@ cargo build --release -p jd-cli -p jd-mcp
 | Decisions | [`docs/adr/`](docs/adr/) |
 | Research & evidence | [`docs/research/`](docs/research/) |
 | Roadmap | [`docs/roadmap.md`](docs/roadmap.md) |
+| Blender users | [`docs/user/blender.md`](docs/user/blender.md) — the bridge add-on (`integrations/blender/`, GPL-3.0-or-later; everything else is MIT) |
 
 ## Principles
 

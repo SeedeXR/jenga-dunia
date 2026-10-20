@@ -12,6 +12,7 @@ const checks = [
   ["Cargo.toml", /\[workspace\.package\][^[]*?\nversion = "([^"]+)"/],
   ["apps/desktop/package.json", (s) => JSON.parse(s).version],
   ["apps/desktop/src-tauri/tauri.conf.json", (s) => JSON.parse(s).version],
+  ["integrations/blender/jenga_dunia_bridge/blender_manifest.toml", /\nversion = "([^"]+)"/],
 ];
 let bad = 0;
 for (const [file, get] of checks) {

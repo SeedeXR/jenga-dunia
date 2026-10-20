@@ -1,0 +1,14 @@
+schema_version = "1.0.0"
+id = "jenga_dunia_bridge"
+name = "Jenga Dunia Bridge"
+type = "add-on"
+tags = ["Import-Export"]
+maintainer = "Jenga Dunia contributors <https://github.com/SeedeXR/jenga-dunia>"
+license = ["SPDX:GPL-3.0-or-later"]
+version = "0.0.1"
+tagline = "Import Jenga Dunia terrains and instances via the jd CLI"
+blender_version_min = "4.2.0"
+website = "https://github.com/SeedeXR/jenga-dunia"
+
+[permissions]
+files = "Runs the jd CLI: reads the project, writes glTF to a temp folder"
