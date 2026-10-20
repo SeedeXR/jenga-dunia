@@ -88,6 +88,14 @@ export interface LayerMaps {
   px: [number, number];
 }
 
+/** The noise continued `scale` × beyond the world's border as a coarse preview (the horizon skirt). */
+export async function horizonPreview(scale = 3, px = 256): Promise<Preview | null> {
+  const r = await op<{ bytes_base64: string }>("terrain.horizon", { scale, px });
+  if (r.status !== "ok" || !r.result) return null;
+  const bin = Uint8Array.from(atob(r.result.bytes_base64), (c) => c.charCodeAt(0));
+  return decodePreview(bin.buffer);
+}
+
 /** The physical sky for the viewport dome: a tonemapped equirectangular PNG decoded to a bitmap. */
 export async function skyPreview(sun: { sun_azimuth_deg: number; sun_elevation_deg: number; turbidity: number }, width = 512): Promise<{ bitmap: ImageBitmap; px: [number, number] } | null> {
   // Three times the bake's default exposure: the dome is seen tonemapped, and a clear zenith near 0.5 reads grey.

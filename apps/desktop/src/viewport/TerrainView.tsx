@@ -21,6 +21,8 @@ export interface ViewportInfo {
   waves?: { heightM: number; lengthM: number };
   /** Physical sky texture on the dome (equirectangular preview size), when one is applied. */
   skyPx?: [number, number];
+  /** Horizon skirt resolution per side, when one is drawn. */
+  horizonPx?: number;
 }
 
 interface Props {
@@ -40,6 +42,8 @@ interface Props {
   waves?: OceanWavesResult | null;
   /** Physical sky (`sky.preview`, equirectangular, row 0 = zenith, column 0 = north) drawn on the dome; null keeps the gradient. */
   sky?: { bitmap: ImageBitmap; px: [number, number] } | null;
+  /** The noise continued `scale` × beyond the border: a coarse skirt drawn under the terrain with a hole for the world. */
+  horizon?: { preview: Preview; scale: number } | null;
   /** Sun direction: azimuth clockwise from north (0 = light from the north), elevation above the horizon. */
   sun?: { azimuthDeg: number; elevationDeg: number };
   /** Baked albedo/normal/roughness maps for the shown layer; textured when set and no overlay is active. */
@@ -262,6 +266,8 @@ interface SceneState {
   pbrPx: [number, number] | null;
   /** Size of the sky texture on the dome, when one is applied. */
   skyPx: [number, number] | null;
+  /** Horizon skirt mesh, when drawn. */
+  skirt: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | null;
 }
 
 function placeCamera(s: SceneState) {
@@ -281,6 +287,7 @@ function infoOf(s: SceneState): ViewportInfo {
     ...(s.instances ? { instances: s.instances.count } : {}),
     ...(s.pbrPx ? { pbrPx: s.pbrPx } : {}),
     ...(s.skyPx ? { skyPx: s.skyPx } : {}),
+    ...(s.skirt ? { horizonPx: Math.round(Math.sqrt((s.skirt.geometry.attributes.position?.count ?? 0))) } : {}),
   };
 }
 
@@ -306,7 +313,7 @@ function animateSea(s: SceneState, tS: number): void {
   s.sea.geometry.computeVertexNormals();
 }
 
-export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevelM = null, water = null, waves = null, sky = null, sun, overlay = null, instances = null, maps = null }: Props) {
+export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevelM = null, water = null, waves = null, sky = null, horizon = null, sun, overlay = null, instances = null, maps = null }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<SceneState | null>(null);
   // Latest sculpt props without re-creating the renderer effect.
@@ -385,6 +392,7 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
       instances: null,
       pbrPx: null,
       skyPx: null,
+      skirt: null,
     };
     sceneRef.current = state;
     placeCamera(state);
@@ -575,6 +583,43 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
     s.sunDeg = { azimuthDeg: sun?.azimuthDeg ?? 140, elevationDeg: sun?.elevationDeg ?? 35 };
     onInfo?.(infoOf(s));
   }, [sun?.azimuthDeg, sun?.elevationDeg, onInfo]);
+
+  // Horizon skirt: the noise continued beyond the border, at `scale` × the extent, with the
+  // triangles under the world itself dropped so the real terrain shows through the hole.
+  useEffect(() => {
+    const s = sceneRef.current;
+    if (!s) return;
+    if (s.skirt) {
+      s.scene.remove(s.skirt);
+      s.skirt.geometry.dispose();
+      s.skirt.material.dispose();
+      s.skirt = null;
+    }
+    if (horizon && extentM) {
+      const far: [number, number] = [extentM[0] * horizon.scale, extentM[1] * horizon.scale];
+      const geo = buildTerrainGeometry(horizon.preview, far);
+      const pos = geo.attributes.position as THREE.BufferAttribute;
+      const idx = geo.index!;
+      const kept: number[] = [];
+      for (let t = 0; t < idx.count; t += 3) {
+        let cx = 0;
+        let cz = 0;
+        for (let k = 0; k < 3; k++) {
+          cx += pos.getX(idx.getX(t + k));
+          cz += pos.getZ(idx.getX(t + k));
+        }
+        if (Math.abs(cx / 3) > extentM[0] / 2 || Math.abs(cz / 3) > extentM[1] / 2) kept.push(idx.getX(t), idx.getX(t + 1), idx.getX(t + 2));
+      }
+      geo.setIndex(kept);
+      const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0.0 });
+      mat.color.setScalar(0.85); // a touch dimmer: it is the far distance
+      s.skirt = new THREE.Mesh(geo, mat);
+      s.skirt.renderOrder = -0.5;
+      s.scene.add(s.skirt);
+    }
+    onInfo?.(infoOf(s));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [horizon, extentM, onInfo]);
 
   // Sky dome: the physical sky preview as an equirectangular texture. three's sphere UVs run
   // west → south → east → north around +Y and v = 1 at the zenith; the preview's columns run

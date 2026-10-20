@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TerrainHorizon",
+  "description": "`terrain.horizon` params.",
+  "type": "object",
+  "properties": {
+    "scale": {
+      "description": "How much larger than the world the horizon field is (1.5..=16), centred on the world.",
+      "type": "number",
+      "format": "float",
+      "default": 3.0
+    },
+    "px": {
+      "description": "Resolution of the horizon field in pixels per side (16..=1024).",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0,
+      "default": 256
+    }
+  },
+  "additionalProperties": false
+}

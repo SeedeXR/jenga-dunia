@@ -1060,6 +1060,28 @@ export type TerrainGenerateResult = {
   "duration_ms": number;
 };
 
+export type TerrainHorizonRequest = {
+  /** How much larger than the world the horizon field is (1.5..=16), centred on the world. */
+  "scale"?: number;
+  /** Resolution of the horizon field in pixels per side (16..=1024). */
+  "px"?: number;
+};
+
+export type TerrainHorizonResult = {
+  /** Width in samples. */
+  "width": number;
+  /** Height in samples. */
+  "height": number;
+  /** Height of sample value 0. */
+  "min": number;
+  /** Height of sample value 65535. */
+  "max": number;
+  /** The exact wire format of `jd_terrain::preview::Preview::to_bytes` (16-byte little-endian
+header `u32 width, u32 height, f32 min, f32 max` followed by row-major u16 samples),
+standard base64 with padding. One decoder serves both transports. */
+  "bytes_base64": string;
+};
+
 export type TerrainPreviewRequest = {
   /** Layer name. */
   "layer"?: string;
@@ -1685,6 +1707,8 @@ export interface JdOps {
   "terrain.export_profile": { request: TerrainExportProfileRequest; result: TerrainExportProfileResult };
   /** Generate a noise heightfield for the open project's world and store it as a layer */
   "terrain.generate": { request: TerrainGenerateRequest; result: TerrainGenerateResult };
+  /** The world's noise continued beyond its border: the graph's noise node evaluated over `scale` × the extent (same seed and origin, so it matches at the edge) at a coarse `px`, as a u16 preview — a horizon skirt for viewers; erosion and the rest of the graph are not continued */
+  "terrain.horizon": { request: TerrainHorizonRequest; result: TerrainHorizonResult };
   /** Downsampled u16 preview of a layer (base64) for agents and viewers */
   "terrain.preview": { request: TerrainPreviewRequest; result: TerrainPreviewResult };
   /** Generate seeded, faceted boulders as .glb meshes (icosphere squashed and displaced by value noise, flat base, flat shading) — scatter proxies and props */

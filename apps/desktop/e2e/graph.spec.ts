@@ -87,6 +87,7 @@ test.describe("node graph editor against the real core", () => {
 
     // Delete key on the selected blur node removes it and its edge through graph.remove_node.
     await blur.click();
+    await expect(blur).toHaveClass(/selected/); // the key goes to the selected node; under load the click lands late
     await blur.press("Delete");
     await expect(panel.locator(".react-flow__node")).toHaveCount(2);
     await expect(panel.locator(".react-flow__edge")).toHaveCount(1);

@@ -5903,6 +5903,74 @@ expression: list
     }
   },
   {
+    "id": "terrain.horizon",
+    "description": "The world's noise continued beyond its border: the graph's noise node evaluated over `scale` × the extent (same seed and origin, so it matches at the edge) at a coarse `px`, as a u16 preview — a horizon skirt for viewers; erosion and the rest of the graph are not continued",
+    "scope": "project-read",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TerrainHorizon",
+      "description": "`terrain.horizon` params.",
+      "type": "object",
+      "properties": {
+        "scale": {
+          "description": "How much larger than the world the horizon field is (1.5..=16), centred on the world.",
+          "type": "number",
+          "format": "float",
+          "default": 3.0
+        },
+        "px": {
+          "description": "Resolution of the horizon field in pixels per side (16..=1024).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 256
+        }
+      },
+      "additionalProperties": false
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "PreviewResult",
+      "description": "`terrain.preview` result: a downsampled u16 heightfield, base64-encoded.\n(The desktop app uses the zero-copy `layer_preview` command; this op serves MCP agents\nand browser-based tests that cannot receive raw bytes.)",
+      "type": "object",
+      "properties": {
+        "width": {
+          "description": "Width in samples.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "height": {
+          "description": "Height in samples.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "min": {
+          "description": "Height of sample value 0.",
+          "type": "number",
+          "format": "float"
+        },
+        "max": {
+          "description": "Height of sample value 65535.",
+          "type": "number",
+          "format": "float"
+        },
+        "bytes_base64": {
+          "description": "The exact wire format of `jd_terrain::preview::Preview::to_bytes` (16-byte little-endian\nheader `u32 width, u32 height, f32 min, f32 max` followed by row-major u16 samples),\nstandard base64 with padding. One decoder serves both transports.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "width",
+        "height",
+        "min",
+        "max",
+        "bytes_base64"
+      ]
+    }
+  },
+  {
     "id": "terrain.preview",
     "description": "Downsampled u16 preview of a layer (base64) for agents and viewers",
     "scope": "project-read",

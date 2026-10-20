@@ -169,6 +169,12 @@ Undo and redo are operations like everything else (`graph.undo` / `graph.redo`, 
 
 *Waves: `wind_speed_mps`, `fetch_km` and `wind_azimuth_deg` on the same node raise a wind sea. The app asks the core for the spectrum (`ocean.waves`: JONSWAP fetch-limited growth capped at the fully developed Pierson–Moskowitz sea) and moves the water plane along a Gerstner sum of its three components every frame, so a 3 m/s breeze makes 0.2 m ripples and a 20 m/s gale 9.8 m swells 380 m long (3.2 m / 96 m if the fetch is only 100 km). Waves break where the water is shallower than Hs / 0.78, and the shoreline foam widens to that surf zone — 12.6 m of depth in the gale above. The header shows the significant height and peak wavelength being drawn; recording below. **Export water maps** (Export panel) writes `exports/water/` — depth, colour, foam and a tileable wave normal map for the node's clarity and wind (`ocean.bake`, see the CLI quickstart). Not yet: refraction and shadowing by headlands.*
 
+## Horizon
+
+![Viewport orbited to the horizon with Horizon on: the world's terrain sits in a hole cut in a coarse, dimmer skirt of the same noise that runs to three times the extent under the physical sky](images/desktop-horizon.png)
+
+*Horizon (1): the noise node's own parameters are evaluated three times beyond the world's border at a coarse 256² and drawn as a dimmer skirt under the terrain, with the triangles under the world dropped so the real terrain shows through the hole; the same seed and origin make it continue the world's noise at the edge. It is for the eye — erosion, rivers and the rest of the graph stop at the border — and it re-bakes after every evaluation while on; the header reads `horizon 256²` (2). VUE's infinite terrains, as far as a heightfield tool honestly goes. CLI: `jd op terrain.horizon` returns the same field as a preview.*
+
 ## Roads
 
 ![Viewport after one drag with Road armed: a flattened road bed crosses the hills; the graph shows a jd.terrain.spline node spliced in front of the height output, selected in the inspector with its points and width](images/desktop-road.png)

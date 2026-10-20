@@ -58,6 +58,9 @@ test.describe("desktop UI against the real core", () => {
     // The dome is the physical sky, re-baked for the new sun; haze is a slider too.
     await expect(page.getByTestId("viewport-info")).toContainText("sky 512×256");
     await expect(page.getByTestId("sun-turbidity")).toHaveValue("3");
+    // The horizon skirt: the noise continued 3× beyond the border, coarse, with a hole for the world.
+    await page.getByTestId("horizon-toggle").click();
+    await expect(page.getByTestId("viewport-info")).toContainText("horizon 256²");
     // Orbit down to the horizon: the dome above the rim is the physical sky (tutorial image).
     const vp = (await page.getByTestId("viewport").boundingBox())!;
     await page.mouse.move(vp.x + vp.width / 2, vp.y + vp.height / 2);

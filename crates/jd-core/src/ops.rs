@@ -3115,6 +3115,25 @@ pub mod terrain {
         pub horizon_rgb: [f32; 3],
     }
 
+    /// `terrain.horizon` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct TerrainHorizon {
+        /// How much larger than the world the horizon field is (1.5..=16), centred on the world.
+        #[serde(default = "default_horizon_scale")]
+        pub scale: f32,
+        /// Resolution of the horizon field in pixels per side (16..=1024).
+        #[serde(default = "default_horizon_px")]
+        pub px: u32,
+    }
+
+    fn default_horizon_scale() -> f32 {
+        3.0
+    }
+    fn default_horizon_px() -> u32 {
+        256
+    }
+
     /// `terrain.rocks` params.
     #[derive(Debug, Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
@@ -3281,6 +3300,43 @@ pub mod terrain {
             "Wind sea for a wind speed and fetch (JONSWAP growth capped at the fully developed Pierson–Moskowitz sea): significant height, peak period and wavelength, breaking depth, and the Gerstner components the viewport animates",
             Scope::None,
             |_, p| Ok((jd_terrain::wave_spectrum(&p)?, Vec::new())),
+        );
+        r.register::<TerrainHorizon, PreviewResult, _>(
+            "terrain.horizon",
+            "The world's noise continued beyond its border: the graph's noise node evaluated over `scale` × the extent (same seed and origin, so it matches at the edge) at a coarse `px`, as a u16 preview — a horizon skirt for viewers; erosion and the rest of the graph are not continued",
+            Scope::ProjectRead,
+            |ctx, p| {
+                if !(1.5..=16.0).contains(&p.scale) {
+                    return Err(JdError::invalid("scale", "must be within 1.5..=16"));
+                }
+                if !(16..=1024).contains(&p.px) {
+                    return Err(JdError::invalid("px", "must be within 16..=1024"));
+                }
+                let (world, noise) = ctx.with_project(|proj| {
+                    let node = proj.graph.nodes.values().find(|n| n.kind.0.starts_with("jd.noise."));
+                    let noise: jd_terrain::NoiseParams = match node {
+                        Some(n) => serde_json::from_value(Value::Object(jd_graph::model::resolve_keys(&n.params, proj.graph.time)))?,
+                        None => return Err(JdError::invalid("graph", "no noise node to continue").next("Add a jd.noise.* node, or generate from the panel.")),
+                    };
+                    Ok((proj.doc.world.clone(), noise))
+                })?;
+                let extent = [world.extent_m[0] * f64::from(p.scale), world.extent_m[1] * f64::from(p.scale)];
+                let far = WorldSettings {
+                    extent_m: extent,
+                    resolution_px: [p.px, p.px],
+                    tile_size: p.px.max(64).next_power_of_two().min(512),
+                    halo: 4,
+                    origin: [world.origin[0] - (extent[0] - world.extent_m[0]) / 2.0, world.origin[1] - (extent[1] - world.extent_m[1]) / 2.0],
+                    ..world.clone()
+                };
+                let hf = generate_noise(&far, &noise)?;
+                use base64::Engine as _;
+                let pv = jd_terrain::preview::preview_u16(&hf, 0);
+                Ok((
+                    PreviewResult { width: pv.width, height: pv.height, min: pv.min, max: pv.max, bytes_base64: base64::engine::general_purpose::STANDARD.encode(pv.to_bytes()) },
+                    Vec::new(),
+                ))
+            },
         );
         r.register::<TerrainRocks, Vec<RockFile>, _>(
             "terrain.rocks",

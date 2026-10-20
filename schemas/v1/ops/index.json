@@ -190,6 +190,11 @@
     "scope": "project-write"
   },
   {
+    "id": "terrain.horizon",
+    "description": "The world's noise continued beyond its border: the graph's noise node evaluated over `scale` × the extent (same seed and origin, so it matches at the edge) at a coarse `px`, as a u16 preview — a horizon skirt for viewers; erosion and the rest of the graph are not continued",
+    "scope": "project-read"
+  },
+  {
     "id": "terrain.preview",
     "description": "Downsampled u16 preview of a layer (base64) for agents and viewers",
     "scope": "project-read"

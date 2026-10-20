@@ -454,6 +454,16 @@ $ jd op terrain.scatter --project Road.jdproj --params '{"mask":"road","height":
 
 `terrain.rocks` writes seeded boulders as meshes: an icosphere (`detail` subdivisions → 20 · 4ⁿ facets) squashed by a seeded anisotropic factor, every vertex pushed along its normal by three octaves of seeded value noise scaled by `roughness`, the bottom `flatten` share cut flat so the rock rests on y = 0, and three vertices per facet so it shades flat. Seeds `seed`, `seed + 1`, … give `count` different rocks; the same seed is always the same rock. The scatter op takes the same settings under `rock`: with it, the instanced `.glb` carries a rock (normals included, a stone-grey material) instead of the 1 m cone proxy, so a mask of stony ground scatters real boulders. VUE's random rock generator (`docs/research/vue-features.md`). Not modelled: strata lines, smooth river cobbles, several rock variants in one instanced file.
 
+### Horizon: the noise beyond the border
+
+```
+$ jd op terrain.horizon --project Road.jdproj --params '{"scale":3,"px":256}'
+256 × 256 u16 preview of the noise node evaluated over 3 × the world's extent, centred on it (same seed and origin, so it continues the world at the edge)
+range 12.7 … 284.4 m over the 6 km skirt vs 31.9 … 278.5 m inside the 2 km world
+```
+
+`terrain.horizon` reads the graph's noise node (keyframes resolved at the graph's time), builds a world `scale` × larger with the same seed and an origin shifted so the real world sits in its centre, and returns the noise at `px` per side in the `terrain.preview` wire format. The desktop draws it as a skirt under the terrain with a hole for the world (desktop guide, "Horizon"). Only the noise continues — nothing downstream of it does — which is the honest limit of a heightfield world; true streaming beyond the border is Phase 5.
+
 ### Physical sky as an HDRI
 
 ```

@@ -1,7 +1,7 @@
 // Frontend store: a mirror of what the core reports, never the source of truth (docs/architecture/12-ui-workspace.md).
 import { create } from "zustand";
 import type { Edge, GraphEvaluateResult, GraphListResult, HeightmapFormat, JdOps, JobInfo as JobInfoGen, NodeDefInfo, NodeView, NoiseParams, OceanWavesRequest, OceanWavesResult, OpId, ProjectOpenResult, ProjectSaveResult, ScatterPoint, TerrainStatsResult } from "./lib/ops.gen";
-import { layerPreview, layerTextures, op, skyPreview, type JdError, type LayerMaps, type Preview, type Response, type Warning } from "./lib/api";
+import { horizonPreview, layerPreview, layerTextures, op, skyPreview, type JdError, type LayerMaps, type Preview, type Response, type Warning } from "./lib/api";
 
 export type ProjectSummary = ProjectOpenResult;
 
@@ -73,6 +73,11 @@ interface State {
   /** Viewport sun direction (not part of the project). */
   sun: { azimuth_deg: number; elevation_deg: number; turbidity: number };
   setSun: (patch: Partial<{ azimuth_deg: number; elevation_deg: number; turbidity: number }>) => void;
+  /** The noise continued beyond the border (`terrain.horizon`), drawn as a coarse skirt under the terrain. */
+  horizon: { preview: Preview; scale: number } | null;
+  showHorizon: boolean;
+  setShowHorizon: (on: boolean) => void;
+  refreshHorizon: () => Promise<void>;
   /** The physical sky (`sky.preview`) for the viewport dome, re-baked when the sun moves. */
   sky: { bitmap: ImageBitmap; px: [number, number] } | null;
   refreshSky: () => Promise<void>;
@@ -281,6 +286,7 @@ export const useStore = create<State>((set, get) => {
     const keep = names.find((n) => n.split("#")[0] === current);
     await showLayer(keep ?? names[0]!);
     await refreshScatter();
+    await get().refreshHorizon();
   };
   // Preview LOD keeps live evaluations ≤ 512² so edits feel immediate; Evaluate/export use lod 0.
   const previewLod = () => {
@@ -458,6 +464,21 @@ export const useStore = create<State>((set, get) => {
       set((s) => ({ sun: { ...s.sun, ...patch } }));
       clearTimeout(skyTimer);
       skyTimer = setTimeout(() => void get().refreshSky(), 150); // a slider drag re-bakes once it settles
+    },
+    horizon: null,
+    showHorizon: false,
+    setShowHorizon: (on) => {
+      set({ showHorizon: on, ...(on ? {} : { horizon: null }) });
+      if (on) void get().refreshHorizon();
+    },
+    refreshHorizon: async () => {
+      if (!get().showHorizon || !get().project) return;
+      try {
+        const preview = await horizonPreview(3, 256);
+        set({ horizon: preview ? { preview, scale: 3 } : null });
+      } catch (e) {
+        logFailure("terrain.horizon", e);
+      }
     },
     sky: null,
     refreshSky: async () => {
