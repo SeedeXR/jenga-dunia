@@ -356,6 +356,18 @@ coastal node 3.6 s for 256² × 120 steps (debug build)
 
 `jd.erosion.coastal@1` re-floods the ocean from the field border every step (the same rule as `jd.hydrology.sea_level@1`, so inland basins are not coasts), then every land cell within `band_m` above `level_m` that touches the sea loses `rate_m × exposure` (exposure = share of its eight neighbours that are ocean) down to one step below the level, and that material is shared among those ocean neighbours. A cut cell floods on the next step and exposes the one behind it — cliff retreat with a wave-cut platform just under the surface — while the deposits build beaches that can rise above the level and become land again. The `shore` output is the wave work per cell normalised to the busiest one, a ready mask for beach and cliff materials. No fetch, wave direction or longshore drift yet, so spits, bars and deltas are a later term.
 
+### Seabed: what lies under the water
+
+```
+$ jd op graph.add_node --project Coast.jdproj --save --params '{"kind":"jd.biome.seabed@1","params":{"level_m":60,"sand_max_depth_m":25,"mud_min_depth_m":50,"rock_slope_deg":30}}'
+# coastal.out → seabed.in; coastal.shore → seabed.shore; seabed.seabed → an output, then jd.mask.class@1 {id: 1..4} for sand / rock / mud / reef masks
+seabed node 262 ms (256²)
+share of the classified floor (60 m sea, 28 % of the world):  sand 50.6 %  rock 38.7 %  mud 10.8 %  reef 0 %
+at rock_slope_deg 20 the same floor reads                    sand 27.6 %  rock 66.9 %  mud 5.6 %
+```
+
+`jd.biome.seabed@1` classifies every ocean cell (below `level_m` and connected to the border, like the sea-level node) by depth and slope with the rules coastal geomorphology gives: submarine slopes steeper than `rock_slope_deg` hold no sediment and read **rock** (2); the floor deeper than `mud_min_depth_m` is still enough for fines to settle, **mud** (3); the shelf above the wave base `sand_max_depth_m` is wave-sorted **sand** (1); and a gentle shelf inside `reef_depth_m` that is more than `river_reach_m` from any cell of the optional `rivers` or `shore` masks becomes **reef** (4) — reefs need clear, sediment-free water, so on the steep coastal world above, whose shallow shelves are all within reach of wave-worked cliffs, no reef forms. Land is 0. The class map works with `jd.mask.class@1` exactly like the land biomes, so each bed gets its own material, scatter (kelp, boulders) and colour overlay. No sediment transport or currents yet.
+
 ### Snow cover
 
 ```

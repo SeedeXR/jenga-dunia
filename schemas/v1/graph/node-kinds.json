@@ -230,6 +230,87 @@
     }
   },
   {
+    "kind": "jd.biome.seabed@1",
+    "description": "Classify the sea floor below `level_m`: 1 sand on the shelf above the wave base, 2 rock on steep slopes, 3 mud in deep still water, 4 reef on a shallow gentle shelf away from river sediment (optional `rivers` and `shore` masks); 0 = land",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      },
+      {
+        "name": "rivers",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "shore",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "name": "seabed",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "SeabedParams",
+      "description": "Seabed settings.",
+      "type": "object",
+      "properties": {
+        "level_m": {
+          "description": "Sea level, metres.",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        },
+        "sand_max_depth_m": {
+          "description": "Wave base: sand is sorted and kept moving down to this depth (metres, > 0).",
+          "type": "number",
+          "format": "float",
+          "default": 30.0
+        },
+        "mud_min_depth_m": {
+          "description": "Below this depth the water is still enough for fine sediment to settle: mud (metres, ≥ wave base).",
+          "type": "number",
+          "format": "float",
+          "default": 60.0
+        },
+        "rock_slope_deg": {
+          "description": "Submarine slopes steeper than this (degrees, (0, 90)) hold no sediment: bare rock.",
+          "type": "number",
+          "format": "float",
+          "default": 20.0
+        },
+        "reef_depth_m": {
+          "description": "Reef band: depths [min, max] where a gentle, sediment-free shelf becomes reef. `[0, 0]` disables reefs.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "default": [
+            2.0,
+            25.0
+          ]
+        },
+        "river_reach_m": {
+          "description": "How far (metres) river mouths keep the shelf sandy rather than reef.",
+          "type": "number",
+          "format": "float",
+          "default": 400.0
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
     "kind": "jd.climate.snow@1",
     "description": "Snow cover 0..1 from height alone: a soft snow line, retention that falls with slope, sun-facing slopes melt, windward slopes scour — for biome rules, scatter and colour overlays",
     "inputs": [

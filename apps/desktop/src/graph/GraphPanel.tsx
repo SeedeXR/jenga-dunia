@@ -230,6 +230,7 @@ function Inner() {
             })()
           }
           fitView
+          minZoom={0.1}
           colorMode="dark"
           proOptions={{ hideAttribution: true }}
           deleteKeyCode={["Backspace", "Delete"]}

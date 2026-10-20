@@ -1004,6 +1004,21 @@ temperate default set (beach, grassland, forest, rock, snow). */
   "rules"?: BiomeRule[];
 };
 
+export type NodeParams_jd_biome_seabed_1 = {
+  /** Sea level, metres. */
+  "level_m"?: number;
+  /** Wave base: sand is sorted and kept moving down to this depth (metres, > 0). */
+  "sand_max_depth_m"?: number;
+  /** Below this depth the water is still enough for fine sediment to settle: mud (metres, ≥ wave base). */
+  "mud_min_depth_m"?: number;
+  /** Submarine slopes steeper than this (degrees, (0, 90)) hold no sediment: bare rock. */
+  "rock_slope_deg"?: number;
+  /** Reef band: depths [min, max] where a gentle, sediment-free shelf becomes reef. `[0, 0]` disables reefs. */
+  "reef_depth_m"?: [number, number];
+  /** How far (metres) river mouths keep the shelf sandy rather than reef. */
+  "river_reach_m"?: number;
+};
+
 export type NodeParams_jd_climate_snow_1 = {
   /** Height where cover reaches half, metres. */
   "snow_line_m"?: number;
@@ -1336,6 +1351,7 @@ export interface NodeKinds {
   "jd.analysis.flow@1": NodeParams_jd_analysis_flow_1;
   "jd.analysis.slope@1": NodeParams_jd_analysis_slope_1;
   "jd.biome.classify@1": NodeParams_jd_biome_classify_1;
+  "jd.biome.seabed@1": NodeParams_jd_biome_seabed_1;
   "jd.climate.snow@1": NodeParams_jd_climate_snow_1;
   "jd.erosion.aeolian@1": NodeParams_jd_erosion_aeolian_1;
   "jd.erosion.coastal@1": NodeParams_jd_erosion_coastal_1;

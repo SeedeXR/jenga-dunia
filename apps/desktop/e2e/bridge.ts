@@ -3,7 +3,7 @@
 // and agents use. Only the transport differs from the Tauri shell.
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import type { Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -87,16 +87,39 @@ export async function installBridge(page: Page, core: Client): Promise<void> {
 }
 
 /** Drag a connection in the React Flow graph from `from`'s source handle to `to`'s target handle. */
-export async function wire(page: Page, from: import("@playwright/test").Locator, to: import("@playwright/test").Locator, fromHandle = "out"): Promise<void> {
+export async function wire(page: Page, from: Locator, to: Locator, fromHandle = "out", toHandle?: string): Promise<void> {
   const src = from.locator(`.react-flow__handle.source[data-handleid="${fromHandle}"]`);
-  const dst = to.locator(".react-flow__handle.target");
-  await dst.hover();
-  await src.hover();
-  const a = await src.boundingBox();
-  const b = await dst.boundingBox();
-  if (!a || !b) throw new Error("handles not laid out");
-  await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 10 });
-  await page.mouse.up();
+  // Nodes with several inputs need the target handle named (strict mode otherwise sees them all).
+  const dst = toHandle ? to.locator(`.react-flow__handle.target[data-handleid="${toHandle}"]`) : to.locator(".react-flow__handle.target");
+  // React Flow cannot scroll a node into view: an off-canvas handle makes the forced click land on
+  // whatever is under its coordinates (seen as a silently missing edge). Fail here instead.
+  await expect(src).toBeInViewport();
+  await expect(dst).toBeInViewport();
+  // React Flow's connect-on-click: click the source handle, then the target handle. A drag works
+  // at full zoom but lands short on the few-pixel handles after a fit-view; the click path is
+  // zoom-independent, which is what a scripted user needs.
+  const before = await logCount(page, "graph.connect: ok");
+  await src.click({ force: true });
+  await dst.click({ force: true });
+  await expect.poll(() => logCount(page, "graph.connect: ok")).toBeGreaterThan(before);
+}
+
+/** Click React Flow's fit-view until `node` is on screen: a node added a moment ago has no measured
+ *  size yet, and a fit that runs before the measurement leaves it off-canvas. */
+export async function fitView(page: Page, node: Locator): Promise<void> {
+  const button = page.getByTestId("graph-panel").locator(".react-flow__controls-fitview");
+  for (let i = 0; ; i++) {
+    await button.click();
+    try {
+      await expect(node).toBeInViewport({ timeout: 500 });
+      return;
+    } catch (e) {
+      if (i >= 9) throw e;
+    }
+  }
+}
+
+/** How many lines of the op log contain `text` (assert on a count, not on text that an earlier op already logged). */
+export function logCount(page: Page, text: string): Promise<number> {
+  return page.getByTestId("log").locator("div", { hasText: text }).count();
 }

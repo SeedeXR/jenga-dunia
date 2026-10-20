@@ -21,6 +21,7 @@ pub mod preview;
 pub mod profiles;
 pub mod scatter;
 pub mod sculpt;
+pub mod seabed;
 pub mod sim;
 
 pub use aeolian::{AeolianParams, aeolian_transport};
@@ -45,6 +46,7 @@ pub use noise::{FractalKind, NoiseKind, NoiseParams, generate_noise};
 pub use profiles::{EngineProfile, ProfileReport, ProfileSettings, export_profile};
 pub use scatter::{ScatterParams, ScatterPoint, scatter_points, write_points};
 pub use sculpt::{Stroke, StrokeMode, apply_strokes};
+pub use seabed::{SeabedParams, classify_seabed};
 pub use sim::{
     HydraulicParams, HydraulicResult, StreamPowerParams, THERMAL_MAX_RATE, hydraulic_erode,
     slope_mask, stream_power_erode, thermal_erode,

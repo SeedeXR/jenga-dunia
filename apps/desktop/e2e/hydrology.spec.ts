@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, installBridge, wire } from "./bridge";
+import { connectCore, fitView, installBridge, logCount, wire } from "./bridge";
 
 const NOISE = "01JDGRAPH000000000000N01SE"; // starter graph ids (jd_graph::nodes)
 const HEIGHT = "01JDGRAPH0000000000HE1GHT0";
@@ -118,6 +118,48 @@ test.describe("hydrology nodes against the real core", () => {
     for (let i = 0; i < 2; i++) await page.mouse.wheel(0, 300);
     await page.screenshot({ path: testInfo.outputPath("hydrology-sea.png") }); // tutorial image source
 
+    // Seabed: classify the floor under the 250 m sea (sand / rock / mud / reef) and colour by it.
+    // The sea-level node has only driven the viewport so far: wire it, or the evaluation refuses
+    // (E_GRAPH_MISSING_INPUT) and nothing new is published.
+    await fitView(page, sea);
+    await wire(page, rivers, sea);
+    await expect(page.getByTestId("log")).toContainText("graph.connect: ok");
+    await page.getByTestId("graph-kind").selectOption("jd.biome.seabed@1");
+    await page.getByTestId("graph-add").click();
+    const seabed = panel.locator(".react-flow__node", { hasText: "jd.biome.seabed@1" });
+    // New nodes land to the right of the graph, off-canvas by now: once the node exists, fit the
+    // view so the handles are on screen (fitting before it appears leaves it off-canvas).
+    await fitView(page, seabed);
+    await seabed.click();
+    const seabedLevel = inspector.locator("label", { hasText: "level_m" }).locator("input");
+    await seabedLevel.fill("250");
+    await seabedLevel.blur();
+    await expect(seabed).toContainText("level_m=250");
+    await wire(page, rivers, seabed, "out", "in");
+    await page.getByTestId("graph-kind").selectOption("jd.output.height@1");
+    await page.getByTestId("graph-add").click();
+    const out3 = panel.locator(".react-flow__node", { hasText: "jd.output.height@1" }).last();
+    await expect(panel.locator(".react-flow__node", { hasText: "jd.output.height@1" })).toHaveCount(3);
+    await fitView(page, out3);
+    await out3.click();
+    const seabedLayer = inspector.locator("label", { hasText: "layer" }).locator("input");
+    await seabedLayer.fill("seabed");
+    await seabedLayer.blur();
+    await expect(out3).toContainText("layer=seabed");
+    await wire(page, seabed, out3, "seabed");
+    const evaluated = await logCount(page, "graph.evaluate: ok");
+    await page.getByTestId("graph-evaluate").click();
+    await expect.poll(() => logCount(page, "graph.evaluate: ok")).toBeGreaterThan(evaluated);
+    await page.getByTestId("color-pick").selectOption("seabed");
+    await expect(page.getByTestId("viewport-info")).toContainText("colour seabed");
+    // Drain the sea plane (the seabed node keeps its own 250 m level) so the classified floor is visible.
+    await sea.click();
+    await level.fill("0");
+    await level.blur();
+    await expect(page.getByTestId("viewport-info")).toContainText("sea 0 m");
+    await page.screenshot({ path: testInfo.outputPath("hydrology-seabed.png") }); // tutorial image source
+    await page.getByTestId("color-pick").selectOption("");
+
     // Autosave (interval overridden to 2 s here): after the last edit the project is saved — journal truncated, documents current.
     await expect(page.getByTestId("log")).toContainText("project.save: ok", { timeout: 10_000 });
     await expect(page.getByTestId("project-journal")).toHaveText("0");
@@ -127,7 +169,8 @@ test.describe("hydrology nodes against the real core", () => {
     // the level_m edit and leaves the journal empty.
     const savedLevel = () => {
       const saved = JSON.parse(readFileSync(path.join(ws, "Hydro.jdproj", "graph.json"), "utf8")) as { nodes: Record<string, { kind: string; params?: { level_m?: number } }> };
-      return Object.values(saved.nodes).some((n) => n.kind.startsWith("jd.hydrology.sea_level@") && n.params?.level_m === 250);
+      // The last edit drained the sea to 0 m for the seabed capture; that value must be the saved one.
+      return Object.values(saved.nodes).some((n) => n.kind.startsWith("jd.hydrology.sea_level@") && n.params?.level_m === 0);
     };
     await expect.poll(savedLevel, { timeout: 10_000 }).toBe(true);
     await expect.poll(() => readFileSync(path.join(ws, "Hydro.jdproj", "journal", "ops.ndjson"), "utf8"), { timeout: 10_000 }).toBe("");
