@@ -82,9 +82,10 @@ export function buildTerrainGeometry(p: Preview, extent: [number, number]): THRE
   const nrm = geo.attributes.normal as THREE.BufferAttribute;
   for (let vi = 0; vi < pos.count; vi++) {
     const slope = Math.min(1, Math.max(0, (1 - nrm.getY(vi)) * 1.4));
-    colors[vi * 3] += (ROCK.r - (colors[vi * 3] ?? 0)) * slope;
-    colors[vi * 3 + 1] += (ROCK.g - (colors[vi * 3 + 1] ?? 0)) * slope;
-    colors[vi * 3 + 2] += (ROCK.b - (colors[vi * 3 + 2] ?? 0)) * slope;
+    const [r, g, b] = [colors[vi * 3] ?? 0, colors[vi * 3 + 1] ?? 0, colors[vi * 3 + 2] ?? 0];
+    colors[vi * 3] = r + (ROCK.r - r) * slope;
+    colors[vi * 3 + 1] = g + (ROCK.g - g) * slope;
+    colors[vi * 3 + 2] = b + (ROCK.b - b) * slope;
   }
   geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   return geo;

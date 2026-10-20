@@ -72,7 +72,7 @@ function toFlow(nodes: GraphNode[], kinds: Map<string, { inputs: string[]; outpu
     data: {
       kind: n.kind,
       label: n.ui?.label ?? n.kind.split("@")[0]?.split(".").slice(-1)[0] ?? n.kind,
-      params: n.params,
+      params: n.params ?? {},
       inputs: kinds.get(n.kind)?.inputs ?? [],
       outputs: kinds.get(n.kind)?.outputs ?? ["out"],
     },
@@ -188,7 +188,7 @@ function Inner() {
             <div className="mb-1 font-semibold">{sel.ui?.label ?? sel.kind}</div>
             <div className="mb-2 font-mono text-[11px] text-jd-fg-2">{sel.kind}</div>
             {Object.entries(schemaProps).map(([key, prop]) => {
-              const current = sel.params[key];
+              const current = sel.params?.[key];
               const isNum = prop.type === "number" || prop.type === "integer";
               // f32 params arrive as f64 (0.55 → 0.550000011920929); show 7 significant digits.
               const show = (v: unknown): string => (Array.isArray(v) ? v.map(show).join(",") : typeof v === "number" ? String(Number(v.toPrecision(7))) : String(v));

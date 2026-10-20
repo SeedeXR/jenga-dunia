@@ -1,35 +1,14 @@
 // Frontend store: a mirror of what the core reports, never the source of truth (docs/architecture/12-ui-workspace.md).
 import { create } from "zustand";
+import type { Edge, GraphEvaluateResult, GraphListResult, HeightmapFormat, JdOps, JobInfo as JobInfoGen, NodeDefInfo, NodeView, NoiseParams, OpId, ProjectOpenResult, TerrainStatsResult } from "./lib/ops.gen";
 import { layerPreview, op, type JdError, type Preview, type Response, type Warning } from "./lib/api";
 
-export interface ProjectSummary {
-  project_id: string;
-  name: string;
-  path: string;
-  world: { extent_m: [number, number]; resolution_px: [number, number]; tile_size: number; halo: number; seed: number };
-  schema_version: number;
-  dirty: boolean;
-  pending_journal: number;
-}
+export type ProjectSummary = ProjectOpenResult;
 
-export interface LayerInfo {
-  layer: string;
-  size_px: [number, number];
-  stats: { min: number; max: number; mean: number; non_finite: number };
-  content_hash: string;
-  duration_ms: number;
-}
+export type LayerInfo = TerrainStatsResult;
 
-export interface NoiseSettings {
-  kind: string;
-  fractal: string;
-  seed: number;
-  feature_size_m: number;
-  octaves: number;
-  lacunarity: number;
-  gain: number;
-  height_range_m: [number, number];
-}
+/** The noise inspector's fields: every generator parameter except the sampling offset. */
+export type NoiseSettings = Required<Omit<NoiseParams, "offset_m">>;
 
 export interface LogEntry {
   ts: number;
@@ -37,43 +16,15 @@ export interface LogEntry {
   text: string;
 }
 
-export interface GraphNode {
-  id: string;
-  kind: string;
-  params: Record<string, unknown>;
-  bypass: boolean;
-  ui?: { position?: [number, number]; label?: string | null };
-}
+export type GraphNode = NodeView;
 
-export interface GraphEdge {
-  from: { node: string; port: string };
-  to: { node: string; port: string };
-}
+export type GraphEdge = Edge;
 
-export interface GraphKind {
-  kind: string;
-  description: string;
-  inputs: { name: string; ty: string; required: boolean }[];
-  outputs: { name: string; ty: string; required: boolean }[];
-  param_schema: unknown;
-}
+export type GraphKind = NodeDefInfo;
 
-export interface JobInfo {
-  id: number;
-  op: string;
-  elapsed_ms: number;
-  done: number;
-  total: number;
-  current: string;
-  cancelling: boolean;
-}
+export type JobInfo = JobInfoGen;
 
-export interface EvalReport {
-  lod: number;
-  duration_ms: number;
-  nodes: { node: string; kind: string; hash: string; cached: boolean; duration_ms: number }[];
-  layers: Record<string, string>;
-}
+export type EvalReport = GraphEvaluateResult;
 
 interface State {
   project: ProjectSummary | null;
@@ -122,7 +73,7 @@ interface State {
   newProject: (path: string, name: string, extent: number, resolution: number) => Promise<void>;
   openProject: (path: string) => Promise<void>;
   generate: () => Promise<void>;
-  exportHeightmap: (path: string, format: string) => Promise<void>;
+  exportHeightmap: (path: string, format: HeightmapFormat) => Promise<void>;
   save: () => Promise<void>;
 }
 
@@ -177,11 +128,12 @@ export const useStore = create<State>((set, get) => {
     generation++;
     set({ jobs: [] });
   };
-  const run = async <T,>(id: string, params: Record<string, unknown> = {}): Promise<Response<T>> => {
+  // Typed by the generated op map: request shape and result type follow the op id.
+  const run = async <K extends OpId>(id: K, params?: JdOps[K]["request"]): Promise<Response<JdOps[K]["result"]>> => {
     set({ busy: true });
     startPolling();
     try {
-      const r = await op<T>(id, params);
+      const r = await op<JdOps[K]["result"]>(id, (params ?? {}) as Record<string, unknown>);
       log(r);
       return r;
     } catch (e) {
@@ -206,7 +158,7 @@ export const useStore = create<State>((set, get) => {
   };
   // After an evaluation: adopt the first published layer (stats + viewport preview).
   const showLayer = async (layerName: string) => {
-    const st = await run<LayerInfo>("terrain.stats", { layer: layerName });
+    const st = await run("terrain.stats", { layer: layerName });
     if (st.status === "ok" && st.result) {
       set({ layer: st.result });
       await refreshPreview();
@@ -248,7 +200,7 @@ export const useStore = create<State>((set, get) => {
       }
     }, 150);
   };
-  type GraphView = { nodes: GraphNode[]; edges: GraphEdge[]; undo_depth: number; redo_depth: number };
+  type GraphView = GraphListResult;
   const applyGraph = (r: Response<GraphView>) => {
     if (r.status === "ok" && r.result) {
       set({ graph: r.result });
@@ -257,10 +209,10 @@ export const useStore = create<State>((set, get) => {
   };
   const loadGraph = async () => {
     if (get().graphKinds.length === 0) {
-      const k = await run<GraphKind[]>("graph.kinds");
+      const k = await run("graph.kinds");
       if (k.status === "ok" && k.result) set({ graphKinds: k.result });
     }
-    applyGraph(await run<GraphView>("graph.list"));
+    applyGraph(await run("graph.list"));
   };
   return {
     project: null,
@@ -292,7 +244,7 @@ export const useStore = create<State>((set, get) => {
         const output = g.nodes.find((n) => n.kind.startsWith("jd.output.height@"));
         const feed = output ? g.edges.find((e) => e.to.node === output.id && e.to.port === "in") : undefined;
         const pos = output?.ui?.position ?? [0, 0];
-        const r = await run<{ id: string }>("graph.add_node", { kind: "jd.sculpt.strokes@1", position: [pos[0], pos[1] + 140] });
+        const r = await run("graph.add_node", { kind: "jd.sculpt.strokes@1", position: [pos[0], pos[1] + 140] });
         if (r.status !== "ok" || !r.result) return;
         const id = r.result.id;
         if (feed) await get().connectNodes(feed.from.node, feed.from.port, id, "in");
@@ -306,7 +258,7 @@ export const useStore = create<State>((set, get) => {
       const { selectedNode, graph, brush } = get();
       const node = graph.nodes.find((n) => n.id === selectedNode && n.kind.startsWith("jd.sculpt.strokes@"));
       if (!node || points.length === 0) return;
-      const strokes = Array.isArray(node.params.strokes) ? (node.params.strokes as unknown[]) : [];
+      const strokes = Array.isArray(node.params?.strokes) ? (node.params.strokes as unknown[]) : [];
       await get().setParam(node.id, "strokes", [...strokes, { points: points.map(([u, v]) => [Math.round(u * 10) / 10, Math.round(v * 10) / 10]), radius_m: brush.radius_m, strength_m: brush.strength_m, mode: brush.mode, amount: brush.amount }]);
     },
     setLive: (on) => {
@@ -318,18 +270,18 @@ export const useStore = create<State>((set, get) => {
     addNode: async (kind) => {
       // New nodes go to the right of the current graph so they are visible and easy to wire in.
       const right = Math.max(-320, ...get().graph.nodes.map((n) => n.ui?.position?.[0] ?? 0));
-      const r = await run<{ id: string }>("graph.add_node", { kind, position: [right + 320, 0] });
+      const r = await run("graph.add_node", { kind, position: [right + 320, 0] });
       if (r.status === "ok") await loadGraph();
     },
-    removeNode: async (id) => applyGraph(await run<GraphView>("graph.remove_node", { id })),
-    moveNode: async (id, position) => applyGraph(await run<GraphView>("graph.move_node", { id, position })),
-    undoGraph: async () => applyGraph(await run<GraphView>("graph.undo")),
-    redoGraph: async () => applyGraph(await run<GraphView>("graph.redo")),
-    connectNodes: async (from, fromPort, to, toPort) => applyGraph(await run<GraphView>("graph.connect", { from, from_port: fromPort, to, to_port: toPort })),
-    disconnectNodes: async (from, fromPort, to, toPort) => applyGraph(await run<GraphView>("graph.disconnect", { from, from_port: fromPort, to, to_port: toPort })),
-    setParam: async (id, key, value) => applyGraph(await run<GraphView>("graph.set_param", { id, key, value })),
+    removeNode: async (id) => applyGraph(await run("graph.remove_node", { id })),
+    moveNode: async (id, position) => applyGraph(await run("graph.move_node", { id, position })),
+    undoGraph: async () => applyGraph(await run("graph.undo")),
+    redoGraph: async () => applyGraph(await run("graph.redo")),
+    connectNodes: async (from, fromPort, to, toPort) => applyGraph(await run("graph.connect", { from, from_port: fromPort, to, to_port: toPort })),
+    disconnectNodes: async (from, fromPort, to, toPort) => applyGraph(await run("graph.disconnect", { from, from_port: fromPort, to, to_port: toPort })),
+    setParam: async (id, key, value) => applyGraph(await run("graph.set_param", { id, key, value })),
     evaluateGraph: async (lod = 0) => {
-      const r = await run<EvalReport>("graph.evaluate", { lod });
+      const r = await run("graph.evaluate", { lod });
       if (r.status === "ok" && r.result) await adopt(r.result);
     },
     probeProject: async (isCancelled) => {
@@ -346,7 +298,7 @@ export const useStore = create<State>((set, get) => {
       }
     },
     newProject: async (path, name, extent, resolution) => {
-      const r = await run<ProjectSummary>("project.create", {
+      const r = await run("project.create", {
         path,
         name,
         world: { extent_m: [extent, extent], resolution_px: [resolution, resolution], tile_size: 512, halo: 4, origin: [0, 0], seed: 42 },
@@ -357,14 +309,14 @@ export const useStore = create<State>((set, get) => {
       }
     },
     openProject: async (path) => {
-      const r = await run<ProjectSummary>("project.open", { path });
+      const r = await run("project.open", { path });
       if (r.status === "ok" && r.result) {
         set({ project: r.result, layer: null, preview: null });
         await loadGraph();
       }
     },
     generate: async () => {
-      const r = await run<LayerInfo>("terrain.generate", { noise: get().noise, layer: "height" });
+      const r = await run("terrain.generate", { noise: get().noise, layer: "height" });
       if (r.status === "ok" && r.result) {
         set({ layer: r.result });
         await refreshPreview();
@@ -373,13 +325,13 @@ export const useStore = create<State>((set, get) => {
     exportHeightmap: async (path, format) => {
       // A live preview only published `height#lod<N>`; exports always use the full-resolution layer.
       if (get().layer?.layer.includes("#lod")) {
-        const r = await run<EvalReport>("graph.evaluate", { lod: 0 });
+        const r = await run("graph.evaluate", { lod: 0 });
         if (r.status !== "ok") return;
       }
       await run("terrain.export_heightmap", { layer: "height", path, format });
     },
     save: async () => {
-      const r = await run<ProjectSummary>("project.save");
+      const r = await run("project.save");
       if (r.status === "ok" && r.result) set({ project: r.result });
     },
   };

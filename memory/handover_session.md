@@ -122,12 +122,14 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `14:15:00` `6e5ba06` and `effe6e5` green in CI. **Sea plane in the viewport**: `TerrainView` takes `seaLevelM` and draws a translucent `PlaneGeometry` at that height; `App` derives it from the graph's first `jd.hydrology.sea_level@` node (`params.level_m`, default 0) and only while the height layer is shown; `ViewportInfo.seaM` → header reads `… tris · sea 250 m`. e2e extended: add the node → `sea 0 m`, set `level_m` 250 → `graph.set_param: ok` and `sea 250 m`; capture annotated into `docs/user/images/desktop-sea-level.png`. Not persisted anywhere new: the node *is* the state.
 
-### Open / next (as of 2026-10-20 14:20, head after sea-plane commit)
-1. **CI**: everything through `effe6e5` green; the sea-plane commit polling.
+- `14:35:00` Sea plane pushed as `7e0be28`. **Generated types adopted in `state.ts`**: `run<K extends OpId>(id, params?: JdOps[K]["request"])` returns `Response<JdOps[K]["result"]>`; the hand-written `ProjectSummary`/`LayerInfo`/`GraphNode`/`GraphEdge`/`GraphKind`/`JobInfo`/`EvalReport`/`NoiseSettings` are now aliases of the generated types (−70/+30 lines). Turned on `strict` + `noUncheckedIndexedAccess` in `tsconfig.app.json` (it was *off*): 10 errors, all real narrowings (optional `params`, `HeightmapFormat`/`NoiseKind`/`FractalKind` unions instead of `string`, typed-array indexing). Gotcha: `pnpm exec tsc --noEmit` checks **nothing** here (solution-style `tsconfig.json` with `files: []`) — use `tsc -b`, which is what `pnpm build` runs.
+
+### Open / next (as of 2026-10-20 14:40, head after typed-ops commit)
+1. **CI**: everything through `effe6e5` green; `7e0be28` (sea plane) and the typed-ops commit polling.
 2. **Figma**: connector unavailable this session; plugin OAuth pending on the owner's side → tutorial images stay in `docs/user/images/`; place them in file `fxyeV62hgLoNmG3dU1LX6G` when a connector works.
 3. **Native leftovers**: Edit-menu capture; native sculpt capture/recording (needs Accessibility); signed/notarised bundle (needs an Apple developer account).
 4. **Phase 3 follow-ups**: hydraulic concentration cap / layered materials / open drains; thermal + hydraulic WGSL twins (`jd-gpu`); particle hydraulic; MFD (D∞ ✔; `wetness` still D8-only); sea level ✔ (viewport water plane ✔; ocean shading/shoreline foam ☐); hydrology-first generation; smooth-brush blur done via summed-area table (whole-field blur is now O(N); tile-level dirty sets remain).
-5. **Phase 2 leftovers**: detached async jobs (queues/budgets/timeouts), adopt `JdOps` types in `state.ts`, GeoTIFF tags/nodata on import, textured PBR for GLB, Windows/Linux measurements, tile-level `jd-cache` with LRU.
+5. **Phase 2 leftovers**: detached async jobs (queues/budgets/timeouts), GeoTIFF tags/nodata on import, textured PBR for GLB, Windows/Linux measurements, tile-level `jd-cache` with LRU.
 6. **Docs**: hydrology recipe ✔, `desktop-rivers.png` ✔; rivers inspector `method` capture ✔ (e2e); a *native* capture of the same needs the app rebuilt from this head.
 
 ---

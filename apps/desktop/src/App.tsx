@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import GraphPanel from "./graph/GraphPanel";
 import TerrainView, { type ViewportInfo } from "./viewport/TerrainView";
 import { useStore } from "./state";
+import type { FractalKind, HeightmapFormat, NoiseKind } from "./lib/ops.gen";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -28,7 +29,7 @@ export const PRESETS: { label: string; resolution: number; extent: number }[] = 
   { label: "Unity 4097² · 16 km", resolution: 4097, extent: 16384 },
 ];
 
-export function formatFor(path: string): string {
+export function formatFor(path: string): HeightmapFormat {
   const ext = path.split(".").pop()?.toLowerCase();
   return ext === "png" ? "png16" : ext === "r16" ? "raw_r16" : ext === "r32" ? "raw_r32" : ext === "tif" || ext === "tiff" ? "tiff32" : "exr";
 }
@@ -47,7 +48,7 @@ export default function App() {
   const sculptNode = s.graph.nodes.find((n) => n.id === s.selectedNode && n.kind.startsWith("jd.sculpt.strokes@"));
   // The viewport draws the sea where the graph's sea-level node puts it (only over the height layer).
   const seaNode = s.graph.nodes.find((n) => n.kind.startsWith("jd.hydrology.sea_level@"));
-  const seaLevelM = seaNode && (s.layer === null || s.layer.layer.startsWith("height")) ? Number(seaNode.params.level_m ?? 0) : null;
+  const seaLevelM = seaNode && (s.layer === null || s.layer.layer.startsWith("height")) ? Number(seaNode.params?.level_m ?? 0) : null;
 
   // Native file dialogs (tauri-plugin-dialog). Outside Tauri (browser, tests) they reject and the
   // typed paths keep working, so the dialogs are a convenience layer over the same operations.
@@ -312,14 +313,14 @@ export default function App() {
           )}
           <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Terrain · Noise</h2>
           <Field label="Lattice">
-            <select className={inputCls} value={s.noise.kind} onChange={(e) => s.setNoise({ kind: e.target.value })}>
+            <select className={inputCls} value={s.noise.kind} onChange={(e) => s.setNoise({ kind: e.target.value as NoiseKind })}>
               {["open_simplex2", "open_simplex2s", "perlin", "value", "value_cubic", "cellular"].map((k) => (
                 <option key={k}>{k}</option>
               ))}
             </select>
           </Field>
           <Field label="Fractal">
-            <select className={inputCls} value={s.noise.fractal} onChange={(e) => s.setNoise({ fractal: e.target.value })}>
+            <select className={inputCls} value={s.noise.fractal} onChange={(e) => s.setNoise({ fractal: e.target.value as FractalKind })}>
               {["none", "fbm", "ridged", "ping_pong"].map((k) => (
                 <option key={k}>{k}</option>
               ))}
