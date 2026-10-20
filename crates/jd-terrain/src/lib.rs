@@ -27,6 +27,7 @@ pub mod sculpt;
 pub mod seabed;
 pub mod sim;
 pub mod sky;
+pub mod spline;
 pub mod strata;
 pub mod yardang;
 
@@ -65,5 +66,6 @@ pub use sim::{
     thermal_erode_with,
 };
 pub use sky::{Sky, SkyParams, bake_sky_hdri, sky_preview_png};
+pub use spline::{SplineMode, SplineParams, apply_spline};
 pub use strata::{StrataParams, strata_hardness};
 pub use yardang::{YardangParams, wind_abrasion};

@@ -1978,6 +1978,103 @@
     }
   },
   {
+    "kind": "jd.terrain.spline@1",
+    "description": "A road, path, canal or dyke along a polyline (`points` in layer metres): the corridor of `width_m` is flattened onto the line's smoothed grade, cut `profile_m` below it or raised above it, with a `falloff_m` shoulder; outputs the terrain and a 0..1 corridor `mask` for materials and scatter",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "mask",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "SplineParams",
+      "description": "Spline settings.",
+      "type": "object",
+      "properties": {
+        "points": {
+          "description": "Polyline in layer metres: `[u east, v north]` from the south-west corner (≥ 2 points).",
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            },
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "default": []
+        },
+        "width_m": {
+          "description": "Corridor width, metres (> 0).",
+          "type": "number",
+          "format": "float",
+          "default": 12.0
+        },
+        "falloff_m": {
+          "description": "Shoulder beyond the width over which the reshaping fades out, metres (≥ 0).",
+          "type": "number",
+          "format": "float",
+          "default": 10.0
+        },
+        "mode": {
+          "description": "Flatten, cut or raise.",
+          "$ref": "#/$defs/SplineMode",
+          "default": "flatten"
+        },
+        "profile_m": {
+          "description": "Depth of a cut or height of a raise, metres (≥ 0; ignored by flatten).",
+          "type": "number",
+          "format": "float",
+          "default": 3.0
+        },
+        "smooth_m": {
+          "description": "Length along the line over which the grade is smoothed, metres (≥ 0).",
+          "type": "number",
+          "format": "float",
+          "default": 200.0
+        }
+      },
+      "additionalProperties": false,
+      "$defs": {
+        "SplineMode": {
+          "description": "What the corridor does to the terrain.",
+          "oneOf": [
+            {
+              "description": "Level the corridor crosswise onto the line's grade (a road bed, a path).",
+              "type": "string",
+              "const": "flatten"
+            },
+            {
+              "description": "Sink the corridor `profile_m` below the grade (a canal, a river bed, a trench).",
+              "type": "string",
+              "const": "cut"
+            },
+            {
+              "description": "Lift the corridor `profile_m` above the grade (an embankment, a dyke, a causeway).",
+              "type": "string",
+              "const": "raise"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
     "kind": "jd.terrain.strata@1",
     "description": "Layered rock hardness (0..1): repeating hard-cap / soft-bed cycles of `layer_m`, tilted by `dip_deg` towards `dip_azimuth_deg`, bed surfaces undulating by `warp_m` — feed it to the `hardness` input of thermal and stream-power erosion for mesas, buttes and stepped canyon walls; re-evaluate after the surface moves",
     "inputs": [

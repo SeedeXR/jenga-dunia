@@ -916,6 +916,17 @@ pub fn register_all(r: &mut Registry) {
             Ok(out("out", jd_terrain::wind_abrasion(field(i, "in")?, spacing_m(ctx), hardness.map(|k| &**k), &yp, Some(&ctx.cancel))?))
         },
     ).with_memory(8.0));
+    r.register(NodeDef::new::<jd_terrain::SplineParams, _>(
+        "jd.terrain.spline@1",
+        "A road, path, canal or dyke along a polyline (`points` in layer metres): the corridor of `width_m` is flattened onto the line's smoothed grade, cut `profile_m` below it or raised above it, with a `falloff_m` shoulder; outputs the terrain and a 0..1 corridor `mask` for materials and scatter",
+        vec![port("in", PortType::Heightfield, true)],
+        vec![port("out", PortType::Heightfield, false), port("mask", PortType::Heightfield, false)],
+        |ctx, p, i| {
+            let sp: jd_terrain::SplineParams = params(p)?;
+            let (out_h, mask) = jd_terrain::apply_spline(field(i, "in")?, spacing_m(ctx), &sp)?;
+            Ok(BTreeMap::from([("out".to_owned(), Value::field(out_h)), ("mask".to_owned(), Value::field(mask))]))
+        },
+    ).with_memory(12.0));
     r.register(NodeDef::new::<jd_terrain::KarstParams, _>(
         "jd.erosion.karst@1",
         "Karst sinkholes (dolines): seeded bowl or collapse depressions on flat, soluble ground — `density_per_km2`, radius and depth ranges, `max_slope_deg`, `min_spacing_m`; optional `soluble` mask (0..1); outputs the carved terrain and a `sinkholes` floor mask",

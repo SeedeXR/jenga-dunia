@@ -1524,6 +1524,23 @@ class mask instead of a height. */
   "clamp"?: [number, number] | null;
 };
 
+export type SplineMode = "flatten" | "cut" | "raise";
+
+export type NodeParams_jd_terrain_spline_1 = {
+  /** Polyline in layer metres: `[u east, v north]` from the south-west corner (≥ 2 points). */
+  "points"?: ([number, number])[];
+  /** Corridor width, metres (> 0). */
+  "width_m"?: number;
+  /** Shoulder beyond the width over which the reshaping fades out, metres (≥ 0). */
+  "falloff_m"?: number;
+  /** Flatten, cut or raise. */
+  "mode"?: SplineMode;
+  /** Depth of a cut or height of a raise, metres (≥ 0; ignored by flatten). */
+  "profile_m"?: number;
+  /** Length along the line over which the grade is smoothed, metres (≥ 0). */
+  "smooth_m"?: number;
+};
+
 export type NodeParams_jd_terrain_strata_1 = {
   /** Thickness of one hard+soft cycle, metres (> 0). */
   "layer_m"?: number;
@@ -1667,5 +1684,6 @@ export interface NodeKinds {
   "jd.ocean.bathymetry@1": NodeParams_jd_ocean_bathymetry_1;
   "jd.output.height@1": NodeParams_jd_output_height_1;
   "jd.sculpt.strokes@1": NodeParams_jd_sculpt_strokes_1;
+  "jd.terrain.spline@1": NodeParams_jd_terrain_spline_1;
   "jd.terrain.strata@1": NodeParams_jd_terrain_strata_1;
 }

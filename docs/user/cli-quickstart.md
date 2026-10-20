@@ -427,6 +427,19 @@ after   min 42.548  max 412.711  mean 230.109      (+0.74 m averaged over the wo
 
 `jd.ocean.bathymetry@1` takes the terrain and a `seabed` class map and raises every **sand** (1) or **mud** (3) cell towards the local mean height over `smooth_m` (a summed-area box filter, O(N)), never lowering a cell, never by more than `max_fill_m`, and never above `level_m` — sediment settles into hollows and levels the shelf, it does not build above the water. Rock (2), reef (4) and land keep the shape erosion gave them, so the chain coastal → seabed → bathymetry turns a noisy flooded landscape into a floor with smooth sediment plains between rock outcrops. `strength` (0..1) scales the fill. Not modelled: transport along the slope, sorting by grain size, a sediment budget.
 
+### Roads, paths and canals: the spline node
+
+```
+$ jd op graph.add_node --project Road.jdproj --save --params '{"kind":"jd.terrain.spline@1","params":{"points":[[150,200],[800,600],[1300,700],[1900,1800]],"width_m":14,"falloff_m":12,"smooth_m":200}}'
+# noise.out → spline.in; spline.out → height output; spline.mask → a `road` output
+spline node 462 ms (256², a 2.3 km polyline)      corridor mask 1.57 % of the world (width 14 m + 12 m shoulders)
+mean slope inside the corridor (slope node × mask): 26.3° → 22.1° — what remains is the road's own grade along a 300 m-relief hillside, smoothed over 200 m; the crosswise bumps are gone
+```
+
+![Blender render of the hilly world with a road wound across it: a flat, smooth band following the terrain's grade with soft shoulders](images/cli-road.png)
+
+`jd.terrain.spline@1` reshapes the corridor around a polyline (`points` in layer metres, east and north from the south-west corner): the line is sampled every half cell, its grade is the terrain height at those samples box-smoothed over `smooth_m`, and every cell within `width_m / 2` takes that grade — `flatten` for a road bed or path, `cut` sinks it `profile_m` for a canal or river bed, `raise` lifts it for an embankment or dyke — with a smoothstep shoulder of `falloff_m` outside. The `mask` output (1 in the corridor, fading across the shoulder) drives materials and scatter, so a road gets its surface and the verges their grass from the same node. One node is one spline; several roads are several nodes. Not modelled: curves between points (the polyline is straight between them — add points), banking, bridges where the grade would float.
+
 ### Physical sky as an HDRI
 
 ```
