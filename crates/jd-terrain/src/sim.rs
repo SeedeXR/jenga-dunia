@@ -34,7 +34,7 @@ fn neighbour_dist(spacing: [f32; 2]) -> [f32; 8] {
 pub const THERMAL_MAX_RATE: f32 = 0.25;
 
 /// Cooperative cancellation: long kernels poll the job's flag once per iteration.
-fn check_cancel(cancel: Option<&AtomicBool>) -> JdResult<()> {
+pub(crate) fn check_cancel(cancel: Option<&AtomicBool>) -> JdResult<()> {
     if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
         return Err(JdError::new(jd_types::ErrorCode::E_CANCELLED, "cancelled")
             .why("The job's cancel flag was set.")

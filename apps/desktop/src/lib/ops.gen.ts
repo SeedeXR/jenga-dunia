@@ -937,6 +937,32 @@ temperate default set (beach, grassland, forest, rock, snow). */
   "rules"?: BiomeRule[];
 };
 
+export type NodeParams_jd_erosion_droplet_1 = {
+  /** Number of droplets (1..=5 000 000). Aim for 1–2 per cell: 512² wants ~400 000; fewer gives
+diffuse, unstructured lowering, more deepens the same gullies. */
+  "droplets"?: number;
+  /** Seed. */
+  "seed"?: number;
+  /** Steps a droplet may travel before it is dropped (8..=256). */
+  "max_steps"?: number;
+  /** Direction inertia 0..1 (0 follows the gradient exactly). */
+  "inertia"?: number;
+  /** Sediment capacity factor. */
+  "capacity"?: number;
+  /** Minimum capacity so droplets on flats still carry a little. */
+  "min_capacity"?: number;
+  /** Fraction of surplus sediment deposited per step, 0..1. */
+  "deposit"?: number;
+  /** Fraction of the capacity deficit eroded per step, 0..1. */
+  "erode"?: number;
+  /** Water lost per step, 0..1. */
+  "evaporation"?: number;
+  /** Gravity (speed gain per unit drop). */
+  "gravity"?: number;
+  /** Erosion brush radius in cells (1..=8). */
+  "radius"?: number;
+};
+
 export type NodeParams_jd_erosion_hydraulic_1 = {
   /** Simulation steps (1..=2000). */
   "iterations"?: number;
@@ -1174,6 +1200,7 @@ export interface NodeKinds {
   "jd.analysis.flow@1": NodeParams_jd_analysis_flow_1;
   "jd.analysis.slope@1": NodeParams_jd_analysis_slope_1;
   "jd.biome.classify@1": NodeParams_jd_biome_classify_1;
+  "jd.erosion.droplet@1": NodeParams_jd_erosion_droplet_1;
   "jd.erosion.hydraulic@1": NodeParams_jd_erosion_hydraulic_1;
   "jd.erosion.stream_power@1": NodeParams_jd_erosion_stream_power_1;
   "jd.erosion.thermal@1": NodeParams_jd_erosion_thermal_1;

@@ -4,10 +4,10 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use jd_terrain::{
-    FlowMethod, ForeignImport, Heightfield, HydraulicParams, NoiseParams, StreamPowerParams,
-    Stroke, THERMAL_MAX_RATE, apply_strokes, carve_rivers, fill_depressions,
-    flow_accumulation_with, generate_noise, hydraulic_erode, read_foreign, resample_to_world,
-    sea_level, slope_mask, stream_power_erode, thermal_erode, wetness_index,
+    DropletParams, FlowMethod, ForeignImport, Heightfield, HydraulicParams, NoiseParams,
+    StreamPowerParams, Stroke, THERMAL_MAX_RATE, apply_strokes, carve_rivers, droplet_erode,
+    fill_depressions, flow_accumulation_with, generate_noise, hydraulic_erode, read_foreign,
+    resample_to_world, sea_level, slope_mask, stream_power_erode, thermal_erode, wetness_index,
 };
 use jd_types::{JdError, JdResult};
 use rayon::prelude::*;
@@ -504,6 +504,17 @@ pub fn register_all(r: &mut Registry) {
             Ok(out("out", thermal_erode(
                     field(i, "in")?,
                     spacing_m(ctx), tp.talus_deg, tp.iterations, tp.rate, Some(&ctx.cancel))?))
+        },
+    ));
+    r.register(NodeDef::new::<DropletParams, _>(
+        "jd.erosion.droplet@1",
+        "Particle (droplet) hydraulic erosion after Beyer: seeded droplets follow the slope with inertia, erode through a brush and deposit as they slow — gullies and fans; outputs the terrain and the signed `delta`",
+        vec![port("in", PortType::Heightfield, true)],
+        vec![port("out", PortType::Heightfield, false), port("delta", PortType::Heightfield, false)],
+        |ctx, p, i| {
+            let dp: DropletParams = params(p)?;
+            let r = droplet_erode(field(i, "in")?, spacing_m(ctx), &dp, Some(&ctx.cancel))?;
+            Ok(BTreeMap::from([("out".to_owned(), Value::field(r.terrain)), ("delta".to_owned(), Value::field(r.delta))]))
         },
     ));
     r.register(NodeDef::new::<StreamPowerParams, _>(
