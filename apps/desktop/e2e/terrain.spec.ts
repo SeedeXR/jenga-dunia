@@ -14,6 +14,7 @@ test.describe("desktop UI against the real core", () => {
   });
 
   test("create project → generate → viewport shows terrain → export PNG16", async ({ page }, testInfo) => {
+    test.slow(); // the software-rendered CI runner bakes the sky, horizon and maps several times over; see hydrology.spec.ts
     const core = await connectCore(ws);
     await installBridge(page, core);
     const errors: string[] = [];
