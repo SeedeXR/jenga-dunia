@@ -718,6 +718,118 @@
     }
   },
   {
+    "kind": "jd.erosion.karst@1",
+    "description": "Karst sinkholes (dolines): seeded bowl or collapse depressions on flat, soluble ground — `density_per_km2`, radius and depth ranges, `max_slope_deg`, `min_spacing_m`; optional `soluble` mask (0..1); outputs the carved terrain and a `sinkholes` floor mask",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      },
+      {
+        "name": "soluble",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "sinkholes",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "KarstParams",
+      "description": "Karst settings.",
+      "type": "object",
+      "properties": {
+        "seed": {
+          "description": "Placement seed.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "density_per_km2": {
+          "description": "Sinkholes per km² of eligible ground (> 0).",
+          "type": "number",
+          "format": "float",
+          "default": 3.0
+        },
+        "radius_m": {
+          "description": "Radius range, metres, [min, max] (> 0).",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "default": [
+            20.0,
+            80.0
+          ]
+        },
+        "depth_m": {
+          "description": "Depth range, metres, [min, max] (> 0).",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "default": [
+            3.0,
+            15.0
+          ]
+        },
+        "max_slope_deg": {
+          "description": "Steepest ground a sinkhole forms on, degrees (0, 90).",
+          "type": "number",
+          "format": "float",
+          "default": 6.0
+        },
+        "min_spacing_m": {
+          "description": "Closest two centres may be, metres (≥ 0).",
+          "type": "number",
+          "format": "float",
+          "default": 120.0
+        },
+        "profile": {
+          "description": "Bowl or collapse.",
+          "$ref": "#/$defs/SinkholeProfile",
+          "default": "bowl"
+        }
+      },
+      "additionalProperties": false,
+      "$defs": {
+        "SinkholeProfile": {
+          "description": "Sinkhole shape.",
+          "oneOf": [
+            {
+              "description": "Smooth subsidence bowl: a raised-cosine dip.",
+              "type": "string",
+              "const": "bowl"
+            },
+            {
+              "description": "Collapse pit: steep rim over the outer 25 % of the radius, flat floor inside.",
+              "type": "string",
+              "const": "collapse"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
     "kind": "jd.erosion.stream_power@1",
     "description": "Fluvial (stream-power) erosion: channels incise in proportion to drainage area^m × slope, implicit and unconditionally stable; outputs the eroded terrain and an `incision` depth map",
     "inputs": [

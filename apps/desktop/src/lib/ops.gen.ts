@@ -1216,6 +1216,25 @@ export type NodeParams_jd_erosion_hydraulic_1 = {
   "max_concentration"?: number;
 };
 
+export type SinkholeProfile = "bowl" | "collapse";
+
+export type NodeParams_jd_erosion_karst_1 = {
+  /** Placement seed. */
+  "seed"?: number;
+  /** Sinkholes per km² of eligible ground (> 0). */
+  "density_per_km2"?: number;
+  /** Radius range, metres, [min, max] (> 0). */
+  "radius_m"?: [number, number];
+  /** Depth range, metres, [min, max] (> 0). */
+  "depth_m"?: [number, number];
+  /** Steepest ground a sinkhole forms on, degrees (0, 90). */
+  "max_slope_deg"?: number;
+  /** Closest two centres may be, metres (≥ 0). */
+  "min_spacing_m"?: number;
+  /** Bowl or collapse. */
+  "profile"?: SinkholeProfile;
+};
+
 export type NodeParams_jd_erosion_stream_power_1 = {
   /** Erodibility K: metres of incision per step for unit drainage area and unit slope
 (`dz = -K·A^m·S`, A in m², S dimensionless). 1e-3 carves visible valleys on a 5 km world
@@ -1485,6 +1504,7 @@ export interface NodeKinds {
   "jd.erosion.coastal@1": NodeParams_jd_erosion_coastal_1;
   "jd.erosion.droplet@1": NodeParams_jd_erosion_droplet_1;
   "jd.erosion.hydraulic@1": NodeParams_jd_erosion_hydraulic_1;
+  "jd.erosion.karst@1": NodeParams_jd_erosion_karst_1;
   "jd.erosion.stream_power@1": NodeParams_jd_erosion_stream_power_1;
   "jd.erosion.thermal@1": NodeParams_jd_erosion_thermal_1;
   "jd.filter.blur@1": NodeParams_jd_filter_blur_1;

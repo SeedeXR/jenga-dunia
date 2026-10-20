@@ -425,6 +425,21 @@ after   min 42.548  max 412.711  mean 230.109      (+0.74 m averaged over the wo
 
 `jd.ocean.bathymetry@1` takes the terrain and a `seabed` class map and raises every **sand** (1) or **mud** (3) cell towards the local mean height over `smooth_m` (a summed-area box filter, O(N)), never lowering a cell, never by more than `max_fill_m`, and never above `level_m` — sediment settles into hollows and levels the shelf, it does not build above the water. Rock (2), reef (4) and land keep the shape erosion gave them, so the chain coastal → seabed → bathymetry turns a noisy flooded landscape into a floor with smooth sediment plains between rock outcrops. `strength` (0..1) scales the fill. Not modelled: transport along the slope, sorting by grain size, a sediment budget.
 
+### Karst sinkholes (desert and limestone plains)
+
+```
+$ jd --json new Desert.jdproj --extent 4096 --resolution 256 --seed 3
+$ jd op graph.set_param --project Desert.jdproj --save --params '{"id":"<noise id>","key":"height_range_m","value":[0,60]}'      # a low-relief plain (also feature_size_m 2500, octaves 4)
+$ jd op graph.add_node --project Desert.jdproj --save --params '{"kind":"jd.erosion.karst@1","params":{"seed":1,"density_per_km2":2,"radius_m":[40,120],"depth_m":[4,18],"max_slope_deg":5,"min_spacing_m":200,"profile":"collapse"}}'
+$ jd op graph.add_node --project Desert.jdproj --save --params '{"kind":"jd.output.height@1","params":{"layer":"sinkholes"}}'
+# noise.out → karst.in; karst.out → height output; karst.sinkholes → sinkholes output
+karst node 102 ms (256²)   height min −7.9 (a pit floor)  max 55.9  mean 29.3     sinkholes mask mean 0.025 (2.5 % of the plain is pit floor, ~45 pits)
+```
+
+![Sinkhole floor mask on the 4 km desert plain: white discs of 40–120 m radius, at least 200 m apart](images/cli-karst-sinkholes.png) ![The carved height map: the same pits as dark dips in the low-relief plain](images/cli-karst-height.png)
+
+`jd.erosion.karst@1` places dolines where soluble rock dissolves: a seeded stream proposes cells, each accepted when the ground is gentler than `max_slope_deg`, the optional `soluble` mask (0..1) allows it, and it keeps `min_spacing_m` from every accepted centre; `density_per_km2` is counted against the *eligible* area, so steep ground never dilutes it. Each sinkhole draws its radius and depth from the given ranges and is carved as a smooth subsidence `bowl` (raised cosine) or a steep-rimmed `collapse` pit with a flat floor; overlapping pits take the deeper cut. The `sinkholes` output is 1 at the floors and fades to 0 at the rims — colour by it, scatter rubble from it, or mask a material. Same seed, same holes. Not modelled: underground drainage (a sinkhole is a closed basin to `jd.hydrology.fill@1`), caves, doline chains along joints.
+
 ### Snow cover
 
 ```

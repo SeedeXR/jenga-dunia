@@ -880,6 +880,21 @@ pub fn register_all(r: &mut Registry) {
             Ok(out("seabed", classify_seabed(field(i, "in")?, spacing_m(ctx), rivers.map(|r| &**r), shore.map(|s| &**s), &sp)?))
         },
     ).with_memory(8.0));
+    r.register(NodeDef::new::<jd_terrain::KarstParams, _>(
+        "jd.erosion.karst@1",
+        "Karst sinkholes (dolines): seeded bowl or collapse depressions on flat, soluble ground — `density_per_km2`, radius and depth ranges, `max_slope_deg`, `min_spacing_m`; optional `soluble` mask (0..1); outputs the carved terrain and a `sinkholes` floor mask",
+        vec![
+            port("in", PortType::Heightfield, true),
+            port("soluble", PortType::Heightfield, false),
+        ],
+        vec![port("out", PortType::Heightfield, false), port("sinkholes", PortType::Heightfield, false)],
+        |ctx, p, i| {
+            let kp: jd_terrain::KarstParams = params(p)?;
+            let soluble = i.get("soluble").map(|v| v.as_field());
+            let (out_h, mask, _) = jd_terrain::karst_sinkholes(field(i, "in")?, spacing_m(ctx), soluble.map(|s| &**s), &kp)?;
+            Ok(BTreeMap::from([("out".to_owned(), Value::field(out_h)), ("sinkholes".to_owned(), Value::field(mask))]))
+        },
+    ).with_memory(16.0));
     r.register(NodeDef::new::<jd_terrain::BathymetryParams, _>(
         "jd.ocean.bathymetry@1",
         "Sediment infill of the sea floor: sand and mud cells (from a `seabed` class map) rise towards the local mean over `smooth_m`, capped at `max_fill_m` and `level_m`; rock, reef and land are untouched",

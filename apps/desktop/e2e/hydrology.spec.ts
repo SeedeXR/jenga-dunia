@@ -18,6 +18,9 @@ test.describe("hydrology nodes against the real core", () => {
   });
 
   test("rivers node: method select (d8 → dinf) in the inspector, wired and evaluated; sea-level node added", async ({ page }, testInfo) => {
+    // ~70 UI actions with live previews between them: 10 s here, close to the 300 s budget on the
+    // software-rendered CI runner (three runs timed out mid-spec with every element present).
+    test.slow();
     const core = await connectCore(ws);
     await installBridge(page, core);
     const errors: string[] = [];

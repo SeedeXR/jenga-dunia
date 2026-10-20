@@ -16,6 +16,7 @@ pub mod fbx;
 pub mod flow;
 pub mod heightfield;
 pub mod import;
+pub mod karst;
 pub mod mesh;
 pub mod noise;
 pub mod ocean;
@@ -41,6 +42,7 @@ pub use flow::{
 };
 pub use heightfield::{Heightfield, HeightfieldStats, Tile, TileCoord};
 pub use import::{ForeignImport, GeoTags, geotiff_tags, read_foreign, resample_to_world};
+pub use karst::{KarstParams, Sinkhole, SinkholeProfile, karst_sinkholes};
 pub use mesh::{
     BakedMaps, GridMesh, MeshExportReport, auto_step, bake_maps, export_glb, export_mesh,
     export_mesh_lods, export_obj, export_ply, export_stl, export_usda, export_usdz,
