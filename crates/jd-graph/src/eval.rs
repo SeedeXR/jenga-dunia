@@ -303,10 +303,9 @@ impl<'a> Evaluator<'a> {
         let mut scratch = 0u64;
         for node in graph.nodes.values() {
             let def = self.registry.get(&node.kind)?;
-            let est = def.estimate_bytes(cells);
-            let out = def.outputs.len().max(1) as u64 * 4 * cells;
+            let out = def.output_bytes(cells);
             outputs += out;
-            scratch = scratch.max(est - out);
+            scratch = scratch.max(def.estimate_bytes(cells, &node.params) - out);
         }
         Ok(outputs + scratch)
     }

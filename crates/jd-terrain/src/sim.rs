@@ -230,6 +230,82 @@ pub fn thermal_erode_with(
     Ok(out)
 }
 
+/// [`thermal_erode_with`] tile by tile: every `tile_px` square is eroded on its own sub-field
+/// with a halo of `iterations` cells around it — one step moves material one cell, so a halo
+/// that wide makes the tile's interior identical to the whole-field result — and only the
+/// interior is kept. Scratch is a sub-field's worth instead of 12 B per cell of the whole
+/// field, which is what lets a 16k² layer erode inside the memory budget (ADR-0005).
+#[allow(clippy::too_many_arguments)]
+pub fn thermal_erode_tiled(
+    h: &Heightfield,
+    spacing_m: [f32; 2],
+    talus_deg: f32,
+    iterations: u32,
+    rate: f32,
+    hardness: Option<&Heightfield>,
+    tile_px: u32,
+    cancel: Option<&AtomicBool>,
+) -> JdResult<Heightfield> {
+    if tile_px < 16 {
+        return Err(JdError::invalid(
+            "tile_px",
+            "must be ≥ 16 (0 erodes the whole field at once)",
+        ));
+    }
+    if let Some(k) = hardness
+        && (k.width(), k.height()) != (h.width(), h.height())
+    {
+        return Err(JdError::invalid("hardness", "field size differs from `in`"));
+    }
+    let (w, hh) = (h.width(), h.height());
+    let halo = iterations;
+    let mut out = Heightfield::new(w, hh, h.tile_size(), h.halo())?;
+    // Tiles go band by band: a band's rows are assembled in one buffer and written with
+    // `set_row`, which also pads the edge tiles exactly as `fill_with` does.
+    for y0 in (0..hh).step_by(tile_px as usize) {
+        let y1 = (y0 + tile_px).min(hh);
+        let mut band = vec![0.0f32; (w * (y1 - y0)) as usize];
+        for x0 in (0..w).step_by(tile_px as usize) {
+            check_cancel(cancel)?;
+            let x1 = (x0 + tile_px).min(w);
+            let (sx0, sy0) = (x0.saturating_sub(halo), y0.saturating_sub(halo));
+            let (sx1, sy1) = ((x1 + halo).min(w), (y1 + halo).min(hh));
+            let (sw, sh) = (sx1 - sx0, sy1 - sy0);
+            let mut sub = Heightfield::new(sw, sh, 64, 0)?;
+            sub.fill_with(|x, y| h.get(sx0 + x, sy0 + y));
+            let sub_hard = hardness
+                .map(|k| -> JdResult<Heightfield> {
+                    let mut f = Heightfield::new(sw, sh, 64, 0)?;
+                    f.fill_with(|x, y| k.get(sx0 + x, sy0 + y));
+                    Ok(f)
+                })
+                .transpose()?;
+            let eroded = thermal_erode_with(
+                &sub,
+                spacing_m,
+                talus_deg,
+                iterations,
+                rate,
+                sub_hard.as_ref(),
+                cancel,
+            )?;
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    band[((y - y0) * w + x) as usize] = eroded.get(x - sx0, y - sy0);
+                }
+            }
+        }
+        for y in y0..y1 {
+            out.set_row(
+                y,
+                &band[((y - y0) * w) as usize..((y - y0 + 1) * w) as usize],
+            );
+        }
+    }
+    out.rebuild_halos();
+    Ok(out)
+}
+
 /// Hydraulic erosion parameters (virtual pipes / shallow water, Mei–Decaudin–Hu 2007).
 #[derive(Debug, Clone, Copy)]
 pub struct HydraulicParams {
@@ -712,6 +788,38 @@ mod tests {
 
     fn sum(h: &Heightfield) -> f64 {
         h.to_vec().iter().map(|&v| v as f64).sum()
+    }
+
+    #[test]
+    fn tiled_thermal_equals_the_whole_field_result_when_the_halo_covers_the_steps() {
+        // A rough 200 × 150 field with a hardness band; 64-px tiles, 12 steps → 12-cell halos.
+        let mut h = Heightfield::new(200, 150, 64, 4).expect("hf");
+        h.fill_with(|x, y| {
+            let (fx, fy) = (x as f32, y as f32);
+            let spike = if (x, y) == (90, 70) { 300.0 } else { 0.0 };
+            spike
+                + 40.0 * ((fx * 0.3).sin() * (fy * 0.2).cos())
+                + ((fx * 1.7 + fy * 0.9).sin() * 9.0)
+        });
+        let mut k = Heightfield::new(200, 150, 64, 4).expect("k");
+        k.fill_with(|x, _| if (120..160).contains(&x) { 0.9 } else { 0.0 });
+        let full =
+            thermal_erode_with(&h, [10.0, 10.0], 35.0, 12, 0.2, Some(&k), None).expect("full");
+        let tiled = thermal_erode_tiled(&h, [10.0, 10.0], 35.0, 12, 0.2, Some(&k), 64, None)
+            .expect("tiled");
+        let worst = full
+            .to_vec()
+            .iter()
+            .zip(&tiled.to_vec())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        assert!(worst <= 1e-4, "tiled vs whole field: {worst} m");
+        assert_eq!(
+            full.content_hash(),
+            tiled.content_hash(),
+            "bit-identical interiors"
+        );
+        assert!(thermal_erode_tiled(&h, [10.0, 10.0], 35.0, 12, 0.2, None, 8, None).is_err());
     }
 
     #[test]

@@ -187,6 +187,14 @@ impl Heightfield {
         t.get(x % self.tile_size, y % self.tile_size)
     }
 
+    /// Write one interior sample (no halo update: call [`Self::rebuild_halos`] after the last).
+    pub fn set(&mut self, x: u32, y: u32, v: f32) {
+        debug_assert!(x < self.width && y < self.height, "sample out of range");
+        let (ts, tx) = (self.tile_size, self.tiles_x);
+        let t = &mut self.tiles[((y / ts) * tx + x / ts) as usize];
+        t.set(x % ts, y % ts, v);
+    }
+
     /// Fill every interior sample in parallel from `f(x, y)` (field pixel coordinates), then rebuild halos.
     /// Deterministic: the result depends only on `f`, never on scheduling.
     pub fn fill_with<F>(&mut self, f: F)

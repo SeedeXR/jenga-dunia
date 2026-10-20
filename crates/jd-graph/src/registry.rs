@@ -46,9 +46,14 @@ pub struct NodeDef {
     pub param_schema: Value,
     check: CheckFn,
     eval: EvalFn,
-    /// Peak scratch memory the kernel needs per cell, bytes (outputs are counted separately).
-    scratch_bytes_per_cell: f32,
+    /// Peak scratch memory the kernel needs per cell, bytes, as a function of its params
+    /// (outputs are counted separately).
+    scratch: ScratchFn,
+    /// The node's output is its input (an `Arc` clone), so it costs no memory of its own.
+    aliases_input: bool,
 }
+
+type ScratchFn = Arc<dyn Fn(&Map<String, Value>) -> f32 + Send + Sync>;
 
 impl NodeDef {
     /// Build a definition whose params deserialise into `P` (schema and check derive from it).
@@ -87,21 +92,44 @@ impl NodeDef {
             param_schema: serde_json::to_value(schemars::schema_for!(P)).unwrap_or(Value::Null),
             check,
             eval: Arc::new(eval),
-            scratch_bytes_per_cell: 0.0,
+            scratch: Arc::new(|_| 0.0),
+            aliases_input: false,
         }
     }
 
     /// Declare the kernel's peak scratch memory per cell (bytes) for the pre-flight estimate.
-    pub fn with_memory(mut self, scratch_bytes_per_cell: f32) -> Self {
-        self.scratch_bytes_per_cell = scratch_bytes_per_cell;
+    pub fn with_memory(self, scratch_bytes_per_cell: f32) -> Self {
+        self.with_memory_fn(move |_| scratch_bytes_per_cell)
+    }
+
+    /// [`Self::with_memory`] decided from the node's params (a tiled kernel needs far less).
+    pub fn with_memory_fn(
+        mut self,
+        scratch: impl Fn(&Map<String, Value>) -> f32 + Send + Sync + 'static,
+    ) -> Self {
+        self.scratch = Arc::new(scratch);
         self
     }
 
-    /// Estimated peak bytes to evaluate this node on `cells` samples: every output field plus
-    /// the kernel's scratch.
-    pub fn estimate_bytes(&self, cells: u64) -> u64 {
-        let outputs = self.outputs.len().max(1) as u64 * 4 * cells;
-        outputs + (self.scratch_bytes_per_cell as f64 * cells as f64) as u64
+    /// The node republishes its input field (no copy): the estimate counts no output for it.
+    pub fn aliasing_input(mut self) -> Self {
+        self.aliases_input = true;
+        self
+    }
+
+    /// Bytes this node's outputs occupy on `cells` samples (0 when it aliases its input).
+    pub fn output_bytes(&self, cells: u64) -> u64 {
+        if self.aliases_input {
+            0
+        } else {
+            self.outputs.len().max(1) as u64 * 4 * cells
+        }
+    }
+
+    /// Estimated peak bytes to evaluate this node on `cells` samples with `params`: every output
+    /// field plus the kernel's scratch.
+    pub fn estimate_bytes(&self, cells: u64, params: &Map<String, Value>) -> u64 {
+        self.output_bytes(cells) + ((self.scratch)(params) as f64 * cells as f64) as u64
     }
 
     /// Add a semantic check on top of the schema check (ranges, ordering…): it runs before a

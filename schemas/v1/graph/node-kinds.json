@@ -1217,7 +1217,7 @@
   },
   {
     "kind": "jd.erosion.thermal@1",
-    "description": "Thermal erosion: material steeper than the talus angle slides downhill (mass-conserving Jacobi steps); an optional `hardness` field (0..1, e.g. from `jd.terrain.strata@1`) lets hard rock hold near-vertical faces and shed at a tenth of the rate; `engine: gpu` runs the same kernel on the headless GPU",
+    "description": "Thermal erosion: material steeper than the talus angle slides downhill (mass-conserving Jacobi steps); an optional `hardness` field (0..1, e.g. from `jd.terrain.strata@1`) lets hard rock hold near-vertical faces and shed at a tenth of the rate; `engine: gpu` runs the same kernel on the headless GPU; `tile_px` erodes the CPU field tile by tile (exact, a tile's scratch) for very large worlds",
     "inputs": [
       {
         "name": "in",
@@ -1252,6 +1252,13 @@
           "description": "Where the steps run: `cpu` (default, bit-reproducible) or `gpu` (`jd-gpu`, the same kernel in\nWGSL; ≈ 1e-7 relative to the CPU; fails with E_DEPENDENCY_MISSING when no adapter exists).",
           "$ref": "#/$defs/Engine",
           "default": "cpu"
+        },
+        "tile_px": {
+          "description": "CPU only: erode in `tile_px` squares with a halo of `iterations` cells (bit-identical to the\nwhole field, a tile's scratch instead of 12 B per cell — how a 16k² layer fits); 0 = whole field.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 0
         },
         "iterations": {
           "description": "Jacobi steps (1..=1000); more steps move material further.",

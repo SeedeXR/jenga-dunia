@@ -107,6 +107,10 @@ struct ThermalParams {
     /// WGSL; ≈ 1e-7 relative to the CPU; fails with E_DEPENDENCY_MISSING when no adapter exists).
     #[serde(default)]
     engine: Engine,
+    /// CPU only: erode in `tile_px` squares with a halo of `iterations` cells (bit-identical to the
+    /// whole field, a tile's scratch instead of 12 B per cell — how a 16k² layer fits); 0 = whole field.
+    #[serde(default)]
+    tile_px: u32,
     /// Jacobi steps (1..=1000); more steps move material further.
     #[serde(default = "iterations_default")]
     iterations: u32,
@@ -662,7 +666,7 @@ pub fn register_all(r: &mut Registry) {
     ));
     r.register(NodeDef::new::<ThermalParams, _>(
         "jd.erosion.thermal@1",
-        "Thermal erosion: material steeper than the talus angle slides downhill (mass-conserving Jacobi steps); an optional `hardness` field (0..1, e.g. from `jd.terrain.strata@1`) lets hard rock hold near-vertical faces and shed at a tenth of the rate; `engine: gpu` runs the same kernel on the headless GPU",
+        "Thermal erosion: material steeper than the talus angle slides downhill (mass-conserving Jacobi steps); an optional `hardness` field (0..1, e.g. from `jd.terrain.strata@1`) lets hard rock hold near-vertical faces and shed at a tenth of the rate; `engine: gpu` runs the same kernel on the headless GPU; `tile_px` erodes the CPU field tile by tile (exact, a tile's scratch) for very large worlds",
         vec![port("in", PortType::Heightfield, true), port("hardness", PortType::Heightfield, false)],
         vec![port("out", PortType::Heightfield, false)],
         |ctx, p, i| {
@@ -672,6 +676,9 @@ pub fn register_all(r: &mut Registry) {
             }
             let hardness = i.get("hardness").map(|v| v.as_field());
             let eroded = match tp.engine {
+                Engine::Cpu if tp.tile_px > 0 => jd_terrain::thermal_erode_tiled(
+                    field(i, "in")?,
+                    spacing_m(ctx), tp.talus_deg, tp.iterations, tp.rate, hardness.map(|k| &**k), tp.tile_px, Some(&ctx.cancel))?,
                 Engine::Cpu => jd_terrain::thermal_erode_with(
                     field(i, "in")?,
                     spacing_m(ctx), tp.talus_deg, tp.iterations, tp.rate, hardness.map(|k| &**k), Some(&ctx.cancel))?,
@@ -682,7 +689,7 @@ pub fn register_all(r: &mut Registry) {
             };
             Ok(out("out", eroded))
         },
-    ).with_memory(8.0));
+    ).with_memory_fn(|p| if p.get("tile_px").and_then(|v| v.as_u64()).unwrap_or(0) > 0 { 0.5 } else { 8.0 }));
     r.register(NodeDef::new::<DropletParams, _>(
         "jd.erosion.droplet@1",
         "Particle (droplet) hydraulic erosion after Beyer: seeded droplets follow the slope with inertia, erode through a brush and deposit as they slow — gullies and fans; outputs the terrain and the signed `delta`",
@@ -1138,24 +1145,27 @@ pub fn register_all(r: &mut Registry) {
             Ok(out("out", wetness_index_with(field(i, "in")?, spacing_m(ctx), wp.method)?))
         },
     ).with_memory(24.0));
-    r.register(NodeDef::new::<OutputParams, _>(
-        "jd.output.height@1",
-        "Publishes its input as a named heightfield layer",
-        vec![port("in", PortType::Heightfield, true)],
-        vec![port("out", PortType::Heightfield, false)],
-        |_, p, i| {
-            let op: OutputParams = params(p)?;
-            if op.layer.trim().is_empty() {
-                return Err(JdError::invalid("layer", "layer name must not be empty"));
-            }
-            Ok(BTreeMap::from([(
-                "out".to_owned(),
-                i.get("in")
-                    .cloned()
-                    .ok_or_else(|| JdError::invalid("in", "not connected"))?,
-            )]))
-        },
-    ));
+    r.register(
+        NodeDef::new::<OutputParams, _>(
+            "jd.output.height@1",
+            "Publishes its input as a named heightfield layer",
+            vec![port("in", PortType::Heightfield, true)],
+            vec![port("out", PortType::Heightfield, false)],
+            |_, p, i| {
+                let op: OutputParams = params(p)?;
+                if op.layer.trim().is_empty() {
+                    return Err(JdError::invalid("layer", "layer name must not be empty"));
+                }
+                Ok(BTreeMap::from([(
+                    "out".to_owned(),
+                    i.get("in")
+                        .cloned()
+                        .ok_or_else(|| JdError::invalid("in", "not connected"))?,
+                )]))
+            },
+        )
+        .aliasing_input(),
+    );
 }
 
 /// Id of the starter graph's noise node.
@@ -1569,6 +1579,45 @@ mod tests {
         assert_eq!(
             ev.validate(&g).expect_err("unknown").code,
             ErrorCode::E_NODE_UNKNOWN
+        );
+    }
+
+    #[test]
+    fn memory_estimate_follows_tiling_and_ignores_aliased_outputs() {
+        let reg = Registry::with_builtins();
+        let cache = Cache::default();
+        let mut g = Graph::default();
+        let n = add(&mut g, "jd.noise.fbm@1", serde_json::json!({}));
+        let t = add(
+            &mut g,
+            "jd.erosion.thermal@1",
+            serde_json::json!({ "iterations": 10 }),
+        );
+        let o = add(
+            &mut g,
+            "jd.output.height@1",
+            serde_json::json!({ "layer": "height" }),
+        );
+        connect(&mut g, &n, "out", &t, "in");
+        connect(&mut g, &t, "out", &o, "in");
+        let cells = 128u64 * 96;
+        let whole = Evaluator::new(&reg, &cache)
+            .estimate_bytes(&g, &world(), 0)
+            .expect("est");
+        // Two real fields (noise, thermal) at 4 B/cell, the output aliases, thermal scratch 8 B/cell.
+        assert_eq!(whole, 2 * 4 * cells + 8 * cells);
+        g.nodes
+            .get_mut(&t)
+            .expect("t")
+            .params
+            .insert("tile_px".into(), serde_json::json!(64));
+        let tiled = Evaluator::new(&reg, &cache)
+            .estimate_bytes(&g, &world(), 0)
+            .expect("est");
+        assert_eq!(
+            tiled,
+            2 * 4 * cells + cells / 2,
+            "a tiled kernel declares half a byte per cell"
         );
     }
 

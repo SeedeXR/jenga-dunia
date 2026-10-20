@@ -1649,6 +1649,9 @@ export type NodeParams_jd_erosion_thermal_1 = {
   /** Where the steps run: `cpu` (default, bit-reproducible) or `gpu` (`jd-gpu`, the same kernel in
 WGSL; ≈ 1e-7 relative to the CPU; fails with E_DEPENDENCY_MISSING when no adapter exists). */
   "engine"?: Engine;
+  /** CPU only: erode in `tile_px` squares with a halo of `iterations` cells (bit-identical to the
+whole field, a tile's scratch instead of 12 B per cell — how a 16k² layer fits); 0 = whole field. */
+  "tile_px"?: number;
   /** Jacobi steps (1..=1000); more steps move material further. */
   "iterations"?: number;
   /** Fraction of the excess that moves per step, (0, 0.25]; 0.25 is the stable maximum. */
