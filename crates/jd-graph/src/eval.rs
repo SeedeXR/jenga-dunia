@@ -1,6 +1,6 @@
 //! Incremental, content-hashed evaluation.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -122,6 +122,8 @@ impl Default for JobCtl {
 pub struct Evaluator<'a> {
     registry: &'a Registry,
     cache: &'a Cache,
+    layers: Option<crate::registry::LayerLoader>,
+    only: Option<Vec<String>>,
 }
 
 /// Values produced by every node: `(node id, port) → value`.
@@ -130,7 +132,60 @@ pub type Outputs = BTreeMap<(NodeId, String), Value>;
 impl<'a> Evaluator<'a> {
     /// Build an evaluator.
     pub fn new(registry: &'a Registry, cache: &'a Cache) -> Self {
-        Self { registry, cache }
+        Self {
+            registry,
+            cache,
+            layers: None,
+            only: None,
+        }
+    }
+
+    /// Give `jd.input.layer@1` nodes a way to read the project's published layers.
+    pub fn with_layers(mut self, layers: crate::registry::LayerLoader) -> Self {
+        self.layers = Some(layers);
+        self
+    }
+
+    /// Evaluate only the output nodes publishing these layer names (and their ancestors).
+    pub fn only_outputs(mut self, names: Option<Vec<String>>) -> Self {
+        self.only = names.filter(|n| !n.is_empty());
+        self
+    }
+
+    /// The nodes an `only_outputs` selection needs: the named output nodes and everything that
+    /// feeds them (the gate pattern: a coarse chain evaluated at a high lod, the fine chain at
+    /// lod 0, in one graph). `None` = every node.
+    fn selected(&self, graph: &Graph) -> JdResult<Option<BTreeSet<NodeId>>> {
+        let Some(names) = &self.only else {
+            return Ok(None);
+        };
+        let input_map = graph.input_map();
+        let mut needed: BTreeSet<NodeId> = BTreeSet::new();
+        let mut stack: Vec<NodeId> = graph
+            .nodes
+            .iter()
+            .filter(|(_, n)| {
+                n.kind.0.starts_with("jd.output.height@")
+                    && names.contains(&crate::nodes::output_layer_name(&n.params))
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        if stack.is_empty() {
+            return Err(JdError::new(
+                ErrorCode::E_INPUT_INVALID,
+                format!("no output node publishes any of {names:?}"),
+            )
+            .next("Name layers that an output node publishes, or leave `outputs` out."));
+        }
+        while let Some(id) = stack.pop() {
+            if !needed.insert(id.clone()) {
+                continue;
+            }
+            if let Some(ins) = input_map.get(&id) {
+                stack.extend(ins.values().map(|p| p.node.clone()));
+            }
+        }
+        Ok(Some(needed))
     }
 
     /// Every structural problem in the graph (none for a valid one): unknown kinds, params that do
@@ -299,9 +354,13 @@ impl<'a> Evaluator<'a> {
     pub fn estimate_bytes(&self, graph: &Graph, world: &WorldSettings, lod: u8) -> JdResult<u64> {
         let lw = lod_world(world, lod);
         let cells = lw.resolution_px[0] as u64 * lw.resolution_px[1] as u64;
+        let selected = self.selected(graph)?;
         let mut outputs = 0u64;
         let mut scratch = 0u64;
-        for node in graph.nodes.values() {
+        for (id, node) in &graph.nodes {
+            if selected.as_ref().is_some_and(|s| !s.contains(id)) {
+                continue;
+            }
             let def = self.registry.get(&node.kind)?;
             let out = def.output_bytes(cells);
             outputs += out;
@@ -326,6 +385,11 @@ impl<'a> Evaluator<'a> {
             lod_world: lod_world(world, lod),
             assets_dir: assets_dir.map(|p| p.to_path_buf()),
             cancel: job.cancel.clone(),
+            layers: self.layers.clone(),
+        };
+        let order = match self.selected(graph)? {
+            None => order,
+            Some(needed) => order.into_iter().filter(|id| needed.contains(id)).collect(),
         };
         let lod_world_bytes = serde_json::to_vec(&ctx.lod_world)?;
         let input_map = graph.input_map();
@@ -350,6 +414,15 @@ impl<'a> Evaluator<'a> {
             hasher.update(&serde_json::to_vec(&params)?);
             hasher.update(&[node.bypass as u8, lod]);
             hasher.update(&lod_world_bytes);
+            // A layer read from the project is part of the key through its content hash, so a
+            // re-evaluated coarse chain invalidates the fine one that reads it.
+            if node.kind.0 == "jd.input.layer@1"
+                && let Some(name) = params.get("name").and_then(|v| v.as_str())
+                && let Some(load) = &ctx.layers
+                && let Some(hf) = load(name)?
+            {
+                hasher.update(hf.content_hash().as_bytes());
+            }
             // Results computed inside a project may depend on its assets: never share them
             // across projects (or with project-less evaluations).
             if let Some(dir) = &ctx.assets_dir {

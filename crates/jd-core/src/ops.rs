@@ -94,6 +94,31 @@ impl Context {
         Ok(())
     }
 
+    /// A published layer as a shared field (loaded from the cache under `root` on first use).
+    /// Takes only the layer lock, so it may be called while the project lock is held.
+    pub fn layer_arc(
+        &self,
+        root: &Path,
+        name: &str,
+    ) -> JdResult<Option<Arc<jd_terrain::Heightfield>>> {
+        let mut g = self
+            .layers
+            .lock()
+            .map_err(|_| JdError::new(ErrorCode::E_INTERNAL, "layer lock poisoned"))?;
+        if !g.contains_key(name)
+            && let Some(hf) = jd_cache::LayerCache::open(root).get(name)?
+        {
+            g.insert(name.to_owned(), Arc::new(hf));
+        }
+        Ok(g.get(name).cloned())
+    }
+
+    /// The layer loader handed to the graph evaluator for `jd.input.layer@1`.
+    pub fn layer_loader(&self, root: &Path) -> jd_graph::registry::LayerLoader {
+        let (ctx, root) = (self.clone(), root.to_path_buf());
+        Arc::new(move |name: &str| ctx.layer_arc(&root, name))
+    }
+
     /// The u16 preview of a layer: from memory when it is loaded, otherwise streamed straight
     /// from its cache blob (the same bytes; a 16k² layer is never loaded just to be previewed).
     pub fn preview_layer(&self, name: &str, lod: u8) -> JdResult<jd_terrain::preview::Preview> {
@@ -1015,6 +1040,10 @@ pub mod graph {
         /// Level of detail (0 = full resolution).
         #[serde(default)]
         pub lod: u8,
+        /// Evaluate only the output nodes publishing these layers (and what feeds them); the
+        /// gate pattern runs the coarse chain at a high lod and the fine chain at lod 0.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub outputs: Option<Vec<String>>,
         /// Detached jobs only: give up after this many seconds (`E_TIMEOUT` in the result).
         #[serde(default)]
         pub timeout_s: Option<f32>,
@@ -1340,6 +1369,7 @@ pub mod graph {
     fn evaluate(
         ctx: &Context,
         lod: u8,
+        only: Option<Vec<String>>,
         job_id: u64,
         ctl: &jd_graph::JobCtl,
     ) -> JdResult<(EvaluateResult, Vec<Warning>)> {
@@ -1353,7 +1383,9 @@ pub mod graph {
             ))
         })?;
         // Pre-flight: refuse evaluations the memory budget cannot hold instead of thrashing.
-        let estimate = Evaluator::new(registry(), cache()).estimate_bytes(&graph, &world, lod)?;
+        let estimate = Evaluator::new(registry(), cache())
+            .only_outputs(only.clone())
+            .estimate_bytes(&graph, &world, lod)?;
         if estimate > budget {
             return Err(JdError::new(
                 ErrorCode::E_RESOURCE_MEMORY,
@@ -1383,6 +1415,8 @@ pub mod graph {
             }
         }
         let (outputs, report) = Evaluator::new(registry(), cache())
+            .with_layers(ctx.layer_loader(&root))
+            .only_outputs(only.clone())
             .evaluate_job(&graph, &world, lod, Some(&root.join("assets")), ctl)
             .map_err(|err| {
                 if err.code == ErrorCode::E_CANCELLED {
@@ -1576,7 +1610,7 @@ pub mod graph {
             Scope::ProjectWrite,
             |ctx, e| {
                 let job = ctx.jobs.start("graph.evaluate");
-                evaluate(ctx, e.lod, job.id, &job.ctl)
+                evaluate(ctx, e.lod, e.outputs.clone(), job.id, &job.ctl)
             },
         );
         r.register_detached::<Evaluate, _>(
@@ -1633,7 +1667,7 @@ pub mod graph {
                                 }
                             });
                         }
-                        let outcome = evaluate(&ctx2, e.lod, id, &guard.ctl);
+                        let outcome = evaluate(&ctx2, e.lod, e.outputs.clone(), id, &guard.ctl);
                         done.store(true, std::sync::atomic::Ordering::Relaxed);
                         ctx2.jobs.release_slot();
                         let envelope = match outcome {

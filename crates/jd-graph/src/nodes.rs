@@ -122,6 +122,14 @@ fn talus_default() -> f32 {
     35.0
 }
 
+/// `jd.input.layer@1` parameters.
+#[derive(Debug, Clone, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct LayerInputParams {
+    /// Published layer to read, e.g. `height` or `height#lod2`.
+    name: String,
+}
+
 /// Which processor runs a kernel that exists in both forms.
 #[derive(
     Debug,
@@ -586,6 +594,27 @@ pub fn register_all(r: &mut Registry) {
             Ok(BTreeMap::from([("out".to_owned(), Value::field(out_h)), ("rivers".to_owned(), Value::field(rivers)), ("order".to_owned(), Value::field(order))]))
         },
     ).with_memory(50.0));
+    r.register(NodeDef::new::<LayerInputParams, _>(
+        "jd.input.layer@1",
+        "Read a layer the project has already published (`height`, `height#lod2`, …) and resample it onto the current grid — the gate pattern: erode at a coarse lod, then add the fine detail at lod 0 (the layer's content hash is part of the cache key)",
+        vec![],
+        vec![port("out", PortType::Heightfield, false)],
+        |ctx, p, _| {
+            let lp: LayerInputParams = params(p)?;
+            let load = ctx.layers.as_ref().ok_or_else(|| {
+                JdError::invalid("name", "no project is open, so there are no published layers to read")
+            })?;
+            let hf = load(&lp.name)?.ok_or_else(|| {
+                JdError::invalid("name", format!("no published layer named `{}`", lp.name))
+                    .next("Evaluate the graph (at the lod that publishes it) first; coarse layers are named `<layer>#lod<N>`.")
+            })?;
+            let w = &ctx.lod_world;
+            if (hf.width(), hf.height()) == (w.resolution_px[0], w.resolution_px[1]) {
+                return Ok(BTreeMap::from([("out".to_owned(), Value::Field(hf.clone(), hf.content_hash()))]));
+            }
+            Ok(out("out", resample_to_world(&hf.to_vec(), hf.width(), hf.height(), false, w)?))
+        },
+    ));
     r.register(NodeDef::new::<NoParams, _>(
         "jd.math.add@1",
         "a + b",
@@ -1308,6 +1337,7 @@ mod tests {
                 lod_world: world(),
                 assets_dir: None,
                 cancel: Default::default(),
+                layers: None,
             };
             let params = serde_json::json!({ "scale": 0.01 })
                 .as_object()
@@ -1579,6 +1609,97 @@ mod tests {
         assert_eq!(
             ev.validate(&g).expect_err("unknown").code,
             ErrorCode::E_NODE_UNKNOWN
+        );
+    }
+
+    #[test]
+    fn layer_input_resamples_a_published_layer_and_only_outputs_skips_the_rest() {
+        use std::sync::Mutex;
+        let reg = Registry::with_builtins();
+        let cache = Cache::default();
+        // A coarse 32 × 24 ramp (0..100 west → east) stands in for a layer published at lod 2.
+        let coarse = Arc::new(Mutex::new({
+            let mut c = Heightfield::new(32, 24, 64, 0).expect("c");
+            c.fill_with(|x, _| x as f32 / 31.0 * 100.0);
+            Arc::new(c)
+        }));
+        let src = coarse.clone();
+        let loader: crate::registry::LayerLoader = Arc::new(move |name: &str| {
+            Ok((name == "coarse#lod2").then(|| src.lock().expect("lock").clone()))
+        });
+        let mut g = Graph::default();
+        let n = add(&mut g, "jd.noise.fbm@1", serde_json::json!({ "seed": 4 }));
+        let heavy = add(
+            &mut g,
+            "jd.erosion.thermal@1",
+            serde_json::json!({ "iterations": 10 }),
+        );
+        let o_coarse = add(
+            &mut g,
+            "jd.output.height@1",
+            serde_json::json!({ "layer": "coarse" }),
+        );
+        let l = add(
+            &mut g,
+            "jd.input.layer@1",
+            serde_json::json!({ "name": "coarse#lod2" }),
+        );
+        let o_fine = add(
+            &mut g,
+            "jd.output.height@1",
+            serde_json::json!({ "layer": "fine" }),
+        );
+        connect(&mut g, &n, "out", &heavy, "in");
+        connect(&mut g, &heavy, "out", &o_coarse, "in");
+        connect(&mut g, &l, "out", &o_fine, "in");
+        let ev = || {
+            Evaluator::new(&reg, &cache)
+                .with_layers(loader.clone())
+                .only_outputs(Some(vec!["fine".into()]))
+        };
+        let (outs, rep) = ev().evaluate(&g, &world(), 0).expect("fine only");
+        assert_eq!(
+            rep.nodes.len(),
+            2,
+            "only the layer node and its output ran: {:?}",
+            rep.nodes.iter().map(|n| n.kind.clone()).collect::<Vec<_>>()
+        );
+        let fine = outs[&(o_fine.clone(), "out".into())].as_field();
+        assert_eq!(
+            (fine.width(), fine.height()),
+            (128, 96),
+            "resampled onto the world grid"
+        );
+        assert!(
+            fine.get(0, 10) < 3.0 && fine.get(127, 10) > 97.0,
+            "the ramp survives: {} .. {}",
+            fine.get(0, 10),
+            fine.get(127, 10)
+        );
+        // A re-published coarse layer changes the key: the layer node is not served from cache.
+        let mut c2 = Heightfield::new(32, 24, 64, 0).expect("c2");
+        c2.fill_with(|x, _| 100.0 - x as f32 / 31.0 * 100.0);
+        *coarse.lock().expect("lock") = Arc::new(c2);
+        let (outs2, rep2) = ev().evaluate(&g, &world(), 0).expect("again");
+        assert!(
+            rep2.nodes.iter().all(|n| !n.cached),
+            "nothing cached after the layer changed"
+        );
+        assert!(
+            outs2[&(o_fine, "out".into())].as_field().get(0, 10) > 97.0,
+            "the new ramp"
+        );
+        // Memory estimate honours the selection; an unknown output name is refused.
+        let all = Evaluator::new(&reg, &cache)
+            .estimate_bytes(&g, &world(), 0)
+            .expect("all");
+        let fine_only = ev().estimate_bytes(&g, &world(), 0).expect("fine");
+        assert!(fine_only < all, "{fine_only} < {all}");
+        assert!(
+            Evaluator::new(&reg, &cache)
+                .only_outputs(Some(vec!["nope".into()]))
+                .evaluate(&g, &world(), 0)
+                .is_err()
         );
     }
 

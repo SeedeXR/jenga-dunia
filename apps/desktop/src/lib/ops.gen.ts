@@ -207,6 +207,9 @@ export type GraphDisconnectResult = {
 export type GraphEvaluateRequest = {
   /** Level of detail (0 = full resolution). */
   "lod"?: number;
+  /** Evaluate only the output nodes publishing these layers (and what feeds them); the
+gate pattern runs the coarse chain at a high lod and the fine chain at lod 0. */
+  "outputs"?: string[] | null;
   /** Detached jobs only: give up after this many seconds (`E_TIMEOUT` in the result). */
   "timeout_s"?: number | null;
   /** Detached jobs only: queue priority `low` | `normal` (default) | `high`; a higher
@@ -241,6 +244,9 @@ export type GraphEvaluateResult = {
 export type GraphEvaluateAsyncRequest = {
   /** Level of detail (0 = full resolution). */
   "lod"?: number;
+  /** Evaluate only the output nodes publishing these layers (and what feeds them); the
+gate pattern runs the coarse chain at a high lod and the fine chain at lod 0. */
+  "outputs"?: string[] | null;
   /** Detached jobs only: give up after this many seconds (`E_TIMEOUT` in the result). */
   "timeout_s"?: number | null;
   /** Detached jobs only: queue priority `low` | `normal` (default) | `high`; a higher
@@ -1771,6 +1777,11 @@ georeferencing are always stretched. */
   "georeference"?: boolean;
 };
 
+export type NodeParams_jd_input_layer_1 = {
+  /** Published layer to read, e.g. `height` or `height#lod2`. */
+  "name": string;
+};
+
 export type NodeParams_jd_mask_class_1 = {
   /** Class id to select (1-based rule position from `jd.biome.classify@1`). */
   "id": number;
@@ -2016,6 +2027,7 @@ export interface NodeKinds {
   "jd.hydrology.sea_level@1": NodeParams_jd_hydrology_sea_level_1;
   "jd.hydrology.wetness@1": NodeParams_jd_hydrology_wetness_1;
   "jd.input.heightmap@1": NodeParams_jd_input_heightmap_1;
+  "jd.input.layer@1": NodeParams_jd_input_layer_1;
   "jd.mask.class@1": NodeParams_jd_mask_class_1;
   "jd.math.add@1": NodeParams_jd_math_add_1;
   "jd.math.multiply@1": NodeParams_jd_math_multiply_1;

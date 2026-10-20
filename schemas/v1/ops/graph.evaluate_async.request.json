@@ -12,6 +12,16 @@
       "maximum": 255,
       "default": 0
     },
+    "outputs": {
+      "description": "Evaluate only the output nodes publishing these layers (and what feeds them); the\ngate pattern runs the coarse chain at a high lod and the fine chain at lod 0.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      }
+    },
     "timeout_s": {
       "description": "Detached jobs only: give up after this many seconds (`E_TIMEOUT` in the result).",
       "type": [

@@ -649,6 +649,24 @@ $ jd op terrain.export_heightmap --project Coast.jdproj --params '{"layer":"expo
 
 `exposure` is the sea-level node's third output: for every water cell, the open water upwind of it (the wind is the node's or the world's; land resets the count, the field border counts as open sea) as a share of `fetch_km` (50 km when no fetch limit is set), square-rooted because wave height grows with the square root of the fetch. Lee shores behind islands and headlands read near 0 — the wave shadow — and open coasts 1, so it scales foam, wash and wave amplitude per shore: wire it into `jd.erosion.coastal@1`'s `exposure` input and the cliffs retreat where the waves actually arrive, or into `jd.biome.seabed@1`'s and the sheltered bays silt up with mud at depths where the open shelf stays sand (sheltered water counts as that much deeper for the mud rule; unit test) (unit test: a straight coast with full energy on one half and a sheltered bay on the other receives over three times the wave work on the open half), or export it as a mask for the engine's water material. One upwind sweep with the wind rounded to a compass neighbour (hence the row-wise streaks); refraction around headlands is not modelled.
 
+### Erode a 16k world: the gate pattern
+
+Hydraulic erosion keeps ~40 bytes of state per cell, so a 16 384² world would need 10 GB of it — more than the 4 GiB budget. ADR-0005's answer is the gate: run the erosion chain at a coarser level of detail, publish it, and let the full-resolution chain read that layer back and add the fine detail. One graph, two evaluations:
+
+```
+$ jd new Big.jdproj --extent 163840 --resolution 16384 --seed 5
+# coarse chain: noise → hydraulic (100 steps) → output `coarse`
+# fine chain:   jd.input.layer {name: "coarse#lod2"} → add ← noise (300 m detail, ±4 m) → output `height`
+$ jd --json op graph.evaluate --project Big.jdproj --params '{"lod":2,"outputs":["coarse"]}'
+   hydraulic 4096²  11.2 s   peak 1.31 GB   publishes coarse#lod2
+$ jd --json op graph.evaluate --project Big.jdproj --params '{"lod":0,"outputs":["height"]}'
+   input.layer 1.3 s (resampled 4096² → 16384²), add 1.6 s, noise 3.6 s   peak 2.74 GB   publishes height
+$ jd --json op graph.evaluate --project Big.jdproj --params '{"lod":0}'
+   E_RESOURCE_MEMORY: evaluation needs an estimated 17408 MiB, over the project's 4096 MiB budget
+```
+
+`outputs` restricts an evaluation to the named output nodes and whatever feeds them (the pre-flight memory estimate is restricted the same way, which is why the third call is refused and the second admitted). `jd.input.layer@1` reads any layer the project has published — `coarse#lod2` is the coarse chain's output at lod 2 — and resamples it onto the current grid; the layer's content hash is part of the node's cache key, so re-running the coarse chain invalidates the fine one. The thermal node has a cheaper route for the same problem: `tile_px` erodes the full grid tile by tile with a halo of `iterations` cells (bit-identical to the whole field; 16k² × 10 steps in 2.35 GB).
+
 ### Timeline: keyframed parameters
 
 ```

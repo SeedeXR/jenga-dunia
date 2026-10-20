@@ -18,7 +18,14 @@ pub struct EvalCtx {
     pub assets_dir: Option<std::path::PathBuf>,
     /// Set when the job is cancelled; long kernels poll it and return `E_CANCELLED`.
     pub cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// Reads a published layer of the open project by name (`height`, `height#lod2`), for
+    /// `jd.input.layer@1`; `None` outside a project.
+    pub layers: Option<LayerLoader>,
 }
+
+/// A layer loader: `name → Some(field)` or `None` when no such layer exists.
+pub type LayerLoader =
+    Arc<dyn Fn(&str) -> JdResult<Option<Arc<jd_terrain::Heightfield>>> + Send + Sync>;
 
 type EvalFn = Arc<
     dyn Fn(

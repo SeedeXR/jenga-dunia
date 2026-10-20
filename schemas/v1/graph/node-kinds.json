@@ -1889,6 +1889,34 @@
     }
   },
   {
+    "kind": "jd.input.layer@1",
+    "description": "Read a layer the project has already published (`height`, `height#lod2`, …) and resample it onto the current grid — the gate pattern: erode at a coarse lod, then add the fine detail at lod 0 (the layer's content hash is part of the cache key)",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "LayerInputParams",
+      "description": "`jd.input.layer@1` parameters.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Published layer to read, e.g. `height` or `height#lod2`.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ]
+    }
+  },
+  {
     "kind": "jd.mask.class@1",
     "description": "0/1 mask of the cells whose class id equals `id` (feed a `jd.biome.classify@1` map)",
     "inputs": [
