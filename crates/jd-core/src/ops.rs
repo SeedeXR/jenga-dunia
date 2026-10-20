@@ -94,6 +94,27 @@ impl Context {
         Ok(())
     }
 
+    /// The u16 preview of a layer: from memory when it is loaded, otherwise streamed straight
+    /// from its cache blob (the same bytes; a 16k² layer is never loaded just to be previewed).
+    pub fn preview_layer(&self, name: &str, lod: u8) -> JdResult<jd_terrain::preview::Preview> {
+        let root = self.project_root();
+        let loaded = self
+            .layers
+            .lock()
+            .map_err(|_| JdError::new(ErrorCode::E_INTERNAL, "layer lock poisoned"))?
+            .get(name)
+            .cloned();
+        if let Some(hf) = loaded {
+            return Ok(jd_terrain::preview::preview_u16(&hf, lod));
+        }
+        if let Some(root) = root
+            && let Some(pv) = jd_cache::LayerCache::open(&root).preview(name, lod)?
+        {
+            return Ok(pv);
+        }
+        self.with_layer(name, |hf| Ok(jd_terrain::preview::preview_u16(hf, lod)))
+    }
+
     /// Run `f` with a stored layer, or fail with `E_INPUT_INVALID`.
     pub fn with_layer<T>(
         &self,
@@ -4087,21 +4108,19 @@ pub mod terrain {
             "Downsampled u16 preview of a layer (base64) for agents and viewers",
             Scope::ProjectRead,
             |ctx, p| {
-                ctx.with_layer(&p.layer, |hf| {
-                    use base64::Engine as _;
-                    let pv = jd_terrain::preview::preview_u16(hf, p.lod);
-                    Ok((
-                        PreviewResult {
-                            width: pv.width,
-                            height: pv.height,
-                            min: pv.min,
-                            max: pv.max,
-                            bytes_base64: base64::engine::general_purpose::STANDARD
-                                .encode(pv.to_bytes()),
-                        },
-                        Vec::new(),
-                    ))
-                })
+                use base64::Engine as _;
+                let pv = ctx.preview_layer(&p.layer, p.lod)?;
+                Ok((
+                    PreviewResult {
+                        width: pv.width,
+                        height: pv.height,
+                        min: pv.min,
+                        max: pv.max,
+                        bytes_base64: base64::engine::general_purpose::STANDARD
+                            .encode(pv.to_bytes()),
+                    },
+                    Vec::new(),
+                ))
             },
         );
         r.register::<TerrainGenerate, LayerInfo, _>(

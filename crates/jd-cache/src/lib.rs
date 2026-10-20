@@ -216,6 +216,83 @@ impl LayerCache {
         Ok(Some(hf))
     }
 
+    /// The preview of a stored layer straight from its blob — bit-identical to
+    /// `jd_terrain::preview::preview_u16` on the loaded field (full-field min/max, every
+    /// `2^lod`-th sample), but reading rows instead of holding the layer: a 16k² layer is 1 GiB
+    /// in memory and a few hundred kilobytes on the way to the viewport.
+    pub fn preview(&self, name: &str, lod: u8) -> JdResult<Option<jd_terrain::preview::Preview>> {
+        let Some(hash) = self.read_index()?.remove(name) else {
+            return Ok(None);
+        };
+        let file = match fs::File::open(self.blob_path(&hash)) {
+            Ok(f) => f,
+            Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e.into()),
+        };
+        let corrupt = || {
+            JdError::new(ErrorCode::E_INTERNAL, format!("cache blob for layer `{name}` is corrupt"))
+                .next("Delete the project's cache/ directory — it is disposable — and re-run the operation.")
+                .detail("layer", name)
+        };
+        let len = file.metadata()?.len();
+        let mut input = std::io::BufReader::with_capacity(1 << 20, file);
+        let mut head = [0u8; HEADER];
+        if input.read_exact(&mut head).is_err() || &head[..4] != MAGIC {
+            return Err(corrupt());
+        }
+        let u32_at =
+            |i: usize| u32::from_le_bytes([head[i], head[i + 1], head[i + 2], head[i + 3]]);
+        let (w, h) = (u32_at(4), u32_at(8));
+        if len != HEADER as u64 + 4 * w as u64 * h as u64 || w == 0 || h == 0 {
+            return Err(corrupt());
+        }
+        let step = 1u32 << lod.min(12);
+        let (pw, ph) = (w.div_ceil(step).max(1), h.div_ceil(step).max(1));
+        // One sequential pass: exact min / max over every sample, the strided rows kept as f32.
+        let (mut min, mut max) = (f32::MAX, f32::MIN);
+        let mut rows: Vec<f32> = Vec::with_capacity((pw * ph) as usize);
+        let mut bytes = vec![0u8; 4 * w as usize];
+        for y in 0..h {
+            input.read_exact(&mut bytes).map_err(|_| corrupt())?;
+            let vals = bytes
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|b| f32::from_le_bytes(*b));
+            if y.is_multiple_of(step) {
+                for (x, v) in vals.enumerate() {
+                    min = min.min(v);
+                    max = max.max(v);
+                    if (x as u32).is_multiple_of(step) {
+                        rows.push(v);
+                    }
+                }
+            } else {
+                for v in vals {
+                    min = min.min(v);
+                    max = max.max(v);
+                }
+            }
+        }
+        let (min, max) = if max > min {
+            (min, max)
+        } else {
+            (min, min + 1.0)
+        };
+        let scale = 65535.0 / (max - min);
+        let data = rows
+            .iter()
+            .map(|v| ((v - min) * scale).round().clamp(0.0, 65535.0) as u16)
+            .collect();
+        Ok(Some(jd_terrain::preview::Preview {
+            width: pw,
+            height: ph,
+            min,
+            max,
+            data,
+        }))
+    }
+
     fn blob_path(&self, hash: &str) -> PathBuf {
         self.dir.join(format!("{hash}.jdl"))
     }
@@ -256,6 +333,23 @@ fn write_atomic(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_from_the_blob_matches_the_in_memory_preview_bit_for_bit() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let cache = LayerCache::open(dir.path());
+        let hf = field(0.3);
+        cache.put("height", &hf).expect("put");
+        for lod in [0u8, 1, 3] {
+            let streamed = cache
+                .preview("height", lod)
+                .expect("preview")
+                .expect("some");
+            let loaded = jd_terrain::preview::preview_u16(&hf, lod);
+            assert_eq!(streamed, loaded, "lod {lod}");
+        }
+        assert!(cache.preview("missing", 1).expect("none").is_none());
+    }
 
     fn field(seed: f32) -> Heightfield {
         let mut hf = Heightfield::new(70, 50, 32, 4).expect("hf");
