@@ -165,8 +165,15 @@ impl<'a> Evaluator<'a> {
                     continue;
                 }
             };
-            if let Err(e) = def.check_params(&node.params) {
-                errs.push(e.detail("node", id.to_string()));
+            // Keyed parameters must be valid at every keyframe, not just where the timeline sits.
+            for t in std::iter::once(graph.time).chain(crate::model::key_times(&node.params)) {
+                if let Err(e) = def.check_params(&crate::model::resolve_keys(&node.params, t)) {
+                    errs.push(
+                        e.detail("node", id.to_string())
+                            .detail("time", t.to_string()),
+                    );
+                    break;
+                }
             }
             for (name, from) in inputs.get(id).into_iter().flatten() {
                 let Some(port) = def.input(name) else {
@@ -335,10 +342,13 @@ impl<'a> Evaluator<'a> {
             }
             (job.progress)(done, order.len(), &node.kind.0);
             let def = self.registry.get(&node.kind)?;
+            // Keyframes resolve at the graph's timeline position; the hash sees the resolved values,
+            // so every time position caches on its own.
+            let params = crate::model::resolve_keys(&node.params, graph.time);
             let mut inputs: NodeOutputs = BTreeMap::new();
             let mut hasher = blake3::Hasher::new();
             hasher.update(node.kind.0.as_bytes());
-            hasher.update(&serde_json::to_vec(&node.params)?);
+            hasher.update(&serde_json::to_vec(&params)?);
             hasher.update(&[node.bypass as u8, lod]);
             hasher.update(&lod_world_bytes);
             // Results computed inside a project may depend on its assets: never share them
@@ -382,7 +392,7 @@ impl<'a> Evaluator<'a> {
                     let outs = if node.bypass {
                         bypass(def, &inputs)
                     } else {
-                        def.evaluate(&ctx, &node.params, &inputs)
+                        def.evaluate(&ctx, &params, &inputs)
                     }
                     .map_err(|e| {
                         e.detail("node", id.to_string())

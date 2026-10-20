@@ -136,6 +136,8 @@ export type GraphAppendParamResult = {
   "undo_depth": number;
   /** Number of undone edits `graph.redo` can re-apply. */
   "redo_depth": number;
+  /** Timeline position 0..1 at which keyed parameters resolve (`graph.set_time`). */
+  "time"?: number;
 };
 
 export type GraphConnectRequest = {
@@ -158,6 +160,8 @@ export type GraphConnectResult = {
   "undo_depth": number;
   /** Number of undone edits `graph.redo` can re-apply. */
   "redo_depth": number;
+  /** Timeline position 0..1 at which keyed parameters resolve (`graph.set_time`). */
+  "time"?: number;
 };
 
 export type GraphDisconnectRequest = {
@@ -180,6 +184,8 @@ export type GraphDisconnectResult = {
   "undo_depth": number;
   /** Number of undone edits `graph.redo` can re-apply. */
   "redo_depth": number;
+  /** Timeline position 0..1 at which keyed parameters resolve (`graph.set_time`). */
+  "time"?: number;
 };
 
 export type GraphEvaluateRequest = {
@@ -270,6 +276,8 @@ export type GraphListResult = {
   "undo_depth": number;
   /** Number of undone edits `graph.redo` can re-apply. */
   "redo_depth": number;
+  /** Timeline position 0..1 at which keyed parameters resolve (`graph.set_time`). */
+  "time"?: number;
 };
 
 export type GraphMoveNodeRequest = {
@@ -288,6 +296,8 @@ export type GraphMoveNodeResult = {
   "undo_depth": number;
   /** Number of undone edits `graph.redo` can re-apply. */
   "redo_depth": number;
+  /** Timeline position 0..1 at which keyed parameters resolve (`graph.set_time`). */
+  "time"?: number;
 };
 
 export type GraphRedoRequest = Record<string, unknown>;
@@ -301,6 +311,8 @@ export type GraphRedoResult = {
   "undo_depth": number;
   /** Number of undone edits `graph.redo` can re-apply. */
   "redo_depth": number;
+  /** Timeline position 0..1 at which keyed parameters resolve (`graph.set_time`). */
+  "time"?: number;
 };
 
 export type GraphRemoveNodeRequest = {
@@ -319,6 +331,8 @@ export type GraphRemoveNodeResult = {
   "undo_depth": number;
   /** Number of undone edits `graph.redo` can re-apply. */
   "redo_depth": number;
+  /** Timeline position 0..1 at which keyed parameters resolve (`graph.set_time`). */
+  "time"?: number;
 };
 
 export type GraphSetBypassRequest = {
@@ -337,6 +351,8 @@ export type GraphSetBypassResult = {
   "undo_depth": number;
   /** Number of undone edits `graph.redo` can re-apply. */
   "redo_depth": number;
+  /** Timeline position 0..1 at which keyed parameters resolve (`graph.set_time`). */
+  "time"?: number;
 };
 
 export type GraphSetParamRequest = {
@@ -357,6 +373,26 @@ export type GraphSetParamResult = {
   "undo_depth": number;
   /** Number of undone edits `graph.redo` can re-apply. */
   "redo_depth": number;
+  /** Timeline position 0..1 at which keyed parameters resolve (`graph.set_time`). */
+  "time"?: number;
+};
+
+export type GraphSetTimeRequest = {
+  /** Timeline position, 0..1. */
+  "time": number;
+};
+
+export type GraphSetTimeResult = {
+  /** Nodes. */
+  "nodes": NodeView[];
+  /** Edges. */
+  "edges": Edge[];
+  /** Number of edits `graph.undo` can take back. */
+  "undo_depth": number;
+  /** Number of undone edits `graph.redo` can re-apply. */
+  "redo_depth": number;
+  /** Timeline position 0..1 at which keyed parameters resolve (`graph.set_time`). */
+  "time"?: number;
 };
 
 export type GraphUndoRequest = Record<string, unknown>;
@@ -370,6 +406,8 @@ export type GraphUndoResult = {
   "undo_depth": number;
   /** Number of undone edits `graph.redo` can re-apply. */
   "redo_depth": number;
+  /** Timeline position 0..1 at which keyed parameters resolve (`graph.set_time`). */
+  "time"?: number;
 };
 
 export type JobsCancelRequest = {
@@ -1476,6 +1514,8 @@ export interface JdOps {
   "graph.set_bypass": { request: GraphSetBypassRequest; result: GraphSetBypassResult };
   /** Set (or null to reset) a node parameter (journaled; validated against the kind's schema) */
   "graph.set_param": { request: GraphSetParamRequest; result: GraphSetParamResult };
+  /** Move the timeline (0..1, journaled): parameters written as `{"keys": [[t, v], …]}` interpolate here — numbers linearly, anything else stepwise — so erosion steps, sea level or wind can be scrubbed and keyframed */
+  "graph.set_time": { request: GraphSetTimeRequest; result: GraphSetTimeResult };
   /** Take back the last graph edit (journaled as graph.restore) */
   "graph.undo": { request: GraphUndoRequest; result: GraphUndoResult };
   /** Request cancellation of a running job; it stops at the next node or kernel iteration with E_CANCELLED */

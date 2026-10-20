@@ -96,9 +96,88 @@ pub struct Graph {
     /// Edges.
     #[serde(default)]
     pub edges: Vec<Edge>,
+    /// Timeline position, 0..1: keyed parameters (`{"keys": [[t, v], …]}`) resolve here.
+    #[serde(default)]
+    pub time: f32,
     /// Preserved unknown keys (forward compatibility).
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
+}
+
+/// The keyframes of a parameter value written as `{"keys": [[t, v], …]}` — `None` for a plain value.
+pub fn keyed(v: &Value) -> Option<&Vec<Value>> {
+    v.as_object()
+        .filter(|o| o.len() == 1)
+        .and_then(|o| o.get("keys"))
+        .and_then(Value::as_array)
+}
+
+fn key_pairs(keys: &[Value]) -> Vec<(f32, &Value)> {
+    let mut pairs: Vec<(f32, &Value)> = keys
+        .iter()
+        .filter_map(|k| {
+            let a = k.as_array()?;
+            Some((a.first()?.as_f64()? as f32, a.get(1)?))
+        })
+        .collect();
+    pairs.sort_by(|a, b| a.0.total_cmp(&b.0));
+    pairs
+}
+
+/// Resolve a keyed value at `time`: numbers interpolate linearly between the neighbouring keys
+/// (clamped outside the first and last), anything else steps to the last key at or before `time`.
+pub fn resolve_value(v: &Value, time: f32) -> Value {
+    let Some(keys) = keyed(v) else {
+        return v.clone();
+    };
+    let pairs = key_pairs(keys);
+    let (Some(first), Some(last)) = (pairs.first(), pairs.last()) else {
+        return Value::Null;
+    };
+    if time <= first.0 {
+        return first.1.clone();
+    }
+    if time >= last.0 {
+        return last.1.clone();
+    }
+    let i = pairs
+        .iter()
+        .position(|(t, _)| *t > time)
+        .unwrap_or(pairs.len() - 1);
+    let (a, b) = (&pairs[i - 1], &pairs[i]);
+    match (a.1.as_f64(), b.1.as_f64()) {
+        (Some(x), Some(y)) if b.0 > a.0 => {
+            let f = ((time - a.0) / (b.0 - a.0)) as f64;
+            let v = x + (y - x) * f;
+            // Keep integers integral so `u32` parameters still deserialise.
+            if a.1.is_i64() && b.1.is_i64() {
+                Value::from(v.round() as i64)
+            } else {
+                Value::from(v)
+            }
+        }
+        _ => a.1.clone(),
+    }
+}
+
+/// The parameters of a node with every keyed value resolved at `time`.
+pub fn resolve_keys(params: &Map<String, Value>, time: f32) -> Map<String, Value> {
+    params
+        .iter()
+        .map(|(k, v)| (k.clone(), resolve_value(v, time)))
+        .collect()
+}
+
+/// Every key time used by a node's keyed parameters (for validating each keyframe).
+pub fn key_times(params: &Map<String, Value>) -> Vec<f32> {
+    let mut times: Vec<f32> = params
+        .values()
+        .filter_map(keyed)
+        .flat_map(|keys| key_pairs(keys).into_iter().map(|(t, _)| t))
+        .collect();
+    times.sort_by(f32::total_cmp);
+    times.dedup();
+    times
 }
 
 impl Default for Graph {
@@ -107,6 +186,7 @@ impl Default for Graph {
             schema_version: SchemaVersion::CURRENT,
             nodes: BTreeMap::new(),
             edges: Vec::new(),
+            time: 0.0,
             extra: BTreeMap::new(),
         }
     }
@@ -190,6 +270,36 @@ impl Graph {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keyed_values_interpolate_numbers_step_everything_else_and_clamp() {
+        let keys = serde_json::json!({ "keys": [[0.0, 10], [1.0, 110]] });
+        assert_eq!(resolve_value(&keys, 0.5), serde_json::json!(60));
+        assert_eq!(resolve_value(&keys, -1.0), serde_json::json!(10));
+        assert_eq!(resolve_value(&keys, 2.0), serde_json::json!(110));
+        let floats = serde_json::json!({ "keys": [[0.25, 1.0], [0.75, 2.0]] });
+        assert_eq!(resolve_value(&floats, 0.5), serde_json::json!(1.5));
+        let steps = serde_json::json!({ "keys": [[0.0, "d8"], [0.5, "mfd"]] });
+        assert_eq!(resolve_value(&steps, 0.49), serde_json::json!("d8"));
+        assert_eq!(resolve_value(&steps, 0.5), serde_json::json!("mfd"));
+        assert_eq!(
+            resolve_value(&serde_json::json!(7), 0.3),
+            serde_json::json!(7)
+        );
+        assert_eq!(
+            resolve_value(&serde_json::json!({ "keys": [] }), 0.3),
+            Value::Null
+        );
+        let mut params = Map::new();
+        params.insert("iterations".into(), keys.clone());
+        params.insert("method".into(), steps);
+        params.insert("rate".into(), serde_json::json!(0.2));
+        let at = resolve_keys(&params, 0.75);
+        assert_eq!(at["iterations"], serde_json::json!(85));
+        assert_eq!(at["method"], serde_json::json!("mfd"));
+        assert_eq!(at["rate"], serde_json::json!(0.2));
+        assert_eq!(key_times(&params), vec![0.0, 0.5, 1.0]);
+    }
 
     fn node(kind: &str) -> Node {
         Node {

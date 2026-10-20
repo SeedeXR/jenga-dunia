@@ -896,6 +896,17 @@ pub mod graph {
         pub undo_depth: usize,
         /// Number of undone edits `graph.redo` can re-apply.
         pub redo_depth: usize,
+        /// Timeline position 0..1 at which keyed parameters resolve (`graph.set_time`).
+        #[serde(default)]
+        pub time: f32,
+    }
+
+    /// `graph.set_time` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct SetTime {
+        /// Timeline position, 0..1.
+        pub time: f32,
     }
 
     /// `graph.evaluate` result.
@@ -955,6 +966,7 @@ pub mod graph {
             edges: p.graph.edges.clone(),
             undo_depth,
             redo_depth,
+            time: p.graph.time,
         }
     }
 
@@ -1079,6 +1091,13 @@ pub mod graph {
                 } else {
                     node.params.insert(s.key, s.value);
                 }
+            }
+            "graph.set_time" => {
+                let s: SetTime = serde_json::from_value(params.clone())?;
+                if !(0.0..=1.0).contains(&s.time) {
+                    return Err(JdError::invalid("time", "must be within 0..=1"));
+                }
+                g.time = s.time;
             }
             "graph.append_param" => {
                 let a: AppendParam = serde_json::from_value(params.clone())?;
@@ -1299,6 +1318,18 @@ pub mod graph {
                 let params = serde_json::json!({ "id": s.id, "key": s.key, "value": s.value });
                 ctx.with_project(|p| {
                     builtin::mutate(p, "graph.set_param", params)?;
+                    Ok((view(p), Vec::new()))
+                })
+            },
+        );
+        r.register::<SetTime, GraphView, _>(
+            "graph.set_time",
+            "Move the timeline (0..1, journaled): parameters written as `{\"keys\": [[t, v], …]}` interpolate here — numbers linearly, anything else stepwise — so erosion steps, sea level or wind can be scrubbed and keyframed",
+            Scope::ProjectWrite,
+            |ctx, s| {
+                let params = serde_json::json!({ "time": s.time });
+                ctx.with_project(|p| {
+                    builtin::mutate(p, "graph.set_time", params)?;
                     Ok((view(p), Vec::new()))
                 })
             },
@@ -2025,6 +2056,121 @@ pub mod graph {
                 vec!["project.set_settings"],
                 "the refused edit was never journaled"
             );
+        }
+
+        #[test]
+        fn timeline_keys_resolve_at_the_journaled_time_and_validate_at_every_key() {
+            let reg = Registry::with_builtins();
+            let dir = tempfile::tempdir().expect("tmp");
+            let path = dir.path().join("t.jdproj");
+            let ctx = Context::default();
+            let world = WorldSettings {
+                resolution_px: [64, 64],
+                extent_m: [640.0, 640.0],
+                tile_size: 64,
+                halo: 4,
+                ..Default::default()
+            };
+            assert_eq!(
+                call(
+                    &reg,
+                    &ctx,
+                    "project.create",
+                    serde_json::json!({ "path": path, "name": "T", "world": world })
+                )
+                .status,
+                crate::envelope::Status::Ok
+            );
+            // Thermal erosion whose step count is keyed 1 → 200 over the timeline, spliced in front of the output.
+            let noise = jd_graph::nodes::STARTER_NOISE_ID.to_string();
+            let out = jd_graph::nodes::STARTER_OUTPUT_ID.to_string();
+            let th = call(
+                &reg,
+                &ctx,
+                "graph.add_node",
+                serde_json::json!({ "kind": "jd.erosion.thermal@1", "params": { "iterations": { "keys": [[0.0, 1], [1.0, 200]] }, "talus_deg": 30.0 } }),
+            )
+            .result
+            .expect("thermal")["id"]
+                .as_str()
+                .expect("id")
+                .to_owned();
+            assert_eq!(
+                call(
+                    &reg,
+                    &ctx,
+                    "graph.disconnect",
+                    serde_json::json!({ "from": noise, "to": out, "to_port": "in" })
+                )
+                .status,
+                crate::envelope::Status::Ok
+            );
+            for (from, to) in [(noise.as_str(), th.as_str()), (th.as_str(), out.as_str())] {
+                let r = call(
+                    &reg,
+                    &ctx,
+                    "graph.connect",
+                    serde_json::json!({ "from": from, "to": to, "to_port": "in" }),
+                );
+                assert_eq!(r.status, crate::envelope::Status::Ok, "{r:?}");
+            }
+            let at = |t: f64| {
+                let r = call(
+                    &reg,
+                    &ctx,
+                    "graph.set_time",
+                    serde_json::json!({ "time": t }),
+                );
+                assert_eq!(r.result.expect("view")["time"].as_f64(), Some(t));
+                let r = call(&reg, &ctx, "graph.evaluate", serde_json::json!({}));
+                assert_eq!(r.status, crate::envelope::Status::Ok, "{r:?}");
+                let st = call(
+                    &reg,
+                    &ctx,
+                    "terrain.stats",
+                    serde_json::json!({ "layer": "height" }),
+                );
+                st.result.expect("stats")["content_hash"]
+                    .as_str()
+                    .expect("hash")
+                    .to_owned()
+            };
+            let (h0, h_mid, h1) = (at(0.0), at(0.5), at(1.0));
+            assert_ne!(h0, h1, "1 step and 200 steps differ");
+            assert_ne!(h0, h_mid);
+            assert_ne!(h_mid, h1);
+            assert_eq!(
+                at(0.5),
+                h_mid,
+                "the same time evaluates to the same hash (cached)"
+            );
+            // A keyframe outside the schema is refused before journaling, even though time 0 is fine.
+            let r = call(
+                &reg,
+                &ctx,
+                "graph.set_param",
+                serde_json::json!({ "id": th, "key": "iterations", "value": { "keys": [[0.0, 10], [1.0, "many"]] } }),
+            );
+            assert_eq!(
+                r.error.as_ref().map(|e| e.code),
+                Some(ErrorCode::E_INPUT_INVALID),
+                "{r:?}"
+            );
+            assert_eq!(
+                call(
+                    &reg,
+                    &ctx,
+                    "graph.set_time",
+                    serde_json::json!({ "time": 1.5 })
+                )
+                .error
+                .map(|e| e.code),
+                Some(ErrorCode::E_INPUT_INVALID)
+            );
+            // Time is journaled: undo takes the last successful move (1.0 → 0.5) back to 1.0; the
+            // refused edits above were never journaled.
+            let r = call(&reg, &ctx, "graph.undo", serde_json::json!({}));
+            assert_eq!(r.result.expect("undo")["time"].as_f64(), Some(1.0));
         }
 
         #[test]

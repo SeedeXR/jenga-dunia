@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GraphView",
+  "description": "`graph.list` result.",
+  "type": "object",
+  "properties": {
+    "nodes": {
+      "description": "Nodes.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/NodeView"
+      }
+    },
+    "edges": {
+      "description": "Edges.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Edge"
+      }
+    },
+    "undo_depth": {
+      "description": "Number of edits `graph.undo` can take back.",
+      "type": "integer",
+      "format": "uint",
+      "minimum": 0
+    },
+    "redo_depth": {
+      "description": "Number of undone edits `graph.redo` can re-apply.",
+      "type": "integer",
+      "format": "uint",
+      "minimum": 0
+    },
+    "time": {
+      "description": "Timeline position 0..1 at which keyed parameters resolve (`graph.set_time`).",
+      "type": "number",
+      "format": "float",
+      "default": 0.0
+    }
+  },
+  "required": [
+    "nodes",
+    "edges",
+    "undo_depth",
+    "redo_depth"
+  ],
+  "$defs": {
+    "NodeView": {
+      "description": "Node as reported by `graph.list`.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Id.",
+          "$ref": "#/$defs/NodeId"
+        },
+        "kind": {
+          "description": "Kind `name@version`.",
+          "$ref": "#/$defs/NodeKind"
+        },
+        "params": {
+          "description": "Parameters, validated against the kind's schema on every mutation.",
+          "type": "object",
+          "additionalProperties": true,
+          "default": {}
+        },
+        "bypass": {
+          "description": "Bypassed nodes pass their first input through unchanged.",
+          "type": "boolean",
+          "default": false
+        },
+        "ui": {
+          "description": "Editor metadata.",
+          "$ref": "#/$defs/UiMeta",
+          "default": {
+            "position": [
+              0.0,
+              0.0
+            ]
+          }
+        }
+      },
+      "required": [
+        "id",
+        "kind"
+      ]
+    },
+    "NodeId": {
+      "description": "Identifies a graph node.",
+      "type": "string"
+    },
+    "NodeKind": {
+      "description": "A node kind identifier `namespace.name@version`, e.g. `jd.noise.fbm@1`.",
+      "type": "string"
+    },
+    "UiMeta": {
+      "description": "Editor-only metadata.",
+      "type": "object",
+      "properties": {
+        "position": {
+          "description": "Canvas position.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "default": [
+            0.0,
+            0.0
+          ]
+        },
+        "label": {
+          "description": "Display label override.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "Edge": {
+      "description": "A directed connection from an output port to an input port.",
+      "type": "object",
+      "properties": {
+        "from": {
+          "description": "Source output.",
+          "$ref": "#/$defs/PortRef"
+        },
+        "to": {
+          "description": "Destination input.",
+          "$ref": "#/$defs/PortRef"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ]
+    },
+    "PortRef": {
+      "description": "One end of an edge.",
+      "type": "object",
+      "properties": {
+        "node": {
+          "description": "Node id.",
+          "$ref": "#/$defs/NodeId"
+        },
+        "port": {
+          "description": "Port name.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node",
+        "port"
+      ]
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SetTime",
+  "description": "`graph.set_time` params.",
+  "type": "object",
+  "properties": {
+    "time": {
+      "description": "Timeline position, 0..1.",
+      "type": "number",
+      "format": "float"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "time"
+  ]
+}

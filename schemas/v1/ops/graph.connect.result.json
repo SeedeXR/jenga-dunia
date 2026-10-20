@@ -29,6 +29,12 @@
       "type": "integer",
       "format": "uint",
       "minimum": 0
+    },
+    "time": {
+      "description": "Timeline position 0..1 at which keyed parameters resolve (`graph.set_time`).",
+      "type": "number",
+      "format": "float",
+      "default": 0.0
     }
   },
   "required": [

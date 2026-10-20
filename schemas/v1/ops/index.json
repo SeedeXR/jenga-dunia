@@ -75,6 +75,11 @@
     "scope": "project-write"
   },
   {
+    "id": "graph.set_time",
+    "description": "Move the timeline (0..1, journaled): parameters written as `{\"keys\": [[t, v], …]}` interpolate here — numbers linearly, anything else stepwise — so erosion steps, sea level or wind can be scrubbed and keyframed",
+    "scope": "project-write"
+  },
+  {
     "id": "graph.undo",
     "description": "Take back the last graph edit (journaled as graph.restore)",
     "scope": "project-write"

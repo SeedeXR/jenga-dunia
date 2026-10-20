@@ -425,6 +425,20 @@ after   min 42.548  max 412.711  mean 230.109      (+0.74 m averaged over the wo
 
 `jd.ocean.bathymetry@1` takes the terrain and a `seabed` class map and raises every **sand** (1) or **mud** (3) cell towards the local mean height over `smooth_m` (a summed-area box filter, O(N)), never lowering a cell, never by more than `max_fill_m`, and never above `level_m` — sediment settles into hollows and levels the shelf, it does not build above the water. Rock (2), reef (4) and land keep the shape erosion gave them, so the chain coastal → seabed → bathymetry turns a noisy flooded landscape into a floor with smooth sediment plains between rock outcrops. `strength` (0..1) scales the fill. Not modelled: transport along the slope, sorting by grain size, a sediment budget.
 
+### Timeline: keyframed parameters
+
+```
+$ jd op graph.set_param --project Mesa.jdproj --save --params '{"id":"<thermal id>","key":"iterations","value":{"keys":[[0,1],[1,300]]}}'
+$ jd op graph.set_time  --project Mesa.jdproj --save --params '{"time":0.25}'      # journaled; graph.list reports `time`
+$ jd --json op graph.evaluate --project Mesa.jdproj
+time 0     thermal   39 ms  (1 step)     height hash b5ace71e…
+time 0.25  thermal  309 ms  (76 steps)   height hash 85cb28e0…
+time 0.5   thermal  585 ms  (150 steps)  height hash e3159c0e…
+time 1     thermal 1142 ms  (300 steps)  height hash c3b5eeec…
+```
+
+Any node parameter can be written as `{"keys": [[t, value], …]}` with `t` in 0..1: the graph carries a `time` (journaled by `graph.set_time`, so it is undoable and saved with the project) and every keyed parameter resolves there before the node runs — numbers interpolate linearly between the neighbouring keys (integers stay integral, values clamp beyond the first and last key), strings and other values step to the last key at or before `time`. The content hash sees the resolved values, so each time position caches on its own and scrubbing back is free. Keyframes are validated at every key when they are set (`graph.set_param` refuses `{"keys": [[0, 10], [1, "many"]]}` with `E_INPUT_INVALID`), and `time` outside 0..1 is refused. This is VUE's animated heightfield terrains as a graph feature (`docs/research/vue-features.md`): erosion steps, sea level, wind speed or snow line can all be keyed, and a sequence of `set_time` + evaluate + export renders the frames. Not yet: a desktop scrubber and keyframe editor, easing curves, exporting a frame sequence in one call.
+
 ### Strata: mesas, buttes and stepped canyon walls
 
 ```
