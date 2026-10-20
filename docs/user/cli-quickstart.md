@@ -791,6 +791,17 @@ loss:
 
 Every masked layer becomes a weightmap in the engine's row order, `materials.json` carries the look per layer, and the README repeats the loss list under *Lost in translation* — the same facts in the result for an agent and on disk for a person. Nothing is silently dropped.
 
+**Verified in Unity.** `scripts/unity-import-check.sh <profile dir>` rebuilds the Terrain in a scratch project headlessly (`integrations/unity/Editor/JengaDuniaImport.cs`: Import Raw conventions, weightmaps → terrain layers tinted from `materials.json`, `trees_unity.json` → tree instances) and prints Unity's own report. On this machine, Unity 6000.4.8f1:
+
+```
+$ scripts/unity-import-check.sh Acceptance.jdproj/exports/unity          # extent from the sidecar's spacing_m (10 m × 512)
+{"unity":"6000.4.8f1","heightmap_resolution":513,"source_px":512,"terrain_size":[5120,1232.5,5120],
+ "sampled_height_min_max":[76.9,1227.5],"alphamap_layers":3,"layers":["weight_mask_forest.png","weight_mask_rock.png","weight_snow.png"],"trees":291,
+ "warnings":["source 512×512 is not a 2ⁿ+1 square: TerrainData resolution 513, the extra row/column is left at the edge value"],"ok":true}
+```
+
+The acceptance scenario runs this when a Unity editor is found and marks its item 13 from the report; without one it stays PARTIAL. Unreal has no headless importer here yet (the Epic launcher is installed, no engine build).
+
 `terrain.export_profile` writes one folder an engine importer can take as-is: **Unreal** gets a 16-bit PNG heightmap with row 0 = north, one 8-bit grayscale weightmap per mask layer at the same resolution, and a README with the Landscape numbers computed from the data — Z scale = (max − min) × 100 / 512 (201.771 here for 52…1085 m) and the Z location that puts mid-grey at the mid height; **Unity** gets `heightmap.r16` (16-bit little-endian, row 0 = south, so *Flip Vertically: off*, Byte Order *Windows*), the weightmaps, and the Terrain Height (1033.07 m) plus the y offset (51.98 m). Sizes an engine does not like are reported as `W_ENGINE_SIZE` (Unity wants 2ⁿ+1 squares, Unreal 1009/2017/4033/8129 — use the world presets). The engine-side steps follow the Unity 6 manual and the Unreal 5 Landscape guide but are **UNVERIFIED** until someone imports once; the README says so.
 
 ### Bring in a real DEM or engine heightmap

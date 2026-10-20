@@ -148,6 +148,9 @@ pub struct Sidecar {
     pub units: String,
     /// Generator.
     pub generator: String,
+    /// Sample spacing [x, y] in metres when the exporter knew the world (extent = size_px × spacing_m).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spacing_m: Option<[f64; 2]>,
 }
 
 fn ensure_parent(path: &Path) -> JdResult<()> {
@@ -190,6 +193,7 @@ pub fn export_heightmap_geo(
     ensure_parent(path)?;
     let stats = hf.stats();
     let format = opts.format;
+    let spacing_m = geo.map(|g| g.spacing); // every format's sidecar carries the spacing; only TIFF gets tags
     let geo = geo.filter(|_| opts.georeference && format == HeightmapFormat::Tiff32);
     if let Some(g) = geo
         && !(g.spacing[0] > 0.0 && g.spacing[1] > 0.0 && g.origin.iter().all(|v| v.is_finite()))
@@ -308,6 +312,7 @@ pub fn export_heightmap_geo(
         byte_order: "little-endian".into(),
         units: "metres; pixel spacing per project world settings".into(),
         generator: format!("jenga-dunia {}", env!("CARGO_PKG_VERSION")),
+        spacing_m,
     };
     fs::write(&sidecar_path, serde_json::to_vec_pretty(&sidecar)?)?;
     Ok(ExportReport {

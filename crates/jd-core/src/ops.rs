@@ -4060,7 +4060,11 @@ pub mod terrain {
                     .enumerate()
                     .map(|(i, (m, f))| jd_terrain::ProfileMaterial { name: m.mask.clone().unwrap_or_else(|| format!("material_{i}")), mask: f.as_ref(), albedo: m.albedo, roughness: m.roughness })
                     .collect();
-                let report = jd_terrain::export_profile_with(p.profile, &height, &refs, &stack, &dir, p.range_m)?;
+                let geo = ctx.with_project(|proj| {
+                    let w = &proj.doc.world;
+                    Ok(jd_terrain::GeoRef { origin: w.origin, spacing: w.spacing_m(), crs: w.crs.clone() })
+                })?;
+                let report = jd_terrain::export_profile_with(p.profile, &height, &refs, &stack, &dir, p.range_m, Some(&geo))?;
                 let warnings = report.notes.iter().map(|n| Warning::new("W_ENGINE_SIZE", n.clone())).collect();
                 Ok((report, warnings))
             },

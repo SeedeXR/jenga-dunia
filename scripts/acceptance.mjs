@@ -9,7 +9,7 @@
 //   --quick   256² world and shorter simulations (CI); default 512².
 //   --out     working directory (default: a temp dir); the project and exports land there.
 //   --report  where to write the Markdown report (default docs/spec/acceptance-report.md).
-import { spawnSync, spawn } from "node:child_process";
+import { execFileSync, spawnSync, spawn } from "node:child_process";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, statSync, writeFileSync, appendFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -186,7 +186,19 @@ const skyBake = op("sky.bake", { sun_elevation_deg: 30, sun_azimuth_deg: 140, tu
 mark(5, "VERIFIED", `sky.bake: Preetham daylight HDRI ${skyBake.px.join("×")} EXR + preview, zenith rgb ${skyBake.zenith_rgb.map((v) => v.toFixed(3)).join("/")}; desktop sun + turbidity drive the same sky on the dome`);
 for (const profile of ["unity", "unreal"]) {
   const r = op("terrain.export_profile", { profile, dir: profile, layer: "height", masks: ["mask_forest", "mask_grassland", "mask_rock", "snow"] }, false);
-  mark(13, "PARTIAL", `${profile} profile written: ${(r.files ?? []).length || "heightmap + 4 weightmaps + README"} files (engine-side import not run on this machine)`);
+  if (profile === "unity" && existsSync("scripts/unity-import-check.sh") && (process.env.UNITY || existsSync("/Applications/Unity/Hub/Editor"))) {
+    // Engine-side verification: rebuild the Terrain in a scratch Unity project headlessly and read Unity's own report.
+    try {
+      const out = execFileSync("bash", ["scripts/unity-import-check.sh", path.join(proj, "exports", "unity")], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 900_000 });
+      const rep = JSON.parse(readFileSync(path.join(proj, "exports", "unity", "jd-unity-import.json"), "utf8"));
+      mark(13, rep.ok ? "VERIFIED" : "FAILED", `Unity ${rep.unity} headless import of the unity profile: TerrainData ${rep.heightmap_resolution}² from a ${rep.source_px}² r16, size ${rep.terrain_size?.map((v) => v.toFixed(0)).join("×")} m, sampled height ${rep.sampled_height_min_max?.map((v) => v.toFixed(1)).join("…")} m, ${rep.alphamap_layers} terrain layers from the weightmaps${rep.trees ? `, ${rep.trees} trees` : ""}${rep.warnings?.length ? `; notes: ${rep.warnings.join(" | ")}` : ""}`);
+      void out;
+    } catch (e) {
+      mark(13, "FAILED", `unity profile: headless import did not complete: ${String(e).slice(0, 300)}`);
+    }
+  } else {
+    mark(13, "PARTIAL", `${profile} profile written: ${(r.files ?? []).length || "heightmap + 4 weightmaps + README"} files (engine-side import not run on this machine)`);
+  }
 }
 // ── 6, 8, 9, 10. Meshes: full + LODs, GLB, USD, FBX; scatter instances ─────────────────────────
 const meshes = [];

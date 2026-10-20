@@ -12,7 +12,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::Heightfield;
-use crate::export::{ExportOptions, HeightmapFormat, export_heightmap};
+use crate::export::{ExportOptions, HeightmapFormat};
 use jd_types::{JdError, JdResult};
 use serde::{Deserialize, Serialize};
 
@@ -88,12 +88,13 @@ pub fn export_profile(
     dir: &Path,
     range_m: Option<[f32; 2]>,
 ) -> JdResult<ProfileReport> {
-    export_profile_with(profile, height, masks, &[], dir, range_m)
+    export_profile_with(profile, height, masks, &[], dir, range_m, None)
 }
 
 /// [`export_profile`] with the material stack translated for the engine: every masked layer
 /// becomes a weightmap, `materials.json` carries the look per layer, and `loss` says what the
 /// engine's own material model cannot take from the stack (the translation layer's report).
+#[allow(clippy::too_many_arguments)]
 pub fn export_profile_with(
     profile: EngineProfile,
     height: &Heightfield,
@@ -101,6 +102,7 @@ pub fn export_profile_with(
     materials: &[ProfileMaterial<'_>],
     dir: &Path,
     range_m: Option<[f32; 2]>,
+    geo: Option<&crate::GeoRef>,
 ) -> JdResult<ProfileReport> {
     height.validate_finite()?;
     let safe = |name: &str| {
@@ -158,7 +160,7 @@ pub fn export_profile_with(
             ("heightmap.png", HeightmapFormat::Png16, Some(true))
         }
     };
-    let report = export_heightmap(
+    let report = crate::export_heightmap_geo(
         height,
         &dir.join(hm_name),
         &ExportOptions {
@@ -167,6 +169,7 @@ pub fn export_profile_with(
             range_m,
             georeference: true,
         },
+        geo,
     )?;
     let [min_m, max_m] = report.range_m;
     let range = max_m - min_m;
@@ -292,7 +295,7 @@ fn readme(
             if !layers.is_empty() {
                 out.push_str(&format!("5. Splat layers: {} are 8-bit weights (row 0 = north); load them with `TerrainData.SetAlphamaps` (float[y, x, layer], 0..1 — normalise so each texel's weights sum to 1).\n", layers.join(", ")));
             }
-            out.push_str("\nStatus: these steps follow the Unity 6 manual (Import Raw, TerrainData API); UNVERIFIED on a live Unity until someone imports once — please report back.\n");
+            out.push_str("\nStatus: these steps follow the Unity 6 manual (Import Raw, TerrainData API). The repository's headless importer (`integrations/unity/Editor/JengaDuniaImport.cs`, run by `scripts/unity-import-check.sh`) rebuilds the Terrain from this directory on Unity 6000.4 and writes `jd-unity-import.json` with what Unity got.\n");
         }
         EngineProfile::Unreal => {
             out.push_str(&format!("# Unreal Landscape import (Jenga Dunia)\n\nHeightmap: `heightmap.png` — {w}×{h}, 16-bit grayscale PNG, row 0 = north.\n\n"));
@@ -346,6 +349,7 @@ mod tests {
             &stack,
             &dir.path().join("u"),
             None,
+            None,
         )
         .expect("unity");
         assert!(
@@ -384,7 +388,8 @@ mod tests {
                 &[],
                 &bad,
                 &dir.path().join("b"),
-                None
+                None,
+                None,
             )
             .is_err()
         );
@@ -431,7 +436,7 @@ mod tests {
         assert!(
             readme.contains("Flip Vertically: off")
                 && readme.contains("352.00 m")
-                && readme.contains("UNVERIFIED")
+                && readme.contains("unity-import-check")
         );
         let wm = image::open(dir.path().join("unity/weight_forest.png"))
             .expect("png")
