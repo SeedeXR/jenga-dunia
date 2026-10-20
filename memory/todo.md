@@ -53,7 +53,8 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [~] Thermal ✔ (CPU Jacobi, `jd.erosion.thermal@1`, mass-conserving; GPU/tile-local ☐) · hydraulic (grid/virtual pipes) ✔ (`jd.erosion.hydraulic@1`, CPU, closed boundary, concentration cap ✔; drains/layers/GPU ☐) · hydraulic (particle/droplet) ✔ (`jd.erosion.droplet@1`, Beyer, deterministic, 1024² × 1.5 M ≈ 4.6 s release) · stream-power ✔ (`jd.erosion.stream_power@1`, implicit, D8/D∞/MFD area, uplift; 2048² × 20 ≈ 4 s release) · wind ✔ (`jd.erosion.aeolian@1`, Werner slab model, mass-exact, optional sand mask; bimodal winds/vegetation ☐) · coastal ✔ (`jd.erosion.coastal@1`: exposure-driven cliff retreat + platform/beach deposition, mass-exact; drift/fetch ☐) · snow cover mask ✔ (`jd.climate.snow@1`: snow line, slope retention, sun aspect, wind scour; snow accumulation/melt sim ☐)
 - [~] Hydrology: D8 flow accumulation ✔ (`jd.analysis.flow@1`), priority-flood fill ✔ (`jd.hydrology.fill@1`, outputs drainable field + `lakes`), rivers ✔ (`jd.hydrology.rivers@1`: fill → D8 accumulation → smoothstep incision, `rivers` mask); TWI ✔ (`jd.hydrology.wetness@1`); D∞ ✔ + MFD ✔ (`method: d8|dinf|mfd` on flow + rivers nodes; wetness D8-only); sea level ✔ (`jd.hydrology.sea_level@1`: border-connected `ocean` + `depth`); viewport sea plane ✔ (follows the sea_level node); hydrology-first generation ☐
 - [~] Biomes ✔ (`jd.biome.classify@1` rules → class map, `jd.mask.class@1`, desktop rules table editor ✔) · scatter ✔ (`terrain.scatter` from any 0..1 mask → CSV/JSON instances, deterministic) · engine instance formats: glTF `EXT_mesh_gpu_instancing` ✔ (`terrain.scatter … .glb`, Blender-verified) · desktop Scatter panel + viewport instances ✔ · Unity/Unreal instance formats ☐
-- [ ] Weather state, timeline, water/ocean viewport
+- [ ] Weather state, timeline
+- [ ] **Ocean water (user request 2026-10-20)**: (1) water clarity on `jd.hydrology.sea_level@1` — visibility depth + tint, Beer–Lambert per channel (crystal clear → murky), viewport + bakes; (2) seabed classifier node `jd.biome.seabed@1` — sand / rock / mud / reef masks from depth, slope, wave exposure, river sediment; (3) waves — wind speed, fetch, direction → Gerstner sum in the viewport (big/small waves), breaking foam from the coastal `shore` mask, baked wave displacement/normal/foam maps for export; (4) bathymetry — offshore sediment smoothing + rock outcrop masks below the waterline
 - [ ] Material graph + baking
 
 ## Phase 4 — Interoperability
@@ -70,7 +71,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [ ] GPU kernels + parity tests
 - [ ] `jd-geo` (DEM/OSM/contours with attribution) and `jd-vision` (MoGe-2, DA3 via ONNX; licence gate)
 - [~] Fuzzing: FBX reader hardened (nesting ≤ 64, arrays ≤ 1 GiB, bounded zlib) + proptest mutation test ✔ · cargo-fuzz targets / other parsers ☐ · signed releases ✗ (no Apple developer account) · diagnostic bundles ☐
-- [ ] Acceptance scenario §20 green
+- [~] Acceptance scenario §20: `scripts/acceptance.mjs` builds the demo project (mountains/valleys/river/coast, stream power + rivers + coastal, 6 biome rules + masks + snow, PBR bakes, LOD chain, GLB/USD/FBX/engine profiles, validators, Blender import, MCP replay, cancel, recovery) and writes `docs/spec/acceptance-report.md`; CI runs the quick world. 14 VERIFIED · PARTIAL: 4 (user material graph), 5 (weather), 18 (per-project logs) · UNVERIFIED: 13 (Unity/Unreal/browser viewer)
 
 ## Deferred (with reasons)
 - OpenVDB adapter — no justified volumetric use case before the SDF/voxel module exists (brief §9.1 "where justified").

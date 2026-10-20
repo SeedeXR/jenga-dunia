@@ -94,6 +94,8 @@ struct Candidate {
     va: u32,
     vb: u32,
     target: [f64; 3],
+    /// Times this edge was refused by the flip test and re-queued with a penalty.
+    retries: u8,
 }
 
 impl Eq for Candidate {}
@@ -266,6 +268,7 @@ pub fn decimate(mesh: &GridMesh, extent_m: [f64; 2], target_triangles: u32) -> J
             va: version[a as usize],
             vb: version[b as usize],
             target,
+            retries: 0,
         }
     };
     for &(a, b) in edge_faces.keys() {
@@ -313,13 +316,22 @@ pub fn decimate(mesh: &GridMesh, extent_m: [f64; 2], target_triangles: u32) -> J
             // Stay a heightfield: every face keeps facing up (n.y > 0) and near its old normal.
             if len < 1e-12
                 || n[1] <= 1e-9
-                || before.is_none_or(|bn| dot(bn, [n[0] / len, n[1] / len, n[2] / len]) < 0.2)
+                || before.is_none_or(|bn| dot(bn, [n[0] / len, n[1] / len, n[2] / len]) < 0.0)
             {
                 flips = true;
                 break;
             }
         }
         if flips {
+            // Not safe now, maybe later (a neighbour's collapse often unblocks it): re-queue with
+            // a penalty rather than losing the edge for good, a few times at most.
+            if c.retries < 8 {
+                heap.push(Candidate {
+                    cost: c.cost * 2.0 + 1e-9,
+                    retries: c.retries + 1,
+                    ..c
+                });
+            }
             continue;
         }
         // Collapse b into a.

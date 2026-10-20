@@ -131,6 +131,9 @@ jobs:
           pnpm --dir apps/desktop validate:glb "$RUNNER_TEMP/mesh.jdproj/exports/terrain.glb"
           ./target/debug/jd --json op terrain.scatter --project "$RUNNER_TEMP/mesh.jdproj" --params '{"mask":"height","spacing_m":64,"path":"trees.glb"}' | tail -1 | grep -q '"status":"ok"'
           pnpm --dir apps/desktop validate:glb "$RUNNER_TEMP/mesh.jdproj/exports/trees.glb"
+      - name: Acceptance scenario (brief §20, quick world) through the CLI and MCP
+        shell: bash
+        run: node scripts/acceptance.mjs --quick --out "$RUNNER_TEMP/acceptance" --report "$RUNNER_TEMP/acceptance-report.md" && tail -25 "$RUNNER_TEMP/acceptance-report.md"
       - name: Install Playwright Chromium
         working-directory: apps/desktop
         run: pnpm exec playwright install --with-deps chromium
