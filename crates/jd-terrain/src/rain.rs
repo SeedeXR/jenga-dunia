@@ -34,6 +34,24 @@ pub struct RainParams {
     /// Distance over which dry air re-moistens towards saturation, km (> 0): the length of a rain shadow.
     #[serde(default = "d_recovery")]
     pub recovery_km: f32,
+    /// Air temperature at sea level, °C — key it over the timeline for a season.
+    #[serde(default = "d_temperature")]
+    pub temperature_c: f32,
+    /// Lapse rate, °C lost per km of height (≥ 0).
+    #[serde(default = "d_lapse")]
+    pub lapse_c_per_km: f32,
+    /// Precipitation falls as snow where the local air is colder than this, °C.
+    #[serde(default = "d_snow_below")]
+    pub snow_below_c: f32,
+}
+fn d_temperature() -> f32 {
+    12.0
+}
+fn d_lapse() -> f32 {
+    6.5
+}
+fn d_snow_below() -> f32 {
+    1.0
 }
 
 fn d_west() -> f32 {
@@ -56,18 +74,32 @@ impl Default for RainParams {
             moisture_scale_m: d_scale(),
             base_per_km: d_base(),
             recovery_km: d_recovery(),
+            temperature_c: d_temperature(),
+            lapse_c_per_km: d_lapse(),
+            snow_below_c: d_snow_below(),
         }
     }
 }
 
-/// Returns (`rain` 0..1 with the field's 99th percentile at 1, `moisture` 0..1 = the relative
-/// humidity of the air leaving each cell). Row 0 is south, x grows east; the air enters saturated
-/// for its height at the upwind edge.
+/// Returns (`rain`, `snowfall`, `moisture`): the liquid and the frozen share of the precipitation
+/// (both 0..1 against the total's 99th percentile, split by the local air temperature —
+/// `temperature_c` lapsed by height — against `snow_below_c`) and the relative humidity of the
+/// air leaving each cell. Row 0 is south, x grows east; the air enters saturated for its height
+/// at the upwind edge.
 pub fn orographic_rain(
     h: &Heightfield,
     spacing_m: [f32; 2],
     p: &RainParams,
-) -> JdResult<(Heightfield, Heightfield)> {
+) -> JdResult<(Heightfield, Heightfield, Heightfield)> {
+    for (name, v) in [
+        ("temperature_c", p.temperature_c),
+        ("lapse_c_per_km", p.lapse_c_per_km),
+        ("snow_below_c", p.snow_below_c),
+    ] {
+        if !v.is_finite() || (name == "lapse_c_per_km" && v < 0.0) {
+            return Err(JdError::invalid(name, "must be finite (lapse ≥ 0)"));
+        }
+    }
     if !(0.0..=1.0).contains(&p.base_per_km) {
         return Err(JdError::invalid("base_per_km", "must be within 0..=1"));
     }
@@ -128,11 +160,27 @@ pub fn orographic_rain(
         .1
         .max(f32::MIN_POSITIVE);
     let wu = w as u32;
+    let cold =
+        |x: u32, y: u32| p.temperature_c - p.lapse_c_per_km * h.get(x, y) / 1000.0 < p.snow_below_c;
+    let mut snow = Heightfield::new(h.width(), h.height(), h.tile_size(), h.halo())?;
+    snow.fill_with(|x, y| {
+        if cold(x, y) {
+            (rain[(y * wu + x) as usize] / peak).min(1.0)
+        } else {
+            0.0
+        }
+    });
     let mut out = Heightfield::new(h.width(), h.height(), h.tile_size(), h.halo())?;
-    out.fill_with(|x, y| (rain[(y * wu + x) as usize] / peak).min(1.0));
+    out.fill_with(|x, y| {
+        if cold(x, y) {
+            0.0
+        } else {
+            (rain[(y * wu + x) as usize] / peak).min(1.0)
+        }
+    });
     let mut moist = Heightfield::new(h.width(), h.height(), h.tile_size(), h.halo())?;
     moist.fill_with(|x, y| rh[(y * wu + x) as usize]);
-    Ok((out, moist))
+    Ok((out, snow, moist))
 }
 
 #[cfg(test)]
@@ -145,7 +193,7 @@ mod tests {
         // 1 500 m from x = 17 to x = 32, the east face drops back to the plain by x = 47.
         let mut ridge = Heightfield::new(64, 16, 64, 0).expect("ridge");
         ridge.fill_with(|x, _| (1500.0 - (x as f32 - 32.0).abs() * 100.0).max(0.0));
-        let (rain, moist) =
+        let (rain, snowfall, moist) =
             orographic_rain(&ridge, [100.0, 100.0], &RainParams::default()).expect("rain");
         let row = |f: &Heightfield, x0: u32, x1: u32| {
             (x0..x1).map(|x| f.get(x, 8)).sum::<f32>() / (x1 - x0) as f32
@@ -178,8 +226,44 @@ mod tests {
             rain.to_vec().iter().filter(|v| **v >= 1.0).count() >= 10,
             "the top percentile saturates"
         );
+        // Snow: at 12 °C with a 6.5 °C/km lapse the air is below 1 °C above ~1 690 m, so the crest
+        // (1 500 m) stays rain; at 2 °C everything above ~150 m snows and the plain still rains.
+        assert!(
+            snowfall.to_vec().iter().all(|v| *v == 0.0),
+            "no snow on a 1 500 m crest at 12 °C"
+        );
+        let (rain_c, snow_c, _) = orographic_rain(
+            &ridge,
+            [100.0, 100.0],
+            &RainParams {
+                temperature_c: 2.0,
+                ..RainParams::default()
+            },
+        )
+        .expect("cold");
+        assert!(
+            snow_c.get(32, 8) > 0.0 && rain_c.get(32, 8) == 0.0,
+            "the crest snows: {} / {}",
+            snow_c.get(32, 8),
+            rain_c.get(32, 8)
+        );
+        assert!(
+            rain_c.get(2, 8) > 0.0 && snow_c.get(2, 8) == 0.0,
+            "the plain rains"
+        );
+        let total = |a: &Heightfield, b: &Heightfield| {
+            a.to_vec()
+                .iter()
+                .zip(&b.to_vec())
+                .map(|(x, y)| x + y)
+                .sum::<f32>()
+        };
+        assert!(
+            (total(&rain_c, &snow_c) - total(&rain, &snowfall)).abs() < 1e-3,
+            "rain + snow is the same precipitation"
+        );
         // The same ridge under an easterly mirrors: now the east face is the wet one.
-        let (east, _) = orographic_rain(
+        let (east, _, _) = orographic_rain(
             &ridge,
             [100.0, 100.0],
             &RainParams {

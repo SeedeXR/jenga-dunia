@@ -1453,6 +1453,12 @@ wrings out most of the moisture. */
   "base_per_km"?: number;
   /** Distance over which dry air re-moistens towards saturation, km (> 0): the length of a rain shadow. */
   "recovery_km"?: number;
+  /** Air temperature at sea level, °C — key it over the timeline for a season. */
+  "temperature_c"?: number;
+  /** Lapse rate, °C lost per km of height (≥ 0). */
+  "lapse_c_per_km"?: number;
+  /** Precipitation falls as snow where the local air is colder than this, °C. */
+  "snow_below_c"?: number;
 };
 
 export type NodeParams_jd_climate_snow_1 = {

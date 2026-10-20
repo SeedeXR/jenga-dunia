@@ -331,7 +331,7 @@
   },
   {
     "kind": "jd.climate.rain@1",
-    "description": "Orographic rain: moisture rides the wind across the field; air holds less water the higher it climbs (`moisture_scale_m`), so windward slopes condense the excess as rain, descending air rains nothing (the shadow), flat ground takes a drizzle (`base_per_km`) and dry air re-moistens over `recovery_km` — `rain` 0..1 (the field's 99th percentile at 1; feed `jd.erosion.hydraulic@1`'s `rain` or a biome rule) and `moisture` 0..1, the relative humidity of the air leaving each cell",
+    "description": "Orographic rain: moisture rides the wind across the field; air holds less water the higher it climbs (`moisture_scale_m`), so windward slopes condense the excess as rain, descending air rains nothing (the shadow), flat ground takes a drizzle (`base_per_km`) and dry air re-moistens over `recovery_km` — `rain` 0..1 (the field's 99th percentile at 1; feed `jd.erosion.hydraulic@1`'s `rain` or a biome rule), `snowfall` (the share that falls where the lapsed `temperature_c` is below `snow_below_c`; key the temperature for a season) and `moisture` 0..1, the relative humidity of the air leaving each cell",
     "inputs": [
       {
         "name": "in",
@@ -342,6 +342,11 @@
     "outputs": [
       {
         "name": "rain",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "snowfall",
         "ty": "heightfield",
         "required": false
       },
@@ -380,6 +385,24 @@
           "type": "number",
           "format": "float",
           "default": 40.0
+        },
+        "temperature_c": {
+          "description": "Air temperature at sea level, °C — key it over the timeline for a season.",
+          "type": "number",
+          "format": "float",
+          "default": 12.0
+        },
+        "lapse_c_per_km": {
+          "description": "Lapse rate, °C lost per km of height (≥ 0).",
+          "type": "number",
+          "format": "float",
+          "default": 6.5
+        },
+        "snow_below_c": {
+          "description": "Precipitation falls as snow where the local air is colder than this, °C.",
+          "type": "number",
+          "format": "float",
+          "default": 1.0
         }
       },
       "additionalProperties": false
