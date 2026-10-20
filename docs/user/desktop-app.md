@@ -95,6 +95,10 @@ Undo and redo are operations like everything else (`graph.undo` / `graph.redo`, 
 
 *Inside the app: pick `jd.hydrology.rivers@1` in the kinds dropdown and **Add** (1), click the node (2) and the schema-driven inspector shows its parameters; `method` is a select built from the node's schema — switch it from `d8` to `dinf` (3) and the node label updates (`method=dinf`) after the core journals `graph.set_param`. `jd.hydrology.sea_level@1` adds the same way and exposes two output handles, `ocean` and `depth`. Numbers that come from the core as 32-bit floats are shown rounded (`0.55`, not `0.550000011920929`). Captured by the UI-driven test `apps/desktop/e2e/hydrology.spec.ts`.*
 
+![Viewport with a translucent water plane at 250 m cutting through the terrain; sea_level node selected](images/desktop-sea-level.png)
+
+*Sea in the viewport: as soon as the graph contains a `jd.hydrology.sea_level@1` node (1) the viewport draws a translucent water plane at its `level_m` — edit the value (2) and the plane moves with it; the header's viewport line reports the height (boxed, top right). The plane is only drawn while the **height** layer is shown (masks like `ocean` or `rivers` are 0..1 and would hide under it). Same e2e test.*
+
 ## Tutorial: sculpting
 
 1. Click **Sculpt** (top of the viewport). If the graph has no stroke node yet, a `jd.sculpt.strokes` node is inserted in front of the output and selected; the button reads **Sculpting…** and a **Brush** panel appears on the right: **mode** (raise/lower by a strength in metres — negative digs; **smooth** blends towards the local mean; **flatten** pulls towards the height under the first point of the stroke), radius, and strength or amount (0–1).

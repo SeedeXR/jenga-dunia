@@ -8,6 +8,8 @@ import type { Preview } from "../lib/api";
 export interface ViewportInfo {
   backend: "webgpu" | "webgl2" | "none";
   triangles: number;
+  /** Sea plane height in metres when one is drawn. */
+  seaM?: number;
 }
 
 interface Props {
@@ -17,6 +19,8 @@ interface Props {
   /** Sculpt mode: pointer drags paint a stroke on the terrain instead of orbiting. Points are
    *  reported in layer metres (u east from the west edge, v north from the south edge = row 0). */
   sculpt?: { enabled: boolean; radiusM: number; onStroke: (points: [number, number][]) => void };
+  /** Draw a translucent water plane at this height (metres); null hides it. */
+  seaLevelM?: number | null;
 }
 
 function isWebGPU(r: WebGPURenderer): boolean {
@@ -96,6 +100,7 @@ interface SceneState {
   frame: number;
   backend: ViewportInfo["backend"];
   triangles: number;
+  sea: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshStandardMaterial> | null;
   orbit: { theta: number; phi: number; radius: number; minR: number; maxR: number };
 }
 
@@ -105,7 +110,7 @@ function placeCamera(s: SceneState) {
   s.camera.lookAt(0, 0, 0);
 }
 
-export default function TerrainView({ preview, extentM, onInfo, sculpt }: Props) {
+export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevelM = null }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<SceneState | null>(null);
   // Latest sculpt props without re-creating the renderer effect.
@@ -148,6 +153,7 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt }: Props)
       frame: 0,
       backend: "none",
       triangles: 0,
+      sea: null,
       orbit: { theta: 0.6, phi: 1.0, radius: 5200, minR: 200, maxR: 100000 },
     };
     sceneRef.current = state;
@@ -301,8 +307,29 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt }: Props)
     }
     s.camera.updateProjectionMatrix();
     placeCamera(s);
-    onInfo?.({ backend: s.backend, triangles: s.triangles });
+    onInfo?.({ backend: s.backend, triangles: s.triangles, ...(s.sea ? { seaM: s.sea.position.y } : {}) });
   }, [preview, extentM, onInfo]);
+
+  // Sea plane: follows the graph's sea-level node; a flat translucent quad over the whole world.
+  useEffect(() => {
+    const s = sceneRef.current;
+    if (!s) return;
+    if (s.sea) {
+      s.scene.remove(s.sea);
+      s.sea.geometry.dispose();
+      s.sea.material.dispose();
+      s.sea = null;
+    }
+    if (seaLevelM !== null && extentM && preview) {
+      const geo = new THREE.PlaneGeometry(extentM[0], extentM[1]);
+      geo.rotateX(-Math.PI / 2);
+      const mat = new THREE.MeshStandardMaterial({ color: 0x2f6fd0, transparent: true, opacity: 0.6, roughness: 0.25, metalness: 0.1 });
+      s.sea = new THREE.Mesh(geo, mat);
+      s.sea.position.y = seaLevelM;
+      s.scene.add(s.sea);
+    }
+    onInfo?.({ backend: s.backend, triangles: s.triangles, ...(s.sea ? { seaM: seaLevelM ?? 0 } : {}) });
+  }, [seaLevelM, extentM, preview, onInfo]);
 
   return <div ref={host} className="h-full w-full" data-testid="viewport" />;
 }

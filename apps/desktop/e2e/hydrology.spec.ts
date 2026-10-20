@@ -81,7 +81,14 @@ test.describe("hydrology nodes against the real core", () => {
     await expect(sea.locator('.react-flow__handle.source[data-handleid="ocean"]')).toBeAttached();
     await expect(sea.locator('.react-flow__handle.source[data-handleid="depth"]')).toBeAttached();
     await sea.click();
-    await expect(inspector.locator("label", { hasText: "level_m" }).locator("input")).toBeVisible();
+    // The viewport draws a sea plane at the node's level; editing level_m moves it.
+    await expect(page.getByTestId("viewport-info")).toContainText("sea 0 m");
+    const level = inspector.locator("label", { hasText: "level_m" }).locator("input");
+    await level.fill("250");
+    await level.blur();
+    await expect(page.getByTestId("log")).toContainText("graph.set_param: ok");
+    await expect(page.getByTestId("viewport-info")).toContainText("sea 250 m");
+    await page.screenshot({ path: testInfo.outputPath("hydrology-sea.png") }); // tutorial image source
 
     expect(errors, "no uncaught page errors").toEqual([]);
     await core.close();

@@ -45,6 +45,9 @@ export default function App() {
   const onInfo = useCallback((i: ViewportInfo) => setVp(i), []);
   const pathInput = useRef<HTMLInputElement>(null);
   const sculptNode = s.graph.nodes.find((n) => n.id === s.selectedNode && n.kind.startsWith("jd.sculpt.strokes@"));
+  // The viewport draws the sea where the graph's sea-level node puts it (only over the height layer).
+  const seaNode = s.graph.nodes.find((n) => n.kind.startsWith("jd.hydrology.sea_level@"));
+  const seaLevelM = seaNode && (s.layer === null || s.layer.layer.startsWith("height")) ? Number(seaNode.params.level_m ?? 0) : null;
 
   // Native file dialogs (tauri-plugin-dialog). Outside Tauri (browser, tests) they reject and the
   // typed paths keep working, so the dialogs are a convenience layer over the same operations.
@@ -166,7 +169,7 @@ export default function App() {
           </label>
         )}
         <span className={`${s.lastEval && Object.keys(s.lastEval.layers).length > 1 ? "" : "ml-auto "}text-xs text-jd-fg-2`} data-testid="viewport-info">
-          viewport: {vp.backend} · {vp.triangles.toLocaleString()} tris
+          viewport: {vp.backend} · {vp.triangles.toLocaleString()} tris{vp.seaM !== undefined ? ` · sea ${vp.seaM} m` : ""}
           {s.previewStats ? ` · preview lod ${s.previewStats.lod}, ${(s.previewStats.bytes / 1048576).toFixed(2)} MB in ${s.previewStats.ms.toFixed(0)} ms` : ""}
         </span>
         {(s.busy || s.jobs.length > 0) &&
@@ -251,7 +254,7 @@ export default function App() {
         {/* Center: viewport (top) + node graph (bottom, toggle) */}
         <main className={`relative grid bg-jd-bg-0 ${showGraph ? "grid-rows-[1fr_300px]" : "grid-rows-[1fr]"}`}>
           <div className="relative min-h-0">
-            <TerrainView preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} sculpt={{ enabled: s.sculpting && sculptNode !== undefined, radiusM: s.brush.radius_m, onStroke: (pts) => void s.addStroke(pts) }} />
+            <TerrainView preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} sculpt={{ enabled: s.sculpting && sculptNode !== undefined, radiusM: s.brush.radius_m, onStroke: (pts) => void s.addStroke(pts) }} seaLevelM={seaLevelM} />
             <button
               className={`btn absolute top-2 right-28 ${s.sculpting ? "text-jd-accent" : ""}`}
               title={s.sculpting ? "Sculpting: drag on the terrain to paint a stroke (click to stop)" : "Sculpt: adds a stroke node before the output and paints with the brush"}
