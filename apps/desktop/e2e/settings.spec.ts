@@ -68,6 +68,15 @@ test.describe("project settings against the real core", () => {
     await wind.blur();
     await expect(page.getByTestId("log")).toContainText("project.set_settings: ok");
     await expect(page.getByTestId("wind-azimuth")).toHaveValue("90");
+    // Origin and CRS re-base the world through the same op (layers stay local).
+    const ox = page.getByTestId("origin-x");
+    await ox.fill("500000");
+    await ox.blur();
+    await expect(page.getByTestId("origin-x")).toHaveValue("500000");
+    const crs = page.getByTestId("crs");
+    await crs.fill("EPSG:32637");
+    await crs.blur();
+    await expect(page.getByTestId("crs")).toHaveValue("EPSG:32637");
 
     // An edit now autosaves after ~1 s: dirty/journal return to false/0 and project.json holds the setting.
     const panel = page.getByTestId("graph-panel");
@@ -78,10 +87,12 @@ test.describe("project settings against the real core", () => {
     await expect(page.getByTestId("log")).toContainText("graph.set_param: ok");
     await expect(page.getByTestId("log")).toContainText("project.save: ok", { timeout: 8_000 });
     await expect(page.getByTestId("project-journal")).toHaveText("0");
-    const doc = JSON.parse(readFileSync(path.join(proj, "project.json"), "utf8")) as { settings: { autosave_interval_s: number; cache_limit_bytes: number }; world: { wind: { azimuth_deg: number; speed_mps: number } } };
+    const doc = JSON.parse(readFileSync(path.join(proj, "project.json"), "utf8")) as { settings: { autosave_interval_s: number; cache_limit_bytes: number }; world: { wind: { azimuth_deg: number; speed_mps: number }; origin: number[]; crs?: string } };
     expect(doc.settings.autosave_interval_s).toBe(1);
     expect(doc.settings.cache_limit_bytes).toBe(2147483648);
     expect(doc.world.wind).toEqual({ azimuth_deg: 90, speed_mps: 8 });
+    expect(doc.world.origin).toEqual([500000, 0]);
+    expect(doc.world.crs).toBe("EPSG:32637");
     await page.screenshot({ path: testInfo.outputPath("settings.png") }); // tutorial image source
 
     expect(errors, "no uncaught page errors").toEqual([]);

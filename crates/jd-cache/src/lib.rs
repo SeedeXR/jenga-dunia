@@ -131,7 +131,8 @@ impl LayerCache {
             report.evicted_blobs += 1;
         }
         if report.evicted_blobs > 0 {
-            write_atomic(&self.index_path(), &serde_json::to_vec_pretty(&index)?)?;
+            let index_bytes = serde_json::to_vec_pretty(&index)?;
+            write_atomic(&self.index_path(), |out| Ok(out.write_all(&index_bytes)?))?;
         }
         Ok(report)
     }
@@ -143,25 +144,25 @@ impl LayerCache {
         let blob = self.blob_path(&hash);
         if !blob.exists() {
             // Streamed row by row: a 16k² layer is 1 GiB and must not be copied to write it.
-            let tmp = tmp_path(&blob);
-            let mut out = std::io::BufWriter::with_capacity(1 << 20, fs::File::create(&tmp)?);
-            out.write_all(MAGIC)?;
-            for v in [hf.width(), hf.height(), hf.tile_size(), hf.halo()] {
-                out.write_all(&v.to_le_bytes())?;
-            }
-            let mut row = vec![0.0f32; hf.width() as usize];
-            for y in 0..hf.height() {
-                hf.row(y, &mut row);
-                for v in &row {
+            write_atomic(&blob, |out| {
+                out.write_all(MAGIC)?;
+                for v in [hf.width(), hf.height(), hf.tile_size(), hf.halo()] {
                     out.write_all(&v.to_le_bytes())?;
                 }
-            }
-            out.into_inner().map_err(|e| e.into_error())?.sync_all()?;
-            fs::rename(&tmp, &blob)?;
+                let mut row = vec![0.0f32; hf.width() as usize];
+                for y in 0..hf.height() {
+                    hf.row(y, &mut row);
+                    for v in &row {
+                        out.write_all(&v.to_le_bytes())?;
+                    }
+                }
+                Ok(())
+            })?;
         }
         let mut index = self.read_index()?;
         index.insert(name.to_owned(), hash.clone());
-        write_atomic(&self.index_path(), &serde_json::to_vec_pretty(&index)?)?;
+        let index_bytes = serde_json::to_vec_pretty(&index)?;
+        write_atomic(&self.index_path(), |out| Ok(out.write_all(&index_bytes)?))?;
         if self.limit_bytes.is_some() {
             self.gc()?;
         }
@@ -236,15 +237,18 @@ impl LayerCache {
 
 /// Write via a uniquely named temporary file and rename, so an interrupted write never leaves a
 /// torn blob/index and two writers (two processes, or two evaluations) never share a temp file.
-fn tmp_path(path: &Path) -> PathBuf {
+/// Write `path` through a temp file next to it, fsync, then rename into place — the one
+/// recipe for blobs (streamed) and the index (one `write_all`).
+fn write_atomic(
+    path: &Path,
+    body: impl FnOnce(&mut std::io::BufWriter<fs::File>) -> JdResult<()>,
+) -> JdResult<()> {
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    path.with_extension(format!("{}-{seq}.tmp", std::process::id()))
-}
-
-fn write_atomic(path: &Path, bytes: &[u8]) -> JdResult<()> {
-    let tmp = tmp_path(path);
-    fs::write(&tmp, bytes)?;
+    let tmp = path.with_extension(format!("{}-{seq}.tmp", std::process::id()));
+    let mut out = std::io::BufWriter::with_capacity(1 << 20, fs::File::create(&tmp)?);
+    body(&mut out)?;
+    out.into_inner().map_err(|e| e.into_error())?.sync_all()?;
     fs::rename(&tmp, path)?;
     Ok(())
 }

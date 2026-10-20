@@ -214,7 +214,12 @@ pub fn snowpack(
         to.to_radians().sin().round() as i64,
         to.to_radians().cos().round() as i64,
     );
-    let hv = h.to_vec();
+    // The avalanche loop reads the terrain flat; nothing to read when it is off.
+    let hv = if p.avalanche_strength > 0.0 {
+        h.to_vec()
+    } else {
+        Vec::new()
+    };
     let mut depth = vec![0.0f32; n];
     let mut next = vec![0.0f32; n];
     for _ in 0..p.steps {

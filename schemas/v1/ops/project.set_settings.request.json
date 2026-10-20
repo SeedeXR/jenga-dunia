@@ -47,6 +47,26 @@
       ],
       "default": null
     },
+    "origin": {
+      "description": "World-space origin of pixel (0, 0) in metres, f64 — layers stay in local metres, so\nmoving the origin re-bases the world without touching a sample (GeoTIFF tie points,\nthe Unreal profile and georeferenced exports follow it).",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "number",
+        "format": "double"
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "crs": {
+      "description": "Coordinate reference system of the origin, e.g. `EPSG:32637`; an empty string clears it.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "memory_budget_bytes": {
       "description": "Memory budget for evaluations, bytes (≥ 256 MiB; default 4 GiB).",
       "type": [

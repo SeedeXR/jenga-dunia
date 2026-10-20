@@ -32,9 +32,6 @@ fn params<T: for<'de> Deserialize<'de>>(p: &Map<String, Json>) -> JdResult<T> {
         .map_err(|e| JdError::invalid("params", e.to_string()))
 }
 
-/// The world's shared wind fills in the named `wind_*` parameters a node leaves unset, so one
-/// setting drives dunes, yardangs, snow scour and the wind sea together (the node hash covers the
-/// world settings, so a wind change re-evaluates them).
 /// The shared headless device, or the error a node reports when the machine has none.
 fn gpu() -> JdResult<&'static jd_gpu::Gpu> {
     jd_gpu::Gpu::shared().ok_or_else(|| {
@@ -46,6 +43,9 @@ fn gpu() -> JdResult<&'static jd_gpu::Gpu> {
     })
 }
 
+/// The world's shared wind fills in the named `wind_*` parameters a node leaves unset, so one
+/// setting drives dunes, yardangs, snow scour and the wind sea together (the node hash covers the
+/// world settings, so a wind change re-evaluates them).
 fn with_world_wind(ctx: &EvalCtx, p: &Map<String, Json>, keys: &[&str]) -> Map<String, Json> {
     let mut p = p.clone();
     for k in keys {
@@ -664,11 +664,8 @@ pub fn register_all(r: &mut Registry) {
                     field(i, "in")?,
                     spacing_m(ctx), tp.talus_deg, tp.iterations, tp.rate, hardness.map(|k| &**k), Some(&ctx.cancel))?,
                 Engine::Gpu => {
-                    if !(1..=1000).contains(&tp.iterations) {
-                        return Err(JdError::invalid("iterations", "must be within 1..=1000"));
-                    }
                     let gpu = gpu()?;
-                    gpu.thermal_erode(field(i, "in")?, spacing_m(ctx), tp.talus_deg, tp.iterations, tp.rate, hardness.map(|k| &**k))?
+                    gpu.thermal_erode(field(i, "in")?, spacing_m(ctx), tp.talus_deg, tp.iterations, tp.rate, hardness.map(|k| &**k), Some(&ctx.cancel))?
                 }
             };
             Ok(out("out", eroded))
@@ -854,7 +851,7 @@ pub fn register_all(r: &mut Registry) {
                 };
             let r = match hp.engine {
                 Engine::Cpu => jd_terrain::hydraulic_erode_with(field(i, "in")?, spacing_m(ctx), &hp2, hardness.map(|k| &**k), rain.map(|k| &**k), Some(&ctx.cancel))?,
-                Engine::Gpu => gpu()?.hydraulic_erode(field(i, "in")?, spacing_m(ctx), &hp2, hardness.map(|k| &**k), rain.map(|k| &**k))?,
+                Engine::Gpu => gpu()?.hydraulic_erode(field(i, "in")?, spacing_m(ctx), &hp2, hardness.map(|k| &**k), rain.map(|k| &**k), Some(&ctx.cancel))?,
             };
             Ok(BTreeMap::from([
                 ("out".to_owned(), Value::field(r.height)),

@@ -452,6 +452,14 @@ pub mod builtin {
         /// Shared wind of the world: every wind-driven node without its own `wind_*` setting follows it.
         #[serde(default)]
         pub wind: Option<jd_types::Wind>,
+        /// World-space origin of pixel (0, 0) in metres, f64 — layers stay in local metres, so
+        /// moving the origin re-bases the world without touching a sample (GeoTIFF tie points,
+        /// the Unreal profile and georeferenced exports follow it).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub origin: Option<[f64; 2]>,
+        /// Coordinate reference system of the origin, e.g. `EPSG:32637`; an empty string clears it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub crs: Option<String>,
         /// Memory budget for evaluations, bytes (≥ 256 MiB; default 4 GiB).
         #[serde(default)]
         pub memory_budget_bytes: Option<u64>,
@@ -584,6 +592,20 @@ pub mod builtin {
                         .validate()
                         .map_err(|e| JdError::invalid("params.wind", e))?;
                 }
+                if let Some(o) = args.origin
+                    && !o.iter().all(|v| v.is_finite())
+                {
+                    return Err(JdError::invalid("params.origin", "must be finite metres"));
+                }
+                if let Some(c) = &args.crs
+                    && !c.is_empty()
+                    && (c.trim() != c || c.len() > 64)
+                {
+                    return Err(JdError::invalid(
+                        "params.crs",
+                        "an identifier such as `EPSG:32637` (≤ 64 chars, no surrounding spaces), or empty to clear",
+                    ));
+                }
                 Project::validate_settings(&merged_settings(p, &args))
             }
             _ if op.starts_with("graph.") => super::graph::validate_mutation(p, op, params),
@@ -609,6 +631,12 @@ pub mod builtin {
                 p.set_settings(merged)?;
                 if let Some(w) = args.wind {
                     p.doc.world.wind = w;
+                }
+                if let Some(o) = args.origin {
+                    p.doc.world.origin = o;
+                }
+                if let Some(c) = args.crs {
+                    p.doc.world.crs = (!c.is_empty()).then_some(c);
                 }
                 Ok(())
             }
@@ -700,7 +728,7 @@ pub mod builtin {
         );
         r.register::<ProjectSetSettings, ProjectSummary, _>(
             "project.set_settings",
-            "Change project settings (autosave interval, cache limit, preview LOD, memory budget, the world's shared wind); fields left out keep their value — journaled like every mutation",
+            "Change project settings (autosave interval, cache limit, preview LOD, memory budget, the world's shared wind, the world origin and CRS); fields left out keep their value — journaled like every mutation",
             Scope::ProjectWrite,
             |ctx, args| {
                 ctx.with_project(|p| {
@@ -1815,6 +1843,75 @@ pub mod graph {
                 .status,
                 Status::Error
             );
+        }
+
+        #[test]
+        fn origin_and_crs_rebase_the_world_without_touching_the_layers() {
+            use crate::envelope::Status;
+            let reg = Registry::with_builtins();
+            let dir = tempfile::tempdir().expect("tmp");
+            let ctx = Context::default();
+            let world = WorldSettings {
+                resolution_px: [64, 64],
+                extent_m: [2560.0, 2560.0],
+                tile_size: 64,
+                halo: 0,
+                ..Default::default()
+            };
+            reg.invoke(&ctx, Request::new("project.create", serde_json::json!({ "path": dir.path().join("g.jdproj"), "name": "G", "world": world })));
+            let before = call(&reg, &ctx, "graph.evaluate", serde_json::json!({}))
+                .result
+                .expect("eval")["layers"]["height"]
+                .clone();
+            let r = call(
+                &reg,
+                &ctx,
+                "project.set_settings",
+                serde_json::json!({ "origin": [500_000.0, 4_000_000.0], "crs": "EPSG:32637" }),
+            );
+            assert_eq!(r.status, Status::Ok, "{:?}", r.error);
+            let world = &r.result.expect("summary")["world"];
+            assert_eq!(world["origin"], serde_json::json!([500_000.0, 4_000_000.0]));
+            assert_eq!(world["crs"], "EPSG:32637");
+            // Generators sample world space: the window moved over the infinite noise field, so
+            // the layer is a different (seamlessly adjacent) piece of it — not a shifted copy.
+            let after = call(&reg, &ctx, "graph.evaluate", serde_json::json!({}))
+                .result
+                .expect("eval")["layers"]["height"]
+                .clone();
+            assert_ne!(before, after, "noise follows the world origin");
+            // The georeferenced TIFF carries the origin as its tie point (north-west corner).
+            let r = call(
+                &reg,
+                &ctx,
+                "terrain.export_heightmap",
+                serde_json::json!({ "layer": "height", "path": "geo.tif", "format": "tiff32", "georeference": true }),
+            );
+            assert_eq!(r.status, Status::Ok, "{:?}", r.error);
+            let tif = std::fs::read(dir.path().join("g.jdproj/exports/geo.tif")).expect("tif");
+            let tie = 4_000_000.0f64 + 2560.0; // origin y + extent = the north edge
+            assert!(
+                tif.windows(8).any(|w| w == 500_000.0f64.to_le_bytes())
+                    && tif.windows(8).any(|w| w == tie.to_le_bytes()),
+                "tie point x and north edge present in the TIFF tags"
+            );
+            // Persisted through save → reopen; an empty crs clears it; a padded one is refused.
+            call(&reg, &ctx, "project.save", serde_json::json!({}));
+            let r = call(
+                &reg,
+                &ctx,
+                "project.set_settings",
+                serde_json::json!({ "crs": " EPSG:1 " }),
+            );
+            assert_eq!(r.status, Status::Error);
+            let r = call(
+                &reg,
+                &ctx,
+                "project.set_settings",
+                serde_json::json!({ "crs": "" }),
+            );
+            assert_eq!(r.status, Status::Ok);
+            assert!(r.result.expect("summary")["world"]["crs"].is_null());
         }
 
         #[test]

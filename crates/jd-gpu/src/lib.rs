@@ -47,8 +47,13 @@ impl Gpu {
         }))
         .ok()?;
         let info = adapter.get_info();
-        let (device, queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()?;
+        // Ask for the adapter's own limits: the defaults cap a storage binding at 128 MiB, which
+        // a 4k² field exceeds (hydraulic state is 16 B/cell).
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            required_limits: adapter.limits(),
+            ..Default::default()
+        }))
+        .ok()?;
         Some(Gpu {
             device,
             queue,
@@ -56,8 +61,28 @@ impl Gpu {
         })
     }
 
+    /// Refuse a field whose per-cell storage would exceed what one binding may hold, instead of
+    /// letting wgpu's validation abort the process.
+    pub(crate) fn check_fits(&self, cells: u64, bytes_per_cell: u64) -> JdResult<()> {
+        let limit = self.device.limits().max_storage_buffer_binding_size;
+        if cells * bytes_per_cell > limit {
+            return Err(JdError::new(
+                ErrorCode::E_RESOURCE_MEMORY,
+                format!(
+                    "the field needs {} MiB per GPU buffer; this device allows {} MiB",
+                    (cells * bytes_per_cell) >> 20,
+                    limit >> 20
+                ),
+            )
+            .next("Use `engine: \"cpu\"` or evaluate at a higher lod."));
+        }
+        Ok(())
+    }
+
     /// Thermal erosion on the GPU: the same talus rule, neighbour order, distances and hardness
-    /// rule as [`jd_terrain::thermal_erode_with`], `iterations` ping-pong steps on the device.
+    /// rule as [`jd_terrain::thermal_erode_with`], `iterations` ping-pong steps on the device;
+    /// `cancel` is honoured between chunks of [`CHUNK`] steps.
+    #[allow(clippy::too_many_arguments)] // mirrors jd_terrain::thermal_erode_with
     pub fn thermal_erode(
         &self,
         h: &Heightfield,
@@ -66,6 +91,7 @@ impl Gpu {
         iterations: u32,
         rate: f32,
         hardness: Option<&Heightfield>,
+        cancel: Option<&std::sync::atomic::AtomicBool>,
     ) -> JdResult<Heightfield> {
         if let Some(k) = hardness
             && (k.width(), k.height()) != (h.width(), h.height())
@@ -87,6 +113,7 @@ impl Gpu {
         h.validate_finite()?;
         let (w, hh) = (h.width(), h.height());
         let n = (w * hh) as usize;
+        self.check_fits(n as u64, 8)?; // `shed` is the widest buffer: vec2 per cell
         let offsets: [(f32, f32); 8] = [
             (-1.0, -1.0),
             (0.0, -1.0),
@@ -207,18 +234,28 @@ impl Gpu {
             })
             .into();
         let (gx, gy) = (w.div_ceil(16), hh.div_ceil(16));
-        let mut encoder = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("jd thermal"),
-        });
-        for it in 0..iterations as usize {
-            let group = &groups[it % 2];
-            for pipe in [&shed_pipe, &gather_pipe] {
-                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
-                pass.set_pipeline(pipe);
-                pass.set_bind_group(0, group, &[]);
-                pass.dispatch_workgroups(gx, gy, 1);
+        // One command buffer per CHUNK steps so a cancel lands between submits (and no single
+        // submit runs long enough to trip a GPU watchdog).
+        for start in (0..iterations as usize).step_by(CHUNK) {
+            check_cancel(cancel)?;
+            let mut encoder = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("jd thermal"),
+            });
+            for it in start..(start + CHUNK).min(iterations as usize) {
+                let group = &groups[it % 2];
+                for pipe in [&shed_pipe, &gather_pipe] {
+                    let mut pass =
+                        encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+                    pass.set_pipeline(pipe);
+                    pass.set_bind_group(0, group, &[]);
+                    pass.dispatch_workgroups(gx, gy, 1);
+                }
             }
+            self.queue.submit([encoder.finish()]);
         }
+        let mut encoder = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("jd thermal readback"),
+        });
         let result = &bufs[(iterations as usize) % 2];
         encoder.copy_buffer_to_buffer(result, 0, &readback, 0, f32_bytes);
         self.queue.submit([encoder.finish()]);
@@ -242,6 +279,16 @@ impl Gpu {
         out.fill_with(|x, y| data[(y * w + x) as usize]);
         Ok(out)
     }
+}
+
+/// Steps per command buffer: cancel is checked between them.
+pub(crate) const CHUNK: usize = 32;
+
+pub(crate) fn check_cancel(cancel: Option<&std::sync::atomic::AtomicBool>) -> JdResult<()> {
+    if cancel.is_some_and(|c| c.load(std::sync::atomic::Ordering::Relaxed)) {
+        return Err(JdError::new(ErrorCode::E_CANCELLED, "cancelled"));
+    }
+    Ok(())
 }
 
 pub(crate) fn binding(index: u32, ty: wgpu::BufferBindingType) -> wgpu::BindGroupLayoutEntry {
@@ -281,7 +328,7 @@ mod tests {
         });
         let cpu = jd_terrain::thermal_erode(&h, [10.0, 10.0], 35.0, 40, 0.2, None).expect("cpu");
         let gpu_out = gpu
-            .thermal_erode(&h, [10.0, 10.0], 35.0, 40, 0.2, None)
+            .thermal_erode(&h, [10.0, 10.0], 35.0, 40, 0.2, None, None)
             .expect("gpu");
         let (a, b) = (cpu.to_vec(), gpu_out.to_vec());
         let scale = a.iter().cloned().fold(0.0f32, f32::max).max(1.0);
@@ -312,7 +359,7 @@ mod tests {
             gpu_out.get(40, 30)
         );
         assert!(
-            gpu.thermal_erode(&h, [10.0, 10.0], 95.0, 1, 0.2, None)
+            gpu.thermal_erode(&h, [10.0, 10.0], 95.0, 1, 0.2, None, None)
                 .is_err()
         );
         // Hardness: the east half is hard rock; the CPU and GPU agree there too.
@@ -321,7 +368,7 @@ mod tests {
         let cpu_k = jd_terrain::thermal_erode_with(&h, [10.0, 10.0], 35.0, 40, 0.2, Some(&k), None)
             .expect("cpu k");
         let gpu_k = gpu
-            .thermal_erode(&h, [10.0, 10.0], 35.0, 40, 0.2, Some(&k))
+            .thermal_erode(&h, [10.0, 10.0], 35.0, 40, 0.2, Some(&k), None)
             .expect("gpu k");
         let (a, b) = (cpu_k.to_vec(), gpu_k.to_vec());
         let worst_k = a
@@ -343,7 +390,8 @@ mod tests {
                 35.0,
                 1,
                 0.2,
-                Some(&Heightfield::new(8, 8, 8, 0).expect("s"))
+                Some(&Heightfield::new(8, 8, 8, 0).expect("s")),
+                None
             )
             .is_err()
         );
@@ -367,7 +415,7 @@ mod tests {
         let cpu_ms = t.elapsed().as_millis();
         let t = std::time::Instant::now();
         let g = gpu
-            .thermal_erode(&h, [5.0, 5.0], 35.0, 50, 0.2, None)
+            .thermal_erode(&h, [5.0, 5.0], 35.0, 50, 0.2, None, None)
             .expect("gpu");
         let gpu_ms = t.elapsed().as_millis();
         let (a, b) = (cpu.to_vec(), g.to_vec());

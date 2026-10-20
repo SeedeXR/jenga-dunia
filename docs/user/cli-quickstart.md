@@ -594,6 +594,15 @@ $ jd --json op sky.preview --project World.jdproj --params '{"sun_elevation_deg"
 
 The clouds are a shaded noise field, not a scattering model: three octaves of seeded value noise on the direction projected onto a plane above the viewer (so cells flatten towards the horizon), thresholded by the cover with a soft edge, coloured a neutral grey-white around the zenith luminance and brighter towards the sun; thick cover dims the sun pixel. Cover 0 reproduces the clear sky bit for bit. Fog and rain are not modelled.
 
+### Georeference by hand: origin and CRS
+
+```
+$ jd op project.set_settings --project World.jdproj --save --params '{"origin":[500000,4000000],"crs":"EPSG:32637"}'
+$ jd --json op terrain.export_heightmap --project World.jdproj --params '{"layer":"height","path":"world.tif","format":"tiff32","georeference":true}'
+```
+
+Layers are stored in local metres and the origin says where pixel (0, 0) sits in the CRS: the georeferenced TIFF carries it as its tie point and the CRS as its GeoKeys, a GeoTIFF import sets both automatically, and the desktop's Settings panel has the same three fields (an empty `crs` clears it). Generators sample world space, so moving the origin moves the window over the infinite noise field — two worlds whose origins differ by one extent are seamlessly adjacent (unit test: the layer hash changes with the origin); imported and sculpted layers do not move.
+
 ### Timeline: keyframed parameters
 
 ```

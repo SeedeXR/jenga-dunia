@@ -38,6 +38,7 @@ impl Gpu {
         p: &HydraulicParams,
         hardness: Option<&Heightfield>,
         rain: Option<&Heightfield>,
+        cancel: Option<&std::sync::atomic::AtomicBool>,
     ) -> JdResult<HydraulicResult> {
         for (name, f) in [("hardness", hardness), ("rain", rain)] {
             if let Some(k) = f
@@ -79,6 +80,7 @@ impl Gpu {
         h.validate_finite()?;
         let (w, hh) = (h.width(), h.height());
         let n = (w * hh) as usize;
+        self.check_fits(n as u64, 16)?; // state and flux are vec4 per cell
         let params = Params {
             w,
             h: hh,
@@ -136,9 +138,20 @@ impl Gpu {
         });
         self.queue
             .write_buffer(&uniform, 0, bytemuck::bytes_of(&params));
-        let init: Vec<[f32; 4]> = h.to_vec().iter().map(|t| [*t, 0.0, 0.0, 0.0]).collect();
-        self.queue
-            .write_buffer(&state[0], 0, bytemuck::cast_slice(&init));
+        // Upload row by row: no whole-field host copy of the vec4 state.
+        let mut row = vec![0.0f32; w as usize];
+        let mut packed = vec![[0.0f32; 4]; w as usize];
+        for y in 0..hh {
+            h.row(y, &mut row);
+            for (p, t) in packed.iter_mut().zip(&row) {
+                *p = [*t, 0.0, 0.0, 0.0];
+            }
+            self.queue.write_buffer(
+                &state[0],
+                (y as u64) * (w as u64) * 16,
+                bytemuck::cast_slice(&packed),
+            );
+        }
         self.queue.write_buffer(&flux[0], 0, &vec![0u8; n * 16]);
         if let Some(k) = hardness {
             let soft_v: Vec<f32> = k
@@ -232,18 +245,26 @@ impl Gpu {
             })
             .into();
         let (gx, gy) = (w.div_ceil(16), hh.div_ceil(16));
-        let mut encoder = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("jd hydraulic"),
-        });
-        for it in 0..p.iterations as usize {
-            let group = &groups[it % 2];
-            for pipe in &passes {
-                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
-                pass.set_pipeline(pipe);
-                pass.set_bind_group(0, group, &[]);
-                pass.dispatch_workgroups(gx, gy, 1);
+        for start in (0..p.iterations as usize).step_by(crate::CHUNK) {
+            crate::check_cancel(cancel)?;
+            let mut encoder = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("jd hydraulic"),
+            });
+            for it in start..(start + crate::CHUNK).min(p.iterations as usize) {
+                let group = &groups[it % 2];
+                for pipe in &passes {
+                    let mut pass =
+                        encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+                    pass.set_pipeline(pipe);
+                    pass.set_bind_group(0, group, &[]);
+                    pass.dispatch_workgroups(gx, gy, 1);
+                }
             }
+            self.queue.submit([encoder.finish()]);
         }
+        let mut encoder = dev.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("jd hydraulic readback"),
+        });
         encoder.copy_buffer_to_buffer(
             &state[(p.iterations as usize) % 2],
             0,
@@ -319,7 +340,7 @@ mod tests {
             )
             .expect("cpu");
             let g = gpu
-                .hydraulic_erode(&valley, [10.0, 10.0], &q, Some(&hard), Some(&rain))
+                .hydraulic_erode(&valley, [10.0, 10.0], &q, Some(&hard), Some(&rain), None)
                 .expect("gpu");
             let d = c
                 .height
@@ -340,7 +361,7 @@ mod tests {
         )
         .expect("cpu");
         let g = gpu
-            .hydraulic_erode(&valley, [10.0, 10.0], &p, Some(&hard), Some(&rain))
+            .hydraulic_erode(&valley, [10.0, 10.0], &p, Some(&hard), Some(&rain), None)
             .expect("gpu");
         let worst = |a: &Heightfield, b: &Heightfield| {
             let (a, b) = (a.to_vec(), b.to_vec());
@@ -377,9 +398,16 @@ mod tests {
                 [10.0, 10.0],
                 &HydraulicParams { dt: 0.0, ..p },
                 None,
+                None,
                 None
             )
             .is_err()
         );
+        // A cancel flag already set stops before the first chunk is submitted.
+        let stop = std::sync::atomic::AtomicBool::new(true);
+        let Err(e) = gpu.hydraulic_erode(&valley, [10.0, 10.0], &p, None, None, Some(&stop)) else {
+            panic!("a set cancel flag must stop the run");
+        };
+        assert_eq!(e.code, jd_types::ErrorCode::E_CANCELLED);
     }
 }

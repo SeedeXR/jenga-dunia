@@ -825,6 +825,12 @@ export type ProjectSetSettingsRequest = {
   "preview_lod"?: number | null;
   /** Shared wind of the world: every wind-driven node without its own `wind_*` setting follows it. */
   "wind"?: Wind | null;
+  /** World-space origin of pixel (0, 0) in metres, f64 — layers stay in local metres, so
+moving the origin re-bases the world without touching a sample (GeoTIFF tie points,
+the Unreal profile and georeferenced exports follow it). */
+  "origin"?: [number, number] | null;
+  /** Coordinate reference system of the origin, e.g. `EPSG:32637`; an empty string clears it. */
+  "crs"?: string | null;
   /** Memory budget for evaluations, bytes (≥ 256 MiB; default 4 GiB). */
   "memory_budget_bytes"?: number | null;
 };
@@ -1912,7 +1918,7 @@ export interface JdOps {
   "project.save": { request: ProjectSaveRequest; result: ProjectSaveResult };
   /** Rename the open project */
   "project.set_name": { request: ProjectSetNameRequest; result: ProjectSetNameResult };
-  /** Change project settings (autosave interval, cache limit, preview LOD, memory budget, the world's shared wind); fields left out keep their value — journaled like every mutation */
+  /** Change project settings (autosave interval, cache limit, preview LOD, memory budget, the world's shared wind, the world origin and CRS); fields left out keep their value — journaled like every mutation */
   "project.set_settings": { request: ProjectSetSettingsRequest; result: ProjectSetSettingsResult };
   /** Bake a physical sky (Preetham daylight model: sun azimuth/elevation, turbidity) as an equirectangular HDRI — OpenEXR RGB f32 for engines and renderers, with a tonemapped PNG preview beside it */
   "sky.bake": { request: SkyBakeRequest; result: SkyBakeResult };

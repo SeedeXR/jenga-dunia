@@ -244,20 +244,25 @@ pub fn export_heightmap_geo(
                 JdError::new(ErrorCode::E_SERIALIZE, format!("PNG write failed: {e}"))
                     .detail("path", path.display().to_string())
             };
-            let file = std::io::BufWriter::with_capacity(1 << 20, fs::File::create(path)?);
-            let mut enc = png::Encoder::new(file, w, h);
-            enc.set_color(png::ColorType::Grayscale);
-            enc.set_depth(png::BitDepth::Sixteen);
-            let mut writer = enc.write_header().map_err(png_err)?;
-            let mut stream = writer.stream_writer().map_err(png_err)?;
-            let mut bytes = vec![0u8; 2 * w as usize];
-            for_each_row_quantised(hf, flip, range, |q| {
-                for (b, v) in bytes.as_chunks_mut::<2>().0.iter_mut().zip(q) {
-                    *b = v.to_be_bytes();
-                }
-                stream.write_all(&bytes)
-            })?;
-            stream.finish().map_err(png_err)?;
+            {
+                // Scoped like the TIFF arm: IEND and the final flush happen in `finish`, before the
+                // file is measured, and their errors are reported instead of lost on drop.
+                let file = std::io::BufWriter::with_capacity(1 << 20, fs::File::create(path)?);
+                let mut enc = png::Encoder::new(file, w, h);
+                enc.set_color(png::ColorType::Grayscale);
+                enc.set_depth(png::BitDepth::Sixteen);
+                let mut writer = enc.write_header().map_err(png_err)?;
+                let mut stream = writer.stream_writer_with_size(1 << 20).map_err(png_err)?;
+                let mut bytes = vec![0u8; 2 * w as usize];
+                for_each_row_quantised(hf, flip, range, |q| {
+                    for (b, v) in bytes.as_chunks_mut::<2>().0.iter_mut().zip(q) {
+                        *b = v.to_be_bytes();
+                    }
+                    stream.write_all(&bytes)
+                })?;
+                stream.finish().map_err(png_err)?;
+                writer.finish().map_err(png_err)?;
+            }
             fs::metadata(path)?.len()
         }
         HeightmapFormat::RawR16 => {

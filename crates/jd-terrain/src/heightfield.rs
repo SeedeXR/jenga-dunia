@@ -242,9 +242,17 @@ impl Heightfield {
             .collect();
         self.tiles.par_iter_mut().zip(rings).for_each(|(t, ring)| {
             let s = t.stride() as i64;
-            let cells: Vec<(i64, i64)> = ring_cells(t).collect();
-            for ((px, py), v) in cells.into_iter().zip(ring) {
-                t.data[(py * s + px) as usize] = v;
+            let (halo, ts) = (t.halo as i64, t.size as i64);
+            let mut k = 0;
+            for py in 0..s {
+                for px in 0..s {
+                    let (ix, iy) = (px - halo, py - halo);
+                    if ix >= 0 && iy >= 0 && ix < ts && iy < ts {
+                        continue;
+                    }
+                    t.data[(py * s + px) as usize] = ring[k];
+                    k += 1;
+                }
             }
         });
     }

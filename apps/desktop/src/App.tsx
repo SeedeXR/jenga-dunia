@@ -110,6 +110,8 @@ export default function App() {
   // The wind sea is the core's call (`ocean.waves`): re-fetched when the node's wind changes.
   // A sea node without its own wind follows the world's shared wind (Settings ▸ Wind).
   const worldWind = s.project?.world.wind ?? { azimuth_deg: 270, speed_mps: 8 };
+  const worldOrigin = s.project?.world.origin ?? [0, 0];
+  const worldCrs = s.project?.world.crs ?? "";
   const windSpeed = seaNode ? Number(seaNode.params?.wind_speed_mps ?? worldWind.speed_mps) : null;
   const fetchKm = seaNode?.params?.fetch_km == null ? null : Number(seaNode.params.fetch_km);
   const windAzimuth = seaNode ? Number(seaNode.params?.wind_azimuth_deg ?? worldWind.azimuth_deg) : null;
@@ -380,6 +382,18 @@ export default function App() {
               <label className="mb-1 flex items-center justify-between gap-2 text-xs text-jd-fg-1" title="Live preview target per evaluation, ms (0 = off): the preview LOD steps coarser while evaluations run over it and finer again when they are well under; this app setting is not part of the project">
                 Live target (ms)
                 <input className={inputCls} type="number" min={0} step={50} value={s.previewTargetMs} onChange={(e) => s.setPreviewTargetMs(Number(e.target.value))} data-testid="preview-target" />
+              </label>
+              <label className="mb-1 flex items-center justify-between gap-2 text-xs text-jd-fg-1" title="World origin, metres: where pixel (0, 0) sits in the CRS. Georeferenced exports carry it; generators sample world space, so moving it moves the window over the noise field (adjacent worlds stay seamless)">
+                Origin x (m)
+                <input className={inputCls} type="number" step={1} key={`ox-${s.settingsRev}-${worldOrigin[0]}`} defaultValue={worldOrigin[0]} onBlur={(e) => { const v = Number(e.target.value); if (Number.isFinite(v) && v !== worldOrigin[0]) void s.setSettings({ origin: [v, worldOrigin[1]] }); }} data-testid="origin-x" />
+              </label>
+              <label className="mb-1 flex items-center justify-between gap-2 text-xs text-jd-fg-1" title="World origin y (north), metres">
+                Origin y (m)
+                <input className={inputCls} type="number" step={1} key={`oy-${s.settingsRev}-${worldOrigin[1]}`} defaultValue={worldOrigin[1]} onBlur={(e) => { const v = Number(e.target.value); if (Number.isFinite(v) && v !== worldOrigin[1]) void s.setSettings({ origin: [worldOrigin[0], v] }); }} data-testid="origin-y" />
+              </label>
+              <label className="mb-1 flex items-center justify-between gap-2 text-xs text-jd-fg-1" title="Coordinate reference system of the origin, e.g. EPSG:32637 (UTM 37N); empty = none. GeoTIFF exports carry it">
+                CRS
+                <input className={inputCls} type="text" placeholder="EPSG:32637" key={`crs-${s.settingsRev}-${worldCrs}`} defaultValue={worldCrs} onBlur={(e) => { const v = e.target.value.trim(); if (v !== worldCrs) void s.setSettings({ crs: v }); }} data-testid="crs" />
               </label>
               <label className="mb-1 flex items-center justify-between gap-2 text-xs text-jd-fg-1" title="Shared wind: dunes, yardangs, snow scour and the wind sea follow it unless a node sets its own wind">
                 Wind from (°)
