@@ -155,6 +155,11 @@
     "scope": "export"
   },
   {
+    "id": "terrain.export_profile",
+    "description": "Write a Unity or Unreal terrain import set: heightmap in the engine's encoding and row order, one 8-bit weightmap per mask layer, and a README with the computed Terrain Height / Z scale",
+    "scope": "export"
+  },
+  {
     "id": "terrain.generate",
     "description": "Generate a noise heightfield for the open project's world and store it as a layer",
     "scope": "project-write"

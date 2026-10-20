@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ProfileReport",
+  "description": "What the profile wrote.",
+  "type": "object",
+  "properties": {
+    "profile": {
+      "description": "Engine.",
+      "$ref": "#/$defs/EngineProfile"
+    },
+    "dir": {
+      "description": "Output directory.",
+      "type": "string"
+    },
+    "files": {
+      "description": "Files written, relative to `dir`, in write order (heightmap, sidecar, weightmaps, README).",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "size_px": {
+      "description": "Heightmap size in pixels.",
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint32",
+        "minimum": 0
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "settings": {
+      "description": "Import numbers.",
+      "$ref": "#/$defs/ProfileSettings"
+    },
+    "notes": {
+      "description": "Non-fatal notes (e.g. a size Unreal does not recommend).",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "profile",
+    "dir",
+    "files",
+    "size_px",
+    "settings",
+    "notes"
+  ],
+  "$defs": {
+    "EngineProfile": {
+      "description": "Target engine.",
+      "oneOf": [
+        {
+          "description": "Unity Terrain: RAW 16-bit little-endian, row 0 = south (no flip), Terrain Height = range.",
+          "type": "string",
+          "const": "unity"
+        },
+        {
+          "description": "Unreal Landscape: PNG16, row 0 = north, Z scale = range_m × 100 / 512, 8-bit weightmaps.",
+          "type": "string",
+          "const": "unreal"
+        }
+      ]
+    },
+    "ProfileSettings": {
+      "description": "Engine-specific numbers the importer needs.",
+      "type": "object",
+      "properties": {
+        "min_m": {
+          "description": "Lowest encoded height (metres) — the terrain's base offset.",
+          "type": "number",
+          "format": "float"
+        },
+        "max_m": {
+          "description": "Highest encoded height (metres).",
+          "type": "number",
+          "format": "float"
+        },
+        "unity_terrain_height_m": {
+          "description": "Unity: Terrain Height in metres (max − min); place the terrain at y = min.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        },
+        "unreal_z_scale": {
+          "description": "Unreal: Landscape Z scale for this encoding (range × 100 / 512).",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        },
+        "unreal_location_z_cm": {
+          "description": "Unreal: Z location in centimetres so mid-grey (32768) lands at (min + max) / 2.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        }
+      },
+      "required": [
+        "min_m",
+        "max_m"
+      ]
+    }
+  }
+}

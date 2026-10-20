@@ -222,6 +222,19 @@ $ jd --json op terrain.scatter --project Bio.jdproj --params '{"mask":"forest","
 
 On the 5 120 m world above the 40 m grid has 128² = 16 384 candidates and the forest mask covers 66.8 % of the area — 10 966 points, i.e. the expected share, in 30 ms including the file write. A spacing finer than the layer's sample spacing is refused (`spacing_m … must be ≥ the sample spacing (10 m)`). On the 512² world shown (heights −50..1200 m): rock 21.6 %, snow 4.4 %, grassland 7.2 %, forest 66.8 %; classify took 61 ms (debug). In the desktop the rules are a table in the inspector (add a row, type `min,max` ranges; see the desktop guide).
 
+### Export for Unity or Unreal
+
+```
+$ jd --json op terrain.export_profile --project Bio.jdproj --params '{"profile":"unreal","dir":"unreal","layer":"land","masks":["forest"]}'
+{"op":"terrain.export_profile","status":"ok","result":{"profile":"unreal","dir":".../exports/unreal",
+  "files":["heightmap.png","heightmap.png.jd-height.json","weight_forest.png","README.md"],"size_px":[512,512],
+  "settings":{"min_m":51.98,"max_m":1085.05,"unreal_z_scale":201.771,"unreal_location_z_cm":56851.2}},
+  "warnings":[{"code":"W_ENGINE_SIZE","message":"Unreal's recommended overall resolutions are 127/253/505/1009/2017/4033/8129; this is 512×512 — …"}]}
+$ jd op terrain.export_profile --project Bio.jdproj --params '{"profile":"unity","dir":"unity","layer":"land","masks":["forest"]}'
+```
+
+`terrain.export_profile` writes one folder an engine importer can take as-is: **Unreal** gets a 16-bit PNG heightmap with row 0 = north, one 8-bit grayscale weightmap per mask layer at the same resolution, and a README with the Landscape numbers computed from the data — Z scale = (max − min) × 100 / 512 (201.771 here for 52…1085 m) and the Z location that puts mid-grey at the mid height; **Unity** gets `heightmap.r16` (16-bit little-endian, row 0 = south, so *Flip Vertically: off*, Byte Order *Windows*), the weightmaps, and the Terrain Height (1033.07 m) plus the y offset (51.98 m). Sizes an engine does not like are reported as `W_ENGINE_SIZE` (Unity wants 2ⁿ+1 squares, Unreal 1009/2017/4033/8129 — use the world presets). The engine-side steps follow the Unity 6 manual and the Unreal 5 Landscape guide but are **UNVERIFIED** until someone imports once; the README says so.
+
 ### Bring in a real DEM or engine heightmap
 
 ```

@@ -61,7 +61,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [ ] QEM decimation, LOD chains, MikkTSpace, topology validation + stats
 - [ ] Material translation layer + loss reports
 - [ ] Blender bridge add-on (separate licence) + headless round-trip test
-- [ ] Unity/Unreal export profiles (heightmap sizes, weightmaps, z-scale) + documented import procedures
+- [~] Unity/Unreal export profiles ✔ (`terrain.export_profile`: engine-specific heightmap encoding/row order, 8-bit weightmaps, README with Terrain Height / Z scale; size warnings) · engine-side import verified on a real Unity/Unreal ☐ · Unity C# TerrainData import script ☐
 - [ ] FBX SDK export adapter (out-of-process) for fbx we build our own high performance accurate reader and writer from sratch you can learn from optima it's in Software Projects , but also you can verify against blender headless , api , autodesk fbx  , maya , unity and unreal we build our own fbx dsk reader
 
 ## Phase 5 — Scale & hardening

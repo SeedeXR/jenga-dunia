@@ -728,6 +728,49 @@ export type TerrainExportMeshResult = {
   "texture_px"?: [number, number] | null;
 };
 
+export type EngineProfile = "unity" | "unreal";
+
+export type TerrainExportProfileRequest = {
+  /** Target engine. */
+  "profile": EngineProfile;
+  /** Output directory; relative paths resolve against the project's `exports/`. */
+  "dir": string;
+  /** Height layer. */
+  "layer"?: string;
+  /** 0..1 mask layers written as weightmaps (`weight_<name>.png`). */
+  "masks"?: string[];
+  /** Height range to encode (default: the layer's min/max). */
+  "range_m"?: [number, number] | null;
+};
+
+export type ProfileSettings = {
+  /** Lowest encoded height (metres) — the terrain's base offset. */
+  "min_m": number;
+  /** Highest encoded height (metres). */
+  "max_m": number;
+  /** Unity: Terrain Height in metres (max − min); place the terrain at y = min. */
+  "unity_terrain_height_m"?: number | null;
+  /** Unreal: Landscape Z scale for this encoding (range × 100 / 512). */
+  "unreal_z_scale"?: number | null;
+  /** Unreal: Z location in centimetres so mid-grey (32768) lands at (min + max) / 2. */
+  "unreal_location_z_cm"?: number | null;
+};
+
+export type TerrainExportProfileResult = {
+  /** Engine. */
+  "profile": EngineProfile;
+  /** Output directory. */
+  "dir": string;
+  /** Files written, relative to `dir`, in write order (heightmap, sidecar, weightmaps, README). */
+  "files": string[];
+  /** Heightmap size in pixels. */
+  "size_px": [number, number];
+  /** Import numbers. */
+  "settings": ProfileSettings;
+  /** Non-fatal notes (e.g. a size Unreal does not recommend). */
+  "notes": string[];
+};
+
 export type NoiseKind = "open_simplex2" | "open_simplex2_s" | "perlin" | "value" | "value_cubic" | "cellular";
 
 export type FractalKind = "none" | "fbm" | "ridged" | "ping_pong";
@@ -1107,6 +1150,8 @@ export interface JdOps {
   "terrain.export_heightmap": { request: TerrainExportHeightmapRequest; result: TerrainExportHeightmapResult };
   /** Write a layer as a binary glTF (.glb) grid mesh: metres, +Y up, centred on the world, normals + UVs + PBR material with a baked base-colour texture */
   "terrain.export_mesh": { request: TerrainExportMeshRequest; result: TerrainExportMeshResult };
+  /** Write a Unity or Unreal terrain import set: heightmap in the engine's encoding and row order, one 8-bit weightmap per mask layer, and a README with the computed Terrain Height / Z scale */
+  "terrain.export_profile": { request: TerrainExportProfileRequest; result: TerrainExportProfileResult };
   /** Generate a noise heightfield for the open project's world and store it as a layer */
   "terrain.generate": { request: TerrainGenerateRequest; result: TerrainGenerateResult };
   /** Downsampled u16 preview of a layer (base64) for agents and viewers */

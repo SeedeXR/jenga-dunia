@@ -25,8 +25,8 @@ Auditable per-format status (brief §9.5). Status values: `verified` (validator/
 | Target | Procedure | Automation | Status |
 |---|---|---|---|
 | Blender 5.x | headless `blender -b -P import_check.py` imports GLB/USD/OBJ, reports counts, re-exports | CI on runners with Blender | planned |
-| Unity 6 | editor script creates TerrainData from RAW r16 + alphamaps; glTFast imports GLB | manual checklist; `UNVERIFIED` until a Unity runner exists | planned |
-| Unreal 5.8 | Landscape import of PNG16/r16 (sizes 1009…8129, Z-scale formula), weightmaps; Interchange glTF/USD | manual checklist; `UNVERIFIED` until automated | planned |
+| Unity 6 | `terrain.export_profile unity`: RAW r16 (LE, row 0 south) + 8-bit weightmaps + README with Terrain Height / y offset; glTFast imports GLB | manual checklist in the README; `UNVERIFIED` until a Unity runner exists | shipped (export side) |
+| Unreal 5.8 | `terrain.export_profile unreal`: PNG16 (row 0 north) + 8-bit weightmaps at heightmap resolution + README with Z scale = range × 100 / 512 and Z location; `W_ENGINE_SIZE` off the 1009…8129 sizes; Interchange glTF/USD | manual checklist in the README; `UNVERIFIED` until automated | shipped (export side) |
 | Maya 2027 | `mayapy` USD/FBX import script | manual | planned |
 | Web | three.js r186, Babylon 9.x, model-viewer load GLB (meshopt, KTX2) | Playwright in CI | planned |
 | Apple | `usdchecker --arkit`, Quick Look | macOS runner | planned |

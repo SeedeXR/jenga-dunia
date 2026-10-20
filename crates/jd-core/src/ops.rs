@@ -2250,6 +2250,25 @@ pub mod terrain {
         pub options: ExportOptions,
     }
 
+    /// `terrain.export_profile` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct TerrainExportProfile {
+        /// Target engine.
+        pub profile: jd_terrain::EngineProfile,
+        /// Output directory; relative paths resolve against the project's `exports/`.
+        pub dir: PathBuf,
+        /// Height layer.
+        #[serde(default = "default_layer")]
+        pub layer: String,
+        /// 0..1 mask layers written as weightmaps (`weight_<name>.png`).
+        #[serde(default)]
+        pub masks: Vec<String>,
+        /// Height range to encode (default: the layer's min/max).
+        #[serde(default)]
+        pub range_m: Option<[f32; 2]>,
+    }
+
     /// `terrain.scatter` params.
     #[derive(Debug, Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
@@ -2441,6 +2460,23 @@ pub mod terrain {
                     }
                     jd_terrain::export_glb(hf, extent, &path, step, p.texture)
                 })?;
+                Ok((report, warnings))
+            },
+        );
+        r.register::<TerrainExportProfile, jd_terrain::ProfileReport, _>(
+            "terrain.export_profile",
+            "Write a Unity or Unreal terrain import set: heightmap in the engine's encoding and row order, one 8-bit weightmap per mask layer, and a README with the computed Terrain Height / Z scale",
+            Scope::Export,
+            |ctx, p| {
+                let dir = if p.dir.is_absolute() { p.dir.clone() } else { ctx.with_project(|proj| Ok(proj.root().join("exports").join(&p.dir)))? };
+                let height = ctx.with_layer(&p.layer, |hf| Ok(hf.clone()))?;
+                let mut masks = Vec::new();
+                for name in &p.masks {
+                    masks.push((name.clone(), ctx.with_layer(name, |hf| Ok(hf.clone()))?));
+                }
+                let refs: Vec<(String, &jd_terrain::Heightfield)> = masks.iter().map(|(n, hf)| (n.clone(), hf)).collect();
+                let report = jd_terrain::export_profile(p.profile, &height, &refs, &dir, p.range_m)?;
+                let warnings = report.notes.iter().map(|n| Warning::new("W_ENGINE_SIZE", n.clone())).collect();
                 Ok((report, warnings))
             },
         );

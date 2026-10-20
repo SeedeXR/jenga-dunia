@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TerrainExportProfile",
+  "description": "`terrain.export_profile` params.",
+  "type": "object",
+  "properties": {
+    "profile": {
+      "description": "Target engine.",
+      "$ref": "#/$defs/EngineProfile"
+    },
+    "dir": {
+      "description": "Output directory; relative paths resolve against the project's `exports/`.",
+      "type": "string"
+    },
+    "layer": {
+      "description": "Height layer.",
+      "type": "string",
+      "default": "height"
+    },
+    "masks": {
+      "description": "0..1 mask layers written as weightmaps (`weight_<name>.png`).",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "range_m": {
+      "description": "Height range to encode (default: the layer's min/max).",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "number",
+        "format": "float"
+      },
+      "minItems": 2,
+      "maxItems": 2,
+      "default": null
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "profile",
+    "dir"
+  ],
+  "$defs": {
+    "EngineProfile": {
+      "description": "Target engine.",
+      "oneOf": [
+        {
+          "description": "Unity Terrain: RAW 16-bit little-endian, row 0 = south (no flip), Terrain Height = range.",
+          "type": "string",
+          "const": "unity"
+        },
+        {
+          "description": "Unreal Landscape: PNG16, row 0 = north, Z scale = range_m × 100 / 512, 8-bit weightmaps.",
+          "type": "string",
+          "const": "unreal"
+        }
+      ]
+    }
+  }
+}
