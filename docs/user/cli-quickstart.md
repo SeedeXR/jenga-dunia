@@ -441,7 +441,7 @@ faces steeper than 30° / 45° / 60°:  terraced input 10.1 / 9.5 / 8.7 %   with
 ![Blender render of the strata result: flat-topped mesas with caprock cliffs and fluted talus aprons below each step](images/cli-mesa-strata.png)
 ![The same terrace and erosion without the hardness input: every riser slumped to the 34° talus angle](images/cli-mesa-plain.png)
 
-`jd.terrain.strata@1` writes a 0..1 hardness field from the height: beds of `layer_m` alternate a hard cap (`hard_fraction` of each cycle, hardness `hard`) and a soft bed (`soft`), with `transition` wide edges, tilted by `dip_deg` towards `dip_azimuth_deg` and undulating by `warp_m` (seeded). The thermal and stream-power nodes take it on their new optional `hardness` input: hard rock holds an 88° face and sheds at a tenth of the rate, and its erodibility `k` drops to a tenth, so the cap keeps the cliff while the shale below it slumps into talus — mesas, buttes, stepped canyon walls, the VUE "strata" filter done as a simulation input. The field is a property of the rock at the *current* surface, so for deep cuts re-evaluate it between erosion passes (strata → erode → strata → erode). Rendered in Blender 5.2 from the GLB exports with `scripts/blender/render_glb.py`; slope shares from `scripts/blender/slope_stats.py` (face normals).
+`jd.terrain.strata@1` writes a 0..1 hardness field from the height: beds of `layer_m` alternate a hard cap (`hard_fraction` of each cycle, hardness `hard`) and a soft bed (`soft`), with `transition` wide edges, tilted by `dip_deg` towards `dip_azimuth_deg` and undulating by `warp_m` (seeded). The thermal, stream-power and hydraulic nodes take it on their optional `hardness` input: hard rock holds an 88° face and sheds at a tenth of the rate, its stream-power erodibility `k` and its hydraulic dissolving rate drop to a tenth, so the cap keeps the cliff while the shale below it slumps into talus — mesas, buttes, stepped canyon walls, the VUE "strata" filter done as a simulation input. The field is a property of the rock at the *current* surface, so for deep cuts re-evaluate it between erosion passes (strata → erode → strata → erode). Rendered in Blender 5.2 from the GLB exports with `scripts/blender/render_glb.py`; slope shares from `scripts/blender/slope_stats.py` (face normals).
 
 ### Karst sinkholes (desert and limestone plains)
 
@@ -488,6 +488,24 @@ wadi         0..0.92, mean 0.011   (1 % of the plain is an ephemeral channel at 
 ![Playa mask: every closed basin of the desert plain filled level — the sinkholes read as bright discs, the broad hollows as soft blobs](images/cli-desert-playa.png) ![Wadi mask: a sparse dendritic network of ephemeral channels across the plain](images/cli-desert-wadi.png)
 
 Two desert landforms need no new node. A **playa** (salt pan) is a closed basin whose floods evaporate: `jd.hydrology.fill@1` levels every closed hollow — on this plain that is each sinkhole and the broad low ground between the dunes — and its `lakes` output is the depth of water that would stand there, so `lakes > 0` is the evaporite floor and `out` the flat pan surface; give it a bright, rough salt material through a biome rule on that mask. A **wadi** (arroyo) is a channel that only runs in flash floods: `jd.hydrology.rivers@1` with a low `threshold` and a shallow `depth_m` on the plain cuts the braided, sparse network above, and `method: dinf` keeps it from locking to the grid. Both are static: no flood timing, no salt crust growth.
+
+### Desert materials: a biome rule set
+
+```
+$ jd op graph.add_node --project Desert.jdproj --save --params '{"kind":"jd.analysis.slope@1"}'                                  # karst.out → slope.in
+$ jd op graph.add_node --project Desert.jdproj --save --params '{"kind":"jd.hydrology.wetness@1","params":{"method":"mfd"}}'    # karst.out → wetness.in
+$ jd op graph.add_node --project Desert.jdproj --save --params '{"kind":"jd.biome.classify@1","params":{"rules":[
+    {"name":"wadi gravel","wetness":[0.75,1.01]},
+    {"name":"sand sheet","slope":[0,0.06]},
+    {"name":"reg (desert pavement)","slope":[0.06,0.2]},
+    {"name":"varnished rock","slope":[0.2,1.01]}]}}'
+# karst.out → classify.height; slope.out → classify.slope; wetness.out → classify.wetness; classify.biome → `desert_biome`
+classify 59 ms (256²)   shares: wadi gravel 0.3 %  sand sheet 95.8 %  reg 2.9 %  varnished rock 1.1 %   (jd.mask.class@1 ids 1..4)
+```
+
+![Desert biome class map: a sand-sheet plain with reg rims and varnished rock on the steep sinkhole walls, wadi gravel along the channels](images/cli-desert-biome.png)
+
+The desert surfaces fall out of the same rule engine as the temperate biomes: the wettest cells (the wadi beds, MFD-routed so the index reads as moisture) take gravel first, then slope sorts the rest into sand sheet, reg (the stone pavement that armours gently sloping desert ground) and varnished rock on anything steep — here the sinkhole walls and dune slip faces. Each class is a `jd.mask.class@1` mask for materials and scatter. The playa floor (`fill.lakes > 0`) and the sinkhole floors are masks of their own; the classify node does not take extra masks yet, so a salt-crust class has to be composited downstream — that is the open item.
 
 ### Snow cover
 

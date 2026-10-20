@@ -45,7 +45,7 @@ test.describe("jobs against the real core", () => {
       await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 10 });
       await page.mouse.up();
     };
-    await drag(noise.locator(".react-flow__handle.source"), hyd.locator(".react-flow__handle.target"));
+    await drag(noise.locator(".react-flow__handle.source"), hyd.locator('.react-flow__handle.target[data-handleid="in"]')); // the node also has a `hardness` input
     await drag(hyd.locator(".react-flow__handle.source[data-handleid=\"out\"]"), out.locator(".react-flow__handle.target"));
     await expect(panel.locator(".react-flow__edge")).toHaveCount(2);
 

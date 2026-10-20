@@ -299,6 +299,29 @@ pub fn hydraulic_erode(
     p: &HydraulicParams,
     cancel: Option<&AtomicBool>,
 ) -> JdResult<HydraulicResult> {
+    hydraulic_erode_with(h, spacing_m, p, None, cancel)
+}
+
+/// [`hydraulic_erode`] with an optional per-cell `hardness` field (0..1): the dissolving constant
+/// drops to a tenth on hard rock, so water cuts shale and deposits on caprock as before.
+pub fn hydraulic_erode_with(
+    h: &Heightfield,
+    spacing_m: [f32; 2],
+    p: &HydraulicParams,
+    hardness: Option<&Heightfield>,
+    cancel: Option<&AtomicBool>,
+) -> JdResult<HydraulicResult> {
+    if let Some(k) = hardness
+        && (k.width(), k.height()) != (h.width(), h.height())
+    {
+        return Err(JdError::invalid("hardness", "field size differs from `in`"));
+    }
+    let soft: Option<Vec<f32>> = hardness.map(|k| {
+        k.to_vec()
+            .iter()
+            .map(|v| 1.0 - 0.9 * v.clamp(0.0, 1.0))
+            .collect()
+    });
     check_spacing(spacing_m)?;
     if !(p.dt > 0.0 && p.dt <= 1.0) {
         return Err(JdError::invalid("dt", "must be within (0, 1]"));
@@ -442,7 +465,10 @@ pub fn hydraulic_erode(
                     let mut s = (sediment[i] - sed_out).max(0.0) + sed_in;
                     let mut t = terrain[i];
                     if capacity > s {
-                        let delta = p.dissolve_k * (capacity - s) * p.dt;
+                        let delta = p.dissolve_k
+                            * soft.as_ref().map_or(1.0, |f| f[i])
+                            * (capacity - s)
+                            * p.dt;
                         t -= delta;
                         s += delta;
                     } else {
@@ -501,6 +527,36 @@ pub fn slope_mask(h: &Heightfield, spacing_m: [f32; 2], max_deg: f32) -> JdResul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hard_rock_dissolves_a_tenth_as_fast_under_rain() {
+        let mut valley = Heightfield::new(48, 32, 64, 0).expect("v");
+        valley.fill_with(|x, y| 200.0 + y as f32 * 2.0 + (x as f32 - 24.0).abs() * 1.5);
+        // Enough rain and an open concentration cap that dissolution, not the thin-film cap, sets the pace.
+        let p = HydraulicParams {
+            iterations: 60,
+            rain_rate: 0.2,
+            max_concentration: 10.0,
+            ..HydraulicParams::default()
+        };
+        let soft = hydraulic_erode(&valley, [10.0, 10.0], &p, None).expect("soft");
+        let mut cap = Heightfield::new(48, 32, 64, 0).expect("k");
+        cap.fill_with(|_, _| 1.0);
+        let hard = hydraulic_erode_with(&valley, [10.0, 10.0], &p, Some(&cap), None).expect("hard");
+        let moved = |f: &Heightfield| {
+            (0..32)
+                .flat_map(|y| (0..48).map(move |x| (x, y)))
+                .map(|(x, y)| (valley.get(x, y) - f.get(x, y)).abs())
+                .sum::<f32>()
+        };
+        let (ms, mh) = (moved(&soft.height), moved(&hard.height));
+        assert!(ms > 0.0 && mh < ms * 0.5, "hard {mh} vs soft {ms}");
+        let mut zero = Heightfield::new(48, 32, 64, 0).expect("z");
+        zero.fill_with(|_, _| 0.0);
+        let same =
+            hydraulic_erode_with(&valley, [10.0, 10.0], &p, Some(&zero), None).expect("zero");
+        assert_eq!(same.height.to_vec(), soft.height.to_vec());
+    }
 
     #[test]
     fn hard_rock_keeps_its_cliff_while_soft_rock_slumps_to_talus() {

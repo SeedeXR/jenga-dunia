@@ -634,12 +634,17 @@
   },
   {
     "kind": "jd.erosion.hydraulic@1",
-    "description": "Hydraulic erosion (virtual pipes / shallow water): rain flows downhill, dissolves, carries and deposits sediment; outputs terrain, water depth and suspended sediment",
+    "description": "Hydraulic erosion (virtual pipes / shallow water): rain flows downhill, dissolves, carries and deposits sediment; outputs terrain, water depth and suspended sediment; an optional `hardness` field (0..1) drops the dissolving rate to a tenth on hard rock",
     "inputs": [
       {
         "name": "in",
         "ty": "heightfield",
         "required": true
+      },
+      {
+        "name": "hardness",
+        "ty": "heightfield",
+        "required": false
       }
     ],
     "outputs": [

@@ -8,8 +8,7 @@ use jd_terrain::{
     HydraulicParams, NoiseParams, SeabedParams, SnowParams, StreamPowerParams, Stroke,
     THERMAL_MAX_RATE, aeolian_transport, apply_strokes, carve_rivers, classify_seabed,
     coastal_erode, droplet_erode, fill_depressions, flow_accumulation_with, generate_noise,
-    hydraulic_erode, read_foreign, resample_to_world, sea_level, slope_mask, snow_cover,
-    wetness_index_with,
+    read_foreign, resample_to_world, sea_level, slope_mask, snow_cover, wetness_index_with,
 };
 use jd_types::{JdError, JdResult};
 use rayon::prelude::*;
@@ -729,8 +728,8 @@ pub fn register_all(r: &mut Registry) {
     ));
     r.register(NodeDef::new::<HydraulicNodeParams, _>(
         "jd.erosion.hydraulic@1",
-        "Hydraulic erosion (virtual pipes / shallow water): rain flows downhill, dissolves, carries and deposits sediment; outputs terrain, water depth and suspended sediment",
-        vec![port("in", PortType::Heightfield, true)],
+        "Hydraulic erosion (virtual pipes / shallow water): rain flows downhill, dissolves, carries and deposits sediment; outputs terrain, water depth and suspended sediment; an optional `hardness` field (0..1) drops the dissolving rate to a tenth on hard rock",
+        vec![port("in", PortType::Heightfield, true), port("hardness", PortType::Heightfield, false)],
         vec![
             port("out", PortType::Heightfield, false),
             port("water", PortType::Heightfield, false),
@@ -741,7 +740,8 @@ pub fn register_all(r: &mut Registry) {
             if !(1..=2000).contains(&hp.iterations) {
                 return Err(JdError::invalid("iterations", "must be within 1..=2000"));
             }
-            let r = hydraulic_erode(
+            let hardness = i.get("hardness").map(|v| v.as_field());
+            let r = jd_terrain::hydraulic_erode_with(
                 field(i, "in")?,
                 spacing_m(ctx),
                 &HydraulicParams {
@@ -754,7 +754,7 @@ pub fn register_all(r: &mut Registry) {
                     deposit_k: hp.deposit_k,
                     max_concentration: hp.max_concentration,
                     ..Default::default()
-                }, Some(&ctx.cancel))?;
+                }, hardness.map(|k| &**k), Some(&ctx.cancel))?;
             Ok(BTreeMap::from([
                 ("out".to_owned(), Value::field(r.height)),
                 ("water".to_owned(), Value::field(r.water)),
