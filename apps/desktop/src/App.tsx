@@ -250,6 +250,23 @@ export default function App() {
               <dd data-testid="project-journal">{s.project.pending_journal}</dd>
             </dl>
           )}
+          {s.project && (
+            <>
+              <h2 className="mt-4 mb-2 text-[11px] font-semibold tracking-wide text-jd-fg-2 uppercase">Settings</h2>
+              <label className="mb-1 flex items-center justify-between gap-2 text-xs text-jd-fg-1" title="Seconds after the last edit before the project autosaves; 0 disables">
+                Autosave (s)
+                <input className={inputCls} type="number" min={0} max={86400} key={`as-${s.settingsRev}-${s.project.settings.autosave_interval_s}`} defaultValue={s.project.settings.autosave_interval_s} onBlur={(e) => { const v = Number(e.target.value); if (v !== s.project?.settings.autosave_interval_s) void s.setSettings({ autosave_interval_s: v }); }} data-testid="setting-autosave" />
+              </label>
+              <label className="mb-1 flex items-center justify-between gap-2 text-xs text-jd-fg-1" title="Layer cache cap on disk; oldest layers are evicted beyond it">
+                Cache limit (MB)
+                <input className={inputCls} type="number" min={16} key={`cl-${s.settingsRev}-${s.project.settings.cache_limit_bytes}`} defaultValue={Math.round(s.project.settings.cache_limit_bytes / 1048576)} onBlur={(e) => { const v = Math.round(Number(e.target.value)) * 1048576; if (v !== s.project?.settings.cache_limit_bytes) void s.setSettings({ cache_limit_bytes: v }); }} data-testid="setting-cache" />
+              </label>
+              <label className="mb-1 flex items-center justify-between gap-2 text-xs text-jd-fg-1" title="Preview level of detail hint (resolution ÷ 2^lod)">
+                Preview LOD
+                <input className={inputCls} type="number" min={0} max={8} key={`pl-${s.settingsRev}-${s.project.settings.preview_lod}`} defaultValue={s.project.settings.preview_lod} onBlur={(e) => { const v = Number(e.target.value); if (v !== s.project?.settings.preview_lod) void s.setSettings({ preview_lod: v }); }} data-testid="setting-lod" />
+              </label>
+            </>
+          )}
         </aside>
 
         {/* Center: viewport (top) + node graph (bottom, toggle) */}

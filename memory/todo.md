@@ -27,7 +27,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [~] Generated schemas committed under `schemas/v1/` ✔ (`jd schema --write`, CI fails when stale; 24 ops × request/result + envelope + node kinds); TS type generation ✔ (`apps/desktop/scripts/gen-types.mjs` → `src/lib/ops.gen.ts`, CI-checked; `state.ts` `run()` typed by the `JdOps` map and strict TS on ✔)
 - [x] CLI `jd new|open|op|schema|diag env` with `--json` NDJSON envelopes and spec exit codes
 - [x] MCP server over stdio: tools from registry, scope gate (`--scope`), `--workspace` confinement, structured envelopes
-- [x] Autosave: debounced `project.save` `settings.autosave_interval_s` after the last journaled edit (desktop; e2e-verified with the interval overridden to 2 s); settings UI ☐
+- [x] Autosave: debounced `project.save` `settings.autosave_interval_s` after the last journaled edit (desktop; e2e-verified); settings UI ✔ (`project.set_settings` + project-panel Settings section)
 - [~] jobs: progress + cancel ✔ (`jd-core::jobs`, `jobs.list`/`jobs.cancel`, header progress + Cancel, E_CANCELLED in kernels); queues/budgets/timeouts/detached execution ☐ · `jd-cache` ✔ (layer-level, LRU eviction to `settings.cache_limit_bytes` + `project.cache_gc` ✔; tile-level ☐)
 - [~] Viewport feasibility prototype: three.js WebGPU/WebGL2 in Tauri WebView ✔ (WebGPU observed active on macOS 27 dev build), u16 tile streaming over raw-bytes IPC ✔; measure IPC MB/s + latency on macOS and Windows ☐; Rust headless wgpu compute ☐; close ADR-0003 ☐
 - [x] Desktop app skeleton (`apps/desktop`, `jd-app`): project panel, noise inspector, three.js viewport, export, log; vitest component tests; Playwright e2e bridged to the real core via jd-mcp

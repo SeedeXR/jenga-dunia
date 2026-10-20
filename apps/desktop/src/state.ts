@@ -75,6 +75,10 @@ interface State {
   generate: () => Promise<void>;
   exportHeightmap: (path: string, format: HeightmapFormat) => Promise<void>;
   save: () => Promise<void>;
+  /** Bumped when a settings edit is refused so the inputs snap back to the stored values. */
+  settingsRev: number;
+  /** Change project settings (journaled); fields left out keep their value. */
+  setSettings: (patch: JdOps["project.set_settings"]["request"]) => Promise<void>;
 }
 
 const defaultNoise: NoiseSettings = {
@@ -365,6 +369,12 @@ export const useStore = create<State>((set, get) => {
         if (r.status !== "ok") return;
       }
       await run("terrain.export_heightmap", { layer: "height", path, format });
+    },
+    settingsRev: 0,
+    setSettings: async (patch) => {
+      const r = await run("project.set_settings", patch);
+      if (r.status === "ok" && r.result) set({ project: r.result });
+      else set((s) => ({ settingsRev: s.settingsRev + 1 }));
     },
     save: async () => {
       const r = await run("project.save");

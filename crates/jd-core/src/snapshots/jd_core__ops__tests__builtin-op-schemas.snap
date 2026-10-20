@@ -3632,6 +3632,211 @@ expression: list
     }
   },
   {
+    "id": "project.set_settings",
+    "description": "Change project settings (autosave interval, cache limit, preview LOD); fields left out keep their value — journaled like every mutation",
+    "scope": "project-write",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ProjectSetSettings",
+      "description": "`project.set_settings` params: fields left out keep their current value.",
+      "type": "object",
+      "properties": {
+        "autosave_interval_s": {
+          "description": "Seconds after the last edit before the desktop autosaves (0 disables).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "default": null
+        },
+        "cache_limit_bytes": {
+          "description": "Layer cache cap in bytes (≥ 16 MiB).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "default": null
+        },
+        "preview_lod": {
+          "description": "Preview LOD hint (resolution ÷ 2^lod).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ProjectSummary",
+      "description": "Summary returned by project ops.",
+      "type": "object",
+      "properties": {
+        "project_id": {
+          "description": "Project id.",
+          "type": "string"
+        },
+        "name": {
+          "description": "Name.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Directory.",
+          "type": "string"
+        },
+        "world": {
+          "description": "World settings.",
+          "$ref": "#/$defs/WorldSettings"
+        },
+        "schema_version": {
+          "description": "Document schema version.",
+          "$ref": "#/$defs/SchemaVersion"
+        },
+        "dirty": {
+          "description": "Unsaved changes?",
+          "type": "boolean"
+        },
+        "pending_journal": {
+          "description": "Journal entries awaiting replay.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "settings": {
+          "description": "User-tunable settings (`project.json` → `settings`): autosave interval, cache limit, preview LOD.",
+          "$ref": "#/$defs/ProjectSettings"
+        }
+      },
+      "required": [
+        "project_id",
+        "name",
+        "path",
+        "world",
+        "schema_version",
+        "dirty",
+        "pending_journal",
+        "settings"
+      ],
+      "$defs": {
+        "WorldSettings": {
+          "description": "World extent, resolution and tiling (`docs/spec/project-format.md`).",
+          "type": "object",
+          "properties": {
+            "extent_m": {
+              "description": "Extent in metres, [x, y].",
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "double"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "resolution_px": {
+              "description": "Heightfield resolution in pixels, [x, y].",
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "tile_size": {
+              "description": "Tile edge length in pixels (power of two).",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "halo": {
+              "description": "Halo width in pixels around each tile.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "origin": {
+              "description": "World-space origin of pixel (0,0), metres.",
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "double"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "crs": {
+              "description": "Optional CRS identifier (e.g. \"EPSG:32637\") when georeferenced.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "seed": {
+              "description": "Master seed for all procedural randomness.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "extent_m",
+            "resolution_px",
+            "tile_size",
+            "halo",
+            "origin",
+            "seed"
+          ]
+        },
+        "SchemaVersion": {
+          "description": "A monotonically increasing document/API schema version.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "ProjectSettings": {
+          "description": "User-tunable project settings.",
+          "type": "object",
+          "properties": {
+            "autosave_interval_s": {
+              "description": "Autosave interval in seconds (0 disables).",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "cache_limit_bytes": {
+              "description": "Cache size cap in bytes.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "preview_lod": {
+              "description": "Preview LOD (resolution divided by 2^lod).",
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0,
+              "maximum": 255
+            }
+          },
+          "required": [
+            "autosave_interval_s",
+            "cache_limit_bytes",
+            "preview_lod"
+          ]
+        }
+      }
+    }
+  },
+  {
     "id": "terrain.export_heightmap",
     "description": "Write a layer as EXR (f32), PNG16, RAW r16 or r32 with a JSON sidecar",
     "scope": "export",

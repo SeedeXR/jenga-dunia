@@ -125,6 +125,11 @@
     "scope": "project-write"
   },
   {
+    "id": "project.set_settings",
+    "description": "Change project settings (autosave interval, cache limit, preview LOD); fields left out keep their value — journaled like every mutation",
+    "scope": "project-write"
+  },
+  {
     "id": "terrain.export_heightmap",
     "description": "Write a layer as EXR (f32), PNG16, RAW r16 or r32 with a JSON sidecar",
     "scope": "export"

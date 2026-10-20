@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ProjectSetSettings",
+  "description": "`project.set_settings` params: fields left out keep their current value.",
+  "type": "object",
+  "properties": {
+    "autosave_interval_s": {
+      "description": "Seconds after the last edit before the desktop autosaves (0 disables).",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0,
+      "default": null
+    },
+    "cache_limit_bytes": {
+      "description": "Layer cache cap in bytes (≥ 16 MiB).",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0,
+      "default": null
+    },
+    "preview_lod": {
+      "description": "Preview LOD hint (resolution ÷ 2^lod).",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint8",
+      "minimum": 0,
+      "maximum": 255,
+      "default": null
+    }
+  },
+  "additionalProperties": false
+}

@@ -138,12 +138,14 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `17:20:00` Cache LRU pushed as `fb8e9f6`. **Autosave follows the project**: `ProjectSummary.settings` (ProjectSettings: autosave_interval_s / cache_limit_bytes / preview_lod) exposed by every project.* result; desktop autosave delay = `settings.autosave_interval_s` × 1000 (default 120 s, 0 disables), `?autosave=<ms>` still overrides (hydrology e2e passes 2000, graph/sculpt specs 0). Vitest fixture gained `settings` (the TypeError surfaced in a component test — good, the mock is now the real shape). Docs paragraph updated.
 
-### Open / next (as of 2026-10-20 17:25, head after autosave-settings commit)
-1. **CI**: everything through `e9f1c15` (textured GLB) green; `663916c` was the only red run (sculpt.spec vs autosave, fixed in `3d1cf64`).
+- `17:45:00` Autosave-settings pushed as `9611fac`. **Settings slice**: `project.set_settings` (partial patch, merged then `Project::validate_settings` — autosave ≤ 86400, LOD ≤ 8, cache ≥ 16 MiB — validate → journal → apply like `set_name`), summary returned; desktop project panel gained a **Settings** section (autosave s / cache MB / preview LOD, blur-to-apply, refused edits snap back via `settingsRev` remount key); core test (merge, refuse, journal has only the accepted op); e2e `settings.spec.ts` with **no URL override**: defaults 120/2048/2 shown → autosave 1 → cache 8 MB refused (`project.set_settings: E_INPUT_INVALID` in the log, input back to 2048) → seed edit → `project.save: ok` within 8 s, project.json has `autosave_interval_s: 1`. Docs + capture `desktop-settings.png`.
+
+### Open / next (as of 2026-10-20 17:50, head after settings commit)
+1. **CI**: green through `0e5afef`; `2324fa7` (broken inline bench step) and `663916c` (sculpt.spec vs autosave) were the red runs, both fixed by the next commit; `fb8e9f6`, `9611fac` and the settings commit polling.
 2. **Figma**: connector unavailable this session; plugin OAuth pending on the owner's side → tutorial images stay in `docs/user/images/`; place them in file `fxyeV62hgLoNmG3dU1LX6G` when a connector works.
 3. **Native leftovers**: Edit-menu capture; native sculpt capture/recording (needs Accessibility); signed/notarised bundle (needs an Apple developer account).
 4. **Phase 3 follow-ups**: hydraulic concentration cap / layered materials / open drains; thermal + hydraulic WGSL twins (`jd-gpu`); particle hydraulic; MFD (D∞ ✔; `wetness` still D8-only); sea level ✔ (viewport water plane ✔; ocean shading/shoreline foam ☐); hydrology-first generation; smooth-brush blur done via summed-area table (whole-field blur is now O(N); tile-level dirty sets remain).
-5. **Phase 2 leftovers**: detached async jobs (queues/budgets/timeouts), a settings UI for autosave/cache/preview LOD (values are read from project.json now), CRS-aware GeoTIFF import (`jd-geo`; tags/nodata ✔), normal/roughness maps for GLB (albedo ✔), Windows/Linux measurements, tile-level `jd-cache` (LRU ✔).
+5. **Phase 2 leftovers**: detached async jobs (queues/budgets/timeouts), CRS-aware GeoTIFF import (`jd-geo`; tags/nodata ✔), normal/roughness maps for GLB (albedo ✔), Windows/Linux measurements, tile-level `jd-cache` (LRU ✔).
 6. **Docs**: hydrology recipe ✔, `desktop-rivers.png` ✔; rivers inspector `method` capture ✔ (e2e); a *native* capture of the same needs the app rebuilt from this head.
 
 ---

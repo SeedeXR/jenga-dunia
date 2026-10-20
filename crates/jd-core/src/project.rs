@@ -481,6 +481,34 @@ impl Project {
         Ok(())
     }
 
+    /// Validate settings (shared by `project.set_settings` and pre-journal validation).
+    pub fn validate_settings(s: &ProjectSettings) -> JdResult<()> {
+        if s.autosave_interval_s > 86_400 {
+            return Err(JdError::invalid(
+                "params.autosave_interval_s",
+                "must be ≤ 86400 (a day); 0 disables autosave",
+            ));
+        }
+        if s.preview_lod > 8 {
+            return Err(JdError::invalid("params.preview_lod", "must be ≤ 8"));
+        }
+        if s.cache_limit_bytes < 16 * 1024 * 1024 {
+            return Err(JdError::invalid(
+                "params.cache_limit_bytes",
+                "must be ≥ 16 MiB (one 2048² layer)",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Replace the settings (a mutating op; callers validate and journal first via [`Self::journal`]).
+    pub fn set_settings(&mut self, s: ProjectSettings) -> JdResult<()> {
+        Self::validate_settings(&s)?;
+        self.doc.settings = s;
+        self.dirty = true;
+        Ok(())
+    }
+
     /// Rename the project (a mutating op; callers validate and journal first via [`Self::journal`]).
     pub fn set_name(&mut self, name: &str) -> JdResult<()> {
         Self::validate_name(name)?;

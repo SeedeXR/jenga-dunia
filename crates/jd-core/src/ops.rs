@@ -362,6 +362,35 @@ pub mod builtin {
         pub name: String,
     }
 
+    /// `project.set_settings` params: fields left out keep their current value.
+    #[derive(Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct ProjectSetSettings {
+        /// Seconds after the last edit before the desktop autosaves (0 disables).
+        #[serde(default)]
+        pub autosave_interval_s: Option<u32>,
+        /// Layer cache cap in bytes (≥ 16 MiB).
+        #[serde(default)]
+        pub cache_limit_bytes: Option<u64>,
+        /// Preview LOD hint (resolution ÷ 2^lod).
+        #[serde(default)]
+        pub preview_lod: Option<u8>,
+    }
+
+    fn merged_settings(p: &Project, args: &ProjectSetSettings) -> crate::project::ProjectSettings {
+        let mut s = p.doc.settings.clone();
+        if let Some(v) = args.autosave_interval_s {
+            s.autosave_interval_s = v;
+        }
+        if let Some(v) = args.cache_limit_bytes {
+            s.cache_limit_bytes = v;
+        }
+        if let Some(v) = args.preview_lod {
+            s.preview_lod = v;
+        }
+        s
+    }
+
     /// Summary returned by project ops.
     #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
     pub struct ProjectSummary {
@@ -461,6 +490,10 @@ pub mod builtin {
                 let args: ProjectSetName = serde_json::from_value(params.clone())?;
                 Project::validate_name(&args.name)
             }
+            "project.set_settings" => {
+                let args: ProjectSetSettings = serde_json::from_value(params.clone())?;
+                Project::validate_settings(&merged_settings(p, &args))
+            }
             _ if op.starts_with("graph.") => super::graph::validate_mutation(p, op, params),
             other => Err(JdError::new(
                 ErrorCode::E_INPUT_INVALID,
@@ -477,6 +510,11 @@ pub mod builtin {
             "project.set_name" => {
                 let args: ProjectSetName = serde_json::from_value(params.clone())?;
                 p.set_name(&args.name)
+            }
+            "project.set_settings" => {
+                let args: ProjectSetSettings = serde_json::from_value(params.clone())?;
+                let merged = merged_settings(p, &args);
+                p.set_settings(merged)
             }
             _ if op.starts_with("graph.") => super::graph::apply_mutation(p, op, params),
             _ => unreachable!("validate_mutation rejects unknown ops"),
@@ -559,6 +597,17 @@ pub mod builtin {
                         "project.set_name",
                         serde_json::json!({ "name": args.name }),
                     )?;
+                    Ok((summary(p), Vec::new()))
+                })
+            },
+        );
+        r.register::<ProjectSetSettings, ProjectSummary, _>(
+            "project.set_settings",
+            "Change project settings (autosave interval, cache limit, preview LOD); fields left out keep their value — journaled like every mutation",
+            Scope::ProjectWrite,
+            |ctx, args| {
+                ctx.with_project(|p| {
+                    mutate(p, "project.set_settings", serde_json::to_value(&args)?)?;
                     Ok((summary(p), Vec::new()))
                 })
             },
@@ -1150,6 +1199,66 @@ pub mod graph {
 
         fn call(reg: &Registry, ctx: &Context, op: &str, params: Value) -> Response {
             reg.invoke(ctx, Request::new(op, params))
+        }
+
+        #[test]
+        fn set_settings_merges_validates_and_journals() {
+            let reg = Registry::with_builtins();
+            let dir = tempfile::tempdir().expect("tmp");
+            let path = dir.path().join("s.jdproj");
+            let ctx = Context::default();
+            assert_eq!(
+                call(
+                    &reg,
+                    &ctx,
+                    "project.create",
+                    serde_json::json!({ "path": path, "name": "S" })
+                )
+                .status,
+                crate::envelope::Status::Ok
+            );
+            let r = call(
+                &reg,
+                &ctx,
+                "project.set_settings",
+                serde_json::json!({ "autosave_interval_s": 1 }),
+            );
+            assert_eq!(r.status, crate::envelope::Status::Ok, "{:?}", r.error);
+            let settings = &r.result.expect("summary")["settings"];
+            assert_eq!(settings["autosave_interval_s"], 1);
+            assert_eq!(
+                settings["cache_limit_bytes"], 2_147_483_648u64,
+                "untouched fields keep their value"
+            );
+            let bad = call(
+                &reg,
+                &ctx,
+                "project.set_settings",
+                serde_json::json!({ "cache_limit_bytes": 8 }),
+            );
+            assert_eq!(bad.error.map(|e| e.code), Some(ErrorCode::E_INPUT_INVALID));
+            let info = call(&reg, &ctx, "project.info", serde_json::json!({}));
+            assert_eq!(
+                info.result.expect("info")["settings"]["cache_limit_bytes"],
+                2_147_483_648u64,
+                "a refused edit changes nothing"
+            );
+            let journal =
+                std::fs::read_to_string(path.join("journal").join("ops.ndjson")).expect("journal");
+            let ops: Vec<String> = journal
+                .lines()
+                .map(|l| {
+                    serde_json::from_str::<Value>(l).expect("entry")["op"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_owned()
+                })
+                .collect();
+            assert_eq!(
+                ops,
+                vec!["project.set_settings"],
+                "the refused edit was never journaled"
+            );
         }
 
         #[test]

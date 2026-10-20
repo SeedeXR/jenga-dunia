@@ -83,6 +83,10 @@ Undo and redo are operations like everything else (`graph.undo` / `graph.redo`, 
 
 **Autosave.** Every edit is journaled first (crash-safe), and `settings.autosave_interval_s` seconds after the last edit (project.json, default 120; `0` disables) the app saves the project on its own: the log shows `project.save: ok`, the project panel's **dirty** returns to `false` and **journal** to `0`, and `graph.json` on disk is current. Press **Save** (⌘S) to save immediately. The UI-driven test `apps/desktop/e2e/hydrology.spec.ts` runs with the interval set to 2 s and checks the saved `graph.json` and the truncated journal. (For debugging, `?autosave=<ms>` in the dev URL overrides the interval.)
 
+![Project panel with the Settings section: Autosave (s), Cache limit (MB), Preview LOD](images/desktop-settings.png)
+
+*Settings live in the project panel: **Autosave (s)**, **Cache limit (MB)** and **Preview LOD** are `project.json → settings`, edited through `project.set_settings` — a journaled mutation like everything else, so a crash mid-edit recovers it. The core validates every value (cache limit ≥ 16 MB, autosave ≤ a day, LOD ≤ 8) and a refused value snaps back to the stored one with the reason in the log. The UI-driven test `apps/desktop/e2e/settings.spec.ts` sets autosave to 1 s, tries an 8 MB cache (refused), edits a node and watches the project save itself.*
+
 ![Terrain menu with Generate Terrain and Evaluate Graph](images/desktop-menu-terrain.png)
 
 **Screen recording:** [`videos/graph-editor.mp4`](videos/graph-editor.mp4) (17 s, 1440×900) — the whole flow above: edit the seed, add a blur node, connect it by dragging the handles, move a node, evaluate, delete with the keyboard, undo and redo. It is the UI-driven test `apps/desktop/e2e/graph.spec.ts` running against the real core, recorded with `JD_VIDEO=1 pnpm exec playwright test e2e/graph.spec.ts` (actions slowed to human pace), so it is regenerated whenever the editor changes.

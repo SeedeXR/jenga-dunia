@@ -588,6 +588,34 @@ export type ProjectSetNameResult = {
   "settings": ProjectSettings;
 };
 
+export type ProjectSetSettingsRequest = {
+  /** Seconds after the last edit before the desktop autosaves (0 disables). */
+  "autosave_interval_s"?: number | null;
+  /** Layer cache cap in bytes (≥ 16 MiB). */
+  "cache_limit_bytes"?: number | null;
+  /** Preview LOD hint (resolution ÷ 2^lod). */
+  "preview_lod"?: number | null;
+};
+
+export type ProjectSetSettingsResult = {
+  /** Project id. */
+  "project_id": string;
+  /** Name. */
+  "name": string;
+  /** Directory. */
+  "path": string;
+  /** World settings. */
+  "world": WorldSettings;
+  /** Document schema version. */
+  "schema_version": SchemaVersion;
+  /** Unsaved changes? */
+  "dirty": boolean;
+  /** Journal entries awaiting replay. */
+  "pending_journal": number;
+  /** User-tunable settings (`project.json` → `settings`): autosave interval, cache limit, preview LOD. */
+  "settings": ProjectSettings;
+};
+
 export type HeightmapFormat = "exr" | "png16" | "raw_r16" | "raw_r32" | "tiff32";
 
 export type TerrainExportHeightmapRequest = {
@@ -958,6 +986,8 @@ export interface JdOps {
   "project.save": { request: ProjectSaveRequest; result: ProjectSaveResult };
   /** Rename the open project */
   "project.set_name": { request: ProjectSetNameRequest; result: ProjectSetNameResult };
+  /** Change project settings (autosave interval, cache limit, preview LOD); fields left out keep their value — journaled like every mutation */
+  "project.set_settings": { request: ProjectSetSettingsRequest; result: ProjectSetSettingsResult };
   /** Write a layer as EXR (f32), PNG16, RAW r16 or r32 with a JSON sidecar */
   "terrain.export_heightmap": { request: TerrainExportHeightmapRequest; result: TerrainExportHeightmapResult };
   /** Write a layer as a binary glTF (.glb) grid mesh: metres, +Y up, centred on the world, normals + UVs + PBR material with a baked base-colour texture */
