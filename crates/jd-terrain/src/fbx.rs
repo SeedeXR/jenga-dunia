@@ -571,6 +571,15 @@ pub fn export_fbx(
 mod tests {
     use super::*;
 
+    #[test]
+    fn fuzzer_found_polygon_index_i32_min_is_a_structured_error() {
+        // libFuzzer mutated the 5×5 fixture into a polygon index of i32::MIN, which overflowed
+        // the `-i - 1` decode (2026-10-21); the file is kept as a regression input.
+        let bytes = include_bytes!("../../../fixtures/malformed/polygon-index-min.fbx");
+        let r = read_fbx_mesh_bytes(bytes);
+        assert!(r.is_err(), "a corrupt index is an error, never a panic");
+    }
+
     /// Walk the node tree we wrote with an independent little reader: every record's end
     /// offset must land exactly where the next record starts, and the names must be the ones
     /// an importer looks for.
@@ -1108,8 +1117,10 @@ pub fn read_fbx_mesh_bytes(bytes: &[u8]) -> JdResult<FbxMesh> {
         let n = verts.len() / 3;
         let mut face: Vec<u32> = Vec::with_capacity(4);
         for &i in poly {
+            // A negative index ends the polygon and encodes `!idx`; `!i` cannot overflow where
+            // `-i - 1` panics on i32::MIN (found by the fuzzer).
             let (idx, last) = if i < 0 {
-                ((-i - 1) as usize, true)
+                ((!i) as usize, true)
             } else {
                 (i as usize, false)
             };

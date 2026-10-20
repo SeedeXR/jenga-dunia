@@ -9,3 +9,5 @@ PNGs (imported as 16-bit luminance by design).
 
 `tiny-grid.fbx` — a 5×5 terrain grid from our own writer (`jd export mesh --step 64` on a 256² world, 8.6 KB): the seed
 of the `fbx_mesh` fuzz corpus in CI, so libFuzzer starts past the header instead of from an empty corpus.
+
+`malformed/polygon-index-min.fbx` — the first thing that seed found (2026-10-21): a polygon index of `i32::MIN`, which overflowed the `-i - 1` decode in `jd-terrain::fbx`; `fbx.rs` keeps it as a regression test (a structured error, never a panic).
