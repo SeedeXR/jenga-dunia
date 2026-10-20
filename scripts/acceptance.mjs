@@ -184,6 +184,7 @@ const water = op("ocean.bake", { level_m: SEA, visibility_m: 12, wind_speed_mps:
 mark(7, "VERIFIED", `ocean.bake: ${water.files.join(", ")} ${water.px.join("×")}, max depth ${water.max_depth_m.toFixed(1)} m, waves Hs ${water.waves.significant_height_m.toFixed(2)} m / L ${water.waves.wavelength_m.toFixed(0)} m`);
 const skyBake = op("sky.bake", { sun_elevation_deg: 30, sun_azimuth_deg: 140, turbidity: 3, width: 1024, path: "sky.exr" }, false);
 mark(5, "VERIFIED", `sky.bake: Preetham daylight HDRI ${skyBake.px.join("×")} EXR + preview, zenith rgb ${skyBake.zenith_rgb.map((v) => v.toFixed(3)).join("/")}; desktop sun + turbidity drive the same sky on the dome`);
+let unityVerified = false;
 for (const profile of ["unity", "unreal"]) {
   const r = op("terrain.export_profile", { profile, dir: profile, layer: "height", masks: ["mask_forest", "mask_grassland", "mask_rock", "snow"] }, false);
   if (profile === "unity" && existsSync("scripts/unity-import-check.sh") && (process.env.UNITY || existsSync("/Applications/Unity/Hub/Editor"))) {
@@ -191,6 +192,7 @@ for (const profile of ["unity", "unreal"]) {
     try {
       const out = execFileSync("bash", ["scripts/unity-import-check.sh", path.join(proj, "exports", "unity")], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 900_000 });
       const rep = JSON.parse(readFileSync(path.join(proj, "exports", "unity", "jd-unity-import.json"), "utf8"));
+      unityVerified = Boolean(rep.ok);
       mark(13, rep.ok ? "VERIFIED" : "FAILED", `Unity ${rep.unity} headless import of the unity profile: TerrainData ${rep.heightmap_resolution}² from a ${rep.source_px}² r16, size ${rep.terrain_size?.map((v) => v.toFixed(0)).join("×")} m, sampled height ${rep.sampled_height_min_max?.map((v) => v.toFixed(1)).join("…")} m, ${rep.alphamap_layers} terrain layers from the weightmaps${rep.trees ? `, ${rep.trees} trees` : ""}${rep.warnings?.length ? `; notes: ${rep.warnings.join(" | ")}` : ""}`);
       void out;
     } catch (e) {
@@ -298,7 +300,7 @@ print("BLENDER " + json.dumps(res))
   mark(12, "UNVERIFIED", "Blender not installed on this machine");
   mark(14, "PARTIAL", "geometry/scale checked only through our own readers (FBX round trip); Blender absent");
 }
-mark(13, "UNVERIFIED", "Unity and Unreal are not installed here; the browser viewer is the desktop app's three.js viewport (WebGPU), which renders the same layers but does not load the exported GLB");
+mark(13, unityVerified ? "PARTIAL" : "UNVERIFIED", `${unityVerified ? "Unity import verified headlessly (above); " : "no engine editor found here; "}Unreal: no engine build on this machine (the Epic launcher only); the browser viewer is the desktop app's three.js viewport (WebGPU), which renders the same layers but does not load the exported GLB`);
 
 // ── 16–18. CLI (this script), MCP replay, cancel + recovery ─────────────────────────────────────
 mark(16, "VERIFIED", `every step above ran through \`jd --json op …\` on ${path.basename(proj)}`);
