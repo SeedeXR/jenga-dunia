@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Array_of_RockFile",
+  "type": "array",
+  "items": {
+    "$ref": "#/$defs/RockFile"
+  },
+  "$defs": {
+    "RockFile": {
+      "description": "One written rock.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "Written `.glb`.",
+          "type": "string"
+        },
+        "seed": {
+          "description": "Seed of this rock.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "triangles": {
+          "description": "Triangles.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "size_m": {
+          "description": "Bounding box size x / y / z, metres.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "minItems": 3,
+          "maxItems": 3
+        }
+      },
+      "required": [
+        "path",
+        "seed",
+        "triangles",
+        "size_m"
+      ]
+    }
+  }
+}

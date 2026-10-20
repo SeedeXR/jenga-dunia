@@ -1082,6 +1082,49 @@ standard base64 with padding. One decoder serves both transports. */
   "bytes_base64": string;
 };
 
+export type TerrainRocksRequest = {
+  /** How many rocks to write (1..=64): `rock_0.glb` … seeded `seed`, `seed + 1`, …. */
+  "count"?: number;
+  /** Seed: the same seed is the same rock. */
+  "seed"?: number;
+  /** Nominal radius, metres (> 0). */
+  "radius_m"?: number;
+  /** Icosphere subdivisions 0..=4: 20 · 4ⁿ triangles (2 → 320, 3 → 1 280). */
+  "detail"?: number;
+  /** Surface displacement as a fraction of the radius, 0..=1 (0.35 is a weathered boulder). */
+  "roughness"?: number;
+  /** Share of the rock's height cut away at the bottom so it sits flat, 0..=0.5. */
+  "flatten"?: number;
+  /** Output directory; relative paths resolve against the project's `exports/`. */
+  "dir"?: string;
+};
+
+export type RockFile = {
+  /** Written `.glb`. */
+  "path": string;
+  /** Seed of this rock. */
+  "seed": number;
+  /** Triangles. */
+  "triangles": number;
+  /** Bounding box size x / y / z, metres. */
+  "size_m": [number, number, number];
+};
+
+export type TerrainRocksResult = RockFile[];
+
+export type RockParams = {
+  /** Seed: the same seed is the same rock. */
+  "seed"?: number;
+  /** Nominal radius, metres (> 0). */
+  "radius_m"?: number;
+  /** Icosphere subdivisions 0..=4: 20 · 4ⁿ triangles (2 → 320, 3 → 1 280). */
+  "detail"?: number;
+  /** Surface displacement as a fraction of the radius, 0..=1 (0.35 is a weathered boulder). */
+  "roughness"?: number;
+  /** Share of the rock's height cut away at the bottom so it sits flat, 0..=0.5. */
+  "flatten"?: number;
+};
+
 export type TerrainScatterRequest = {
   /** 0..1 density mask layer (a biome class mask, wetness, a painted mask…). */
   "mask": string;
@@ -1091,6 +1134,8 @@ export type TerrainScatterRequest = {
 relative paths resolve against the project's `exports/`. Omit it to get the points
 back in the result instead (viewport preview; at most 200 000). */
   "path"?: string | null;
+  /** Instance a generated rock (seeded from the scatter seed) instead of the 1 m cone proxy in `.glb` output. */
+  "rock"?: RockParams | null;
   /** Target spacing between points in metres (grid cell size); must be ≥ one sample spacing. */
   "spacing_m": number;
   /** Random offset inside the cell, 0 (regular grid) .. 1 (anywhere in the cell). */
@@ -1642,6 +1687,8 @@ export interface JdOps {
   "terrain.generate": { request: TerrainGenerateRequest; result: TerrainGenerateResult };
   /** Downsampled u16 preview of a layer (base64) for agents and viewers */
   "terrain.preview": { request: TerrainPreviewRequest; result: TerrainPreviewResult };
+  /** Generate seeded, faceted boulders as .glb meshes (icosphere squashed and displaced by value noise, flat base, flat shading) — scatter proxies and props */
+  "terrain.rocks": { request: TerrainRocksRequest; result: TerrainRocksResult };
   /** Scatter instance points over the world from a 0..1 density mask layer (stratified jittered grid, deterministic by seed): write CSV / JSON / GLB instances to `path`, or return the points when `path` is omitted */
   "terrain.scatter": { request: TerrainScatterRequest; result: TerrainScatterResult };
   /** Statistics and content hash of a layer */

@@ -195,6 +195,11 @@
     "scope": "project-read"
   },
   {
+    "id": "terrain.rocks",
+    "description": "Generate seeded, faceted boulders as .glb meshes (icosphere squashed and displaced by value noise, flat base, flat shading) — scatter proxies and props",
+    "scope": "export"
+  },
+  {
     "id": "terrain.scatter",
     "description": "Scatter instance points over the world from a 0..1 density mask layer (stratified jittered grid, deterministic by seed): write CSV / JSON / GLB instances to `path`, or return the points when `path` is omitted",
     "scope": "export"

@@ -5971,6 +5971,113 @@ expression: list
     }
   },
   {
+    "id": "terrain.rocks",
+    "description": "Generate seeded, faceted boulders as .glb meshes (icosphere squashed and displaced by value noise, flat base, flat shading) — scatter proxies and props",
+    "scope": "export",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TerrainRocks",
+      "description": "`terrain.rocks` params.",
+      "type": "object",
+      "properties": {
+        "count": {
+          "description": "How many rocks to write (1..=64): `rock_0.glb` … seeded `seed`, `seed + 1`, ….",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 4
+        },
+        "seed": {
+          "description": "Seed: the same seed is the same rock.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "radius_m": {
+          "description": "Nominal radius, metres (> 0).",
+          "type": "number",
+          "format": "float",
+          "default": 1.0
+        },
+        "detail": {
+          "description": "Icosphere subdivisions 0..=4: 20 · 4ⁿ triangles (2 → 320, 3 → 1 280).",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 2
+        },
+        "roughness": {
+          "description": "Surface displacement as a fraction of the radius, 0..=1 (0.35 is a weathered boulder).",
+          "type": "number",
+          "format": "float",
+          "default": 0.3499999940395355
+        },
+        "flatten": {
+          "description": "Share of the rock's height cut away at the bottom so it sits flat, 0..=0.5.",
+          "type": "number",
+          "format": "float",
+          "default": 0.25
+        },
+        "dir": {
+          "description": "Output directory; relative paths resolve against the project's `exports/`.",
+          "type": "string",
+          "default": "rocks"
+        }
+      },
+      "additionalProperties": false
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "Array_of_RockFile",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/RockFile"
+      },
+      "$defs": {
+        "RockFile": {
+          "description": "One written rock.",
+          "type": "object",
+          "properties": {
+            "path": {
+              "description": "Written `.glb`.",
+              "type": "string"
+            },
+            "seed": {
+              "description": "Seed of this rock.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "triangles": {
+              "description": "Triangles.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "size_m": {
+              "description": "Bounding box size x / y / z, metres.",
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "minItems": 3,
+              "maxItems": 3
+            }
+          },
+          "required": [
+            "path",
+            "seed",
+            "triangles",
+            "size_m"
+          ]
+        }
+      }
+    }
+  },
+  {
     "id": "terrain.scatter",
     "description": "Scatter instance points over the world from a 0..1 density mask layer (stratified jittered grid, deterministic by seed): write CSV / JSON / GLB instances to `path`, or return the points when `path` is omitted",
     "scope": "export",
@@ -6000,6 +6107,18 @@ expression: list
           ],
           "default": null
         },
+        "rock": {
+          "description": "Instance a generated rock (seeded from the scatter seed) instead of the 1 m cone proxy in `.glb` output.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RockParams"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "spacing_m": {
           "description": "Target spacing between points in metres (grid cell size); must be ≥ one sample spacing.",
           "type": "number",
@@ -6023,7 +6142,49 @@ expression: list
       "required": [
         "mask",
         "spacing_m"
-      ]
+      ],
+      "$defs": {
+        "RockParams": {
+          "description": "Rock settings.",
+          "type": "object",
+          "properties": {
+            "seed": {
+              "description": "Seed: the same seed is the same rock.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0,
+              "default": 0
+            },
+            "radius_m": {
+              "description": "Nominal radius, metres (> 0).",
+              "type": "number",
+              "format": "float",
+              "default": 1.0
+            },
+            "detail": {
+              "description": "Icosphere subdivisions 0..=4: 20 · 4ⁿ triangles (2 → 320, 3 → 1 280).",
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0,
+              "maximum": 255,
+              "default": 2
+            },
+            "roughness": {
+              "description": "Surface displacement as a fraction of the radius, 0..=1 (0.35 is a weathered boulder).",
+              "type": "number",
+              "format": "float",
+              "default": 0.3499999940395355
+            },
+            "flatten": {
+              "description": "Share of the rock's height cut away at the bottom so it sits flat, 0..=0.5.",
+              "type": "number",
+              "format": "float",
+              "default": 0.25
+            }
+          },
+          "additionalProperties": false
+        }
+      }
     },
     "result_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",

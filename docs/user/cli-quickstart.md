@@ -440,6 +440,20 @@ mean slope inside the corridor (slope node × mask): 26.3° → 22.1° — what 
 
 `jd.terrain.spline@1` reshapes the corridor around a polyline (`points` in layer metres, east and north from the south-west corner): the line is sampled every half cell, its grade is the terrain height at those samples box-smoothed over `smooth_m`, and every cell within `width_m / 2` takes that grade — `flatten` for a road bed or path, `cut` sinks it `profile_m` for a canal or river bed, `raise` lifts it for an embankment or dyke — with a smoothstep shoulder of `falloff_m` outside. The `mask` output (1 in the corridor, fading across the shoulder) drives materials and scatter, so a road gets its surface and the verges their grass from the same node. One node is one spline; several roads are several nodes. Not modelled: curves between points (the polyline is straight between them — add points), banking, bridges where the grade would float.
 
+### Rocks: a seeded boulder generator
+
+```
+$ jd op terrain.rocks --project Road.jdproj --params '{"count":4,"detail":3,"seed":3}'
+exports/rocks/rock_0.glb … rock_3.glb   1 280 triangles each (icosphere, 3 subdivisions)   sizes 2.7 × 1.2 × 2.6 m, 2.5 × 1.6 × 1.8 m, 2.6 × 1.2 × 2.0 m, 1.8 × 1.4 × 2.3 m
+glTF validator: 0 errors, 0 warnings
+$ jd op terrain.scatter --project Road.jdproj --params '{"mask":"road","height":"height","path":"rocks_on_road.glb","rock":{"radius_m":0.8,"detail":2,"seed":3},"spacing_m":16,"jitter":1,"seed":2}'
+267 instances of one 320-triangle rock (EXT_mesh_gpu_instancing, 39 KB)   Blender imports 267 objects sharing 1 mesh
+```
+
+![Blender render of one generated rock: a faceted, flat-shaded boulder with a flat base](images/cli-rock.png)
+
+`terrain.rocks` writes seeded boulders as meshes: an icosphere (`detail` subdivisions → 20 · 4ⁿ facets) squashed by a seeded anisotropic factor, every vertex pushed along its normal by three octaves of seeded value noise scaled by `roughness`, the bottom `flatten` share cut flat so the rock rests on y = 0, and three vertices per facet so it shades flat. Seeds `seed`, `seed + 1`, … give `count` different rocks; the same seed is always the same rock. The scatter op takes the same settings under `rock`: with it, the instanced `.glb` carries a rock (normals included, a stone-grey material) instead of the 1 m cone proxy, so a mask of stony ground scatters real boulders. VUE's random rock generator (`docs/research/vue-features.md`). Not modelled: strata lines, smooth river cobbles, several rock variants in one instanced file.
+
 ### Physical sky as an HDRI
 
 ```

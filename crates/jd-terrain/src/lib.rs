@@ -22,6 +22,7 @@ pub mod noise;
 pub mod ocean;
 pub mod preview;
 pub mod profiles;
+pub mod rocks;
 pub mod scatter;
 pub mod sculpt;
 pub mod seabed;
@@ -57,7 +58,8 @@ pub use ocean::{
     water_colour, wave_spectrum,
 };
 pub use profiles::{EngineProfile, ProfileReport, ProfileSettings, export_profile};
-pub use scatter::{ScatterParams, ScatterPoint, scatter_points, write_points};
+pub use rocks::{RockParams, rock_mesh};
+pub use scatter::{ScatterParams, ScatterPoint, scatter_points, write_points, write_points_with};
 pub use sculpt::{Stroke, StrokeMode, apply_strokes};
 pub use seabed::{SeabedParams, classify_seabed};
 pub use sim::{

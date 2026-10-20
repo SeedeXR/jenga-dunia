@@ -24,6 +24,18 @@
       ],
       "default": null
     },
+    "rock": {
+      "description": "Instance a generated rock (seeded from the scatter seed) instead of the 1 m cone proxy in `.glb` output.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RockParams"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "spacing_m": {
       "description": "Target spacing between points in metres (grid cell size); must be ≥ one sample spacing.",
       "type": "number",
@@ -47,5 +59,47 @@
   "required": [
     "mask",
     "spacing_m"
-  ]
+  ],
+  "$defs": {
+    "RockParams": {
+      "description": "Rock settings.",
+      "type": "object",
+      "properties": {
+        "seed": {
+          "description": "Seed: the same seed is the same rock.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "radius_m": {
+          "description": "Nominal radius, metres (> 0).",
+          "type": "number",
+          "format": "float",
+          "default": 1.0
+        },
+        "detail": {
+          "description": "Icosphere subdivisions 0..=4: 20 · 4ⁿ triangles (2 → 320, 3 → 1 280).",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 2
+        },
+        "roughness": {
+          "description": "Surface displacement as a fraction of the radius, 0..=1 (0.35 is a weathered boulder).",
+          "type": "number",
+          "format": "float",
+          "default": 0.3499999940395355
+        },
+        "flatten": {
+          "description": "Share of the rock's height cut away at the bottom so it sits flat, 0..=0.5.",
+          "type": "number",
+          "format": "float",
+          "default": 0.25
+        }
+      },
+      "additionalProperties": false
+    }
+  }
 }

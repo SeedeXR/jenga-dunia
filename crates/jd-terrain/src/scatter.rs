@@ -132,10 +132,22 @@ pub fn scatter_points(
 /// Write points as CSV (`u,v,z,r` header), JSON (array of objects) or GLB (one proxy mesh
 /// instanced with `EXT_mesh_gpu_instancing`), by extension. `extent_m` places GLB instances in
 /// the terrain mesh frame (+X east, +Y up, +Z south, world-centred).
+/// [`write_points_with`] using the 1 m cone proxy for `.glb`.
 pub fn write_points(
     path: &std::path::Path,
     points: &[ScatterPoint],
     extent_m: [f64; 2],
+) -> JdResult<u64> {
+    write_points_with(path, points, extent_m, None)
+}
+
+/// Write scatter points as `.csv`, `.json` or `.glb`; a `.glb` instances `proxy` (a generated
+/// rock, any mesh) or, without one, the 1 m cone.
+pub fn write_points_with(
+    path: &std::path::Path,
+    points: &[ScatterPoint],
+    extent_m: [f64; 2],
+    proxy: Option<&crate::mesh::GridMesh>,
 ) -> JdResult<u64> {
     let ext = path
         .extension()
@@ -150,7 +162,7 @@ pub fn write_points(
             s.into_bytes()
         }
         Some("json") => serde_json::to_vec(points)?,
-        Some("glb") => return write_instances_glb(path, points, extent_m),
+        Some("glb") => return write_instances_glb(path, points, extent_m, proxy),
         _ => {
             return Err(JdError::new(
                 jd_types::ErrorCode::E_FORMAT_UNSUPPORTED,
@@ -173,6 +185,7 @@ fn write_instances_glb(
     path: &std::path::Path,
     points: &[ScatterPoint],
     extent_m: [f64; 2],
+    proxy: Option<&crate::mesh::GridMesh>,
 ) -> JdResult<u64> {
     if points.is_empty() {
         return Err(JdError::invalid("mask", "no points to export"));
@@ -183,15 +196,33 @@ fn write_instances_glb(
         }
     };
     let mut bin = Vec::with_capacity(points.len() * 40 + 128);
-    // Proxy: apex up, 0.6 m square base; 4 sides + 2 base triangles, counter-clockwise outside.
-    let verts: [f32; 15] = [
+    // The instanced mesh: a rock (or any mesh) when given, else the 1 m cone proxy — apex up,
+    // 0.6 m square base; 4 sides + 2 base triangles, counter-clockwise outside.
+    let cone_verts: [f32; 15] = [
         0.0, 1.0, 0.0, -0.3, 0.0, 0.3, 0.3, 0.0, 0.3, 0.3, 0.0, -0.3, -0.3, 0.0, -0.3,
     ];
-    f32s(&mut bin, &verts);
+    let cone_idx: [u32; 18] = [0, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 1, 1, 4, 3, 1, 3, 2];
+    let (verts, nrms, idx): (&[f32], Option<&[f32]>, &[u32]) = match proxy {
+        Some(m) => (&m.positions, Some(&m.normals), &m.indices),
+        None => (&cone_verts, None, &cone_idx),
+    };
+    f32s(&mut bin, verts);
+    let nrm_off = bin.len();
+    if let Some(n) = nrms {
+        f32s(&mut bin, n);
+    }
     let idx_off = bin.len();
-    for i in [0u16, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 1, 1, 4, 3, 1, 3, 2] {
+    for i in idx {
         bin.extend_from_slice(&i.to_le_bytes());
     }
+    let (mut vmin, mut vmax) = ([f32::MAX; 3], [f32::MIN; 3]);
+    for v in verts.as_chunks::<3>().0 {
+        for k in 0..3 {
+            vmin[k] = vmin[k].min(v[k]);
+            vmax[k] = vmax[k].max(v[k]);
+        }
+    }
+    let n_verts = verts.len() / 3;
     let tr_off = bin.len();
     let (mut min, mut max) = ([f32::MAX; 3], [f32::MIN; 3]);
     for p in points {
@@ -223,22 +254,24 @@ fn write_instances_glb(
         "extensionsRequired": ["EXT_mesh_gpu_instancing"],
         "buffers": [{ "byteLength": bin.len() }],
         "bufferViews": [
-            { "buffer": 0, "byteOffset": 0, "byteLength": idx_off, "target": 34962 },
+            { "buffer": 0, "byteOffset": 0, "byteLength": nrm_off, "target": 34962 },
+            { "buffer": 0, "byteOffset": nrm_off, "byteLength": idx_off - nrm_off, "target": 34962 },
             { "buffer": 0, "byteOffset": idx_off, "byteLength": tr_off - idx_off, "target": 34963 },
             { "buffer": 0, "byteOffset": tr_off, "byteLength": rot_off - tr_off },
             { "buffer": 0, "byteOffset": rot_off, "byteLength": sc_off - rot_off },
             { "buffer": 0, "byteOffset": sc_off, "byteLength": bin.len() - sc_off }
         ],
         "accessors": [
-            { "bufferView": 0, "componentType": 5126, "count": 5, "type": "VEC3", "min": [-0.3, 0.0, -0.3], "max": [0.3, 1.0, 0.3] },
-            { "bufferView": 1, "componentType": 5123, "count": 18, "type": "SCALAR" },
-            { "bufferView": 2, "componentType": 5126, "count": n, "type": "VEC3", "min": min, "max": max },
-            { "bufferView": 3, "componentType": 5126, "count": n, "type": "VEC4" },
-            { "bufferView": 4, "componentType": 5126, "count": n, "type": "VEC3" }
+            { "bufferView": 0, "componentType": 5126, "count": n_verts, "type": "VEC3", "min": vmin, "max": vmax },
+            { "bufferView": 1, "componentType": 5126, "count": if nrms.is_some() { n_verts } else { 0 }, "type": "VEC3" },
+            { "bufferView": 2, "componentType": 5125, "count": idx.len(), "type": "SCALAR" },
+            { "bufferView": 3, "componentType": 5126, "count": n, "type": "VEC3", "min": min, "max": max },
+            { "bufferView": 4, "componentType": 5126, "count": n, "type": "VEC4" },
+            { "bufferView": 5, "componentType": 5126, "count": n, "type": "VEC3" }
         ],
-        "materials": [{ "name": "proxy", "pbrMetallicRoughness": { "baseColorFactor": [0.2, 0.5, 0.2, 1.0], "metallicFactor": 0.0, "roughnessFactor": 0.9 } }],
-        "meshes": [{ "name": "proxy", "primitives": [{ "attributes": { "POSITION": 0 }, "indices": 1, "material": 0, "mode": 4 }] }],
-        "nodes": [{ "mesh": 0, "name": "instances", "extensions": { "EXT_mesh_gpu_instancing": { "attributes": { "TRANSLATION": 2, "ROTATION": 3, "SCALE": 4 } } } }],
+        "materials": [{ "name": "proxy", "pbrMetallicRoughness": { "baseColorFactor": if proxy.is_some() { [0.45, 0.42, 0.38, 1.0] } else { [0.2, 0.5, 0.2, 1.0] }, "metallicFactor": 0.0, "roughnessFactor": 0.9 } }],
+        "meshes": [{ "name": if proxy.is_some() { "rock" } else { "proxy" }, "primitives": [{ "attributes": if nrms.is_some() { serde_json::json!({ "POSITION": 0, "NORMAL": 1 }) } else { serde_json::json!({ "POSITION": 0 }) }, "indices": 2, "material": 0, "mode": 4 }] }],
+        "nodes": [{ "mesh": 0, "name": "instances", "extensions": { "EXT_mesh_gpu_instancing": { "attributes": { "TRANSLATION": 3, "ROTATION": 4, "SCALE": 5 } } } }],
         "scenes": [{ "nodes": [0] }],
         "scene": 0
     });

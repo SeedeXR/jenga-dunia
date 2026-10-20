@@ -2956,6 +2956,9 @@ pub mod terrain {
         /// back in the result instead (viewport preview; at most 200 000).
         #[serde(default)]
         pub path: Option<PathBuf>,
+        /// Instance a generated rock (seeded from the scatter seed) instead of the 1 m cone proxy in `.glb` output.
+        #[serde(default)]
+        pub rock: Option<jd_terrain::RockParams>,
         /// Spacing, jitter, seed.
         #[serde(flatten)]
         pub scatter: jd_terrain::ScatterParams,
@@ -3112,6 +3115,41 @@ pub mod terrain {
         pub horizon_rgb: [f32; 3],
     }
 
+    /// `terrain.rocks` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct TerrainRocks {
+        /// How many rocks to write (1..=64): `rock_0.glb` … seeded `seed`, `seed + 1`, ….
+        #[serde(default = "default_rock_count")]
+        pub count: u32,
+        /// Shape: radius, detail, roughness, flatten, base seed.
+        #[serde(default, flatten)]
+        pub rock: jd_terrain::RockParams,
+        /// Output directory; relative paths resolve against the project's `exports/`.
+        #[serde(default = "default_rocks_dir")]
+        pub dir: PathBuf,
+    }
+
+    fn default_rock_count() -> u32 {
+        4
+    }
+    fn default_rocks_dir() -> PathBuf {
+        PathBuf::from("rocks")
+    }
+
+    /// One written rock.
+    #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct RockFile {
+        /// Written `.glb`.
+        pub path: PathBuf,
+        /// Seed of this rock.
+        pub seed: u64,
+        /// Triangles.
+        pub triangles: u32,
+        /// Bounding box size x / y / z, metres.
+        pub size_m: [f32; 3],
+    }
+
     /// `ocean.bake` params.
     #[derive(Debug, Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
@@ -3243,6 +3281,32 @@ pub mod terrain {
             "Wind sea for a wind speed and fetch (JONSWAP growth capped at the fully developed Pierson–Moskowitz sea): significant height, peak period and wavelength, breaking depth, and the Gerstner components the viewport animates",
             Scope::None,
             |_, p| Ok((jd_terrain::wave_spectrum(&p)?, Vec::new())),
+        );
+        r.register::<TerrainRocks, Vec<RockFile>, _>(
+            "terrain.rocks",
+            "Generate seeded, faceted boulders as .glb meshes (icosphere squashed and displaced by value noise, flat base, flat shading) — scatter proxies and props",
+            Scope::Export,
+            |ctx, p| {
+                if !(1..=64).contains(&p.count) {
+                    return Err(JdError::invalid("count", "must be within 1..=64"));
+                }
+                let dir = if p.dir.is_absolute() { p.dir.clone() } else { ctx.with_project(|proj| Ok(proj.root().join("exports").join(&p.dir)))? };
+                std::fs::create_dir_all(&dir)?;
+                let mut files = Vec::with_capacity(p.count as usize);
+                for i in 0..p.count {
+                    let seed = p.rock.seed.wrapping_add(u64::from(i));
+                    let mesh = jd_terrain::rock_mesh(&jd_terrain::RockParams { seed, ..p.rock.clone() })?;
+                    let path = dir.join(format!("rock_{i}.glb"));
+                    let span = |k: usize| {
+                        let (lo, hi) = mesh.positions.as_chunks::<3>().0.iter().fold((f32::MAX, f32::MIN), |(lo, hi), v| (lo.min(v[k]), hi.max(v[k])));
+                        hi - lo
+                    };
+                    let size_m = [span(0), span(1), span(2)];
+                    let r = jd_terrain::mesh::write_glb_mesh(&mesh, [f64::from(size_m[0]), f64::from(size_m[2])], &path, 1, None)?;
+                    files.push(RockFile { path, seed, triangles: r.triangles, size_m });
+                }
+                Ok((files, Vec::new()))
+            },
         );
         r.register::<SkyPreview, SkyPreviewResult, _>(
             "sky.preview",
@@ -3436,7 +3500,10 @@ pub mod terrain {
                 };
                 let count = points.len() as u64;
                 let (bytes, points) = match &path {
-                    Some(f) => (jd_terrain::write_points(f, &points, extent)?, None),
+                    Some(f) => {
+                        let rock = p.rock.as_ref().map(|r| jd_terrain::rock_mesh(&jd_terrain::RockParams { seed: r.seed ^ p.scatter.seed, ..r.clone() })).transpose()?;
+                        (jd_terrain::write_points_with(f, &points, extent, rock.as_ref())?, None)
+                    }
                     None if count > 200_000 => {
                         return Err(JdError::invalid("spacing_m", format!("{count} points is too many to return inline (max 200 000)"))
                             .next("Give a `path` to write a file, or use a larger spacing."));
