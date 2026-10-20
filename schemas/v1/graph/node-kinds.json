@@ -1539,6 +1539,12 @@
           "format": "uint32",
           "minimum": 0,
           "default": 3
+        },
+        "valley_width_m": {
+          "description": "Valley floor: within this distance (metres along the stream) of a river the slope eases to a\nfloodplain (15 % of the headwater law), so valleys get a floor instead of a V (0 = off).",
+          "type": "number",
+          "format": "float",
+          "default": 600.0
         }
       },
       "additionalProperties": false,

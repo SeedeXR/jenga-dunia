@@ -61,6 +61,13 @@ pub struct NetworkParams {
     /// Strahler order from which a channel counts as a river in the `rivers` output (≥ 1).
     #[serde(default = "d_river_order")]
     pub river_order: u32,
+    /// Valley floor: within this distance (metres along the stream) of a river the slope eases to a
+    /// floodplain (15 % of the headwater law), so valleys get a floor instead of a V (0 = off).
+    #[serde(default = "d_valley_width")]
+    pub valley_width_m: f32,
+}
+fn d_valley_width() -> f32 {
+    600.0
 }
 
 fn d_slope() -> f32 {
@@ -86,6 +93,7 @@ impl Default for NetworkParams {
             order_falloff: d_falloff(),
             roughness: d_roughness(),
             river_order: d_river_order(),
+            valley_width_m: d_valley_width(),
         }
     }
 }
@@ -152,6 +160,9 @@ pub fn hydrology_first(
     }
     if p.river_order == 0 {
         return Err(JdError::invalid("river_order", "must be ≥ 1"));
+    }
+    if !(p.valley_width_m >= 0.0 && p.valley_width_m.is_finite()) {
+        return Err(JdError::invalid("valley_width_m", "must be finite and ≥ 0"));
     }
     if !p.base_m.is_finite() {
         return Err(JdError::invalid("base_m", "must be finite"));
@@ -265,7 +276,11 @@ pub fn hydrology_first(
         }
     }
     // Heights: parents before children; a cell sits above its parent by the slope of its order.
+    // Heights, parents before children: a cell sits above its parent by the slope of its order,
+    // eased towards a floodplain within `valley_width_m` (along the stream) of a river cell —
+    // `to_river` only grows upstream, so every cell still sits above its parent.
     let mut hgt = vec![p.base_m; n];
+    let mut to_river = vec![0.0f32; n];
     for &i in by_dist.iter().rev() {
         let i = i as usize;
         let pi = parent[i];
@@ -273,8 +288,20 @@ pub fn hydrology_first(
             continue;
         }
         let pi = pi as usize;
-        let slope = p.slope_m_per_km / 1000.0 * p.order_falloff.powi(order[i] as i32 - 1);
-        hgt[i] = hgt[pi] + (dist[i] - dist[pi]) * slope;
+        let step = dist[i] - dist[pi];
+        to_river[i] = if order[i] >= p.river_order {
+            0.0
+        } else {
+            to_river[pi] + step
+        };
+        let floor = if p.valley_width_m > 0.0 {
+            let t = (to_river[i] / p.valley_width_m).clamp(0.0, 1.0);
+            0.15 + 0.85 * t * t * (3.0 - 2.0 * t)
+        } else {
+            1.0
+        };
+        let slope = p.slope_m_per_km / 1000.0 * p.order_falloff.powi(order[i] as i32 - 1) * floor;
+        hgt[i] = hgt[pi] + step * slope;
     }
     let max_order = order.iter().copied().max().unwrap_or(1).max(1) as f32;
     let mut out = Heightfield::new(width, height, tile_size, halo)?;
@@ -360,6 +387,47 @@ mod tests {
         )
         .expect("seed");
         assert_ne!(h.content_hash(), h3.content_hash());
+        // Valley floors: easing the slope near rivers lowers the land next to them; the drainage
+        // property survives (the fill still finds nothing).
+        let (v, _, _) = hydrology_first(
+            96,
+            64,
+            64,
+            4,
+            [50.0, 50.0],
+            &NetworkParams {
+                valley_width_m: 1500.0,
+                ..p.clone()
+            },
+        )
+        .expect("valley");
+        let (sharp, _, _) = hydrology_first(
+            96,
+            64,
+            64,
+            4,
+            [50.0, 50.0],
+            &NetworkParams {
+                valley_width_m: 0.0,
+                ..p.clone()
+            },
+        )
+        .expect("v");
+        let mean = |f: &Heightfield| f.to_vec().iter().sum::<f32>() / (96.0 * 64.0);
+        assert!(
+            mean(&v) < 0.8 * mean(&sharp),
+            "floodplains lower the land: {} vs {}",
+            mean(&v),
+            mean(&sharp)
+        );
+        let (vf, _) = crate::fill_depressions(&v, 0.0).expect("fill v");
+        assert!(
+            v.to_vec()
+                .iter()
+                .zip(&vf.to_vec())
+                .all(|(a, b)| (a - b).abs() < 1e-4),
+            "valley floors still drain"
+        );
         // An island drains to every edge; a bad slope is refused.
         let (isl, _, _) = hydrology_first(
             48,

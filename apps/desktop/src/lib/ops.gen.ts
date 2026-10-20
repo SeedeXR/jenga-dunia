@@ -1707,6 +1707,9 @@ export type NodeParams_jd_hydrology_network_1 = {
   "roughness"?: number;
   /** Strahler order from which a channel counts as a river in the `rivers` output (≥ 1). */
   "river_order"?: number;
+  /** Valley floor: within this distance (metres along the stream) of a river the slope eases to a
+floodplain (15 % of the headwater law), so valleys get a floor instead of a V (0 = off). */
+  "valley_width_m"?: number;
 };
 
 export type NodeParams_jd_hydrology_rivers_1 = {

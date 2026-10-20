@@ -625,15 +625,15 @@ imported  min 63.3  max 382.0  mean 188.2      (the 1 km window inside the 2.2 k
 $ jd new Net.jdproj --extent 25600 --resolution 512 --seed 3
 $ jd op graph.add_node --project Net.jdproj --save --params '{"kind":"jd.hydrology.network@1","params":{"seed":3,"river_order":5}}'
 # network.out → `net`, network.rivers → `rivers`; network.out → fill.in, fill.lakes → `lakes`
-jd.hydrology.network@1  595 ms (512²)        jd.hydrology.fill@1  182 ms
-net     min 0.0  max 226.1  mean 73.1 m
+jd.hydrology.network@1  632 ms (512²)        jd.hydrology.fill@1  182 ms
+net     min 0.0  max 125.7  mean 22.5 m          (valley floors on; 226 / 73 m with valley_width_m 0)
 rivers  0..1 (order / max order), 0 below order 5
 lakes   min 0  max 0  mean 0                 ← the fill finds nothing: every cell already drains
 ```
 
 ![Two panels: a dendritic height field draining to the bottom edge, and the river mask of its order-5 and higher trunks](images/cli-network.png)
 
-`jd.hydrology.network@1` builds the terrain the way Génevaux et al. (2013) argue it should be built — network first. The river mouths are the cells of one edge (`mouths`: south / north / west / east, or the whole border for an island); a spanning tree grown from them over a smooth seeded cost field (two octaves of lattice noise, so cheap corridors — the valleys — hold their course for a dozen cells; `roughness` 0 = straight parallel drainage, 1 = the noise alone) is the drainage network; Strahler orders come from a post-order pass; then each cell sits above its downstream parent by the slope of its order times the step (`slope_m_per_km` for headwaters, × `order_falloff` per higher order, so big rivers run flat). Every cell drains to a mouth by construction — the unit test and the CLI run above both confirm that priority-flood filling changes nothing. `rivers` marks channels of `river_order` and up; `order` is the raw Strahler number. Not modelled: valley cross-sections (run the erosion nodes on the result), Génevaux's primitive blending.
+`jd.hydrology.network@1` builds the terrain the way Génevaux et al. (2013) argue it should be built — network first. The river mouths are the cells of one edge (`mouths`: south / north / west / east, or the whole border for an island); a spanning tree grown from them over a smooth seeded cost field (two octaves of lattice noise, so cheap corridors — the valleys — hold their course for a dozen cells; `roughness` 0 = straight parallel drainage, 1 = the noise alone) is the drainage network; Strahler orders come from a post-order pass; then each cell sits above its downstream parent by the slope of its order times the step (`slope_m_per_km` for headwaters, × `order_falloff` per higher order, so big rivers run flat). Every cell drains to a mouth by construction — the unit test and the CLI run above both confirm that priority-flood filling changes nothing. Within `valley_width_m` (600 m along the stream) of a river cell the slope eases to a floodplain — 15 % of the law — so valleys get a floor instead of a V, and because that distance only grows upstream every cell still sits above its parent (unit test: the mean height drops by more than a fifth, the fill still finds nothing). `rivers` marks channels of `river_order` and up; `order` is the raw Strahler number. Not modelled: Génevaux's primitive blending, terraces (run the erosion nodes on the result).
 
 ### Wave shadow: where the sea is sheltered
 
