@@ -168,7 +168,12 @@ pub fn exclude_near(
 
 /// Read the `u,v` columns of a scatter CSV (`u,v,z,r` header) back as positions.
 pub fn read_points_csv(path: &std::path::Path) -> JdResult<Vec<[f32; 2]>> {
-    let text = std::fs::read_to_string(path)?;
+    parse_points_csv(&std::fs::read_to_string(path)?)
+        .map_err(|e| e.detail("path", path.display().to_string()))
+}
+
+/// Parse the `u,v` columns of scatter CSV text (`u,v,z,r` header).
+pub fn parse_points_csv(text: &str) -> JdResult<Vec<[f32; 2]>> {
     let mut out = Vec::new();
     for (n, line) in text.lines().enumerate().skip(1) {
         let mut cols = line.split(',');
@@ -181,7 +186,7 @@ pub fn read_points_csv(path: &std::path::Path) -> JdResult<Vec<[f32; 2]>> {
             _ => {
                 return Err(JdError::new(
                     jd_types::ErrorCode::E_FORMAT_CORRUPT,
-                    format!("{}: line {} is not `u,v,…`", path.display(), n + 1),
+                    format!("line {} is not `u,v,…`", n + 1),
                 ));
             }
         }

@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "apps/cli", "apps/mcp", "apps/desktop/src-tauri"]
+exclude = ["fuzz"] # cargo-fuzz targets (nightly): `cargo +nightly fuzz run <target>`
 
 [workspace.package]
 version = "0.0.1"

@@ -14,6 +14,7 @@ Thank you for helping build Jenga Dunia. This project is developed by humans and
 - Review loop before pushing: correctness review and over-engineering review (`/code-review`, `/ponytail-review` for agents). Fix findings first.
 - Never bypass hooks or gates (`--no-verify` is prohibited). A broken gate is a finding to report.
 - `scripts/pre-push.sh` runs every CI gate locally (fmt, clippy, tests, cargo-deny, schema and TypeScript-type freshness, version, links, frontend build/tests/e2e, and the code knowledge graph when `graphify` is installed). Run it, read the result, then push — never chain `git push` behind a step that can fail silently.
+- Fuzzing: `fuzz/` holds cargo-fuzz targets for the parsers we own (`fbx_mesh`, `scatter_csv`, `graph_json`); `cargo +nightly fuzz run <target> -- -max_total_time=60` locally (nightly + `cargo install cargo-fuzz`), CI runs each for 30 s on every push. A crash artifact under `fuzz/artifacts/` is a bug: turn it into a unit test in the parser's module.
 - Knowledge graph: `scripts/graphify-code.py` builds `graphify-out/` (ignored by git) from the code alone — graphify's AST extraction, no LLM, no key — and `--check` proves the build deterministic by building twice; CI uploads it as the `graphify-out` artifact. Query it with `graphify query "<question>"`, `graphify path "A" "B"`, `graphify explain "X"`.
 
 ## Code standards

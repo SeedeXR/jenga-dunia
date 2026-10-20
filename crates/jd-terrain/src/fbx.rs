@@ -1019,8 +1019,13 @@ fn transform(p: [f64; 3], t: &[f64], r: &[f64], s: &[f64]) -> [f64; 3] {
 
 /// Read every mesh of a binary FBX file into one triangle soup in metres, +Y up.
 pub fn read_fbx_mesh(path: &Path) -> JdResult<FbxMesh> {
-    let bytes = fs::read(path)?;
-    let top = parse_document(&bytes)?;
+    read_fbx_mesh_bytes(&fs::read(path)?)
+}
+
+/// Parse a binary FBX document from memory (the fuzz target's entry point; `read_fbx_mesh` is
+/// this over a file).
+pub fn read_fbx_mesh_bytes(bytes: &[u8]) -> JdResult<FbxMesh> {
+    let top = parse_document(bytes)?;
     let find = |name: &str| top.iter().find(|n| n.name == name);
     let settings = find("GlobalSettings");
     let unit = settings

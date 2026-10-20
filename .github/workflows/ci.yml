@@ -95,7 +95,7 @@ jobs:
           ./target/release/jd --json open "$RUNNER_TEMP/smoke.jdproj" | tail -1 | grep -q '"status":"ok"'
       - name: S1 bench smoke (real kernels, release; budget 15 s / 1 GB)
         shell: bash
-        run: ./target/release/jd --json diag bench s1 | tail -1 | node scripts/check-bench.mjs 15000 1073741824
+        run: ./target/release/jd --json diag bench s1 | tail -1 | node scripts/check-bench.mjs 15000 1073741824 scripts/bench-baseline.json
       - name: Generated schemas are committed and current
         if: runner.os == 'Linux'
         shell: bash
@@ -161,6 +161,27 @@ jobs:
           name: playwright-output
           path: apps/desktop/test-results
           if-no-files-found: ignore
+
+  fuzz:
+    name: fuzz (ubuntu, 30 s per target)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: Seed the FBX corpus from the fixtures
+        shell: bash
+        run: mkdir -p fuzz/corpus/fbx_mesh && cp fixtures/*.fbx fuzz/corpus/fbx_mesh/ 2>/dev/null || true
+      - name: Fuzz the parsers (FBX, scatter CSV, graph.json)
+        shell: bash
+        run: |
+          for t in fbx_mesh scatter_csv graph_json; do
+            cargo fuzz run "$t" -- -max_total_time=30 -timeout=10
+          done
 
   deny:
     name: cargo-deny

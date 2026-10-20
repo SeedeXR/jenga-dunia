@@ -1,0 +1,5 @@
+{
+  "_comment": "S1 (1024² fBm + ridged + add + thermal×50, release) on GitHub-hosted runners, run 39466828738 (2026-10-20). check-bench.mjs: the content hash must match exactly (determinism across OSes), total_ms > 1.5× warns, > 3× fails.",
+  "content_hash": "859db903b963db8a",
+  "total_ms": { "linux": 1752, "win32": 1679, "darwin": 1387 }
+}
