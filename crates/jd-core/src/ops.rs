@@ -2509,7 +2509,11 @@ pub mod terrain {
                 } else {
                     ctx.with_project(|proj| Ok(proj.root().join("exports").join(&p.path)))?
                 };
-                let report = ctx.with_layer(&p.layer, |hf| jd_terrain::export_heightmap(hf, &path, &p.options))?;
+                let geo = ctx.with_project(|proj| {
+                    let w = &proj.doc.world;
+                    Ok(jd_terrain::GeoRef { origin: w.origin, spacing: w.spacing_m(), crs: w.crs.clone() })
+                })?;
+                let report = ctx.with_layer(&p.layer, |hf| jd_terrain::export_heightmap_geo(hf, &path, &p.options, Some(&geo)))?;
                 let mut warnings = Vec::new();
                 if report.quantisation_step_m > 0.0 {
                     warnings.push(

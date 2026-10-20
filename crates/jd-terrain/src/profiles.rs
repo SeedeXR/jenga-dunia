@@ -113,6 +113,7 @@ pub fn export_profile(
             format,
             flip_y: flip,
             range_m,
+            georeference: true,
         },
     )?;
     let [min_m, max_m] = report.range_m;

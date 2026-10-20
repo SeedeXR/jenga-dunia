@@ -512,6 +512,8 @@ export type GeoTags = {
   "tiepoint"?: [number, number, number, number, number, number] | null;
   /** `GDAL_NODATA` value. */
   "nodata"?: number | null;
+  /** EPSG code from the GeoKey directory (ProjectedCSTypeGeoKey or GeographicTypeGeoKey). */
+  "epsg"?: number | null;
 };
 
 export type ProjectImportAssetResult = {
@@ -675,6 +677,9 @@ export type TerrainExportHeightmapRequest = {
   "flip_y"?: boolean | null;
   /** Height range mapped to [0, 65535] for quantised formats; defaults to the field's min/max. */
   "range_m"?: [number, number] | null;
+  /** For `tiff32`: write GeoTIFF tags (pixel scale, tie point, EPSG GeoKeys) when the caller
+supplies a [`GeoRef`]. Default true; the file is then always north-up. */
+  "georeference"?: boolean;
 };
 
 export type TerrainExportHeightmapResult = {

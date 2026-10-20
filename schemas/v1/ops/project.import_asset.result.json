@@ -68,6 +68,15 @@
             "null"
           ],
           "format": "float"
+        },
+        "epsg": {
+          "description": "EPSG code from the GeoKey directory (ProjectedCSTypeGeoKey or GeographicTypeGeoKey).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
         }
       }
     }

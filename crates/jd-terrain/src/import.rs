@@ -43,6 +43,8 @@ pub struct GeoTags {
     pub tiepoint: Option<[f64; 6]>,
     /// `GDAL_NODATA` value.
     pub nodata: Option<f32>,
+    /// EPSG code from the GeoKey directory (ProjectedCSTypeGeoKey or GeographicTypeGeoKey).
+    pub epsg: Option<u32>,
 }
 
 /// GeoTIFF tags of a `.tif`/`.tiff`; `None` for other extensions or when the file carries none.
@@ -80,13 +82,32 @@ pub fn geotiff_tags(path: &Path) -> JdResult<Option<GeoTags>> {
             .and_then(|s| s.trim().trim_end_matches('\0').parse::<f32>().ok()),
         None => None,
     };
-    if pixel_scale.is_none() && tiepoint.is_none() && nodata.is_none() {
+    let epsg = match dec
+        .find_tag(Tag::GeoKeyDirectoryTag)
+        .map_err(|e| corrupt("TIFF tag", e))?
+    {
+        Some(_) => dec
+            .get_tag_u16_vec(Tag::GeoKeyDirectoryTag)
+            .ok()
+            .and_then(|keys| {
+                keys.get(4..).and_then(|body| {
+                    body.as_chunks::<4>()
+                        .0
+                        .iter()
+                        .find(|k| (k[0] == 3072 || k[0] == 2048) && k[1] == 0)
+                        .map(|k| k[3] as u32)
+                })
+            }),
+        None => None,
+    };
+    if pixel_scale.is_none() && tiepoint.is_none() && nodata.is_none() && epsg.is_none() {
         return Ok(None);
     }
     Ok(Some(GeoTags {
         pixel_scale,
         tiepoint,
         nodata,
+        epsg,
     }))
 }
 

@@ -3179,6 +3179,15 @@ expression: list
                 "null"
               ],
               "format": "float"
+            },
+            "epsg": {
+              "description": "EPSG code from the GeoKey directory (ProjectedCSTypeGeoKey or GeographicTypeGeoKey).",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
             }
           }
         }
@@ -4219,6 +4228,11 @@ expression: list
           "minItems": 2,
           "maxItems": 2,
           "default": null
+        },
+        "georeference": {
+          "description": "For `tiff32`: write GeoTIFF tags (pixel scale, tie point, EPSG GeoKeys) when the caller\nsupplies a [`GeoRef`]. Default true; the file is then always north-up.",
+          "type": "boolean",
+          "default": true
         }
       },
       "additionalProperties": false,

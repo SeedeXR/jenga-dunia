@@ -61,6 +61,51 @@ pub struct ExportOptions {
     /// Height range mapped to [0, 65535] for quantised formats; defaults to the field's min/max.
     #[serde(default)]
     pub range_m: Option<[f32; 2]>,
+    /// For `tiff32`: write GeoTIFF tags (pixel scale, tie point, EPSG GeoKeys) when the caller
+    /// supplies a [`GeoRef`]. Default true; the file is then always north-up.
+    #[serde(default = "yes")]
+    pub georeference: bool,
+}
+fn yes() -> bool {
+    true
+}
+
+/// Where the field sits in the world, for GeoTIFF tags: the south-west corner, the sample
+/// spacing and an optional `EPSG:<code>` CRS (anything else is written without GeoKeys).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct GeoRef {
+    /// World coordinates of the south-west corner (outer edge of sample (0, 0)).
+    pub origin: [f64; 2],
+    /// Sample spacing [x, y] in CRS units.
+    pub spacing: [f64; 2],
+    /// `EPSG:32637`, `EPSG:4326`, … or None.
+    pub crs: Option<String>,
+}
+
+/// GeoKeyDirectory for an EPSG code: geographic codes (4000–4999) use GeographicTypeGeoKey,
+/// everything else ProjectedCSTypeGeoKey; raster type is PixelIsArea.
+fn geokeys(epsg: Option<u32>) -> Vec<u16> {
+    let mut keys: Vec<[u16; 4]> = vec![[1025, 0, 1, 1]]; // GTRasterTypeGeoKey = RasterPixelIsArea
+    if let Some(code) = epsg {
+        let geographic = (4000..5000).contains(&code);
+        keys.push([1024, 0, 1, if geographic { 2 } else { 1 }]); // GTModelTypeGeoKey
+        keys.push([if geographic { 2048 } else { 3072 }, 0, 1, code as u16]);
+    }
+    keys.sort_by_key(|k| k[0]);
+    let mut out = vec![1, 1, 0, keys.len() as u16];
+    for k in keys {
+        out.extend_from_slice(&k);
+    }
+    out
+}
+
+/// Parse `EPSG:<code>` (case-insensitive); None for anything else.
+pub fn epsg_code(crs: Option<&str>) -> Option<u32> {
+    let s = crs?.trim();
+    let code = s
+        .strip_prefix("EPSG:")
+        .or_else(|| s.strip_prefix("epsg:"))?;
+    code.parse::<u32>().ok().filter(|c| (1..=65535).contains(c))
 }
 
 /// What was written.
@@ -130,14 +175,38 @@ pub fn export_heightmap(
     path: &Path,
     opts: &ExportOptions,
 ) -> JdResult<ExportReport> {
+    export_heightmap_geo(hf, path, opts, None)
+}
+
+/// [`export_heightmap`] with a georeference: a `tiff32` export then carries GeoTIFF tags
+/// (`ModelPixelScaleTag`, `ModelTiepointTag`, GeoKeys for an EPSG CRS) and is written north-up.
+pub fn export_heightmap_geo(
+    hf: &Heightfield,
+    path: &Path,
+    opts: &ExportOptions,
+    geo: Option<&GeoRef>,
+) -> JdResult<ExportReport> {
     hf.validate_finite()?;
     ensure_parent(path)?;
     let stats = hf.stats();
     let format = opts.format;
-    let flip = opts.flip_y.unwrap_or(matches!(
-        format,
-        HeightmapFormat::Exr | HeightmapFormat::Png16 | HeightmapFormat::Tiff32
-    ));
+    let geo = geo.filter(|_| opts.georeference && format == HeightmapFormat::Tiff32);
+    if let Some(g) = geo
+        && !(g.spacing[0] > 0.0 && g.spacing[1] > 0.0 && g.origin.iter().all(|v| v.is_finite()))
+    {
+        return Err(JdError::invalid(
+            "geo",
+            "spacing must be positive and the origin finite",
+        ));
+    }
+    let flip = if geo.is_some() {
+        true // GeoTIFF tie point refers to the top-left (north-west) pixel
+    } else {
+        opts.flip_y.unwrap_or(matches!(
+            format,
+            HeightmapFormat::Exr | HeightmapFormat::Png16 | HeightmapFormat::Tiff32
+        ))
+    };
     let range = opts.range_m.unwrap_or([stats.min, stats.max]);
     if range[0] >= range[1] || range.iter().any(|v| !v.is_finite()) {
         return Err(JdError::invalid("range_m", "must be finite with min < max"));
@@ -194,14 +263,37 @@ pub fn export_heightmap(
                 // No BufWriter: tiff writes strips in large chunks, and the encoder's final
                 // directory is written on drop, so the file must be complete before we measure it.
                 let file = fs::File::create(path)?;
-                let mut enc = tiff::encoder::TiffEncoder::new(file).map_err(|e| {
+                let tiff_err = |e: tiff::TiffError| {
                     JdError::new(ErrorCode::E_SERIALIZE, format!("TIFF write failed: {e}"))
-                })?;
-                enc.write_image::<tiff::encoder::colortype::Gray32Float>(w, h, &data)
-                    .map_err(|e| {
-                        JdError::new(ErrorCode::E_SERIALIZE, format!("TIFF write failed: {e}"))
-                            .detail("path", path.display().to_string())
-                    })?;
+                        .detail("path", path.display().to_string())
+                };
+                let mut enc = tiff::encoder::TiffEncoder::new(file).map_err(tiff_err)?;
+                let mut img = enc
+                    .new_image::<tiff::encoder::colortype::Gray32Float>(w, h)
+                    .map_err(tiff_err)?;
+                if let Some(g) = geo {
+                    use tiff::tags::Tag;
+                    // North-west corner of the raster: origin is the south-west corner.
+                    let north = g.origin[1] + g.spacing[1] * h as f64;
+                    img.encoder()
+                        .write_tag(
+                            Tag::ModelPixelScaleTag,
+                            &[g.spacing[0], g.spacing[1], 0.0][..],
+                        )
+                        .map_err(tiff_err)?;
+                    img.encoder()
+                        .write_tag(
+                            Tag::ModelTiepointTag,
+                            &[0.0, 0.0, 0.0, g.origin[0], north, 0.0][..],
+                        )
+                        .map_err(tiff_err)?;
+                    let keys = geokeys(epsg_code(g.crs.as_deref()));
+                    img.encoder()
+                        .write_tag(Tag::GeoKeyDirectoryTag, &keys[..])
+                        .map_err(tiff_err)?;
+                }
+                img.rows_per_strip(h.max(1)).map_err(tiff_err)?;
+                img.write_data(&data).map_err(tiff_err)?;
             }
             fs::metadata(path)?.len()
         }
@@ -361,6 +453,77 @@ fn dequantise(q: &[u16], lo: f32, hi: f32) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn geotiff_export_writes_scale_tiepoint_and_epsg_keys_north_up() {
+        let mut hf = Heightfield::new(8, 4, 8, 0).expect("hf");
+        hf.fill_with(|x, y| x as f32 + y as f32 * 10.0); // row 0 (south) is the lowest row
+        let dir = tempfile::tempdir().expect("tmp");
+        let p = dir.path().join("geo.tif");
+        let geo = GeoRef {
+            origin: [500_000.0, 4_000_000.0],
+            spacing: [30.0, 30.0],
+            crs: Some("EPSG:32637".into()),
+        };
+        let rep = export_heightmap_geo(
+            &hf,
+            &p,
+            &ExportOptions {
+                format: HeightmapFormat::Tiff32,
+                flip_y: Some(false),
+                range_m: None,
+                georeference: true,
+            },
+            Some(&geo),
+        )
+        .expect("export");
+        assert!(
+            rep.flip_y,
+            "georeferenced TIFFs are always north-up, whatever flip_y says"
+        );
+        let tags = crate::import::geotiff_tags(&p)
+            .expect("tags")
+            .expect("some");
+        assert_eq!(tags.pixel_scale, Some([30.0, 30.0]));
+        assert_eq!(
+            tags.tiepoint.map(|t| [t[3], t[4]]),
+            Some([500_000.0, 4_000_120.0]),
+            "tie point is the north-west corner"
+        );
+        assert_eq!(tags.epsg, Some(32637));
+        // Reading it back as a foreign heightmap (north_up) restores the field exactly.
+        let (v, w, h) = crate::import::read_foreign(&p, &crate::import::ForeignImport::default())
+            .expect("read");
+        assert_eq!((w, h), (8, 4));
+        assert_eq!(
+            v[0], 30.0,
+            "file row 0 is the north row (the world flip happens in resample_to_world)"
+        );
+        assert_eq!(v[3 * 8 + 7], 7.0, "last file row is the south row");
+        // Geographic codes become GeographicTypeGeoKey; a non-EPSG CRS writes no CRS key.
+        assert_eq!(
+            geokeys(Some(4326))[4..],
+            [1024, 0, 1, 2, 1025, 0, 1, 1, 2048, 0, 1, 4326]
+        );
+        assert_eq!(geokeys(None), vec![1, 1, 0, 1, 1025, 0, 1, 1]);
+        assert_eq!(epsg_code(Some("epsg:3857")), Some(3857));
+        assert_eq!(epsg_code(Some("WGS84")), None);
+        // georeference: false → plain TIFF, no tags.
+        let plain = dir.path().join("plain.tif");
+        export_heightmap_geo(
+            &hf,
+            &plain,
+            &ExportOptions {
+                format: HeightmapFormat::Tiff32,
+                flip_y: None,
+                range_m: None,
+                georeference: false,
+            },
+            Some(&geo),
+        )
+        .expect("export");
+        assert_eq!(crate::import::geotiff_tags(&plain).expect("tags"), None);
+    }
     use crate::noise::{NoiseParams, generate_noise};
     use jd_types::WorldSettings;
 
@@ -400,6 +563,7 @@ mod tests {
                     format: fmt,
                     flip_y: None,
                     range_m: None,
+                    georeference: true,
                 },
             )
             .expect("export");
@@ -423,6 +587,7 @@ mod tests {
                     format: fmt,
                     flip_y: None,
                     range_m: Some([-20.0, 180.0]),
+                    georeference: true,
                 },
             )
             .expect("export");
@@ -457,6 +622,7 @@ mod tests {
                 format: HeightmapFormat::RawR32,
                 flip_y: Some(true),
                 range_m: None,
+                georeference: true,
             },
         )
         .expect("export");
@@ -481,6 +647,7 @@ mod tests {
                 format: HeightmapFormat::Png16,
                 flip_y: None,
                 range_m: Some([5.0, 5.0]),
+                georeference: true,
             },
         )
         .expect_err("bad range");
@@ -494,6 +661,7 @@ mod tests {
                 format: HeightmapFormat::Exr,
                 flip_y: None,
                 range_m: None,
+                georeference: true,
             },
         )
         .expect_err("nan");

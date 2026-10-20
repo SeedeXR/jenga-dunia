@@ -14,7 +14,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [x] Specs: project-format, json-api, error-codes, performance-targets, interoperability-matrix
 - [x] `docs/README.md` index; README, CONTRIBUTING, SECURITY, CODE_OF_CONDUCT
 - [x] Mermaid + link validation scripts; CI workflow (docs job on macOS/Ubuntu/Windows)
-- [ ] Commit + push to `SeedeXR/jenga-dunia` main
+- [x] Commit + push to `SeedeXR/jenga-dunia` main (continuous since 2026-10-19; CI on every push)
 - [ ] Research follow-ups listed in `docs/research/evidence-register.md`
 - [x] Installer-surface inventory of `installables/` (WM Basic 4067, Gaea 2.3.1.0) → `docs/research/research-log/2026-10-19-installer-inventory.md`
 - [x] CI: `actions/checkout@v5` + `actions/setup-node@v5` (Node 24); `~/.npm/_npx` cached (`actions/cache@v4`)
@@ -57,7 +57,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [ ] Material graph + baking
 
 ## Phase 4 — Interoperability
-- [ ] USD/USDA/USDC/USDZ writer + usdchecker; OBJ/STL/PLY; GeoTIFF
+- [~] USD/USDA/USDC/USDZ writer + usdchecker ☐; OBJ/STL/PLY ☐; GeoTIFF ✔ (export writes pixel scale / tie point / EPSG GeoKeys; import reads them)
 - [ ] QEM decimation, LOD chains, MikkTSpace, topology validation + stats
 - [ ] Material translation layer + loss reports
 - [ ] Blender bridge add-on (separate licence) + headless round-trip test

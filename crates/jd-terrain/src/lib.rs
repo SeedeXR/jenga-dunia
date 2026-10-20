@@ -17,7 +17,9 @@ pub mod scatter;
 pub mod sculpt;
 pub mod sim;
 
-pub use export::{ExportOptions, HeightmapFormat, export_heightmap};
+pub use export::{
+    ExportOptions, GeoRef, HeightmapFormat, epsg_code, export_heightmap, export_heightmap_geo,
+};
 pub use flow::{
     FlowMethod, carve_rivers, d8_receivers, fill_depressions, flow_accumulation,
     flow_accumulation_with, sea_level, wetness_index,
