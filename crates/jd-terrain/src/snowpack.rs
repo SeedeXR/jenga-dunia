@@ -4,8 +4,9 @@
 //! materials-geomorphology.md` B8). `jd.climate.snow@1` is a static snapshot; this one evolves,
 //! and a keyed `temperature_c` over the timeline melts it season by season.
 //!
-//! ponytail: one downwind neighbour for drift, one downhill neighbour for avalanches, no albedo or
-//! density feedback; a step is "a day" only in the sense that the rates say so.
+//! ponytail: one downwind neighbour for drift, one downhill neighbour for avalanches, albedo as
+//! one factor on the melt, no density feedback; a step is "a day" only in the sense that the
+//! rates say so.
 
 use jd_types::{JdError, JdResult};
 use serde::{Deserialize, Serialize};
@@ -50,6 +51,10 @@ pub struct SnowpackParams {
     /// Depth that counts as full cover in the `cover` output, metres (> 0).
     #[serde(default = "d_cover")]
     pub cover_depth_m: f32,
+    /// Albedo feedback (0..1): a full cover reflects this share of the melt energy away, so a deep
+    /// pack melts slower than a dusting (0 = off).
+    #[serde(default = "d_albedo")]
+    pub albedo: f32,
     /// Slope above which snow avalanches each step, degrees (0, 90].
     #[serde(default = "d_avalanche_slope")]
     pub avalanche_slope_deg: f32,
@@ -58,6 +63,9 @@ pub struct SnowpackParams {
     pub avalanche_strength: f32,
 }
 
+fn d_albedo() -> f32 {
+    0.4
+}
 fn d_avalanche_slope() -> f32 {
     38.0
 }
@@ -113,6 +121,7 @@ impl Default for SnowpackParams {
             wind_azimuth_deg: d_west(),
             wind_strength: d_drift(),
             cover_depth_m: d_cover(),
+            albedo: d_albedo(),
             avalanche_slope_deg: d_avalanche_slope(),
             avalanche_strength: d_avalanche(),
         }
@@ -147,6 +156,7 @@ pub fn snowpack(
         ("sun_strength", p.sun_strength),
         ("wind_strength", p.wind_strength),
         ("avalanche_strength", p.avalanche_strength),
+        ("albedo", p.albedo),
     ] {
         if !(0.0..=1.0).contains(&v) {
             return Err(JdError::invalid(name, "must be within 0..=1"));
@@ -227,7 +237,9 @@ pub fn snowpack(
             if t_local[i] < 1.0 {
                 *d += p.accumulation_m * retention[i];
             }
-            *d = (*d - p.melt_m_per_c * t_local[i].max(0.0)).max(0.0);
+            // Albedo: the whiter the ground, the less of the warmth reaches the pack.
+            let reflect = 1.0 - p.albedo * smoothstep(*d / p.cover_depth_m);
+            *d = (*d - p.melt_m_per_c * t_local[i].max(0.0) * reflect).max(0.0);
         }
         // Avalanche: a steep cell sends a share of its snow to the lowest neighbouring snow surface.
         next.copy_from_slice(&depth);
@@ -369,6 +381,29 @@ mod tests {
         );
         let total = d.to_vec().iter().sum::<f32>();
         assert!(total > 0.0);
+        // Albedo: the same shoulder season on a flat field — the pack that reflects melts slower.
+        let mut flat = Heightfield::new(16, 16, 64, 0).expect("flat");
+        flat.fill_with(|_, _| 1200.0);
+        let run_albedo = |albedo: f32| {
+            snowpack(
+                &flat,
+                [100.0, 100.0],
+                &SnowpackParams {
+                    temperature_c: 8.7, // +0.9 °C at 1 200 m: it still snows (< 1 °C) and melts (> 0 °C)
+                    wind_strength: 0.0,
+                    albedo,
+                    ..SnowpackParams::default()
+                },
+            )
+            .expect("albedo")
+            .0
+            .get(8, 8)
+        };
+        let (dark, bright) = (run_albedo(0.0), run_albedo(0.8));
+        assert!(
+            bright > dark * 1.1 && dark > 0.5,
+            "albedo keeps snow: {dark} → {bright} m"
+        );
         // Avalanche: a 45° face from 1 000 m down to a plain at 0 m — the slides empty the face
         // and pile up at its foot; nothing melts (cold everywhere), so the mass is the same.
         let mut face = Heightfield::new(32, 8, 64, 0).expect("face");

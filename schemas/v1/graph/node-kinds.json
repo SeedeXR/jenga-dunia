@@ -549,6 +549,12 @@
           "format": "float",
           "default": 0.20000000298023224
         },
+        "albedo": {
+          "description": "Albedo feedback (0..1): a full cover reflects this share of the melt energy away, so a deep\npack melts slower than a dusting (0 = off).",
+          "type": "number",
+          "format": "float",
+          "default": 0.4000000059604645
+        },
         "avalanche_slope_deg": {
           "description": "Slope above which snow avalanches each step, degrees (0, 90].",
           "type": "number",
