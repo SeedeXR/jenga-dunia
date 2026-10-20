@@ -9,7 +9,7 @@ use jd_terrain::{
     THERMAL_MAX_RATE, aeolian_transport, apply_strokes, carve_rivers, classify_seabed,
     coastal_erode, droplet_erode, fill_depressions, flow_accumulation_with, generate_noise,
     hydraulic_erode, read_foreign, resample_to_world, sea_level, slope_mask, snow_cover,
-    stream_power_erode, thermal_erode, wetness_index,
+    stream_power_erode, thermal_erode, wetness_index_with,
 };
 use jd_types::{JdError, JdResult};
 use rayon::prelude::*;
@@ -421,6 +421,14 @@ fn visibility_m() -> f32 {
 }
 fn tint() -> [f32; 3] {
     [0.1, 0.35, 0.4]
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct WetnessParams {
+    /// Flow routing for the drainage area: `d8` (channel-like streaks), `dinf` (smoother) or `mfd` (diffuse moisture).
+    #[serde(default)]
+    method: FlowMethod,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -935,12 +943,15 @@ pub fn register_all(r: &mut Registry) {
             Ok(BTreeMap::from([("out".to_owned(), Value::field(carved)), ("rivers".to_owned(), Value::field(rivers))]))
         },
     ).with_memory(32.0));
-    r.register(NodeDef::new::<NoParams, _>(
+    r.register(NodeDef::new::<WetnessParams, _>(
         "jd.hydrology.wetness@1",
-        "Topographic wetness index ln(a / tan β) normalised to 0..1 — wet valley floors high, steep ridges low (biome/moisture masks)",
+        "Topographic wetness index ln(a / tan β) normalised to 0..1 — wet valley floors high, steep ridges low (biome/moisture masks); `method` picks d8 / dinf / mfd routing",
         vec![port("in", PortType::Heightfield, true)],
         vec![port("out", PortType::Heightfield, false)],
-        |ctx, _, i| Ok(out("out", wetness_index(field(i, "in")?, spacing_m(ctx))?)),
+        |ctx, p, i| {
+            let wp: WetnessParams = params(p)?;
+            Ok(out("out", wetness_index_with(field(i, "in")?, spacing_m(ctx), wp.method)?))
+        },
     ).with_memory(24.0));
     r.register(NodeDef::new::<OutputParams, _>(
         "jd.output.height@1",

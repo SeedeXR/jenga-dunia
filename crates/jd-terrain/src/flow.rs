@@ -407,7 +407,18 @@ pub fn sea_level(
 /// unit contour length (D8 accumulation × cell area / cell width) and `β` the local slope; the
 /// result is normalised to 0..1 across the field so it reads as a mask (wet valleys → 1).
 pub fn wetness_index(h: &Heightfield, spacing_m: [f32; 2]) -> JdResult<Heightfield> {
-    let acc = flow_accumulation(h, spacing_m, false)?;
+    wetness_index_with(h, spacing_m, FlowMethod::D8)
+}
+
+/// [`wetness_index`] with a choice of flow routing: `dinf` removes the 45° streaks of D8 on
+/// smooth slopes, `mfd` spreads the drainage area so the index reads as moisture rather than
+/// as channels.
+pub fn wetness_index_with(
+    h: &Heightfield,
+    spacing_m: [f32; 2],
+    method: FlowMethod,
+) -> JdResult<Heightfield> {
+    let acc = flow_accumulation_with(h, spacing_m, false, method)?;
     let slope = crate::slope_mask(h, spacing_m, 90.0)?; // slope angle / 90 → degrees = ×90
     let (w, hh) = (h.width(), h.height());
     let cell_w = spacing_m[0].min(spacing_m[1]);

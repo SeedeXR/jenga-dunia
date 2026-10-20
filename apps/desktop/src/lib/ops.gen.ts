@@ -1290,7 +1290,10 @@ the fully developed Pierson–Moskowitz sea); the ocean mask ignores it. */
   "wind_azimuth_deg"?: number;
 };
 
-export type NodeParams_jd_hydrology_wetness_1 = Record<string, unknown>;
+export type NodeParams_jd_hydrology_wetness_1 = {
+  /** Flow routing for the drainage area: `d8` (channel-like streaks), `dinf` (smoother) or `mfd` (diffuse moisture). */
+  "method"?: FlowMethod;
+};
 
 export type NodeParams_jd_input_heightmap_1 = {
   /** File inside the project's `assets/` directory (png, exr, tif/tiff, r16, r32). */

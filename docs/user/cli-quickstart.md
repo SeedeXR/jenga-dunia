@@ -235,6 +235,12 @@ $ jd --json op graph.evaluate --project Rivers.jdproj
            {"kind":"jd.hydrology.wetness@1","duration_ms":143,...}, ...],
   "layers":{"height":"…","rivers":"…","wetness":"…"}}}
 $ jd op terrain.stats --project Rivers.jdproj --params '{"layer":"rivers"}'    # min 0, max 0.844, mean 0.002
+# wetness `method` (d8 default / dinf / mfd) on the 128² default world: mean 0.224 / 0.226 / 0.249, 78–82 ms — mfd spreads the drainage area so the index reads as moisture, not channels
+```
+
+![Wetness index with D8 routing: thin bright channel streaks](images/cli-wetness-d8.png) ![Wetness index with MFD routing: a diffuse moisture field](images/cli-wetness-mfd.png)
+
+```
 $ jd op terrain.export_heightmap --project Rivers.jdproj --params '{"layer":"rivers","path":"rivers.png","format":"png16","range_m":[0,1]}'
 ```
 

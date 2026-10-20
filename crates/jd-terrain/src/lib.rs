@@ -37,7 +37,7 @@ pub use export::{
 };
 pub use flow::{
     FlowMethod, carve_rivers, d8_receivers, fill_depressions, flow_accumulation,
-    flow_accumulation_with, sea_level, wetness_index,
+    flow_accumulation_with, sea_level, wetness_index, wetness_index_with,
 };
 pub use heightfield::{Heightfield, HeightfieldStats, Tile, TileCoord};
 pub use import::{ForeignImport, GeoTags, geotiff_tags, read_foreign, resample_to_world};

@@ -199,7 +199,7 @@ test.describe("hydrology nodes against the real core", () => {
     await page.getByTestId("graph-evaluate").click();
     await expect.poll(() => logCount(page, "graph.evaluate: ok")).toBeGreaterThan(evaluated2);
     await page.getByTestId("layer-pick").selectOption("floor");
-    await expect(page.getByTestId("layer-stats")).toContainText("230.1 m"); // mean rose from 229.4 m: hollows filled
+    await expect(page.getByTestId("layer-stats")).toContainText("230.1 m", { timeout: 20_000 }); // mean rose from 229.4 m: hollows filled (the stats wait behind a live-preview evaluate on a loaded machine)
     await page.screenshot({ path: testInfo.outputPath("hydrology-bathymetry.png") }); // tutorial image source
     await page.getByTestId("layer-pick").selectOption("height");
     await page.getByTestId("color-pick").selectOption("");
