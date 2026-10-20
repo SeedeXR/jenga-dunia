@@ -59,7 +59,7 @@ test.describe("hydrology nodes against the real core", () => {
     await expect(inspector.locator("label", { hasText: "threshold" }).locator("input")).toHaveAttribute("placeholder", "0.55");
     const method = inspector.locator("label", { hasText: "method" }).locator("select");
     await expect(method).toHaveValue("d8");
-    await expect(method.locator("option")).toHaveText(["d8", "dinf"]);
+    await expect(method.locator("option")).toHaveText(["d8", "dinf", "mfd"]);
     await method.selectOption("dinf");
     await expect(page.getByTestId("log")).toContainText("graph.set_param: ok");
     await expect(rivers).toContainText("method=dinf");

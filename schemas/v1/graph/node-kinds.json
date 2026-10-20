@@ -27,7 +27,7 @@
           "default": true
         },
         "method": {
-          "description": "Routing: `d8` (single steepest neighbour) or `dinf` (Tarboton facets, smoother streams).",
+          "description": "Routing: `d8` (single steepest neighbour), `dinf` (Tarboton facets, smoother streams) or `mfd` (Freeman, most diffuse).",
           "$ref": "#/$defs/FlowMethod",
           "default": "d8"
         }
@@ -46,6 +46,11 @@
               "description": "Tarboton 1997: steepest of eight triangular facets, flow split between its two neighbours.",
               "type": "string",
               "const": "dinf"
+            },
+            {
+              "description": "Freeman 1991 multiple-flow-direction: flow shared among all lower neighbours in proportion\nto slope^1.1 — the most diffuse (hillslope wash, wetness); streams come out wide.",
+              "type": "string",
+              "const": "mfd"
             }
           ]
         }
@@ -324,7 +329,7 @@
           "default": 20.0
         },
         "method": {
-          "description": "Flow routing used to find channels: `d8` or `dinf` (fewer parallel-line artefacts).",
+          "description": "Flow routing used to find channels: `d8`, `dinf` (fewer parallel-line artefacts) or `mfd` (wide, diffuse).",
           "$ref": "#/$defs/FlowMethod",
           "default": "d8"
         }
@@ -343,6 +348,11 @@
               "description": "Tarboton 1997: steepest of eight triangular facets, flow split between its two neighbours.",
               "type": "string",
               "const": "dinf"
+            },
+            {
+              "description": "Freeman 1991 multiple-flow-direction: flow shared among all lower neighbours in proportion\nto slope^1.1 — the most diffuse (hillslope wash, wetness); streams come out wide.",
+              "type": "string",
+              "const": "mfd"
             }
           ]
         }

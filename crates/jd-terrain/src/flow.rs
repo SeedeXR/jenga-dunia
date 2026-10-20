@@ -2,7 +2,7 @@
 //! flow accumulation by descending-height order, priority-flood filling, rivers and wetness.
 //! Deterministic (ties broken by cell index), O(N log N) for the sort.
 //!
-//! ponytail: no MFD (Freeman/Quinn) yet; D∞ already removes most of D8's parallel-line streaks.
+//! ponytail: MFD exponent fixed at 1.1 (Freeman); make it a parameter when someone needs Quinn-style tuning.
 
 use crate::Heightfield;
 use jd_types::{JdError, JdResult};
@@ -66,6 +66,9 @@ pub enum FlowMethod {
     /// Tarboton 1997: steepest of eight triangular facets, flow split between its two neighbours.
     #[serde(rename = "dinf")]
     DInf,
+    /// Freeman 1991 multiple-flow-direction: flow shared among all lower neighbours in proportion
+    /// to slope^1.1 — the most diffuse (hillslope wash, wetness); streams come out wide.
+    Mfd,
 }
 
 /// D∞ receivers: up to two downslope neighbours with weights summing to 1 (or none for pits).
@@ -163,19 +166,50 @@ pub fn flow_accumulation_with(
     if v.iter().any(|x| !x.is_finite()) {
         return Err(JdError::invalid("in", "heightfield has non-finite samples"));
     }
+    // D8 / D∞ precompute ≤ 2 receivers per cell; MFD has up to 8 and is computed on the fly in
+    // the descending pass (no 8-slot table: 2048² would need ~270 MB).
     let recv: Vec<[(Option<u32>, f32); 2]> = match method {
         FlowMethod::D8 => d8_receivers(&v, w, hh, spacing_m)
             .into_iter()
             .map(|r| [(r, 1.0), (None, 0.0)])
             .collect(),
         FlowMethod::DInf => dinf_receivers(&v, w, hh, spacing_m),
+        FlowMethod::Mfd => Vec::new(),
     };
+    let dist =
+        NEIGHBOURS.map(|(dx, dy)| (dx as f32 * spacing_m[0]).hypot(dy as f32 * spacing_m[1]));
     let mut order: Vec<u32> = (0..(w * hh) as u32).collect();
     // Descending height, ties by index: identical output regardless of thread count.
     order.par_sort_unstable_by(|a, b| v[*b as usize].total_cmp(&v[*a as usize]).then(a.cmp(b)));
     let mut acc = vec![1.0f32; w * hh];
+    let mut slopes = [(0usize, 0.0f32); 8];
     for &i in &order {
         let a = acc[i as usize];
+        if method == FlowMethod::Mfd {
+            let (x, y) = ((i as usize % w) as i64, (i as usize / w) as i64);
+            let mut n = 0;
+            let mut total = 0.0f32;
+            for (k, (dx, dy)) in NEIGHBOURS.iter().enumerate() {
+                let (nx, ny) = (x + dx, y + dy);
+                if nx < 0 || ny < 0 || nx >= w as i64 || ny >= hh as i64 {
+                    continue;
+                }
+                let j = ny as usize * w + nx as usize;
+                let drop = v[i as usize] - v[j];
+                if drop > 0.0 {
+                    let s = (drop / dist[k]).powf(1.1);
+                    slopes[n] = (j, s);
+                    total += s;
+                    n += 1;
+                }
+            }
+            if total > 0.0 {
+                for &(j, s) in &slopes[..n] {
+                    acc[j] += a * (s / total);
+                }
+            }
+            continue;
+        }
         for (j, wt) in recv[i as usize] {
             if let Some(j) = j
                 && wt > 0.0
@@ -581,6 +615,61 @@ mod tests {
         assert_eq!(o.get(50, 1), 0.0);
         assert!(sea_level(&ramp, f32::NAN, 1.0).is_err());
         assert!(sea_level(&ramp, 0.0, -1.0).is_err());
+    }
+
+    #[test]
+    fn mfd_conserves_area_and_is_more_diffuse_than_d8() {
+        // Everything drains to the valley mouth. The cells
+        // with no lower neighbour (the outlets) must collect exactly N units under every method;
+        // MFD spreads flow over more cells than D8 does.
+        let mut h = Heightfield::new(32, 16, 32, 0).expect("hf");
+        // V-valley along x = 16 sloping down towards y = 0 (plus a ripple so no two cells tie).
+        h.fill_with(|x, y| {
+            (x as f32 - 16.0).abs() * 2.0 + y as f32 * 0.5 + (y as f32 * 0.37).sin() * 0.01
+        });
+        let v = h.to_vec();
+        let (w, hh) = (32usize, 16usize);
+        let is_outlet = |i: usize| {
+            let (x, y) = ((i % w) as i64, (i / w) as i64);
+            !NEIGHBOURS.iter().any(|(dx, dy)| {
+                let (nx, ny) = (x + dx, y + dy);
+                nx >= 0
+                    && ny >= 0
+                    && nx < w as i64
+                    && ny < hh as i64
+                    && v[ny as usize * w + nx as usize] < v[i]
+            })
+        };
+        let outlet_sum = |acc: &Heightfield| -> f32 {
+            (0..w * hh)
+                .filter(|&i| is_outlet(i))
+                .map(|i| acc.get((i % w) as u32, (i / w) as u32))
+                .sum()
+        };
+        let d8 = flow_accumulation(&h, [1.0, 1.0], false).expect("d8");
+        let mfd = flow_accumulation_with(&h, [1.0, 1.0], false, FlowMethod::Mfd).expect("mfd");
+        assert!(
+            (outlet_sum(&d8) - 512.0).abs() < 1e-2,
+            "d8 outlets: {}",
+            outlet_sum(&d8)
+        );
+        assert!(
+            (outlet_sum(&mfd) - 512.0).abs() < 1e-2,
+            "mfd outlets: {}",
+            outlet_sum(&mfd)
+        );
+        // Diffuse: D8 funnels everything into the valley line, MFD shares it with the slopes —
+        // the same total is less concentrated (smaller sum of squares).
+        let concentration =
+            |acc: &Heightfield| acc.to_vec().into_iter().map(|a| a * a).sum::<f32>();
+        assert!(
+            concentration(&mfd) < concentration(&d8),
+            "mfd {} vs d8 {}",
+            concentration(&mfd),
+            concentration(&d8)
+        );
+        let again = flow_accumulation_with(&h, [1.0, 1.0], false, FlowMethod::Mfd).expect("mfd");
+        assert_eq!(mfd.content_hash(), again.content_hash());
     }
 
     #[test]

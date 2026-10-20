@@ -221,7 +221,7 @@ struct FlowParams {
     /// Output ln(1 + area) / ln(1 + N) in 0..1 (true) or the raw upstream cell count (false).
     #[serde(default = "yes")]
     log_scale: bool,
-    /// Routing: `d8` (single steepest neighbour) or `dinf` (Tarboton facets, smoother streams).
+    /// Routing: `d8` (single steepest neighbour), `dinf` (Tarboton facets, smoother streams) or `mfd` (Freeman, most diffuse).
     #[serde(default)]
     method: FlowMethod,
 }
@@ -273,7 +273,7 @@ struct RiversParams {
     /// Incision depth at the largest rivers, metres.
     #[serde(default = "rivers_depth")]
     depth_m: f32,
-    /// Flow routing used to find channels: `d8` or `dinf` (fewer parallel-line artefacts).
+    /// Flow routing used to find channels: `d8`, `dinf` (fewer parallel-line artefacts) or `mfd` (wide, diffuse).
     #[serde(default)]
     method: FlowMethod,
 }

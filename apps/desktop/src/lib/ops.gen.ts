@@ -786,12 +786,12 @@ export type TerrainStatsResult = {
   "duration_ms": number;
 };
 
-export type FlowMethod = "d8" | "dinf";
+export type FlowMethod = "d8" | "dinf" | "mfd";
 
 export type NodeParams_jd_analysis_flow_1 = {
   /** Output ln(1 + area) / ln(1 + N) in 0..1 (true) or the raw upstream cell count (false). */
   "log_scale"?: boolean;
-  /** Routing: `d8` (single steepest neighbour) or `dinf` (Tarboton facets, smoother streams). */
+  /** Routing: `d8` (single steepest neighbour), `dinf` (Tarboton facets, smoother streams) or `mfd` (Freeman, most diffuse). */
   "method"?: FlowMethod;
 };
 
@@ -843,7 +843,7 @@ export type NodeParams_jd_hydrology_rivers_1 = {
   "threshold"?: number;
   /** Incision depth at the largest rivers, metres. */
   "depth_m"?: number;
-  /** Flow routing used to find channels: `d8` or `dinf` (fewer parallel-line artefacts). */
+  /** Flow routing used to find channels: `d8`, `dinf` (fewer parallel-line artefacts) or `mfd` (wide, diffuse). */
   "method"?: FlowMethod;
 };
 
