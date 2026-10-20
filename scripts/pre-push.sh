@@ -12,5 +12,5 @@ git diff --exit-code -- schemas/ || { echo "schemas/v1 regenerated — commit it
 node scripts/check-version.mjs
 node scripts/check-links.mjs
 ( cd apps/desktop && pnpm types:gen >/dev/null && git diff --exit-code -- src/lib/ops.gen.ts || { echo "ops.gen.ts regenerated — commit it"; exit 1; } )
-( cd apps/desktop && pnpm build && pnpm test && pnpm test:e2e )
+( cd apps/desktop && pnpm lint && pnpm build && pnpm test && pnpm test:e2e )
 echo "all gates green"

@@ -84,8 +84,8 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 // React Flow needs layout APIs jsdom lacks; the panel is covered by the Playwright e2e.
-vi.mock("./graph/GraphPanel", () => ({
-  default: () => {
+vi.mock("./graph/GraphPanel", () => {
+  function GraphPanelMock() {
     const s = useStore();
     return (
       <div data-testid="graph-panel">
@@ -95,8 +95,9 @@ vi.mock("./graph/GraphPanel", () => ({
         </button>
       </div>
     );
-  },
-}));
+  }
+  return { default: GraphPanelMock };
+});
 
 vi.mock("./viewport/TerrainView", () => ({
   default: ({ preview }: { preview: { width: number } | null }) => <div data-testid="viewport">{preview ? `preview ${preview.width}` : "no preview"}</div>,

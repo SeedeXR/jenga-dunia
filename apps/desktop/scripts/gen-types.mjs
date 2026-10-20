@@ -3,7 +3,7 @@
 // Usage: node scripts/gen-types.mjs   → src/lib/ops.gen.ts (CI fails when it is stale).
 // Handles the subset schemars emits for our types: objects, arrays/tuples, enums (enum / oneOf
 // const), anyOf-with-null, $ref into $defs, maps (additionalProperties), primitives.
-import { readFileSync, writeFileSync, readdirSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -21,17 +21,17 @@ const nameFor = (base, body) => {
   return name;
 };
 
-function ts(schema, defs, hint) {
+function ts(schema, defs) {
   if (schema.$ref) {
     const key = schema.$ref.split("/").pop();
     const def = defs[key];
     if (!def) return "unknown";
-    const body = ts(def, defs, key);
+    const body = ts(def, defs);
     return nameFor(key, body);
   }
   if (schema.enum) return schema.enum.map((v) => JSON.stringify(v)).join(" | ");
   if (schema.oneOf && schema.oneOf.every((o) => "const" in o)) return schema.oneOf.map((o) => JSON.stringify(o.const)).join(" | ");
-  if (schema.anyOf || schema.oneOf) return (schema.anyOf ?? schema.oneOf).map((o) => ts(o, defs, hint)).join(" | ");
+  if (schema.anyOf || schema.oneOf) return (schema.anyOf ?? schema.oneOf).map((o) => ts(o, defs)).join(" | ");
   const types = Array.isArray(schema.type) ? schema.type : [schema.type];
   const parts = types.map((t) => {
     switch (t) {
@@ -45,13 +45,13 @@ function ts(schema, defs, hint) {
       case "null":
         return "null";
       case "array": {
-        const item = schema.items ? ts(schema.items, defs, hint) : "unknown";
+        const item = schema.items ? ts(schema.items, defs) : "unknown";
         if (schema.minItems !== undefined && schema.minItems === schema.maxItems) return `[${Array(schema.minItems).fill(item).join(", ")}]`;
         return `${item.includes(" ") ? `(${item})` : item}[]`;
       }
       case "object": {
         if (!schema.properties) {
-          const v = schema.additionalProperties && typeof schema.additionalProperties === "object" ? ts(schema.additionalProperties, defs, hint) : "unknown";
+          const v = schema.additionalProperties && typeof schema.additionalProperties === "object" ? ts(schema.additionalProperties, defs) : "unknown";
           return `Record<string, ${v}>`;
         }
         const req = new Set(schema.required ?? []);

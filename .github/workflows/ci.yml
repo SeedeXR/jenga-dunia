@@ -111,6 +111,9 @@ jobs:
         run: |
           pnpm types:gen
           git diff --exit-code -- src/lib/ops.gen.ts || { echo "::error::src/lib/ops.gen.ts is stale — run: pnpm types:gen"; exit 1; }
+      - name: Lint (oxlint)
+        working-directory: apps/desktop
+        run: pnpm lint
       - name: Typecheck + build
         working-directory: apps/desktop
         run: pnpm build
