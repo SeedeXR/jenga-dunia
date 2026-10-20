@@ -559,6 +559,7 @@ pub fn export_fbx(
         bytes: out.len() as u64,
         extent_m,
         texture_px: texture.then_some([gw, gh]),
+        normal_px: None,
     })
 }
 

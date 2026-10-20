@@ -4593,6 +4593,20 @@ expression: list
           },
           "minItems": 2,
           "maxItems": 2
+        },
+        "normal_px": {
+          "description": "Baked normal + roughness map size in pixels (full field resolution, capped at 2048²).",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "minItems": 2,
+          "maxItems": 2
         }
       },
       "required": [

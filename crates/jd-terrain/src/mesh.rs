@@ -4,8 +4,10 @@
 //! Khronos glTF validator (`apps/desktop/scripts/validate-glb.mjs`).
 //!
 //! With `texture` the material carries a baked base-colour PNG (the viewport's hypsometric ramp
-//! blended towards rock on steep slopes), one texel per exported vertex, so the file looks like
-//! the app in Blender / three.js / engines without any material setup.
+//! blended towards rock on steep slopes), one texel per exported vertex, plus a tangent-space
+//! normal map and a roughness map baked from the *full-resolution* field (capped at 2048²), so a
+//! `--step`-decimated mesh keeps the fine relief and the file looks like the app in Blender /
+//! three.js / engines without any material setup.
 //!
 //! OBJ, binary STL and binary PLY (with vertex colours) share one [`GridMesh`] builder; the GLB
 //! path keeps its own streaming writer. [`export_mesh`] picks the writer from the extension.
@@ -42,6 +44,9 @@ pub struct MeshExportReport {
     /// Baked base-colour texture size in pixels when one was embedded.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub texture_px: Option<[u32; 2]>,
+    /// Baked normal + roughness map size in pixels (full field resolution, capped at 2048²).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normal_px: Option<[u32; 2]>,
 }
 
 /// Hypsometric ramp (normalised height → RGB): lowland green → ochre → bare rock → snow.
@@ -109,6 +114,71 @@ pub(crate) fn bake_albedo(
         )
     })?;
     Ok(out.into_inner())
+}
+
+/// Largest texture side for the baked normal / roughness maps.
+const NORMAL_MAP_CAP: u32 = 2048;
+
+/// Bake a tangent-space normal map (glTF convention: +X = +U east, +Y = +V north, +Z out of
+/// the surface) and a roughness map (G channel; B metallic = 0) from the full field, sampled
+/// every `ts` cells so no side exceeds [`NORMAL_MAP_CAP`]. Row 0 = south, like the albedo.
+/// Roughness: 0.92 on flat ground, down to 0.62 on steep rock, 0.6 above the snow line.
+pub(crate) fn bake_normal_roughness(
+    hf: &Heightfield,
+    extent_m: [f64; 2],
+) -> JdResult<(Vec<u8>, Vec<u8>, [u32; 2])> {
+    let (w, h) = (hf.width(), hf.height());
+    let ts = w.max(h).div_ceil(NORMAL_MAP_CAP).max(1);
+    let (tw, th) = (w.div_ceil(ts), h.div_ceil(ts));
+    let (sx, sz) = (extent_m[0] / w as f64, extent_m[1] / h as f64);
+    let stats = hf.stats();
+    let range = (stats.max - stats.min).max(1e-6);
+    let at = |x: i64, z: i64| {
+        hf.get(
+            x.clamp(0, w as i64 - 1) as u32,
+            z.clamp(0, h as i64 - 1) as u32,
+        ) as f64
+    };
+    let mut nrm = Vec::with_capacity((tw * th * 3) as usize);
+    let mut rough = Vec::with_capacity((tw * th * 3) as usize);
+    for ty in 0..th {
+        for tx in 0..tw {
+            let (x, z) = ((tx * ts).min(w - 1) as i64, (ty * ts).min(h - 1) as i64);
+            let d = ts as i64;
+            let dh_dx = (at(x + d, z) - at(x - d, z)) / (2.0 * d as f64 * sx);
+            // Row index grows northwards (−Z): the derivative along +Z (south) is the reverse.
+            let dh_dz = (at(x, z - d) - at(x, z + d)) / (2.0 * d as f64 * sz);
+            let len = (dh_dx * dh_dx + 1.0 + dh_dz * dh_dz).sqrt();
+            let (nx, ny, nz) = (-dh_dx / len, 1.0 / len, -dh_dz / len);
+            // Tangent frame: T = +X, B = +V = north = −Z, N = +Y.
+            for c in [nx, -nz, ny] {
+                nrm.push(((c * 0.5 + 0.5) * 255.0).round().clamp(0.0, 255.0) as u8);
+            }
+            let slope = ((1.0 - ny) * 1.4).clamp(0.0, 1.0);
+            let t = (at(x, z) - stats.min as f64) / range as f64;
+            let r = if t > 0.85 { 0.6 } else { 0.92 - 0.3 * slope };
+            rough.extend_from_slice(&[0, (r * 255.0).round() as u8, 0]);
+        }
+    }
+    let png = |px: &[u8]| -> JdResult<Vec<u8>> {
+        let mut out = std::io::Cursor::new(Vec::new());
+        image::write_buffer_with_format(
+            &mut out,
+            px,
+            tw,
+            th,
+            image::ExtendedColorType::Rgb8,
+            image::ImageFormat::Png,
+        )
+        .map_err(|e| {
+            JdError::new(
+                jd_types::ErrorCode::E_INTERNAL,
+                format!("PNG encode failed: {e}"),
+            )
+        })?;
+        Ok(out.into_inner())
+    };
+    Ok((png(&nrm)?, png(&rough)?, [tw, th]))
 }
 
 /// Smallest step so the grid has at most `max_vertices` vertices.
@@ -206,6 +276,25 @@ pub fn export_glb(
         }
     }
     let uv_len = bin.len() - pos_len - nrm_len;
+    // Tangents (textured only — the normal map needs a tangent space): +X (the +U direction)
+    // made orthogonal to each vertex normal; w = +1 since normal × tangent = −Z = +V (north).
+    let tan_off = bin.len();
+    if texture {
+        for v in 0..n_vertices as usize {
+            let o = pos_len + v * 12;
+            let n: Vec<f32> = (0..3)
+                .map(|k| {
+                    f32::from_le_bytes(bin[o + 4 * k..o + 4 * k + 4].try_into().unwrap_or([0; 4]))
+                })
+                .collect();
+            let t = [1.0 - n[0] * n[0], -n[0] * n[1], -n[0] * n[2]];
+            let len = (t[0] * t[0] + t[1] * t[1] + t[2] * t[2]).sqrt().max(1e-6);
+            for c in [t[0] / len, t[1] / len, t[2] / len, 1.0] {
+                bin.extend_from_slice(&c.to_le_bytes());
+            }
+        }
+    }
+    let tan_len = bin.len() - tan_off;
     let idx_off = bin.len();
     for gz in 0..gh - 1 {
         for gx in 0..gw - 1 {
@@ -222,10 +311,12 @@ pub fn export_glb(
     let idx_len = bin.len() - idx_off;
     let n_triangles = (gw - 1) * (gh - 1) * 2;
     pad4(&mut bin, 0);
-    // Optional baked albedo: one more buffer view holding a PNG; UVs already map v = 0 to south.
-    let mut image_view = None;
+    // Optional baked textures: albedo (one texel per vertex), normal + roughness maps (full field
+    // resolution, capped), each in its own buffer view; UVs already map v = 0 to south.
+    let mut image_views = Vec::new();
+    let mut normal_px = None;
     if texture {
-        let png = bake_albedo(
+        let albedo = bake_albedo(
             &sample,
             &|gx, gz| normal_y[(gz * gw + gx) as usize],
             gw,
@@ -233,10 +324,14 @@ pub fn export_glb(
             min[1],
             max[1],
         )?;
-        let off = bin.len();
-        bin.extend_from_slice(&png);
-        image_view = Some((off, png.len()));
-        pad4(&mut bin, 0);
+        let (normal_png, rough_png, px) = bake_normal_roughness(hf, extent_m)?;
+        normal_px = Some(px);
+        for png in [albedo, normal_png, rough_png] {
+            let off = bin.len();
+            bin.extend_from_slice(&png);
+            image_views.push((off, png.len()));
+            pad4(&mut bin, 0);
+        }
     }
 
     let mut json = serde_json::json!({
@@ -260,18 +355,36 @@ pub fn export_glb(
         "scenes": [{ "nodes": [0] }],
         "scene": 0
     });
-    if let Some((off, len)) = image_view {
-        json["bufferViews"]
+    if !image_views.is_empty() {
+        let views = json["bufferViews"]
             .as_array_mut()
-            .ok_or_else(|| JdError::new(jd_types::ErrorCode::E_INTERNAL, "bufferViews"))?
-            .push(serde_json::json!({ "buffer": 0, "byteOffset": off, "byteLength": len }));
-        json["images"] = serde_json::json!([{ "bufferView": 4, "mimeType": "image/png", "name": "terrain-albedo" }]);
+            .ok_or_else(|| JdError::new(jd_types::ErrorCode::E_INTERNAL, "bufferViews"))?;
+        views.push(serde_json::json!({ "buffer": 0, "byteOffset": tan_off, "byteLength": tan_len, "target": 34962 }));
+        let tangent_view = views.len() - 1;
+        let first = views.len();
+        let names = ["terrain-albedo", "terrain-normal", "terrain-roughness"];
+        let mut images = Vec::new();
+        for (k, (off, len)) in image_views.iter().enumerate() {
+            views.push(serde_json::json!({ "buffer": 0, "byteOffset": off, "byteLength": len }));
+            images.push(serde_json::json!({ "bufferView": first + k, "mimeType": "image/png", "name": names[k] }));
+        }
+        json["images"] = serde_json::Value::Array(images);
         json["samplers"] = serde_json::json!([{ "magFilter": 9729, "minFilter": 9987, "wrapS": 33071, "wrapT": 33071 }]);
-        json["textures"] = serde_json::json!([{ "sampler": 0, "source": 0 }]);
-        json["materials"][0]["pbrMetallicRoughness"]["baseColorTexture"] =
+        json["textures"] = serde_json::json!([{ "sampler": 0, "source": 0 }, { "sampler": 0, "source": 1 }, { "sampler": 0, "source": 2 }]);
+        let accessors = json["accessors"]
+            .as_array_mut()
+            .ok_or_else(|| JdError::new(jd_types::ErrorCode::E_INTERNAL, "accessors"))?;
+        accessors.push(serde_json::json!({ "bufferView": tangent_view, "componentType": 5126, "count": n_vertices, "type": "VEC4" }));
+        json["meshes"][0]["primitives"][0]["attributes"]["TANGENT"] =
+            serde_json::json!(accessors.len() - 1);
+        let m = &mut json["materials"][0];
+        m["pbrMetallicRoughness"]["baseColorTexture"] =
             serde_json::json!({ "index": 0, "texCoord": 0 });
-        json["materials"][0]["pbrMetallicRoughness"]["baseColorFactor"] =
-            serde_json::json!([1.0, 1.0, 1.0, 1.0]);
+        m["pbrMetallicRoughness"]["baseColorFactor"] = serde_json::json!([1.0, 1.0, 1.0, 1.0]);
+        m["pbrMetallicRoughness"]["metallicRoughnessTexture"] =
+            serde_json::json!({ "index": 2, "texCoord": 0 });
+        m["pbrMetallicRoughness"]["roughnessFactor"] = serde_json::json!(1.0);
+        m["normalTexture"] = serde_json::json!({ "index": 1, "texCoord": 0 });
     }
     let bytes = write_glb(path, &json, &bin)?;
     Ok(MeshExportReport {
@@ -283,6 +396,7 @@ pub fn export_glb(
         bytes,
         extent_m,
         texture_px: texture.then_some([gw, gh]),
+        normal_px,
     })
 }
 
@@ -424,6 +538,7 @@ fn report(
         bytes: fs::metadata(path)?.len(),
         extent_m,
         texture_px: None,
+        normal_px: None,
     })
 }
 
@@ -793,10 +908,56 @@ mod tests {
         let dir = tempfile::tempdir().expect("tmp");
         let p = dir.path().join("t.glb");
         let r = export_glb(&hf, [330.0, 170.0], &p, 1, true).expect("export");
-        assert_eq!(r.texture_px, Some([33, 17]));
+        assert_eq!(
+            (r.texture_px, r.normal_px),
+            (Some([33, 17]), Some([33, 17]))
+        );
         let bytes = std::fs::read(&p).expect("read");
         let (json, bin) = chunks(&bytes);
         assert_eq!(json["images"][0]["mimeType"], "image/png");
+        assert_eq!(json["images"].as_array().map(Vec::len), Some(3));
+        assert_eq!(json["materials"][0]["normalTexture"]["index"], 1);
+        let tangent = json["meshes"][0]["primitives"][0]["attributes"]["TANGENT"]
+            .as_u64()
+            .expect("tangent accessor") as usize;
+        assert_eq!(json["accessors"][tangent]["count"], 33 * 17);
+        let tv = &json["bufferViews"]
+            [json["accessors"][tangent]["bufferView"].as_u64().unwrap() as usize];
+        let to = tv["byteOffset"].as_u64().unwrap() as usize;
+        let tangent0: Vec<f32> = (0..4)
+            .map(|k| f32::from_le_bytes(bin[to + 4 * k..to + 4 * k + 4].try_into().unwrap()))
+            .collect();
+        // The 0.1 slope tilts the normal west; the tangent stays unit, leans up, w = +1.
+        assert!(
+            (tangent0[0] - 0.995).abs() < 0.01 && tangent0[1] > 0.09 && tangent0[3] == 1.0,
+            "{tangent0:?}"
+        );
+        assert_eq!(
+            json["materials"][0]["pbrMetallicRoughness"]["metallicRoughnessTexture"]["index"],
+            2
+        );
+        // Normal map: a 0.1 east-facing slope → tangent-space (−0.0995, 0, 0.995) → ≈ (115, 128, 254).
+        let decode = |i: usize| {
+            let v =
+                &json["bufferViews"][json["images"][i]["bufferView"].as_u64().unwrap() as usize];
+            let (o, l) = (
+                v["byteOffset"].as_u64().unwrap() as usize,
+                v["byteLength"].as_u64().unwrap() as usize,
+            );
+            image::load_from_memory(&bin[o..o + l])
+                .expect("png")
+                .into_rgb8()
+        };
+        let n = decode(1).get_pixel(16, 8).0;
+        assert!(
+            (110..=120).contains(&n[0]) && (126..=130).contains(&n[1]) && n[2] >= 250,
+            "normal texel {n:?}"
+        );
+        let rough = decode(2).get_pixel(16, 8).0;
+        assert!(
+            rough[0] == 0 && rough[2] == 0 && (150..=240).contains(&rough[1]),
+            "roughness texel {rough:?}"
+        );
         assert_eq!(
             json["materials"][0]["pbrMetallicRoughness"]["baseColorTexture"]["index"],
             0

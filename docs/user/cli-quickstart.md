@@ -144,6 +144,18 @@ $ jd --json export mesh --project M.jdproj terrain.glb
 
 (512² world.) `.glb` is the default; `.obj`, `.stl` and `.ply` work the same way (below). The `.glb` is a single grid mesh in metres, +Y up, centred on the world like the viewport, with normals, UVs and a PBR material whose base colour is a baked texture — the viewport's hypsometric ramp (lowland green → ochre → rock → snow) blended towards rock on steep slopes, one texel per vertex — so it opens looking like the app in Blender, three.js or any glTF 2.0 importer. `--no-texture` (op param `texture: false`) writes the flat material instead. The Khronos glTF Validator reports 0 errors and 0 warnings for both (CI runs it on every push); on a 512² world the texture adds 0.42 MB to a 14.7 MB mesh.
 
+**Normal and roughness maps.** The textured `.glb` also carries a tangent-space normal map and a roughness map baked from the *full-resolution* field (one texel per sample, capped at 2048 per side), plus a `TANGENT` attribute so the normal map needs no runtime tangent generation. That is what makes `--step` useful: a decimated mesh keeps the fine relief in shading. Roughness is a stated rule, not a measurement — 0.92 on flat ground falling to 0.62 on steep rock, 0.6 above the snow line (metallic 0).
+
+```
+$ jd --json export mesh --project Bio.jdproj --layer land --step 8 land-step8.glb
+{"...","vertices":4225,"triangles":8192,"step":8,"bytes":1200852,"texture_px":[65,65],"normal_px":[512,512]}
+```
+
+![Step-8 terrain (4 225 vertices) rendered in Blender: left the flat export, right the same mesh with the baked normal and roughness maps](images/cli-glb-normal-map.png)
+
+Same 512² world at step 8: the flat file is 0.23 MB, the textured one 1.20 MB (normal 0.60 MB, roughness 0.29 MB, albedo 8 KB). Validator: 0 errors, 0 warnings (one `IMAGE_NPOT_DIMENSIONS` info for the 65² albedo). Blender 5.2 wires Base Color, Roughness, Metallic and Normal (through a Normal Map node) on import; Optima reads `hasTangents: true` and the three textures. Written for GLB only; the FBX export keeps the albedo alone.
+
+
 ![The textured GLB rendered in an independent glTF viewer: iso and top views with green valleys, ochre mid-slopes, grey rock on steep faces and snow on the peaks](images/cli-glb-textured.png)
 
 *The exported `terrain.glb` opened in a third-party viewer (Optima), not in Jenga Dunia — the colours come from the embedded texture alone.*

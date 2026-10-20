@@ -192,12 +192,14 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `12:10:00` **Own FBX writer** (`crates/jd-terrain/src/fbx.rs`): Kaydara binary 7.4, node-tree builder + 13-byte null records + consistent FileId/CreationTime/footer; quads, `ByVertice` normals, `ByPolygonVertex`/`IndexToDirect` UVs (ByVertice UVs were invisible to Optima's reader — switched), Phong material, embedded albedo `Video`/`Texture`, `UnitScaleFactor` 100 (metres). `jd export mesh … .fbx`. Verified: Blender 5.2 headless import (262 144 verts, 261 121 quads, 5 110 m footprint, UV map1, packed 512² image) and Optima import (`hasUvs`/`textured` true, 0 defects, bbox ±2 555 × 52..1 085 m). Unit test walks the record tree. Quickstart section + `cli-fbx.png` (Optima render). Learned the layout from Optima's adapter (user's own project) and Blender's reader; code is ours.
 
-### Open / next (as of 2026-10-20 12:10, head after fbx-writer commit)
-1. **CI**: green through `4f4e363` except `dad6256` (priorities; fixed by `d84eaa9`); `a944ebd` (desktop scatter, pushed red-gated, e2e race fixed in `87f256b`) and `aeb500e` (Blender bridge) polling.
+- `12:45:00` **GLB normal + roughness maps**: `bake_normal_roughness(hf, extent)` samples the full field (cap 2048/side) — tangent-space normal (T = +X, B = north = −Z, N = +Y → `(nx, −nz, ny)`), roughness rule 0.92 → 0.62 by slope, 0.6 above the snow line; `TANGENT` VEC4 accessor (+X ⟂ normal, w = +1) added to textured GLBs after the validator warned `MESH_PRIMITIVE_GENERATED_TANGENT_SPACE`; `normal_px` in the report. Step-8 512² world: 4 225 verts, 1.20 MB vs 0.23 MB flat; validator 0/0; Blender wires Base Color/Roughness/Metallic/Normal, Optima `hasTangents` + 3 textures. EEVEE renders flat vs mapped for the quickstart.
+
+### Open / next (as of 2026-10-20 12:45, head after normal-map commit)
+1. **CI**: green through `f7d2cd0` (FBX writer); the only red run was `dad6256` (priorities; fixed by `d84eaa9`). Normal-map commit next.
 2. **Figma**: connector unavailable this session; plugin OAuth pending on the owner's side → tutorial images stay in `docs/user/images/`; place them in file `fxyeV62hgLoNmG3dU1LX6G` when a connector works.
 3. **Native leftovers**: Edit-menu capture; native sculpt capture/recording (needs Accessibility); signed/notarised bundle (needs an Apple developer account).
 4. **Phase 3 follow-ups**: hydraulic concentration cap / layered materials / open drains; thermal + hydraulic WGSL twins (`jd-gpu`); particle hydraulic; D∞ ✔, MFD ✔ (`wetness` still D8-only); sea level ✔ (viewport water plane ✔; ocean shading/shoreline foam ☐); hydrology-first generation; smooth-brush blur done via summed-area table (whole-field blur is now O(N); tile-level dirty sets remain).
-5. **Phase 2 leftovers**: jobs scheduler complete (detached execution, queue slots, timeouts, memory budget, priorities ✔), CRS-aware GeoTIFF import (`jd-geo`; tags/nodata ✔), normal/roughness maps for GLB (albedo ✔), Windows/Linux measurements, tile-level `jd-cache` (LRU ✔).
+5. **Phase 2 leftovers**: jobs scheduler complete (detached execution, queue slots, timeouts, memory budget, priorities ✔), CRS-aware GeoTIFF import (`jd-geo`; tags/nodata ✔), normal/roughness maps for GLB ✔, Windows/Linux measurements, tile-level `jd-cache` (LRU ✔).
 6. **Docs**: hydrology recipe ✔, `desktop-rivers.png` ✔; rivers inspector `method` capture ✔ (e2e); a *native* capture of the same needs the app rebuilt from this head.
 
 ---

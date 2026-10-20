@@ -750,6 +750,8 @@ export type TerrainExportMeshResult = {
   "extent_m": [number, number];
   /** Baked base-colour texture size in pixels when one was embedded. */
   "texture_px"?: [number, number] | null;
+  /** Baked normal + roughness map size in pixels (full field resolution, capped at 2048²). */
+  "normal_px"?: [number, number] | null;
 };
 
 export type EngineProfile = "unity" | "unreal";
