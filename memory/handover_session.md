@@ -272,7 +272,9 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `13:05:00` **Export frames (desktop)**: store `exportFrames(frames)` → `timeline.export {frames, dir: "frames", format: png16}`; Export section gains a frame-count input (`frames-count`, default 24) + **Export frames** (`frames-export`); `timeline.spec.ts` exports 4 frames and lists `height_0000..0003.png`; desktop-app.md Timeline section documents it.
 
-### Open / next (as of 2026-10-21 13:05, head after export-frames commit)
+- `13:25:00` **Live-preview target** (WM leftover): `lib/previewLod.ts::adaptLodBias(bias, duration, target)` (over target → +1 up to 4, under a quarter → −1, floor 0, target 0 = off; vitest), store `previewTargetMs` (localStorage `jd.previewTargetMs`, try/catch) + `previewLodBias` applied in `previewLod()` and adapted after every live evaluation from `duration_ms`; Settings ▸ Live target (ms) (`preview-target`). Documented in desktop-app.md Settings.
+
+### Open / next (as of 2026-10-21 13:25, head after live-target commit)
 0. **CI**: `a0cb739` + `147a30d` red on `frontend (ubuntu)` only: `trees.glb: 2 errors` from the instance-writer refactor (fixed 10:55, see timeline). Earlier: `ac54bc0` (seabed) red on `frontend (ubuntu)`: hydrology e2e `locator.click` hit the 300 s test timeout; `09044f9` (waves, same spec + the gale step) green; `4b9f4a0` (bathymetry) polling. `4b9f4a0` red the same way: `out3.click()` waited 300 s for "visible, enabled and stable" (the runner is ~10× slower: terrain spec 58 s vs 4 s locally, live previews keep re-rendering the graph). Mitigation in the LOD-chain commit: node-selection clicks in the hydrology spec are `force: true` (wiring clicks already were). If it trips again, pull the run's `error-context.md` artifact.
 1. **CI**: green through `e74faf2` (snow) except `a4f7150` (vitest timing flake, fixed in `f976369`) and `dad6256` (priorities; fixed by `d84eaa9`); `827109f` (aeolian) polling.
 2. **Figma**: connector unavailable this session; plugin OAuth pending on the owner's side → tutorial images stay in `docs/user/images/`; place them in file `fxyeV62hgLoNmG3dU1LX6G` when a connector works.

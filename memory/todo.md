@@ -18,7 +18,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [ ] Research follow-ups listed in `docs/research/evidence-register.md`
 - [x] Installer-surface inventory of `installables/` (WM Basic 4067, Gaea 2.3.1.0) → `docs/research/research-log/2026-10-19-installer-inventory.md`
 - [x] CI: `actions/checkout@v5` + `actions/setup-node@v5` (Node 24); `~/.npm/_npx` cached (`actions/cache@v4`)
-- [~] Phase 2 backlog additions from WM inventory: undo ✔ (cap 100 snapshots; paging/archive ☐); live preview at ≤ 512² preview LOD ✔ (target frame-time setting ☐)
+- [~] Phase 2 backlog additions from WM inventory: undo ✔ (cap 100 snapshots; paging/archive ☐); live preview at ≤ 512² preview LOD ✔ · target frame-time setting ✔ (Settings ▸ Live target (ms): `adaptLodBias` steps the preview LOD ±1 around the budget, vitest)
 
 ## Phase 1 — Foundation (in progress, Session 2)
 - [x] Cargo workspace: `jd-types`, `jd-core`, `apps/cli` (`jd`), `apps/mcp` (`jd-mcp`) — real content, 28 tests (unit/property/CLI-driven/MCP-driven)

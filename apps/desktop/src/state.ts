@@ -2,6 +2,7 @@
 import { create } from "zustand";
 import type { Edge, GraphEvaluateResult, GraphListResult, HeightmapFormat, JdOps, JobInfo as JobInfoGen, NodeDefInfo, NodeView, NoiseParams, OceanWavesRequest, OceanWavesResult, OpId, ProjectOpenResult, ProjectSaveResult, ScatterPoint, TerrainStatsResult } from "./lib/ops.gen";
 import { horizonPreview, layerPreview, layerTextures, op, skyPreview, type JdError, type LayerMaps, type Preview, type Response, type Warning } from "./lib/api";
+import { adaptLodBias } from "./lib/previewLod";
 
 export type ProjectSummary = ProjectOpenResult;
 
@@ -25,6 +26,14 @@ export type GraphKind = NodeDefInfo;
 export type JobInfo = JobInfoGen;
 
 export type EvalReport = GraphEvaluateResult;
+
+function readPreviewTarget(): number {
+  try {
+    return Math.max(0, Number(localStorage.getItem("jd.previewTargetMs") ?? 0)) || 0;
+  } catch {
+    return 0;
+  }
+}
 
 interface State {
   project: ProjectSummary | null;
@@ -127,6 +136,11 @@ interface State {
   settingsRev: number;
   /** Change project settings (journaled); fields left out keep their value. */
   setSettings: (patch: JdOps["project.set_settings"]["request"]) => Promise<void>;
+  /** Live-preview target per evaluation, ms (0 = off): the preview LOD adapts to stay under it. */
+  previewTargetMs: number;
+  /** Extra LOD steps the adaptive policy currently adds to the project's preview LOD. */
+  previewLodBias: number;
+  setPreviewTargetMs: (ms: number) => void;
 }
 
 const defaultNoise: NoiseSettings = {
@@ -293,7 +307,7 @@ export const useStore = create<State>((set, get) => {
   // Preview LOD keeps live evaluations ≤ 512² so edits feel immediate; Evaluate/export use lod 0.
   const previewLod = () => {
     const res = get().project?.world.resolution_px ?? [512, 512];
-    return Math.max(0, Math.ceil(Math.log2(Math.max(res[0], res[1]) / 512)));
+    return Math.max(0, Math.ceil(Math.log2(Math.max(res[0], res[1]) / 512))) + get().previewLodBias;
   };
   let liveTimer: ReturnType<typeof setTimeout> | undefined;
   let timeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -313,6 +327,11 @@ export const useStore = create<State>((set, get) => {
           // The graph moved on while this ran (Generate's edits, a quick second edit): the result
           // is of an older graph and would overwrite the newer layer — drop it, the next one is queued.
           if (gen !== graphGen) return;
+          if (r.status === "ok" && r.result) {
+            const { previewTargetMs, previewLodBias } = get();
+            const bias = adaptLodBias(previewLodBias, r.result.duration_ms, previewTargetMs);
+            if (bias !== previewLodBias) set({ previewLodBias: bias });
+          }
           if (r.status === "ok" && r.result) await adopt(r.result);
           else if (r.error?.code === "E_GRAPH_MISSING_INPUT") {
             // Half-wired graphs are normal while editing: say what is missing, without an error entry.
@@ -652,6 +671,16 @@ export const useStore = create<State>((set, get) => {
         if (r.status !== "ok") return;
       }
       await run("terrain.export_heightmap", { layer: "height", path, format });
+    },
+    previewTargetMs: readPreviewTarget(),
+    previewLodBias: 0,
+    setPreviewTargetMs: (ms) => {
+      set({ previewTargetMs: Math.max(0, ms), previewLodBias: 0 });
+      try {
+        localStorage.setItem("jd.previewTargetMs", String(Math.max(0, ms)));
+      } catch {
+        /* a private window or blocked storage: the setting lasts the session */
+      }
     },
     settingsRev: 0,
     setSettings: async (patch) => {

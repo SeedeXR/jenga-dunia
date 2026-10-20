@@ -331,6 +331,10 @@ export default function App() {
                 Memory budget (GB)
                 <input className={inputCls} type="number" min={0.25} step={0.25} key={`mb-${s.settingsRev}-${s.project?.settings.memory_budget_bytes ?? 0}`} defaultValue={(s.project?.settings.memory_budget_bytes ?? 4294967296) / 1073741824} onBlur={(e) => { const v = Math.round(Number(e.target.value) * 1073741824); if (v !== (s.project?.settings.memory_budget_bytes ?? 4294967296)) void s.setSettings({ memory_budget_bytes: v }); }} title="Evaluations whose memory estimate exceeds this are refused (E_RESOURCE_MEMORY)" data-testid="setting-memory" />
               </label>
+              <label className="mb-1 flex items-center justify-between gap-2 text-xs text-jd-fg-1" title="Live preview target per evaluation, ms (0 = off): the preview LOD steps coarser while evaluations run over it and finer again when they are well under; this app setting is not part of the project">
+                Live target (ms)
+                <input className={inputCls} type="number" min={0} step={50} value={s.previewTargetMs} onChange={(e) => s.setPreviewTargetMs(Number(e.target.value))} data-testid="preview-target" />
+              </label>
               <label className="mb-1 flex items-center justify-between gap-2 text-xs text-jd-fg-1" title="Shared wind: dunes, yardangs, snow scour and the wind sea follow it unless a node sets its own wind">
                 Wind from (°)
                 <input className={inputCls} type="number" min={0} max={360} key={`wa-${s.settingsRev}-${worldWind.azimuth_deg}`} defaultValue={worldWind.azimuth_deg} onBlur={(e) => { const v = Number(e.target.value); if (v !== worldWind.azimuth_deg) void s.setSettings({ wind: { azimuth_deg: v, speed_mps: worldWind.speed_mps ?? 8 } }); }} data-testid="wind-azimuth" />
