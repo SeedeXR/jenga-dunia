@@ -18,7 +18,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [ ] Research follow-ups listed in `docs/research/evidence-register.md`
 - [x] Installer-surface inventory of `installables/` (WM Basic 4067, Gaea 2.3.1.0) → `docs/research/research-log/2026-10-19-installer-inventory.md`
 - [x] CI: `actions/checkout@v5` + `actions/setup-node@v5` (Node 24); `~/.npm/_npx` cached (`actions/cache@v4`)
-- [~] Phase 2 backlog additions from WM inventory: undo ✔ (cap 100 snapshots; paging/archive ☐); live preview at ≤ 512² preview LOD ✔ · target frame-time setting ✔ (Settings ▸ Live target (ms): `adaptLodBias` steps the preview LOD ±1 around the budget, vitest)
+- [~] Phase 2 backlog additions from WM inventory: undo ✔ (cap 100 snapshots and 64 MiB of serialised graph — measured: 500 strokes × 50 points = 2 MiB per snapshot, so ~30 steps worst case; diff/archive paging ☐ only if deeper undo is ever needed); live preview at ≤ 512² preview LOD ✔ · target frame-time setting ✔ (Settings ▸ Live target (ms): `adaptLodBias` steps the preview LOD ±1 around the budget, vitest)
 
 ## Phase 1 — Foundation (in progress, Session 2)
 - [x] Cargo workspace: `jd-types`, `jd-core`, `apps/cli` (`jd`), `apps/mcp` (`jd-mcp`) — real content, 28 tests (unit/property/CLI-driven/MCP-driven)
@@ -46,7 +46,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [~] Heightmap export: EXR f32 ✔, PNG16 ✔, RAW r16/r32 ✔ (+ JSON sidecar, flip + range conventions, round-trip tests); TIFF f32 ✔ (`tiff32`); foreign heightmap import ✔ (`jd.input.heightmap@1` + `project.import_asset`; desktop Import row + File ▸ Import… ⌘I ✔; GeoTIFF pixel scale / tie point / nodata ✔, nodata filled with the floor; CRS reprojection ☐ → `jd-geo`); Unity/Unreal size presets (2ⁿ+1) ✔ (project panel preset picker)
 - [~] Stroke sculpt nodes: `jd.sculpt.strokes@1` ✔ (smooth-falloff raise/lower polylines), desktop Sculpt mode ✔ (raycast strokes, brush panel, one undo step per stroke); brush ring cursor ✔; smooth/flatten brushes ✔; per-stroke bbox skip + summed-area smooth (2048², 600 m smooth: 70.5 s → 0.68 s debug) ✔; `graph.append_param` (one journal entry per stroke, linear WAL growth) ✔; stroke files under `strokes/` ☐
 - [~] GLB export ✔ (`terrain.export_mesh` / `jd export mesh`: grid mesh, normals, UVs, PBR material with baked hypsometric albedo texture, `--no-texture`; Khronos validator 0 errors / 0 warnings) + glTF Validator in CI ✔; normal/roughness maps ✔ (full-res bake capped 2048², TANGENT attribute, validator 0/0, Blender + Optima read them)
-- [~] Node editor UI ✔, generated inspectors ✔ (incl. table editor), task monitor ✔ (Tasks list + Cancel), diagnostics console ✔ (env / cache GC / bench in the project panel); dockable panels / layouts ☐
+- [~] Node editor UI ✔, generated inspectors ✔ (incl. table editor), task monitor ✔ (Tasks list + Cancel), diagnostics console ✔ (env / cache GC / bench in the project panel); resizable panels ✔ (native CSS `resize` on both side panels and the graph strip, `settings.spec.ts`); docking / saved layouts ☐ (not needed yet)
 - [~] Viewport: sky dome + steerable sun (warm low sun) ✔; colour-by-layer overlay (masks + class palettes) ✔; PBR materials ✔ (baked albedo/normal/roughness via `terrain.textures`, toggle); terrain LOD ☐
 
 ## Phase 3 — Simulation

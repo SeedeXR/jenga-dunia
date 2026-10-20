@@ -69,6 +69,8 @@ Logs: `~/Library/Logs/com.seedexr.jengadunia/jd-app.log` on macOS (`$XDG_DATA_HO
 
 Every project starts with a two-node graph (`Noise → Height`), the same `graph.json` the CLI and MCP server edit. The panel under the viewport is that graph; **Hide graph** collapses it.
 
+**Layout.** The three columns and the graph strip are resizable with native handles: drag the bottom-right corner of the left or right panel sideways (200–520 px and 220–560 px) and the corner of the graph panel up or down (160 px to 70 % of the window); **Hide graph** gives the viewport the whole height. Sizes last for the session (UI-driven check: `apps/desktop/e2e/settings.spec.ts` reads the panels' `resize` style).
+
 ![Node graph: add, evaluate, edit, connect, inspect](images/tutorial-03-graph.png)
 
 1. **Add** — pick a kind from the list (`graph.kinds` drives it) and click **Add**; the node is placed to the right of the graph and the view re-fits.
@@ -79,7 +81,7 @@ Every project starts with a two-node graph (`Noise → Height`), the same `graph
 
 6. **Sculpt** — enters sculpt mode (next tutorial).
 
-Undo and redo are operations like everything else (`graph.undo` / `graph.redo`, journaled as `graph.restore`), so a crash in the middle of undoing recovers to exactly what you saw. Connect nodes by dragging from an output handle (right) to an input handle (left); an input holds one edge, so dropping a new connection replaces the old one. Cycles, wrong ports and type mismatches are refused by the core (`E_GRAPH_CYCLE`, `E_INPUT_INVALID`, `E_GRAPH_TYPE_MISMATCH`). Evaluating while a required input is unconnected reports `E_GRAPH_MISSING_INPUT` with the node and port.
+Undo and redo are operations like everything else (`graph.undo` / `graph.redo`, journaled as `graph.restore`), so a crash in the middle of undoing recovers to exactly what you saw. The history keeps up to 100 graph snapshots and at most 64 MiB of them: ordinary graphs are kilobytes and keep all 100; a sculpt session with hundreds of long strokes (500 strokes × 50 points serialise to 2 MiB) keeps about 30 steps. Connect nodes by dragging from an output handle (right) to an input handle (left); an input holds one edge, so dropping a new connection replaces the old one. Cycles, wrong ports and type mismatches are refused by the core (`E_GRAPH_CYCLE`, `E_INPUT_INVALID`, `E_GRAPH_TYPE_MISMATCH`). Evaluating while a required input is unconnected reports `E_GRAPH_MISSING_INPUT` with the node and port.
 
 **Autosave.** Every edit is journaled first (crash-safe), and `settings.autosave_interval_s` seconds after the last edit (project.json, default 120; `0` disables) the app saves the project on its own: the log shows `project.save: ok`, the project panel's **dirty** returns to `false` and **journal** to `0`, and `graph.json` on disk is current. Press **Save** (⌘S) to save immediately. The UI-driven test `apps/desktop/e2e/hydrology.spec.ts` runs with the interval set to 2 s and checks the saved `graph.json` and the truncated journal. (For debugging, `?autosave=<ms>` in the dev URL overrides the interval.)
 

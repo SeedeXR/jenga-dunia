@@ -237,9 +237,9 @@ export default function App() {
           ))}
       </header>
 
-      <div className="grid grid-cols-[260px_1fr_280px] overflow-hidden">
+      <div className="grid grid-cols-[auto_1fr_auto] overflow-hidden">
         {/* Left: project */}
-        <aside className="overflow-y-auto border-r border-jd-line bg-jd-bg-1 p-3">
+        <aside className="w-[260px] min-w-[200px] max-w-[520px] resize-x overflow-y-auto border-r border-jd-line bg-jd-bg-1 p-3" title="Drag the bottom-right corner to resize this panel" data-testid="panel-left">
           <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Project</h2>
           <Field label="Path">
             <span className="flex gap-1">
@@ -390,7 +390,7 @@ export default function App() {
         </aside>
 
         {/* Center: viewport (top) + node graph (bottom, toggle) */}
-        <main className={`relative grid bg-jd-bg-0 ${showGraph ? "grid-rows-[1fr_300px]" : "grid-rows-[1fr]"}`}>
+        <main className={`relative grid bg-jd-bg-0 ${showGraph ? "grid-rows-[1fr_auto]" : "grid-rows-[1fr]"}`}>
           <div className="relative min-h-0">
             <TerrainView preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} sculpt={{ enabled: s.sculpting && (sculptNode !== undefined || s.drawing !== null), radiusM: s.drawing === "road" ? s.roadWidthM / 2 : s.brush.radius_m, onStroke: (pts) => void s.addStroke(pts) }} seaLevelM={seaLevelM} water={water} waves={s.waves} sky={s.sky} horizon={s.horizon} sun={{ azimuthDeg: s.sun.azimuth_deg, elevationDeg: s.sun.elevation_deg }} overlay={s.colorPreview} instances={s.scatter.points ? { points: s.scatter.points, sizeM: Math.max(s.scatter.spacing_m * 0.35, (s.project?.world.extent_m[0] ?? 0) * 0.012) } : null} maps={s.maps} />
             <button
@@ -428,7 +428,7 @@ export default function App() {
             </button>
           </div>
           {showGraph && (
-            <div className="min-h-0 border-t border-jd-line">
+            <div className="h-[300px] max-h-[70vh] min-h-[160px] resize-y overflow-hidden border-t border-jd-line" title="Drag the bottom-right corner to resize the graph" data-testid="panel-graph">
               <GraphPanel />
             </div>
           )}
@@ -440,7 +440,7 @@ export default function App() {
         </main>
 
         {/* Right: terrain inspector */}
-        <aside className="overflow-y-auto border-l border-jd-line bg-jd-bg-1 p-3">
+        <aside className="w-[280px] min-w-[220px] max-w-[560px] resize-x overflow-y-auto border-l border-jd-line bg-jd-bg-1 p-3" title="Drag the bottom-right corner to resize this panel" data-testid="panel-right">
           {s.sculpting && (
             <>
               <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Brush</h2>

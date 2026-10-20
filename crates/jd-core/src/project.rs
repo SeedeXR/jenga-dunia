@@ -182,47 +182,65 @@ pub struct Project {
 /// Undo/redo history of the graph document. Every journaled `graph.*` mutation pushes the
 /// previous graph; undo/redo are themselves journaled as `graph.restore`, so recovery replays
 /// exactly what the user saw.
-/// ponytail: whole-graph snapshots capped at 100 (graphs are kilobytes); diff-based history with
-/// an archive (WM inventory) when graphs grow.
+/// ponytail: whole-graph snapshots, capped at 100 entries and 64 MiB of serialised graph (a
+/// stroke-heavy graph — 500 strokes × 50 points — serialises to 2 MiB, so ~30 of those; ordinary
+/// graphs are kilobytes and keep all 100). Diff-based history with an on-disk archive is the
+/// upgrade if a session ever needs deeper undo than that.
 #[derive(Debug, Default)]
 pub struct History {
-    undo: Vec<GraphDocument>,
-    redo: Vec<GraphDocument>,
+    undo: Vec<(GraphDocument, usize)>,
+    redo: Vec<(GraphDocument, usize)>,
 }
 
 impl History {
     const CAP: usize = 100;
+    const BYTES_CAP: usize = 64 << 20;
+    fn size_of(g: &GraphDocument) -> usize {
+        serde_json::to_vec(g).map_or(0, |v| v.len())
+    }
     /// Record the graph as it was before a user mutation (clears the redo stack).
     pub fn record(&mut self, before: GraphDocument) {
-        if self.undo.len() >= Self::CAP {
-            self.undo.remove(0);
-        }
-        self.undo.push(before);
+        let size = Self::size_of(&before);
+        self.undo.push((before, size));
         self.redo.clear();
+        self.trim_to(Self::CAP, Self::BYTES_CAP);
+    }
+    /// Drop the oldest snapshots past the entry and byte caps (the newest always stays).
+    fn trim_to(&mut self, cap: usize, bytes_cap: usize) {
+        let mut bytes = self.undo_bytes();
+        while self.undo.len() > 1 && (self.undo.len() > cap || bytes > bytes_cap) {
+            bytes -= self.undo.remove(0).1;
+        }
     }
     /// Pop the snapshot to restore for undo, remembering `current` for redo.
     pub fn undo(&mut self, current: GraphDocument) -> Option<GraphDocument> {
-        let g = self.undo.pop()?;
-        self.redo.push(current);
+        let (g, _) = self.undo.pop()?;
+        let size = Self::size_of(&current);
+        self.redo.push((current, size));
         Some(g)
     }
     /// Pop the snapshot to restore for redo, remembering `current` for undo.
     pub fn redo(&mut self, current: GraphDocument) -> Option<GraphDocument> {
-        let g = self.redo.pop()?;
-        self.undo.push(current);
+        let (g, _) = self.redo.pop()?;
+        let size = Self::size_of(&current);
+        self.undo.push((current, size));
         Some(g)
     }
     /// The snapshot `undo` would restore, without changing the stacks.
     pub fn peek_undo(&self) -> Option<&GraphDocument> {
-        self.undo.last()
+        self.undo.last().map(|(g, _)| g)
     }
     /// The snapshot `redo` would restore, without changing the stacks.
     pub fn peek_redo(&self) -> Option<&GraphDocument> {
-        self.redo.last()
+        self.redo.last().map(|(g, _)| g)
     }
     /// (undo depth, redo depth).
     pub fn depths(&self) -> (usize, usize) {
         (self.undo.len(), self.redo.len())
+    }
+    /// Bytes of serialised graph the undo stack holds.
+    pub fn undo_bytes(&self) -> usize {
+        self.undo.iter().map(|(_, n)| n).sum()
     }
 }
 
@@ -683,6 +701,27 @@ mod tests {
 
     fn tmp() -> tempfile::TempDir {
         tempfile::tempdir().expect("tempdir")
+    }
+
+    #[test]
+    fn history_trims_the_oldest_snapshots_past_the_entry_and_byte_caps() {
+        let mut h = History::default();
+        for _ in 0..5 {
+            h.record(GraphDocument::default());
+        }
+        let each = History::size_of(&GraphDocument::default());
+        assert!(each > 0 && h.undo_bytes() == 5 * each);
+        h.trim_to(100, each * 3); // bytes bind: three fit
+        assert_eq!(h.depths().0, 3);
+        h.trim_to(2, usize::MAX); // entries bind
+        assert_eq!(h.depths().0, 2);
+        h.trim_to(100, 1); // the newest always stays
+        assert_eq!(h.depths().0, 1);
+        assert!(
+            h.undo(GraphDocument::default()).is_some()
+                && h.undo(GraphDocument::default()).is_none()
+        );
+        assert_eq!(h.depths(), (0, 1));
     }
 
     #[test]

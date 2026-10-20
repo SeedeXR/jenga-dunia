@@ -33,6 +33,11 @@ test.describe("project settings against the real core", () => {
     await expect(page.getByTestId("setting-cache")).toHaveValue("2048");
     await expect(page.getByTestId("setting-lod")).toHaveValue("2");
     await expect(page.getByTestId("setting-memory")).toHaveValue("4");
+    // Layout: the side panels resize horizontally and the graph panel vertically (native CSS handles).
+    const resizeOf = (id: string) => page.getByTestId(id).evaluate((el) => getComputedStyle(el).resize);
+    expect(await resizeOf("panel-left")).toBe("horizontal");
+    expect(await resizeOf("panel-right")).toBe("horizontal");
+    expect(await resizeOf("panel-graph")).toBe("vertical");
     await expect(page.getByTestId("wind-azimuth")).toHaveValue("270");
     await expect(page.getByTestId("wind-speed")).toHaveValue("8");
 
