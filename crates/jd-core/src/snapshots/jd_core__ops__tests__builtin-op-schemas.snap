@@ -2635,6 +2635,253 @@ expression: list
     }
   },
   {
+    "id": "ocean.bake",
+    "description": "Write the water textures of a sea at `level_m`: depth (16-bit), the water's colour through its clarity and tint (sRGB), the shoreline + surf foam, and a tileable Gerstner wave normal map for the wind sea",
+    "scope": "export",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "OceanBake",
+      "description": "`ocean.bake` params.",
+      "type": "object",
+      "properties": {
+        "layer": {
+          "description": "Height layer the sea floods.",
+          "type": "string",
+          "default": "height"
+        },
+        "level_m": {
+          "description": "Sea level, metres.",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        },
+        "visibility_m": {
+          "description": "Depth at which the bottom fades out, metres (> 0): ~30 crystal clear, 15 open ocean, 3 murky.",
+          "type": "number",
+          "format": "float",
+          "default": 15.0
+        },
+        "tint": {
+          "description": "Colour of the suspended matter scattered back, linear RGB 0..1.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "minItems": 3,
+          "maxItems": 3,
+          "default": [
+            0.10000000149011612,
+            0.3499999940395355,
+            0.4000000059604645
+          ]
+        },
+        "wind_speed_mps": {
+          "description": "Wind speed 10 m above the sea, m/s (≥ 0; 0 = flat calm): 3 ripples, 8 moderate sea, 20 gale.",
+          "type": "number",
+          "format": "float",
+          "default": 8.0
+        },
+        "fetch_km": {
+          "description": "Fetch, km: how far the wind has blown over open water (> 0). Omit for a fully developed sea.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float",
+          "default": null
+        },
+        "wind_azimuth_deg": {
+          "description": "Where the wind blows FROM, degrees clockwise from north; waves travel the opposite way.",
+          "type": "number",
+          "format": "float",
+          "default": 270.0
+        },
+        "max_px": {
+          "description": "Largest side of the depth / colour / foam maps, pixels.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 1024
+        },
+        "wave_px": {
+          "description": "Side of the tileable wave normal map, pixels.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 512
+        },
+        "wave_tile_m": {
+          "description": "World size the wave tile covers, metres; omit for a quarter of the world's width.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float",
+          "default": null
+        },
+        "dir": {
+          "description": "Output directory; relative paths resolve against the project's `exports/`.",
+          "type": "string",
+          "default": "water"
+        }
+      },
+      "additionalProperties": false
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "OceanBakeResult",
+      "description": "`ocean.bake` result.",
+      "type": "object",
+      "properties": {
+        "dir": {
+          "description": "Directory the four PNGs were written to.",
+          "type": "string"
+        },
+        "files": {
+          "description": "`water_depth.png` (16-bit grey, depth / max_depth_m), `water_colour.png` (sRGB), `water_foam.png` (8-bit grey), `wave_normal.png` (tangent space, tileable).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "px": {
+          "description": "Depth / colour / foam map size, pixels.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "max_depth_m": {
+          "description": "Deepest water, metres (the depth map's white point).",
+          "type": "number",
+          "format": "float"
+        },
+        "wave_tile_m": {
+          "description": "Wave tile side in metres and pixels.",
+          "type": "number",
+          "format": "float"
+        },
+        "wave_px": {
+          "description": "Wave tile side, pixels.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "waves": {
+          "description": "The wind sea that was baked.",
+          "$ref": "#/$defs/WaveSpectrum"
+        },
+        "tile_components": {
+          "description": "The components as snapped to the tile (wavelength and direction may differ slightly from `waves`).",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WaveComponent"
+          }
+        }
+      },
+      "required": [
+        "dir",
+        "files",
+        "px",
+        "max_depth_m",
+        "wave_tile_m",
+        "wave_px",
+        "waves",
+        "tile_components"
+      ],
+      "$defs": {
+        "WaveSpectrum": {
+          "description": "The wind sea: bulk statistics plus the Gerstner components that draw it.",
+          "type": "object",
+          "properties": {
+            "significant_height_m": {
+              "description": "Significant wave height Hs (mean of the highest third), m.",
+              "type": "number",
+              "format": "float"
+            },
+            "peak_period_s": {
+              "description": "Peak period Tp, s.",
+              "type": "number",
+              "format": "float"
+            },
+            "wavelength_m": {
+              "description": "Peak wavelength, m.",
+              "type": "number",
+              "format": "float"
+            },
+            "fully_developed": {
+              "description": "Whether the fetch was long enough for the sea to be fully developed for this wind.",
+              "type": "boolean"
+            },
+            "breaking_depth_m": {
+              "description": "Depth (m) shallower than which waves of this height break (H/d = 0.78): the surf zone.",
+              "type": "number",
+              "format": "float"
+            },
+            "components": {
+              "description": "Gerstner components, largest first.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/WaveComponent"
+              }
+            }
+          },
+          "required": [
+            "significant_height_m",
+            "peak_period_s",
+            "wavelength_m",
+            "fully_developed",
+            "breaking_depth_m",
+            "components"
+          ]
+        },
+        "WaveComponent": {
+          "description": "One trochoidal (Gerstner) wave.",
+          "type": "object",
+          "properties": {
+            "amplitude_m": {
+              "description": "Crest height above the mean surface, m.",
+              "type": "number",
+              "format": "float"
+            },
+            "wavelength_m": {
+              "description": "Crest-to-crest distance, m.",
+              "type": "number",
+              "format": "float"
+            },
+            "direction_deg": {
+              "description": "Travel direction, degrees clockwise from north.",
+              "type": "number",
+              "format": "float"
+            },
+            "speed_mps": {
+              "description": "Deep-water phase speed √(g L / 2π), m/s.",
+              "type": "number",
+              "format": "float"
+            },
+            "phase": {
+              "description": "Phase offset, radians.",
+              "type": "number",
+              "format": "float"
+            }
+          },
+          "required": [
+            "amplitude_m",
+            "wavelength_m",
+            "direction_deg",
+            "speed_mps",
+            "phase"
+          ]
+        }
+      }
+    }
+  },
+  {
     "id": "ocean.waves",
     "description": "Wind sea for a wind speed and fetch (JONSWAP growth capped at the fully developed Pierson–Moskowitz sea): significant height, peak period and wavelength, breaking depth, and the Gerstner components the viewport animates",
     "scope": "none",

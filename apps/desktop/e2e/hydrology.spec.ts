@@ -121,6 +121,10 @@ test.describe("hydrology nodes against the real core", () => {
     await wind.blur();
     await expect(sea).toContainText("wind_speed_mps=20");
     await expect(page.getByTestId("viewport-info")).toContainText("waves 9.8 m / 380 m");
+    // The same sea bakes to textures: depth, colour, foam and a tileable wave normal map.
+    await page.getByTestId("water-export").click();
+    await expect.poll(() => existsSync(path.join(ws, "Hydro.jdproj", "exports", "water", "wave_normal.png"))).toBe(true);
+    await expect(page.getByTestId("log")).toContainText("ocean.bake: ok");
     // Back out to the overview (undo the two zoom steps above) so the whole shoreline is in frame.
     await page.getByTestId("viewport").hover();
     for (let i = 0; i < 2; i++) await page.mouse.wheel(0, 300);

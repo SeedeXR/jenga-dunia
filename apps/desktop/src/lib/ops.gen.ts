@@ -420,13 +420,29 @@ export type JobsResultResult = {
   "response"?: unknown;
 };
 
-export type OceanWavesRequest = {
+export type OceanBakeRequest = {
+  /** Height layer the sea floods. */
+  "layer"?: string;
+  /** Sea level, metres. */
+  "level_m"?: number;
+  /** Depth at which the bottom fades out, metres (> 0): ~30 crystal clear, 15 open ocean, 3 murky. */
+  "visibility_m"?: number;
+  /** Colour of the suspended matter scattered back, linear RGB 0..1. */
+  "tint"?: [number, number, number];
   /** Wind speed 10 m above the sea, m/s (≥ 0; 0 = flat calm): 3 ripples, 8 moderate sea, 20 gale. */
   "wind_speed_mps"?: number;
   /** Fetch, km: how far the wind has blown over open water (> 0). Omit for a fully developed sea. */
   "fetch_km"?: number | null;
   /** Where the wind blows FROM, degrees clockwise from north; waves travel the opposite way. */
   "wind_azimuth_deg"?: number;
+  /** Largest side of the depth / colour / foam maps, pixels. */
+  "max_px"?: number;
+  /** Side of the tileable wave normal map, pixels. */
+  "wave_px"?: number;
+  /** World size the wave tile covers, metres; omit for a quarter of the world's width. */
+  "wave_tile_m"?: number | null;
+  /** Output directory; relative paths resolve against the project's `exports/`. */
+  "dir"?: string;
 };
 
 export type WaveComponent = {
@@ -440,6 +456,49 @@ export type WaveComponent = {
   "speed_mps": number;
   /** Phase offset, radians. */
   "phase": number;
+};
+
+export type WaveSpectrum = {
+  /** Significant wave height Hs (mean of the highest third), m. */
+  "significant_height_m": number;
+  /** Peak period Tp, s. */
+  "peak_period_s": number;
+  /** Peak wavelength, m. */
+  "wavelength_m": number;
+  /** Whether the fetch was long enough for the sea to be fully developed for this wind. */
+  "fully_developed": boolean;
+  /** Depth (m) shallower than which waves of this height break (H/d = 0.78): the surf zone. */
+  "breaking_depth_m": number;
+  /** Gerstner components, largest first. */
+  "components": WaveComponent[];
+};
+
+export type OceanBakeResult = {
+  /** Directory the four PNGs were written to. */
+  "dir": string;
+  /** `water_depth.png` (16-bit grey, depth / max_depth_m), `water_colour.png` (sRGB), `water_foam.png` (8-bit grey), `wave_normal.png` (tangent space, tileable). */
+  "files": string[];
+  /** Depth / colour / foam map size, pixels. */
+  "px": [number, number];
+  /** Deepest water, metres (the depth map's white point). */
+  "max_depth_m": number;
+  /** Wave tile side in metres and pixels. */
+  "wave_tile_m": number;
+  /** Wave tile side, pixels. */
+  "wave_px": number;
+  /** The wind sea that was baked. */
+  "waves": WaveSpectrum;
+  /** The components as snapped to the tile (wavelength and direction may differ slightly from `waves`). */
+  "tile_components": WaveComponent[];
+};
+
+export type OceanWavesRequest = {
+  /** Wind speed 10 m above the sea, m/s (≥ 0; 0 = flat calm): 3 ripples, 8 moderate sea, 20 gale. */
+  "wind_speed_mps"?: number;
+  /** Fetch, km: how far the wind has blown over open water (> 0). Omit for a fully developed sea. */
+  "fetch_km"?: number | null;
+  /** Where the wind blows FROM, degrees clockwise from north; waves travel the opposite way. */
+  "wind_azimuth_deg"?: number;
 };
 
 export type OceanWavesResult = {
@@ -1361,6 +1420,8 @@ export interface JdOps {
   "jobs.list": { request: JobsListRequest; result: JobsListResult };
   /** State of a job: running (progress), done (the finished op's envelope, handed over once) or unknown */
   "jobs.result": { request: JobsResultRequest; result: JobsResultResult };
+  /** Write the water textures of a sea at `level_m`: depth (16-bit), the water's colour through its clarity and tint (sRGB), the shoreline + surf foam, and a tileable Gerstner wave normal map for the wind sea */
+  "ocean.bake": { request: OceanBakeRequest; result: OceanBakeResult };
   /** Wind sea for a wind speed and fetch (JONSWAP growth capped at the fully developed Pierson–Moskowitz sea): significant height, peak period and wavelength, breaking depth, and the Gerstner components the viewport animates */
   "ocean.waves": { request: OceanWavesRequest; result: OceanWavesResult };
   /** Evict the oldest cached layer blobs until the project's cache fits `settings.cache_limit_bytes` (the cache is disposable); reports what is left */

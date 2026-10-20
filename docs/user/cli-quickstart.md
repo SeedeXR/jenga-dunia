@@ -381,6 +381,20 @@ at rock_slope_deg 20 the same floor reads                    sand 27.6 %  rock 6
 
 `jd.biome.seabed@1` classifies every ocean cell (below `level_m` and connected to the border, like the sea-level node) by depth and slope with the rules coastal geomorphology gives: submarine slopes steeper than `rock_slope_deg` hold no sediment and read **rock** (2); the floor deeper than `mud_min_depth_m` is still enough for fines to settle, **mud** (3); the shelf above the wave base `sand_max_depth_m` is wave-sorted **sand** (1); and a gentle shelf inside `reef_depth_m` that is more than `river_reach_m` from any cell of the optional `rivers` or `shore` masks becomes **reef** (4) — reefs need clear, sediment-free water, so on the steep coastal world above, whose shallow shelves are all within reach of wave-worked cliffs, no reef forms. Land is 0. The class map works with `jd.mask.class@1` exactly like the land biomes, so each bed gets its own material, scatter (kelp, boulders) and colour overlay. No sediment transport or currents yet.
 
+### Water textures for engines
+
+```
+$ jd op ocean.bake --project World.jdproj --params '{"level_m":250,"visibility_m":4,"wind_speed_mps":20,"wave_px":256}'
+dir exports/water   files water_depth.png water_colour.png water_foam.png wave_normal.png
+px 128×128 (the world's resolution, capped by max_px)   max_depth_m 195.39   wave_tile_m 320 (a quarter of the world)   wave_px 256
+waves: Hs 9.84 m  Tp 15.6 s  L 380 m  breaking 12.6 m
+tile components (snapped to the 320 m tile): 320.0 m @ 90°, 143.1 m @ 116.6°, 88.8 m @ 56.3°   (spectrum: 380 / 172.7 / 76 m @ 90 / 115 / 55°)
+```
+
+![Water colour map: the murky 4 m water is all tint, land is the sand colour at zero depth](images/cli-water-colour.png) ![Foam map: a thin white band along every shore and the surf zone](images/cli-water-foam.png) ![Tileable wave normal map: smooth diagonal bands from the three Gerstner components](images/cli-wave-normal.png)
+
+`ocean.bake` writes what the desktop viewport draws as four PNGs an engine's water material can use, row 0 = south like every other bake: **depth** (16-bit grey, `depth / max_depth_m`; 0 on land and at the waterline), **colour** (sRGB, the bottom seen through the water by the same Beer–Lambert rule as the viewport — the tint takes over as the water gets deep or murky), **foam** (8-bit grey: the shoreline band, widened to the surf zone where the wind sea breaks, depth < Hs / 0.78) and a **wave normal** tile (tangent space +X east / +Y north / +Z up) that repeats seamlessly: each Gerstner component is snapped to the nearest wave vector that fits a whole number of times into `wave_tile_m`, and the result lists the snapped wavelengths and directions beside the spectrum's. The parameters mirror the sea-level node (`level_m`, `visibility_m`, `tint`, `wind_speed_mps`, `fetch_km`, `wind_azimuth_deg`); the desktop's **Export water maps** button passes the node's values. Not baked: displacement (use the components to drive your own vertex animation), refraction, caustics.
+
 ### Bathymetry: sediment fills the floor
 
 ```

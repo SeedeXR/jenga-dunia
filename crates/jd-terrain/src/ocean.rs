@@ -226,3 +226,300 @@ mod tests {
         );
     }
 }
+
+// ---------------------------------------------------------------------------------------------
+// Water bakes: what the viewport draws, as textures an engine can use.
+
+/// Water clarity, mirrored from the sea-level node.
+#[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WaterLook {
+    /// Depth at which the bottom fades out, metres (> 0): ~30 crystal clear, 15 open ocean, 3 murky.
+    #[serde(default = "d_visibility")]
+    pub visibility_m: f32,
+    /// Colour of the suspended matter scattered back, linear RGB 0..1.
+    #[serde(default = "d_tint")]
+    pub tint: [f32; 3],
+}
+
+fn d_visibility() -> f32 {
+    15.0
+}
+fn d_tint() -> [f32; 3] {
+    [0.1, 0.35, 0.4]
+}
+
+impl Default for WaterLook {
+    fn default() -> Self {
+        Self {
+            visibility_m: d_visibility(),
+            tint: d_tint(),
+        }
+    }
+}
+
+/// Pure-water absorption per channel, m⁻¹ (Pope & Fry 1997, rounded): red dies first, blue last.
+const PURE_WATER_ABSORPTION: [f32; 3] = [0.4, 0.07, 0.005];
+/// Wet sand seen through the water, linear RGB.
+const BOTTOM: [f32; 3] = [0.62, 0.55, 0.38];
+
+/// What a sea floor `depth_m` down looks like through the water (linear RGB), and how opaque the
+/// surface is there: Beer–Lambert transmittance per channel, down and back up, with the absorption
+/// scaled by 15 m / visibility; the tint takes over as the bottom disappears. The viewport uses
+/// the same formula.
+pub fn water_colour(depth_m: f32, look: &WaterLook) -> ([f32; 3], f32) {
+    let k = 15.0 / look.visibility_m.max(0.5);
+    let mut rgb = [0.0f32; 3];
+    let mut seen = 0.0;
+    for c in 0..3 {
+        let t = (-PURE_WATER_ABSORPTION[c] * k * depth_m * 2.0).exp();
+        rgb[c] = BOTTOM[c] * t + look.tint[c] * (1.0 - t);
+        seen += t;
+    }
+    let clarity = seen / 3.0;
+    (rgb, 0.35 + 0.55 * (1.0 - clarity))
+}
+
+/// Baked water textures: PNG bytes, row 0 = south like every other bake.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct WaterMaps {
+    /// Texture size in pixels.
+    pub px: [u32; 2],
+    /// Deepest water, metres: the depth map is `depth / max_depth_m` as 16-bit grey.
+    pub max_depth_m: f32,
+    /// Depth PNG (16-bit grey, 0 = land or the waterline).
+    #[serde(skip)]
+    pub depth: Vec<u8>,
+    /// Water colour PNG (sRGB 8-bit): the bottom seen through the water, the tint where it is deep or murky.
+    #[serde(skip)]
+    pub colour: Vec<u8>,
+    /// Foam PNG (8-bit grey): the shoreline band plus the surf zone where the wind sea breaks.
+    #[serde(skip)]
+    pub foam: Vec<u8>,
+}
+
+/// Bake depth, colour and foam for the sea at `level_m` over `hf` (the ocean mask rule of the
+/// sea-level node: below the level and connected to the border), sampled so no side exceeds
+/// `max_px`. `breaking_depth_m` (from the wind sea) widens the foam band to the surf zone.
+pub fn bake_water(
+    hf: &crate::Heightfield,
+    level_m: f32,
+    look: &WaterLook,
+    breaking_depth_m: f32,
+    max_px: u32,
+) -> JdResult<WaterMaps> {
+    if !(look.visibility_m > 0.0 && look.visibility_m.is_finite()) {
+        return Err(JdError::invalid("visibility_m", "must be positive"));
+    }
+    if look.tint.iter().any(|c| !(0.0..=1.0).contains(c)) {
+        return Err(JdError::invalid("tint", "components must be within 0..=1"));
+    }
+    if !(breaking_depth_m >= 0.0 && breaking_depth_m.is_finite()) {
+        return Err(JdError::invalid("breaking_depth_m", "must be ≥ 0"));
+    }
+    let (ocean, depth) = crate::flow::sea_level(hf, level_m, 0.0)?;
+    let (w, h) = (hf.width(), hf.height());
+    let ts = w.max(h).div_ceil(max_px.max(16)).max(1);
+    let (tw, th) = (w.div_ceil(ts), h.div_ceil(ts));
+    let stats = hf.stats();
+    let foam_m = (0.5f32)
+        .max((stats.max - stats.min) * 0.01)
+        .max(breaking_depth_m);
+    let max_depth = depth.stats().max.max(1e-3);
+    let at = |x: u32, y: u32| ((x * ts).min(w - 1), (y * ts).min(h - 1));
+    let mut depth_px = image::ImageBuffer::<image::Luma<u16>, Vec<u16>>::new(tw, th);
+    let mut colour_px = image::RgbImage::new(tw, th);
+    let mut foam_px = image::GrayImage::new(tw, th);
+    for y in 0..th {
+        for x in 0..tw {
+            let (sx, sy) = at(x, y);
+            let d = if ocean.get(sx, sy) > 0.5 {
+                depth.get(sx, sy).max(0.0)
+            } else {
+                0.0
+            };
+            let (rgb, _) = water_colour(d, look);
+            let foam = if d > 0.0 && d < foam_m {
+                1.0 - d / foam_m
+            } else {
+                0.0
+            };
+            let srgb = |v: f32| (v.clamp(0.0, 1.0).powf(1.0 / 2.2) * 255.0).round() as u8;
+            depth_px.put_pixel(
+                x,
+                y,
+                image::Luma([((d / max_depth) * 65535.0).round() as u16]),
+            );
+            colour_px.put_pixel(x, y, image::Rgb([srgb(rgb[0]), srgb(rgb[1]), srgb(rgb[2])]));
+            foam_px.put_pixel(x, y, image::Luma([(foam * 255.0).round() as u8]));
+        }
+    }
+    Ok(WaterMaps {
+        px: [tw, th],
+        max_depth_m: max_depth,
+        depth: png(&depth_px)?,
+        colour: png(&colour_px)?,
+        foam: png(&foam_px)?,
+    })
+}
+
+fn png<P: image::Pixel + image::PixelWithColorType>(
+    img: &image::ImageBuffer<P, Vec<P::Subpixel>>,
+) -> JdResult<Vec<u8>>
+where
+    [P::Subpixel]: image::EncodableLayout,
+{
+    let mut out = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut out, image::ImageFormat::Png)
+        .map_err(|e| {
+            JdError::new(
+                jd_types::ErrorCode::E_INTERNAL,
+                format!("PNG encode failed: {e}"),
+            )
+        })?;
+    Ok(out.into_inner())
+}
+
+/// A tileable wave normal map: every component is snapped to the nearest wave vector that fits
+/// a whole number of times into `tile_m` (so the tile repeats seamlessly), then the Gerstner
+/// surface at t = 0 is differentiated analytically. Tangent space +X east, +Y north, +Z up,
+/// row 0 = south, `px` square. Returns the PNG and the components as snapped.
+pub fn bake_wave_normal(
+    components: &[WaveComponent],
+    tile_m: f32,
+    px: u32,
+) -> JdResult<(Vec<u8>, Vec<WaveComponent>)> {
+    if !(tile_m > 0.0 && tile_m.is_finite()) {
+        return Err(JdError::invalid("wave_tile_m", "must be positive"));
+    }
+    if !(16..=4096).contains(&px) {
+        return Err(JdError::invalid("wave_px", "must be within 16..=4096"));
+    }
+    let two_pi = 2.0 * std::f32::consts::PI;
+    let snapped: Vec<WaveComponent> = components
+        .iter()
+        .map(|c| {
+            let k = two_pi / c.wavelength_m;
+            let rad = c.direction_deg.to_radians();
+            let (dx, dz) = (rad.sin(), -rad.cos());
+            // Integer wave numbers along x and z; a wave longer than the tile becomes one tile long.
+            let mut n = (tile_m * k * dx / two_pi).round();
+            let mut m = (tile_m * k * dz / two_pi).round();
+            if n == 0.0 && m == 0.0 {
+                (n, m) = if dx.abs() >= dz.abs() {
+                    (dx.signum(), 0.0)
+                } else {
+                    (0.0, dz.signum())
+                };
+            }
+            let len = (n * n + m * m).sqrt();
+            WaveComponent {
+                wavelength_m: tile_m / len,
+                direction_deg: (n / len).atan2(-(m / len)).to_degrees().rem_euclid(360.0),
+                ..c.clone()
+            }
+        })
+        .collect();
+    let mut img = image::RgbImage::new(px, px);
+    let step = tile_m / px as f32;
+    for row in 0..px {
+        for col in 0..px {
+            let x = col as f32 * step;
+            let z = -(row as f32 * step); // row 0 = south: north is −z
+            let (mut gx, mut gz) = (0.0f32, 0.0f32);
+            for c in &snapped {
+                let k = two_pi / c.wavelength_m;
+                let rad = c.direction_deg.to_radians();
+                let (dx, dz) = (rad.sin(), -rad.cos());
+                let slope = c.amplitude_m * k * (k * (dx * x + dz * z) + c.phase).cos();
+                gx += slope * dx;
+                gz += slope * dz;
+            }
+            // Normal of y = h(x, z): (−∂h/∂x, 1, −∂h/∂z); tangent-space G is the north component.
+            let (nx, ny, nz) = (-gx, 1.0, -gz);
+            let inv = 1.0 / (nx * nx + ny * ny + nz * nz).sqrt();
+            let enc = |v: f32| ((v * inv * 0.5 + 0.5) * 255.0).round() as u8;
+            img.put_pixel(col, row, image::Rgb([enc(nx), enc(-nz), enc(ny)]));
+        }
+    }
+    Ok((png(&img)?, snapped))
+}
+
+#[cfg(test)]
+mod bake_tests {
+    use super::*;
+
+    #[test]
+    fn water_maps_follow_depth_and_the_wave_tile_wraps() {
+        // West → east ramp from 0 to 300 m with the sea at 110 m: the west edge is 110 m deep.
+        let mut h = crate::Heightfield::new(64, 16, 64, 0).expect("hf");
+        h.fill_with(|x, _| x as f32 / 63.0 * 300.0);
+        let maps = bake_water(&h, 110.0, &WaterLook::default(), 0.0, 64).expect("bake");
+        assert_eq!(maps.px, [64, 16]);
+        assert!((maps.max_depth_m - 110.0).abs() < 0.01);
+        let depth = image::load_from_memory(&maps.depth)
+            .expect("png")
+            .to_luma16();
+        let colour = image::load_from_memory(&maps.colour)
+            .expect("png")
+            .to_rgb8();
+        let foam = image::load_from_memory(&maps.foam).expect("png").to_luma8();
+        assert_eq!(depth.get_pixel(0, 8)[0], 65535, "deepest at the west edge");
+        assert!(depth.get_pixel(10, 8)[0] < depth.get_pixel(0, 8)[0]);
+        assert_eq!(depth.get_pixel(40, 8)[0], 0, "land is 0");
+        let deep = colour.get_pixel(0, 8);
+        assert!(deep[2] > deep[0], "deep water is blue, not sandy");
+        let shallow = colour.get_pixel(22, 8); // ~5 m deep: the sand still shows
+        assert!(shallow[0] > deep[0]);
+        assert!(foam.get_pixel(0, 8)[0] == 0, "no foam out deep");
+        assert!(
+            foam.get_pixel(23, 8)[0] > 100,
+            "foam within 3 m of the shore (0.5 m deep)"
+        );
+        // A surf zone of 60 m puts foam on the whole shelf.
+        let surf = bake_water(&h, 110.0, &WaterLook::default(), 60.0, 64).expect("surf");
+        let surf_foam = image::load_from_memory(&surf.foam).expect("png").to_luma8();
+        assert!(
+            surf_foam.get_pixel(12, 8)[0] > 0,
+            "53 m deep: inside the 60 m surf zone"
+        );
+        assert!(
+            bake_water(
+                &h,
+                110.0,
+                &WaterLook {
+                    visibility_m: 0.0,
+                    ..WaterLook::default()
+                },
+                0.0,
+                64
+            )
+            .is_err()
+        );
+
+        // The wave tile: a 100 m wave on a 256 m tile snaps to 256/3 m; the tile's edges match.
+        let spectrum = wave_spectrum(&WaveParams {
+            wind_speed_mps: 10.0,
+            fetch_km: None,
+            wind_azimuth_deg: 270.0,
+        })
+        .expect("spectrum");
+        let (png, snapped) = bake_wave_normal(&spectrum.components, 256.0, 64).expect("tile");
+        assert_eq!(snapped.len(), 3);
+        for c in &snapped {
+            let n = 256.0 / c.wavelength_m;
+            let rad = c.direction_deg.to_radians();
+            let (nx, nz) = (n * rad.sin(), -n * rad.cos());
+            assert!(
+                (nx - nx.round()).abs() < 1e-3 && (nz - nz.round()).abs() < 1e-3,
+                "{c:?} fits the tile"
+            );
+        }
+        let img = image::load_from_memory(&png).expect("png").to_rgb8();
+        // Periodicity is the integer wave numbers above; the 19 m component is sampled under
+        // 5× per wavelength at 64 px, so a pixel seam comparison would only measure aliasing.
+        // Mostly up: the mean normal points along +Z.
+        let mean_b = img.pixels().map(|p| p[2] as u32).sum::<u32>() / (64 * 64);
+        assert!(mean_b > 240, "mean blue {mean_b}");
+    }
+}

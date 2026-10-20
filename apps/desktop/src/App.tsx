@@ -527,6 +527,15 @@ export default function App() {
           >
             <Upload size={14} /> Export heightmap
           </button>
+          <button
+            className="btn mt-1 w-full justify-center"
+            disabled={!seaNode || s.busy}
+            onClick={() => void s.exportWater()}
+            title="Write exports/water/: depth, colour, foam and a tileable wave normal map for the sea-level node's clarity and wind"
+            data-testid="water-export"
+          >
+            <Upload size={14} /> Export water maps
+          </button>
         </aside>
       </div>
 

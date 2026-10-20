@@ -2766,6 +2766,64 @@ pub mod terrain {
         }
     }
 
+    /// `ocean.bake` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct OceanBake {
+        /// Height layer the sea floods.
+        #[serde(default = "default_layer")]
+        pub layer: String,
+        /// Sea level, metres.
+        #[serde(default)]
+        pub level_m: f32,
+        /// Water clarity and tint (the sea-level node's `visibility_m` / `tint`).
+        #[serde(default, flatten)]
+        pub look: jd_terrain::WaterLook,
+        /// Wind sea (the sea-level node's `wind_speed_mps` / `fetch_km` / `wind_azimuth_deg`).
+        #[serde(default, flatten)]
+        pub wind: jd_terrain::WaveParams,
+        /// Largest side of the depth / colour / foam maps, pixels.
+        #[serde(default = "default_max_px")]
+        pub max_px: u32,
+        /// Side of the tileable wave normal map, pixels.
+        #[serde(default = "default_wave_px")]
+        pub wave_px: u32,
+        /// World size the wave tile covers, metres; omit for a quarter of the world's width.
+        #[serde(default)]
+        pub wave_tile_m: Option<f32>,
+        /// Output directory; relative paths resolve against the project's `exports/`.
+        #[serde(default = "default_water_dir")]
+        pub dir: PathBuf,
+    }
+
+    fn default_wave_px() -> u32 {
+        512
+    }
+    fn default_water_dir() -> PathBuf {
+        PathBuf::from("water")
+    }
+
+    /// `ocean.bake` result.
+    #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct OceanBakeResult {
+        /// Directory the four PNGs were written to.
+        pub dir: PathBuf,
+        /// `water_depth.png` (16-bit grey, depth / max_depth_m), `water_colour.png` (sRGB), `water_foam.png` (8-bit grey), `wave_normal.png` (tangent space, tileable).
+        pub files: Vec<String>,
+        /// Depth / colour / foam map size, pixels.
+        pub px: [u32; 2],
+        /// Deepest water, metres (the depth map's white point).
+        pub max_depth_m: f32,
+        /// Wave tile side in metres and pixels.
+        pub wave_tile_m: f32,
+        /// Wave tile side, pixels.
+        pub wave_px: u32,
+        /// The wind sea that was baked.
+        pub waves: jd_terrain::WaveSpectrum,
+        /// The components as snapped to the tile (wavelength and direction may differ slightly from `waves`).
+        pub tile_components: Vec<jd_terrain::WaveComponent>,
+    }
+
     /// `terrain.textures` params.
     #[derive(Debug, Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
@@ -2839,6 +2897,42 @@ pub mod terrain {
             "Wind sea for a wind speed and fetch (JONSWAP growth capped at the fully developed Pierson–Moskowitz sea): significant height, peak period and wavelength, breaking depth, and the Gerstner components the viewport animates",
             Scope::None,
             |_, p| Ok((jd_terrain::wave_spectrum(&p)?, Vec::new())),
+        );
+        r.register::<OceanBake, OceanBakeResult, _>(
+            "ocean.bake",
+            "Write the water textures of a sea at `level_m`: depth (16-bit), the water's colour through its clarity and tint (sRGB), the shoreline + surf foam, and a tileable Gerstner wave normal map for the wind sea",
+            Scope::Export,
+            |ctx, p| {
+                if !(16..=8192).contains(&p.max_px) {
+                    return Err(JdError::invalid("max_px", "must be within 16..=8192"));
+                }
+                let (dir, extent) = ctx.with_project(|proj| {
+                    let dir = if p.dir.is_absolute() { p.dir.clone() } else { proj.root().join("exports").join(&p.dir) };
+                    Ok((dir, proj.doc.world.extent_m))
+                })?;
+                let waves = jd_terrain::wave_spectrum(&p.wind)?;
+                let maps = ctx.with_layer(&p.layer, |hf| jd_terrain::bake_water(hf, p.level_m, &p.look, waves.breaking_depth_m, p.max_px))?;
+                let tile_m = p.wave_tile_m.unwrap_or((extent[0] / 4.0) as f32);
+                let (normal, tile_components) = jd_terrain::bake_wave_normal(&waves.components, tile_m, p.wave_px)?;
+                std::fs::create_dir_all(&dir)?;
+                let files = ["water_depth.png", "water_colour.png", "water_foam.png", "wave_normal.png"];
+                for (name, bytes) in files.iter().zip([&maps.depth, &maps.colour, &maps.foam, &normal]) {
+                    std::fs::write(dir.join(name), bytes)?;
+                }
+                Ok((
+                    OceanBakeResult {
+                        dir,
+                        files: files.iter().map(|f| f.to_string()).collect(),
+                        px: maps.px,
+                        max_depth_m: maps.max_depth_m,
+                        wave_tile_m: tile_m,
+                        wave_px: p.wave_px,
+                        waves,
+                        tile_components,
+                    },
+                    Vec::new(),
+                ))
+            },
         );
         r.register::<TerrainTextures, TexturesResult, _>(
             "terrain.textures",

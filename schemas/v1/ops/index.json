@@ -95,6 +95,11 @@
     "scope": "none"
   },
   {
+    "id": "ocean.bake",
+    "description": "Write the water textures of a sea at `level_m`: depth (16-bit), the water's colour through its clarity and tint (sRGB), the shoreline + surf foam, and a tileable Gerstner wave normal map for the wind sea",
+    "scope": "export"
+  },
+  {
     "id": "ocean.waves",
     "description": "Wind sea for a wind speed and fetch (JONSWAP growth capped at the fully developed Pierson–Moskowitz sea): significant height, peak period and wavelength, breaking depth, and the Gerstner components the viewport animates",
     "scope": "none"
