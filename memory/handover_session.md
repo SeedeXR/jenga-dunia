@@ -324,7 +324,9 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `22:55:00` **CI flake + IPC measurement**: `terrain.spec.ts` test 1 timed out at 5 min on ubuntu twice (`5472e25`, `2014a64`; no step detail in the log; passes locally in 7–17 s) → `test.slow()` like hydrology. `e2e/ipc.measure.spec.ts` (opt-in `JD_MEASURE=1`) reads the header's preview stats for 512²/1024²/2048² worlds: ≈ 7 MB/s through the Playwright↔jd-mcp bridge (harness path); the native Tauri path's 2 MB in 6 ms (2026-10-19) stays the product number; performance-targets.md row; Windows unmeasured.
 
-### Open / next (as of 2026-10-21 22:55, head after ipc-measure commit)
+- `23:10:00` **USDC export**: `export_usdc` / `write_usdc` write the USDA layer and convert with `usdcat <usda> -o <usdc>` (`E_DEPENDENCY_MISSING` without the tool); `.usdc` in both extension dispatches, op/CLI docs; test skips without usdcat, checks the `PXR-USDC` magic and the size; acceptance item 9 exports USDC and item 11 runs usdchecker on it (report to regenerate on the next full run). 512² step 4: 734 163 B vs 2 556 027 B USDA, usdchecker Success.
+
+### Open / next (as of 2026-10-21 23:10, head after usdc commit)
 0. **CI**: green through `76de799` on every job that ran; macOS jobs on stale heads showed `cancelled` from queue pile-up, and since `f00dbcf` the workflow cancels stale runs itself (`concurrency: ci-<ref>`), so a `cancelled` run on a superseded head is expected. `5472e25` had a one-off `terrain.spec.ts` 5-min timeout on ubuntu (no step detail in the log; passes locally on every gate run) — watch for a repeat. Red runs to re-check only if the newest head is red.
 1. **Disk**: `target/` grows ~3–4 GB per gate run (incremental + duplicate test binaries); `cargo clean` + rebuild was needed twice today. Run gates with `CARGO_INCREMENTAL=0` and delete `target/debug/incremental` between iterations; a full clean when free space < 8 GiB.
 2. **Figma**: connector unavailable this session; plugin OAuth pending on the owner's side → tutorial images stay in `docs/user/images/`; place them in file `fxyeV62hgLoNmG3dU1LX6G` when a connector works.

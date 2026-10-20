@@ -148,12 +148,12 @@ enum ExportCommand {
         #[arg(long, default_value = "height")]
         layer: String,
     },
-    /// Export a heightfield layer as a grid mesh: .glb (textured PBR), .fbx (textured, binary 7.4), .obj, .stl, .ply, .usda or .usdz (metres, +Y up, centred).
+    /// Export a heightfield layer as a grid mesh: .glb (textured PBR), .fbx (textured, binary 7.4), .obj, .stl, .ply, .usda, .usdc or .usdz (metres, +Y up, centred).
     Mesh {
         /// Project directory.
         #[arg(long)]
         project: PathBuf,
-        /// Output .glb / .fbx / .obj / .stl / .ply / .usda / .usdz (relative paths go under the project's exports/).
+        /// Output .glb / .fbx / .obj / .stl / .ply / .usda / .usdc / .usdz (relative paths go under the project's exports/).
         path: PathBuf,
         /// Grid step (1 = every sample; default keeps the mesh within ~1 M vertices).
         #[arg(long)]

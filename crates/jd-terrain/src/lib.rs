@@ -53,7 +53,8 @@ pub use karst::{KarstParams, Sinkhole, SinkholeProfile, karst_sinkholes};
 pub use mesh::{
     BakedMaps, GridMesh, MaterialLayer, MeshExportReport, MeshTopology, auto_step, bake_maps,
     bake_maps_with, export_glb, export_mesh, export_mesh_lods, export_mesh_lods_with,
-    export_mesh_with, export_obj, export_ply, export_stl, export_usda, export_usdz, mesh_topology,
+    export_mesh_with, export_obj, export_ply, export_stl, export_usda, export_usdc, export_usdz,
+    mesh_topology, write_usdc,
 };
 pub use noise::{FractalKind, NoiseKind, NoiseParams, generate_noise};
 pub use ocean::{

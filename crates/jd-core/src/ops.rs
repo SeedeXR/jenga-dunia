@@ -3452,7 +3452,7 @@ pub mod terrain {
         /// Layer name.
         #[serde(default = "default_layer")]
         pub layer: String,
-        /// Output `.glb`, `.fbx`, `.obj`, `.stl`, `.ply`, `.usda` or `.usdz`; relative paths resolve against the project's `exports/` directory.
+        /// Output `.glb`, `.fbx`, `.obj`, `.stl`, `.ply`, `.usda`, `.usdc` or `.usdz`; relative paths resolve against the project's `exports/` directory.
         pub path: PathBuf,
         /// Grid step (1 = every sample). Default: the smallest step that keeps the mesh within `max_vertices`.
         #[serde(default)]

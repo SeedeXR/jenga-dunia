@@ -5678,7 +5678,7 @@ expression: list
           "default": "height"
         },
         "path": {
-          "description": "Output `.glb`, `.fbx`, `.obj`, `.stl`, `.ply`, `.usda` or `.usdz`; relative paths resolve against the project's `exports/` directory.",
+          "description": "Output `.glb`, `.fbx`, `.obj`, `.stl`, `.ply`, `.usda`, `.usdc` or `.usdz`; relative paths resolve against the project's `exports/` directory.",
           "type": "string"
         },
         "step": {

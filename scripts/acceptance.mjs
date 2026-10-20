@@ -224,7 +224,13 @@ try {
 } catch (e) {
   mark(9, "PARTIAL", `USDZ needs usdzip on PATH: ${String(e).slice(0, 120)}`);
 }
-mark(9, usdz ? "VERIFIED" : "PARTIAL", `USDA ${usda.bytes} bytes${usdz ? `, USDZ ${usdz.bytes} bytes` : ""} (step 4)`);
+let usdc = null;
+try {
+  usdc = exportMesh("terrain.usdc", { step: 4, texture: false });
+} catch (e) {
+  mark(9, "PARTIAL", `USDC needs usdcat on PATH: ${String(e).slice(0, 120)}`);
+}
+mark(9, usdz && usdc ? "VERIFIED" : "PARTIAL", `USDA ${usda.bytes} bytes${usdc ? `, USDC ${usdc.bytes} bytes (usdcat)` : ""}${usdz ? `, USDZ ${usdz.bytes} bytes` : ""} (step 4)`);
 const fbx = exportMesh("terrain.fbx", {});
 mark(10, "VERIFIED", `FBX binary 7.4 (own writer): ${fbx.vertices} vertices, ${fbx.bytes} bytes`);
 const scatter = op("terrain.scatter", { mask: "mask_forest", height: "height", spacing_m: 40, seed: 1, path: "trees.glb" }, false);
@@ -255,6 +261,10 @@ for (const file of ["terrain_lod0.glb", "terrain_lod1.glb", "terrain_lod2.glb", 
 const usdchecker = spawnSync("usdchecker", [path.join(exportsDir, "terrain.usda")], { encoding: "utf8" });
 if (usdchecker.error) mark(11, "PARTIAL", "usdchecker not on PATH: USD layers not validated here");
 else mark(11, /Success/.test(usdchecker.stdout) ? "VERIFIED" : "FAILED", `usdchecker terrain.usda: ${usdchecker.stdout.trim().split("\n").pop()}`);
+if (!usdchecker.error && existsSync(path.join(exportsDir, "terrain.usdc"))) {
+  const c = spawnSync("usdchecker", [path.join(exportsDir, "terrain.usdc")], { encoding: "utf8" });
+  mark(11, /Success/.test(c.stdout) ? "VERIFIED" : "FAILED", `usdchecker terrain.usdc: ${c.stdout.trim().split("\n").pop()}`);
+}
 // FBX: our own writer read back by Unity's ModelImporter (the Autodesk FBX SDK) when a Unity editor is installed.
 if (existsSync("scripts/unity-import-check.sh") && (process.env.UNITY || existsSync("/Applications/Unity/Hub/Editor"))) {
   try {

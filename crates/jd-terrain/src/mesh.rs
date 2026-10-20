@@ -1052,6 +1052,53 @@ pub fn export_usdz(
     write_usdz(&mesh, extent_m, path, step)
 }
 
+/// USDC: the USDA layer converted to the binary crate format by the system `usdcat`
+/// (Apple USD Tools / OpenUSD) — the same layer, a fraction of the bytes, no text parsing on
+/// load. `E_DEPENDENCY_MISSING` when no `usdcat` is on PATH.
+pub fn export_usdc(
+    hf: &Heightfield,
+    extent_m: [f64; 2],
+    path: &Path,
+    step: u32,
+) -> JdResult<MeshExportReport> {
+    let mesh = GridMesh::build(hf, extent_m, step)?;
+    write_usdc(&mesh, extent_m, path, step)
+}
+
+/// Write an already built (or decimated) mesh as USDC via `usdcat`.
+pub fn write_usdc(
+    mesh: &GridMesh,
+    extent_m: [f64; 2],
+    path: &Path,
+    step: u32,
+) -> JdResult<MeshExportReport> {
+    let usda = path.with_extension("usda");
+    let mut rep = write_usda(mesh, extent_m, &usda, step)?;
+    let status = std::process::Command::new("usdcat")
+        .arg(&usda)
+        .arg("-o")
+        .arg(path)
+        .output()
+        .map_err(|e| {
+            JdError::new(jd_types::ErrorCode::E_DEPENDENCY_MISSING, format!("usdcat not available: {e}"))
+                .next("Install OpenUSD tools (macOS 27 ships them in /usr/bin; `pip install usd-core` elsewhere) or export .usda.")
+        })?;
+    if !status.status.success() {
+        return Err(JdError::new(
+            jd_types::ErrorCode::E_SERIALIZE,
+            format!(
+                "usdcat failed: {}",
+                String::from_utf8_lossy(&status.stderr).trim()
+            ),
+        )
+        .detail("path", path.display().to_string()));
+    }
+    rep.path = path.to_path_buf();
+    rep.format = "usdc".into();
+    rep.bytes = fs::metadata(path)?.len();
+    Ok(rep)
+}
+
 /// Write an already built (or decimated) mesh as USDZ via `usdzip`.
 pub fn write_usdz(
     mesh: &GridMesh,
@@ -1238,6 +1285,7 @@ pub fn export_mesh_with(
         Some("stl") => export_stl(hf, extent_m, path, step),
         Some("ply") => export_ply(hf, extent_m, path, step),
         Some("usda") => export_usda(hf, extent_m, path, step),
+        Some("usdc") => export_usdc(hf, extent_m, path, step),
         Some("usdz") => export_usdz(hf, extent_m, path, step),
         Some("fbx") => crate::fbx::export_fbx(hf, extent_m, path, step, texture),
         Some(other) => Err(JdError::new(
@@ -1341,6 +1389,7 @@ fn write_decimated(
         Some("stl") => write_stl(mesh, extent_m, path, step),
         Some("ply") => write_ply(mesh, extent_m, path, step),
         Some("usda") => write_usda(mesh, extent_m, path, step),
+        Some("usdc") => write_usdc(mesh, extent_m, path, step),
         Some("usdz") => write_usdz(mesh, extent_m, path, step),
         Some("fbx") => Err(JdError::invalid(
             "target_triangles",
@@ -1445,6 +1494,36 @@ pub fn export_mesh_lods_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn usdc_is_the_usda_layer_in_the_binary_crate() {
+        if std::process::Command::new("usdcat")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            eprintln!("usdcat not on PATH: skipping");
+            return;
+        }
+        let mut h = Heightfield::new(17, 13, 64, 0).expect("hf");
+        h.fill_with(|x, y| (x * y) as f32);
+        let dir = tempfile::tempdir().expect("tmp");
+        let usdc = dir.path().join("t.usdc");
+        let r = export_usdc(&h, [160.0, 120.0], &usdc, 1).expect("usdc");
+        assert_eq!(
+            (r.format.as_str(), r.vertices, r.triangles),
+            ("usdc", 17 * 13, 16 * 12 * 2)
+        );
+        let bytes = std::fs::read(&usdc).expect("read");
+        assert!(bytes.starts_with(b"PXR-USDC"), "binary crate magic");
+        assert!(
+            r.bytes
+                < std::fs::metadata(dir.path().join("t.usda"))
+                    .expect("usda")
+                    .len(),
+            "smaller than the text layer"
+        );
+    }
 
     #[test]
     fn topology_counts_boundary_degenerate_and_non_manifold() {
