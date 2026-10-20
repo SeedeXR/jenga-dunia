@@ -26,11 +26,14 @@ struct Params {
     ly: f32,
     area: f32,
     g: f32,
+    has_drains: u32,
+    _pad: [u32; 3],
 }
 
 impl Gpu {
     /// [`jd_terrain::hydraulic_erode_with`] on the GPU: same model, same validation, same
-    /// optional `hardness` (0..1) and `rain` (0..1) fields.
+    /// optional `hardness` (0..1), `rain` (0..1) and `drains` (> 0.5) fields.
+    #[allow(clippy::too_many_arguments)]
     pub fn hydraulic_erode(
         &self,
         h: &Heightfield,
@@ -38,9 +41,10 @@ impl Gpu {
         p: &HydraulicParams,
         hardness: Option<&Heightfield>,
         rain: Option<&Heightfield>,
+        drains: Option<&Heightfield>,
         cancel: Option<&std::sync::atomic::AtomicBool>,
     ) -> JdResult<HydraulicResult> {
-        for (name, f) in [("hardness", hardness), ("rain", rain)] {
+        for (name, f) in [("hardness", hardness), ("rain", rain), ("drains", drains)] {
             if let Some(k) = f
                 && (k.width(), k.height()) != (h.width(), h.height())
             {
@@ -98,6 +102,8 @@ impl Gpu {
             ly: spacing_m[1],
             area: spacing_m[0] * spacing_m[1],
             g: 9.81,
+            has_drains: drains.is_some() as u32,
+            _pad: [0; 3],
         };
         let dev = &self.device;
         let shader = dev.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -124,6 +130,11 @@ impl Gpu {
         let water_pre = storage("water_pre", f32_bytes);
         let soft = storage("soft", if hardness.is_some() { f32_bytes } else { 4 });
         let rain_buf = storage("rain", if rain.is_some() { f32_bytes } else { 4 });
+        let drain_buf = storage("drains", if drains.is_some() { f32_bytes } else { 4 });
+        if let Some(d) = drains {
+            self.queue
+                .write_buffer(&drain_buf, 0, bytemuck::cast_slice(&d.to_vec()));
+        }
         let uniform = dev.create_buffer(&wgpu::BufferDescriptor {
             label: Some("params"),
             size: std::mem::size_of::<Params>() as u64,
@@ -180,6 +191,7 @@ impl Gpu {
                 binding(5, rw),
                 binding(6, ro),
                 binding(7, ro),
+                binding(8, ro),
             ],
         });
         let pipeline_layout = dev.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -239,6 +251,11 @@ impl Gpu {
                         wgpu::BindGroupEntry {
                             binding: 7,
                             resource: rain_buf.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 8,
+
+                            resource: drain_buf.as_entire_binding(),
                         },
                     ],
                 })
@@ -337,10 +354,19 @@ mod tests {
                 Some(&hard),
                 Some(&rain),
                 None,
+                None,
             )
             .expect("cpu");
             let g = gpu
-                .hydraulic_erode(&valley, [10.0, 10.0], &q, Some(&hard), Some(&rain), None)
+                .hydraulic_erode(
+                    &valley,
+                    [10.0, 10.0],
+                    &q,
+                    Some(&hard),
+                    Some(&rain),
+                    None,
+                    None,
+                )
                 .expect("gpu");
             let d = c
                 .height
@@ -358,10 +384,19 @@ mod tests {
             Some(&hard),
             Some(&rain),
             None,
+            None,
         )
         .expect("cpu");
         let g = gpu
-            .hydraulic_erode(&valley, [10.0, 10.0], &p, Some(&hard), Some(&rain), None)
+            .hydraulic_erode(
+                &valley,
+                [10.0, 10.0],
+                &p,
+                Some(&hard),
+                Some(&rain),
+                None,
+                None,
+            )
             .expect("gpu");
         let worst = |a: &Heightfield, b: &Heightfield| {
             let (a, b) = (a.to_vec(), b.to_vec());
@@ -399,13 +434,36 @@ mod tests {
                 &HydraulicParams { dt: 0.0, ..p },
                 None,
                 None,
+                None,
                 None
             )
             .is_err()
         );
+        // Drains agree too: the south row is a river mouth on both engines.
+        let mut mouth = Heightfield::new(48, 32, 64, 0).expect("m");
+        mouth.fill_with(|_, y| if y == 0 { 1.0 } else { 0.0 });
+        let c = jd_terrain::hydraulic_erode_with(
+            &valley,
+            [10.0, 10.0],
+            &p,
+            None,
+            None,
+            Some(&mouth),
+            None,
+        )
+        .expect("cpu drains");
+        let d = gpu
+            .hydraulic_erode(&valley, [10.0, 10.0], &p, None, None, Some(&mouth), None)
+            .expect("gpu drains");
+        let dd = worst(&c.height, &d.height);
+        assert!(
+            dd <= 1e-5 * scale && (0..48).all(|x| d.water.get(x, 0) == 0.0),
+            "drains parity {dd}"
+        );
         // A cancel flag already set stops before the first chunk is submitted.
         let stop = std::sync::atomic::AtomicBool::new(true);
-        let Err(e) = gpu.hydraulic_erode(&valley, [10.0, 10.0], &p, None, None, Some(&stop)) else {
+        let Err(e) = gpu.hydraulic_erode(&valley, [10.0, 10.0], &p, None, None, None, Some(&stop))
+        else {
             panic!("a set cancel flag must stop the run");
         };
         assert_eq!(e.code, jd_types::ErrorCode::E_CANCELLED);

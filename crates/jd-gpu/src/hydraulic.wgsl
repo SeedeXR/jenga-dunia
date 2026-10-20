@@ -20,6 +20,10 @@ struct Params {
     ly: f32,
     area: f32,
     g: f32,
+    has_drains: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
 }
 
 @group(0) @binding(0) var<uniform> p: Params;
@@ -30,6 +34,7 @@ struct Params {
 @group(0) @binding(5) var<storage, read_write> water_pre: array<f32>;
 @group(0) @binding(6) var<storage, read> soft: array<f32>;
 @group(0) @binding(7) var<storage, read> rain: array<f32>;
+@group(0) @binding(8) var<storage, read> drains: array<f32>;
 
 const PIPES: array<vec2<i32>, 4> = array<vec2<i32>, 4>(vec2(-1, 0), vec2(1, 0), vec2(0, -1), vec2(0, 1));
 
@@ -139,6 +144,11 @@ fn update_pass(@builtin(global_invocation_id) id: vec3<u32>) {
     if s > cap {
         t += s - cap;
         s = cap;
+    }
+    // Drains: the water and what it carries leave the field here.
+    if p.has_drains != 0u && drains[i] > 0.5 {
+        state_out[i] = vec4(t, 0.0, 0.0, 0.0);
+        return;
     }
     state_out[i] = vec4(t, d_final, s, 0.0);
 }

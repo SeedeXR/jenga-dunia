@@ -299,27 +299,32 @@ pub fn hydraulic_erode(
     p: &HydraulicParams,
     cancel: Option<&AtomicBool>,
 ) -> JdResult<HydraulicResult> {
-    hydraulic_erode_with(h, spacing_m, p, None, None, cancel)
+    hydraulic_erode_with(h, spacing_m, p, None, None, None, cancel)
 }
 
 /// [`hydraulic_erode`] with an optional per-cell `hardness` field (0..1): the dissolving constant
 /// drops to a tenth on hard rock, so water cuts shale and deposits on caprock as before — and an
-/// optional `rain` field (0..1, e.g. `orographic_rain`) that scales `rain_rate` per cell.
+/// optional `rain` field (0..1, e.g. `orographic_rain`) that scales `rain_rate` per cell, and an
+/// optional `drains` mask (> 0.5): water and its sediment leave the field there (a river mouth,
+/// a sink), instead of ponding against the closed boundary.
+#[allow(clippy::too_many_arguments)]
 pub fn hydraulic_erode_with(
     h: &Heightfield,
     spacing_m: [f32; 2],
     p: &HydraulicParams,
     hardness: Option<&Heightfield>,
     rain: Option<&Heightfield>,
+    drains: Option<&Heightfield>,
     cancel: Option<&AtomicBool>,
 ) -> JdResult<HydraulicResult> {
-    for (name, f) in [("hardness", hardness), ("rain", rain)] {
+    for (name, f) in [("hardness", hardness), ("rain", rain), ("drains", drains)] {
         if let Some(k) = f
             && (k.width(), k.height()) != (h.width(), h.height())
         {
             return Err(JdError::invalid(name, "field size differs from `in`"));
         }
     }
+    let drain: Option<Vec<bool>> = drains.map(|d| d.to_vec().iter().map(|v| *v > 0.5).collect());
     let rain_scale: Option<Vec<f32>> =
         rain.map(|r| r.to_vec().iter().map(|v| v.clamp(0.0, 1.0)).collect());
     let soft: Option<Vec<f32>> = hardness.map(|k| {
@@ -494,9 +499,11 @@ pub fn hydraulic_erode_with(
                         t += s - cap;
                         s = cap;
                     }
+                    // 5. Drains: the water and what it carries leave the field here.
+                    let drained = drain.as_ref().is_some_and(|d| d[i]);
                     trow[x] = t;
-                    srow[x] = s;
-                    wrow[x] = d_final;
+                    srow[x] = if drained { 0.0 } else { s };
+                    wrow[x] = if drained { 0.0 } else { d_final };
                 }
             });
         terrain = terrain2;
@@ -552,8 +559,8 @@ mod tests {
         let soft = hydraulic_erode(&valley, [10.0, 10.0], &p, None).expect("soft");
         let mut cap = Heightfield::new(48, 32, 64, 0).expect("k");
         cap.fill_with(|_, _| 1.0);
-        let hard =
-            hydraulic_erode_with(&valley, [10.0, 10.0], &p, Some(&cap), None, None).expect("hard");
+        let hard = hydraulic_erode_with(&valley, [10.0, 10.0], &p, Some(&cap), None, None, None)
+            .expect("hard");
         let moved = |f: &Heightfield| {
             (0..32)
                 .flat_map(|y| (0..48).map(move |x| (x, y)))
@@ -564,8 +571,8 @@ mod tests {
         assert!(ms > 0.0 && mh < ms * 0.5, "hard {mh} vs soft {ms}");
         let mut zero = Heightfield::new(48, 32, 64, 0).expect("z");
         zero.fill_with(|_, _| 0.0);
-        let same =
-            hydraulic_erode_with(&valley, [10.0, 10.0], &p, Some(&zero), None, None).expect("zero");
+        let same = hydraulic_erode_with(&valley, [10.0, 10.0], &p, Some(&zero), None, None, None)
+            .expect("zero");
         assert_eq!(same.height.to_vec(), soft.height.to_vec());
     }
 
@@ -779,6 +786,51 @@ mod tests {
             moved.content_hash(),
             ramp.content_hash(),
             "steeper than talus if y spacing were 1 m"
+        );
+    }
+
+    #[test]
+    fn drains_let_water_and_sediment_leave_at_the_marked_cells() {
+        // The valley of the hardness test; the south row is the river mouth.
+        let mut valley = Heightfield::new(48, 32, 64, 0).expect("v");
+        valley.fill_with(|x, y| 200.0 + y as f32 * 2.0 + (x as f32 - 24.0).abs() * 1.5);
+        let mut mouth = Heightfield::new(48, 32, 64, 0).expect("m");
+        mouth.fill_with(|_, y| if y == 0 { 1.0 } else { 0.0 });
+        let p = HydraulicParams {
+            iterations: 80,
+            rain_rate: 0.2,
+            ..Default::default()
+        };
+        let closed = hydraulic_erode_with(&valley, [10.0, 10.0], &p, None, None, None, None)
+            .expect("closed");
+        let open = hydraulic_erode_with(&valley, [10.0, 10.0], &p, None, None, Some(&mouth), None)
+            .expect("open");
+        let sum = |f: &Heightfield| f.to_vec().iter().map(|v| *v as f64).sum::<f64>();
+        assert!(
+            sum(&open.water) < 0.9 * sum(&closed.water),
+            "water leaves: {} vs {}",
+            sum(&open.water),
+            sum(&closed.water)
+        );
+        assert!(
+            (0..48).all(|x| open.water.get(x, 0) == 0.0 && open.sediment.get(x, 0) == 0.0),
+            "the mouth row holds nothing"
+        );
+        assert!(
+            sum(&open.height) + sum(&open.sediment) < sum(&closed.height) + sum(&closed.sediment),
+            "sediment left with the water"
+        );
+        assert!(
+            hydraulic_erode_with(
+                &valley,
+                [10.0, 10.0],
+                &p,
+                None,
+                None,
+                Some(&Heightfield::new(4, 4, 64, 0).expect("s")),
+                None
+            )
+            .is_err()
         );
     }
 

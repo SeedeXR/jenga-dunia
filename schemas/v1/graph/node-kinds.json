@@ -861,7 +861,7 @@
   },
   {
     "kind": "jd.erosion.hydraulic@1",
-    "description": "Hydraulic erosion (virtual pipes / shallow water): rain flows downhill, dissolves, carries and deposits sediment; outputs terrain, water depth and suspended sediment; an optional `hardness` field (0..1) drops the dissolving rate to a tenth on hard rock; an optional `rain` field (0..1, e.g. `jd.climate.rain@1`) scales `rain_rate` per cell; `engine: gpu` runs the same passes on the headless GPU",
+    "description": "Hydraulic erosion (virtual pipes / shallow water): rain flows downhill, dissolves, carries and deposits sediment; outputs terrain, water depth and suspended sediment; an optional `hardness` field (0..1) drops the dissolving rate to a tenth on hard rock; an optional `rain` field (0..1, e.g. `jd.climate.rain@1`) scales `rain_rate` per cell; an optional `drains` mask (> 0.5, e.g. a sea or river-mouth mask) lets water and its sediment leave the field there; `engine: gpu` runs the same passes on the headless GPU",
     "inputs": [
       {
         "name": "in",
@@ -875,6 +875,11 @@
       },
       {
         "name": "rain",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "drains",
         "ty": "heightfield",
         "required": false
       }

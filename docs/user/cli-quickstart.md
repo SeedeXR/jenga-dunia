@@ -804,7 +804,7 @@ $ jd export heightmap --project Rain.jdproj --layer rain --format png16 rain.png
 
 `jd.climate.rain@1` is a one-sweep Smith–Barstad-style model: saturated air holds less water the higher it goes (`exp(-h / moisture_scale_m)`, 2 500 m by default), so as a column of air is carried cell to cell along the wind it condenses whatever exceeds the local capacity as rain, drizzles a steady share over flat ground (`base_per_km`), and re-moistens towards saturation over `recovery_km` (40 km — the length of a rain shadow). Descending air rains nothing because its capacity grows, which is why only crests higher than everything upwind of them catch rain and the hills behind a range stay dry until the air has recovered. The wind is the world's (`project.set_settings {wind}`) unless the node sets `wind_azimuth_deg`; unit test: a ridge on a plain under a westerly, then an easterly. Not modelled: temperature, advection delay, winds off the 8 compass directions (the sweep rounds the wind to a neighbour, hence the row-wise streaks).
 
-**Feeding erosion.** The hydraulic node takes the mask on its new `rain` port and scales `rain_rate` per cell — the same 100-step run twice on the world above, once with the port wired and once without:
+**Feeding erosion.** The hydraulic node takes the mask on its `rain` port and scales `rain_rate` per cell (and a `drains` mask — a sea or river-mouth layer, > 0.5 — lets water and its sediment leave the field there instead of ponding against the closed boundary; unit test: the water budget drops by over 10 % with the south row as a mouth, on the CPU and the GPU alike) — the same 100-step run twice on the world above, once with the port wired and once without:
 
 ```
 # rain.rain → hydraulic.rain  (and a second hydraulic node without it)

@@ -836,8 +836,8 @@ pub fn register_all(r: &mut Registry) {
     ));
     r.register(NodeDef::new::<HydraulicNodeParams, _>(
         "jd.erosion.hydraulic@1",
-        "Hydraulic erosion (virtual pipes / shallow water): rain flows downhill, dissolves, carries and deposits sediment; outputs terrain, water depth and suspended sediment; an optional `hardness` field (0..1) drops the dissolving rate to a tenth on hard rock; an optional `rain` field (0..1, e.g. `jd.climate.rain@1`) scales `rain_rate` per cell; `engine: gpu` runs the same passes on the headless GPU",
-        vec![port("in", PortType::Heightfield, true), port("hardness", PortType::Heightfield, false), port("rain", PortType::Heightfield, false)],
+        "Hydraulic erosion (virtual pipes / shallow water): rain flows downhill, dissolves, carries and deposits sediment; outputs terrain, water depth and suspended sediment; an optional `hardness` field (0..1) drops the dissolving rate to a tenth on hard rock; an optional `rain` field (0..1, e.g. `jd.climate.rain@1`) scales `rain_rate` per cell; an optional `drains` mask (> 0.5, e.g. a sea or river-mouth mask) lets water and its sediment leave the field there; `engine: gpu` runs the same passes on the headless GPU",
+        vec![port("in", PortType::Heightfield, true), port("hardness", PortType::Heightfield, false), port("rain", PortType::Heightfield, false), port("drains", PortType::Heightfield, false)],
         vec![
             port("out", PortType::Heightfield, false),
             port("water", PortType::Heightfield, false),
@@ -850,6 +850,7 @@ pub fn register_all(r: &mut Registry) {
             }
             let hardness = i.get("hardness").map(|v| v.as_field());
             let rain = i.get("rain").map(|v| v.as_field());
+            let drains = i.get("drains").map(|v| v.as_field());
             let hp2 = HydraulicParams {
                     iterations: hp.iterations,
                     dt: hp.dt,
@@ -862,8 +863,8 @@ pub fn register_all(r: &mut Registry) {
                     ..Default::default()
                 };
             let r = match hp.engine {
-                Engine::Cpu => jd_terrain::hydraulic_erode_with(field(i, "in")?, spacing_m(ctx), &hp2, hardness.map(|k| &**k), rain.map(|k| &**k), Some(&ctx.cancel))?,
-                Engine::Gpu => gpu()?.hydraulic_erode(field(i, "in")?, spacing_m(ctx), &hp2, hardness.map(|k| &**k), rain.map(|k| &**k), Some(&ctx.cancel))?,
+                Engine::Cpu => jd_terrain::hydraulic_erode_with(field(i, "in")?, spacing_m(ctx), &hp2, hardness.map(|k| &**k), rain.map(|k| &**k), drains.map(|k| &**k), Some(&ctx.cancel))?,
+                Engine::Gpu => gpu()?.hydraulic_erode(field(i, "in")?, spacing_m(ctx), &hp2, hardness.map(|k| &**k), rain.map(|k| &**k), drains.map(|k| &**k), Some(&ctx.cancel))?,
             };
             Ok(BTreeMap::from([
                 ("out".to_owned(), Value::field(r.height)),
