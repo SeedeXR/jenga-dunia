@@ -170,11 +170,15 @@ describe("App", () => {
       }
     };
     await settle();
-    const before = calls.length;
+    // What a cancelled dialog must not do is open a project: count project.open calls, not
+    // every call — stats/preview/texture fetches of the previous open may still trickle in
+    // on a slow runner (seen twice on CI).
+    const opens = () => calls.filter((c) => (c.args as { request?: { op: string } }).request?.op === "project.open").length;
+    const before = opens();
     dialog.open = null;
     menuListeners.forEach((cb) => cb({ payload: "open" }));
     await new Promise((r) => setTimeout(r, 40));
-    expect(calls.length).toBe(before);
+    expect(opens()).toBe(before);
     menuListeners.forEach((cb) => cb({ payload: "evaluate" }));
     await waitFor(() => expect(screen.getByTestId("log")).toHaveTextContent("graph.evaluate"));
     menuListeners.forEach((cb) => cb({ payload: "undo-graph" }));
