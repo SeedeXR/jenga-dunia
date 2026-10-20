@@ -70,13 +70,18 @@
           "format": "float"
         },
         "epsg": {
-          "description": "EPSG code from the GeoKey directory (ProjectedCSTypeGeoKey or GeographicTypeGeoKey).",
+          "description": "EPSG code from the GeoKey directory (ProjectedCSTypeGeoKey, else GeographicTypeGeoKey).",
           "type": [
             "integer",
             "null"
           ],
           "format": "uint32",
           "minimum": 0
+        },
+        "pixel_is_point": {
+          "description": "`GTRasterTypeGeoKey` = PixelIsPoint: the tie point names a pixel centre, not its corner.",
+          "type": "boolean",
+          "default": false
         }
       }
     }

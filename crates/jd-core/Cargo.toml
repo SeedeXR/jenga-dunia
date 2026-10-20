@@ -11,6 +11,7 @@ publish.workspace = true
 [dependencies]
 jd-types.workspace = true
 jd-terrain.workspace = true
+jd-geo.workspace = true
 jd-graph.workspace = true
 jd-cache.workspace = true
 base64.workspace = true

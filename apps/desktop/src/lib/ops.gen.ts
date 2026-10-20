@@ -692,8 +692,10 @@ export type GeoTags = {
   "tiepoint"?: [number, number, number, number, number, number] | null;
   /** `GDAL_NODATA` value. */
   "nodata"?: number | null;
-  /** EPSG code from the GeoKey directory (ProjectedCSTypeGeoKey or GeographicTypeGeoKey). */
+  /** EPSG code from the GeoKey directory (ProjectedCSTypeGeoKey, else GeographicTypeGeoKey). */
   "epsg"?: number | null;
+  /** `GTRasterTypeGeoKey` = PixelIsPoint: the tie point names a pixel centre, not its corner. */
+  "pixel_is_point"?: boolean;
 };
 
 export type ProjectImportAssetResult = {

@@ -48,8 +48,11 @@ pub struct GeoTags {
     pub tiepoint: Option<[f64; 6]>,
     /// `GDAL_NODATA` value.
     pub nodata: Option<f32>,
-    /// EPSG code from the GeoKey directory (ProjectedCSTypeGeoKey or GeographicTypeGeoKey).
+    /// EPSG code from the GeoKey directory (ProjectedCSTypeGeoKey, else GeographicTypeGeoKey).
     pub epsg: Option<u32>,
+    /// `GTRasterTypeGeoKey` = PixelIsPoint: the tie point names a pixel centre, not its corner.
+    #[serde(default)]
+    pub pixel_is_point: bool,
 }
 
 /// GeoTIFF tags of a `.tif`/`.tiff`; `None` for other extensions or when the file carries none.
@@ -96,19 +99,36 @@ pub fn geotiff_tags(path: &Path) -> JdResult<Option<GeoTags>> {
             .ok()
             .and_then(|keys| {
                 keys.get(4..).and_then(|body| {
-                    body.as_chunks::<4>()
-                        .0
-                        .iter()
-                        .find(|k| (k[0] == 3072 || k[0] == 2048) && k[1] == 0)
+                    let keys = body.as_chunks::<4>().0;
+                    // A projected file also lists its geographic base; the projected code wins.
+                    keys.iter()
+                        .find(|k| k[0] == 3072 && k[1] == 0)
+                        .or_else(|| keys.iter().find(|k| k[0] == 2048 && k[1] == 0))
                         .map(|k| k[3] as u32)
                 })
             }),
         None => None,
     };
+    // GTRasterTypeGeoKey: 1 = PixelIsArea (tie point at the pixel corner, the default), 2 = PixelIsPoint
+    // (tie point at the pixel centre — SRTM, NED and most DEM products).
+    let pixel_is_point = dec
+        .get_tag_u16_vec(Tag::GeoKeyDirectoryTag)
+        .ok()
+        .and_then(|keys| {
+            keys.get(4..).and_then(|body| {
+                body.as_chunks::<4>()
+                    .0
+                    .iter()
+                    .find(|k| k[0] == 1025 && k[1] == 0)
+                    .map(|k| k[3] == 2)
+            })
+        })
+        .unwrap_or(false);
     if pixel_scale.is_none() && tiepoint.is_none() && nodata.is_none() && epsg.is_none() {
         return Ok(None);
     }
     Ok(Some(GeoTags {
+        pixel_is_point,
         pixel_scale,
         tiepoint,
         nodata,
@@ -152,13 +172,20 @@ fn dequant(q: &[u16], range: [f32; 2]) -> Vec<f32> {
 /// Decode a file to (samples row-major, width, height). Quantised sources need `range_m`.
 /// Nodata samples (see [`ForeignImport::nodata`]) are filled with the lowest valid height.
 pub fn read_foreign(path: &Path, opts: &ForeignImport) -> JdResult<(Vec<f32>, u32, u32)> {
-    let (mut data, w, h) = decode(path, opts)?;
-    let nodata = match opts.nodata {
-        Some(n) => Some(n),
-        None => geotiff_tags(path)?.and_then(|t| t.nodata),
-    };
-    fill_nodata(&mut data, nodata)?;
+    let (data, w, h, _) = read_foreign_with_tags(path, opts)?;
     Ok((data, w, h))
+}
+
+/// [`read_foreign`] plus the GeoTIFF tags it read on the way (one IFD walk, not two).
+pub fn read_foreign_with_tags(
+    path: &Path,
+    opts: &ForeignImport,
+) -> JdResult<(Vec<f32>, u32, u32, Option<GeoTags>)> {
+    let (mut data, w, h) = decode(path, opts)?;
+    let tags = geotiff_tags(path)?;
+    let nodata = opts.nodata.or_else(|| tags.as_ref().and_then(|t| t.nodata));
+    fill_nodata(&mut data, nodata)?;
+    Ok((data, w, h, tags))
 }
 
 fn decode(path: &Path, opts: &ForeignImport) -> JdResult<(Vec<f32>, u32, u32)> {
@@ -298,8 +325,14 @@ pub fn resample_to_world_geo(
             "the file has no tie point / pixel scale to place it by",
         ));
     };
-    if !(scale[0] > 0.0 && scale[1] > 0.0) {
-        return Err(corrupt("heightmap", "pixel scale must be positive"));
+    if !(scale[0] > 0.0 && scale[1] > 0.0 && scale.iter().all(|v| v.is_finite())) {
+        return Err(corrupt(
+            "heightmap",
+            "pixel scale must be positive and finite",
+        ));
+    }
+    if !tie.iter().all(|v| v.is_finite()) {
+        return Err(corrupt("heightmap", "tie point must be finite"));
     }
     let transformer = match (&world.crs, tags.epsg) {
         (Some(wc), Some(fe)) if crate::export::epsg_code(Some(wc)) != Some(fe) => {
@@ -311,24 +344,28 @@ pub fn resample_to_world_geo(
     let (ow, oh) = (out.width(), out.height());
     let sp = world.spacing_m();
     // Control grid of file-pixel coordinates (col, row) at every CONTROL_STEP world pixels.
+    // Control points every CONTROL_STEP pixels, the last column/row past the edge (the transform
+    // is smooth, so extrapolating keeps every interval CONTROL_STEP wide).
     let (cx, cy) = (ow.div_ceil(CONTROL_STEP) + 1, oh.div_ceil(CONTROL_STEP) + 1);
     let mut pts: Vec<(f64, f64)> = Vec::with_capacity((cx * cy) as usize);
     for gy in 0..cy {
         for gx in 0..cx {
-            let px = (gx * CONTROL_STEP).min(ow) as f64;
-            let py = (gy * CONTROL_STEP).min(oh) as f64;
+            let px = (gx * CONTROL_STEP) as f64;
+            let py = (gy * CONTROL_STEP) as f64;
             pts.push((world.origin[0] + px * sp[0], world.origin[1] + py * sp[1]));
         }
     }
     if let Some(t) = &transformer {
         t.transform(&mut pts)?;
     }
+    // PixelIsArea ties the raster's (i, j) to the pixel corner; PixelIsPoint to its centre.
+    let centre = if tags.pixel_is_point { 0.0 } else { 0.5 };
     let ctrl: Vec<(f64, f64)> = pts
         .iter()
         .map(|(fx, fy)| {
             (
-                tie[0] + (fx - tie[3]) / scale[0],
-                tie[1] + (tie[4] - fy) / scale[1],
+                tie[0] + (fx - tie[3]) / scale[0] - centre,
+                tie[1] + (tie[4] - fy) / scale[1] - centre,
             )
         })
         .collect();
@@ -352,7 +389,7 @@ pub fn resample_to_world_geo(
             lerp(c(gx, gy + 1), c(gx + 1, gy + 1), fu),
             fv,
         );
-        let (sx, sy) = (col - 0.5, row - 0.5);
+        let (sx, sy) = (col, row);
         let (x0, y0) = (
             sx.floor().clamp(0.0, (w - 1) as f64),
             sy.floor().clamp(0.0, (h - 1) as f64),
@@ -429,6 +466,7 @@ mod tests {
             tiepoint: Some([0.0, 0.0, 0.0, 38.99 - 0.00025, 0.01 + 0.00025, 0.0]), // pixel-corner tie
             nodata: None,
             epsg: Some(4326),
+            pixel_is_point: false,
         };
         // The world: UTM 37N, 1 km around the central meridian / equator, 32 × 32 cells.
         let world = WorldSettings {
@@ -456,6 +494,53 @@ mod tests {
                 hf.get(x, y)
             );
         }
+        // A world that is not a multiple of the control step: the last strip is placed just as
+        // well (the control grid extrapolates past the edge instead of squeezing the last interval).
+        let odd = WorldSettings {
+            resolution_px: [100, 50],
+            extent_m: [1000.0, 500.0],
+            ..world.clone()
+        };
+        let hf_odd = resample_to_world_geo(&data, w, h, &tags, &odd).expect("odd size");
+        for (x, y) in [(99u32, 49u32), (97, 2), (0, 49)] {
+            let mut p = [(
+                499_500.0 + (x as f64 + 0.5) * 10.0,
+                -500.0 + (y as f64 + 0.5) * 10.0,
+            )];
+            t.transform(&mut p).expect("to lon/lat");
+            let expected = (p[0].0 - 38.99) / 0.0005;
+            assert!(
+                (hf_odd.get(x, y) as f64 - expected).abs() < 0.05,
+                "odd pixel ({x}, {y}): {} vs {expected}",
+                hf_odd.get(x, y)
+            );
+        }
+        // PixelIsPoint: the same file declared with centre-anchored ties reads half a pixel over.
+        let point = GeoTags {
+            pixel_is_point: true,
+            tiepoint: Some([0.0, 0.0, 0.0, 38.99, 0.01, 0.0]),
+            ..tags.clone()
+        };
+        let hf_pt = resample_to_world_geo(&data, w, h, &point, &world).expect("point");
+        assert!(
+            (hf_pt.get(16, 16) - hf.get(16, 16)).abs() < 0.05,
+            "a centre tie at the pixel centre places the same: {} vs {}",
+            hf_pt.get(16, 16),
+            hf.get(16, 16)
+        );
+        assert!(
+            resample_to_world_geo(
+                &data,
+                w,
+                h,
+                &GeoTags {
+                    tiepoint: Some([0.0, 0.0, 0.0, f64::NAN, 0.0, 0.0]),
+                    ..tags.clone()
+                },
+                &world
+            )
+            .is_err()
+        );
         // Same-CRS placement without a transform, and the structured errors.
         let same = WorldSettings {
             crs: Some("EPSG:4326".to_owned()),

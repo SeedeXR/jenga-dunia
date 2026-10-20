@@ -8,7 +8,7 @@ use jd_terrain::{
     HydraulicParams, NoiseParams, SeabedParams, SnowParams, StreamPowerParams, Stroke,
     THERMAL_MAX_RATE, aeolian_transport_with, apply_strokes, carve_rivers_with, classify_seabed,
     coastal_erode, droplet_erode, fill_depressions_with, flow_accumulation_with, generate_noise,
-    read_foreign, resample_to_world, sea_level, slope_mask, snow_cover, wetness_index_with,
+    resample_to_world, sea_level, slope_mask, snow_cover, wetness_index_with,
 };
 use jd_types::{JdError, JdResult};
 use rayon::prelude::*;
@@ -581,7 +581,7 @@ pub fn register_all(r: &mut Registry) {
             let (out_h, rivers, order) = jd_terrain::hydrology_first(w.resolution_px[0], w.resolution_px[1], w.tile_size, w.halo, spacing_m(ctx), &np)?;
             Ok(BTreeMap::from([("out".to_owned(), Value::field(out_h)), ("rivers".to_owned(), Value::field(rivers)), ("order".to_owned(), Value::field(order))]))
         },
-    ).with_memory(14.0));
+    ).with_memory(50.0));
     r.register(NodeDef::new::<NoParams, _>(
         "jd.math.add@1",
         "a + b",
@@ -922,10 +922,10 @@ pub fn register_all(r: &mut Registry) {
             if !file.starts_with(&base) {
                 return Err(JdError::invalid("path", "file resolves outside the project's assets/ directory"));
             }
-            let (data, w, h) = read_foreign(&file, &ip.import)?;
+            let (data, w, h, tags) = jd_terrain::read_foreign_with_tags(&file, &ip.import)?;
             // A GeoTIFF that says where it is goes where it says (reprojected when its CRS differs
             // from the world's); everything else is stretched over the world.
-            let placed = match jd_terrain::geotiff_tags(&file)? {
+            let placed = match tags {
                 Some(tags) if ip.import.georeference && tags.pixel_scale.is_some() && tags.tiepoint.is_some() => {
                     jd_terrain::resample_to_world_geo(&data, w, h, &tags, &ctx.lod_world)?
                 }

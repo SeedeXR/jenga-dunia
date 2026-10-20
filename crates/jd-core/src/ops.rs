@@ -599,12 +599,16 @@ pub mod builtin {
                 }
                 if let Some(c) = &args.crs
                     && !c.is_empty()
-                    && (c.trim() != c || c.len() > 64)
                 {
-                    return Err(JdError::invalid(
-                        "params.crs",
-                        "an identifier such as `EPSG:32637` (≤ 64 chars, no surrounding spaces), or empty to clear",
-                    ));
+                    if c.trim() != c || c.len() > 64 {
+                        return Err(JdError::invalid(
+                            "params.crs",
+                            "an identifier such as `EPSG:32637` (≤ 64 chars, no surrounding spaces), or empty to clear",
+                        ));
+                    }
+                    // The build must be able to project it, or imports and exports fail later.
+                    jd_geo::proj_string(c)
+                        .map_err(|e| JdError::invalid("params.crs", e.message))?;
                 }
                 Project::validate_settings(&merged_settings(p, &args))
             }

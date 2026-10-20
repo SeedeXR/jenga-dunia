@@ -2213,6 +2213,7 @@ dependencies = [
  "base64 0.22.1",
  "insta",
  "jd-cache",
+ "jd-geo",
  "jd-graph",
  "jd-terrain",
  "jd-types",

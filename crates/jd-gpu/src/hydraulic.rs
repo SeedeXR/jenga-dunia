@@ -152,7 +152,7 @@ impl Gpu {
                 bytemuck::cast_slice(&packed),
             );
         }
-        self.queue.write_buffer(&flux[0], 0, &vec![0u8; n * 16]);
+        // flux[0] starts zeroed: wgpu zero-initialises a fresh buffer.
         if let Some(k) = hardness {
             let soft_v: Vec<f32> = k
                 .to_vec()
