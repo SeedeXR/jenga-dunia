@@ -799,6 +799,18 @@ pub mod graph {
         pub value: Value,
     }
 
+    /// `graph.append_param` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct AppendParam {
+        /// Node id.
+        pub id: NodeId,
+        /// Array-valued parameter key (created when absent).
+        pub key: String,
+        /// Element to push.
+        pub value: Value,
+    }
+
     /// `graph.evaluate` params.
     #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
@@ -1013,6 +1025,24 @@ pub mod graph {
                     node.params.insert(s.key, s.value);
                 }
             }
+            "graph.append_param" => {
+                let a: AppendParam = serde_json::from_value(params.clone())?;
+                let node = node_mut(g, &a.id)?;
+                match node
+                    .params
+                    .entry(a.key.clone())
+                    .or_insert_with(|| Value::Array(Vec::new()))
+                {
+                    Value::Array(items) => items.push(a.value),
+                    _ => {
+                        return Err(JdError::new(
+                            ErrorCode::E_INPUT_INVALID,
+                            format!("parameter `{}` is not an array", a.key),
+                        )
+                        .next("Use graph.set_param to replace a scalar parameter."));
+                    }
+                }
+            }
             other => {
                 return Err(JdError::new(
                     ErrorCode::E_INPUT_INVALID,
@@ -1139,6 +1169,18 @@ pub mod graph {
                 })
             },
         );
+        r.register::<AppendParam, GraphView, _>(
+            "graph.append_param",
+            "Push one element onto an array parameter (brush strokes): journaled with just the element, so a long sculpt session grows the journal linearly",
+            Scope::ProjectWrite,
+            |ctx, a| {
+                let params = serde_json::json!({ "id": a.id, "key": a.key, "value": a.value });
+                ctx.with_project(|p| {
+                    builtin::mutate(p, "graph.append_param", params)?;
+                    Ok((view(p), Vec::new()))
+                })
+            },
+        );
         r.register::<Evaluate, EvaluateResult, _>(
             "graph.evaluate",
             "Validate and evaluate the graph incrementally; publishes output nodes as layers (`<layer>#lod<N>` when lod > 0)",
@@ -1199,6 +1241,108 @@ pub mod graph {
 
         fn call(reg: &Registry, ctx: &Context, op: &str, params: Value) -> Response {
             reg.invoke(ctx, Request::new(op, params))
+        }
+
+        #[test]
+        fn append_param_pushes_strokes_and_keeps_the_journal_linear() {
+            let reg = Registry::with_builtins();
+            let dir = tempfile::tempdir().expect("tmp");
+            let path = dir.path().join("a.jdproj");
+            let ctx = Context::default();
+            assert_eq!(
+                call(
+                    &reg,
+                    &ctx,
+                    "project.create",
+                    serde_json::json!({ "path": path, "name": "A" })
+                )
+                .status,
+                crate::envelope::Status::Ok
+            );
+            let add = call(
+                &reg,
+                &ctx,
+                "graph.add_node",
+                serde_json::json!({ "kind": "jd.sculpt.strokes@1" }),
+            );
+            let id = add.result.expect("id")["id"]
+                .as_str()
+                .expect("str")
+                .to_owned();
+            let stroke = |i: usize| serde_json::json!({ "points": [[10.0 * i as f64, 5.0], [10.0 * i as f64 + 3.0, 6.0]], "radius_m": 8.0, "strength_m": 2.0, "mode": "raise", "amount": 0.0 });
+            for i in 0..20 {
+                let r = call(
+                    &reg,
+                    &ctx,
+                    "graph.append_param",
+                    serde_json::json!({ "id": id, "key": "strokes", "value": stroke(i) }),
+                );
+                assert_eq!(r.status, crate::envelope::Status::Ok, "{:?}", r.error);
+            }
+            let view = call(&reg, &ctx, "graph.list", serde_json::json!({}))
+                .result
+                .expect("view");
+            let node = view["nodes"]
+                .as_array()
+                .expect("nodes")
+                .iter()
+                .find(|n| n["id"] == id)
+                .expect("node");
+            assert_eq!(
+                node["params"]["strokes"].as_array().map(|a| a.len()),
+                Some(20)
+            );
+            // Appending to a scalar is refused before anything is journaled.
+            let bad = call(
+                &reg,
+                &ctx,
+                "graph.append_param",
+                serde_json::json!({ "id": id, "key": "strokes", "value": 1 }),
+            );
+            assert_eq!(
+                bad.error.map(|e| e.code),
+                Some(ErrorCode::E_INPUT_INVALID),
+                "schema rejects a non-stroke element"
+            );
+            // The journal holds one element per entry: 20 appends are far smaller than 20 full-array set_params.
+            let appended = std::fs::metadata(path.join("journal").join("ops.ndjson"))
+                .expect("journal")
+                .len();
+            let ctx2 = Context::default();
+            let path2 = dir.path().join("b.jdproj");
+            call(
+                &reg,
+                &ctx2,
+                "project.create",
+                serde_json::json!({ "path": path2, "name": "B" }),
+            );
+            let add2 = call(
+                &reg,
+                &ctx2,
+                "graph.add_node",
+                serde_json::json!({ "kind": "jd.sculpt.strokes@1" }),
+            );
+            let id2 = add2.result.expect("id")["id"]
+                .as_str()
+                .expect("str")
+                .to_owned();
+            let mut all = Vec::new();
+            for i in 0..20 {
+                all.push(stroke(i));
+                call(
+                    &reg,
+                    &ctx2,
+                    "graph.set_param",
+                    serde_json::json!({ "id": id2, "key": "strokes", "value": all }),
+                );
+            }
+            let replaced = std::fs::metadata(path2.join("journal").join("ops.ndjson"))
+                .expect("journal")
+                .len();
+            assert!(
+                appended * 3 < replaced,
+                "append {appended} B vs set_param {replaced} B"
+            );
         }
 
         #[test]

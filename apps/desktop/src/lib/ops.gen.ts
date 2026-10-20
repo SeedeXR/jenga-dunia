@@ -84,15 +84,13 @@ export type GraphAddNodeResult = {
   "id": NodeId;
 };
 
-export type GraphConnectRequest = {
-  /** Source node. */
-  "from": NodeId;
-  /** Source output port (default `out`). */
-  "from_port"?: string;
-  /** Destination node. */
-  "to": NodeId;
-  /** Destination input port. */
-  "to_port": string;
+export type GraphAppendParamRequest = {
+  /** Node id. */
+  "id": NodeId;
+  /** Array-valued parameter key (created when absent). */
+  "key": string;
+  /** Element to push. */
+  "value": unknown;
 };
 
 export type UiMeta = {
@@ -127,6 +125,28 @@ export type Edge = {
   "from": PortRef;
   /** Destination input. */
   "to": PortRef;
+};
+
+export type GraphAppendParamResult = {
+  /** Nodes. */
+  "nodes": NodeView[];
+  /** Edges. */
+  "edges": Edge[];
+  /** Number of edits `graph.undo` can take back. */
+  "undo_depth": number;
+  /** Number of undone edits `graph.redo` can re-apply. */
+  "redo_depth": number;
+};
+
+export type GraphConnectRequest = {
+  /** Source node. */
+  "from": NodeId;
+  /** Source output port (default `out`). */
+  "from_port"?: string;
+  /** Destination node. */
+  "to": NodeId;
+  /** Destination input port. */
+  "to_port": string;
 };
 
 export type GraphConnectResult = {
@@ -942,6 +962,8 @@ export interface JdOps {
   "diag.env": { request: DiagEnvRequest; result: DiagEnvResult };
   /** Add a node (journaled) */
   "graph.add_node": { request: GraphAddNodeRequest; result: GraphAddNodeResult };
+  /** Push one element onto an array parameter (brush strokes): journaled with just the element, so a long sculpt session grows the journal linearly */
+  "graph.append_param": { request: GraphAppendParamRequest; result: GraphAppendParamResult };
   /** Connect an output to an input (journaled; rejects bad ports, type mismatches and cycles) */
   "graph.connect": { request: GraphConnectRequest; result: GraphConnectResult };
   /** Remove an edge (journaled) */

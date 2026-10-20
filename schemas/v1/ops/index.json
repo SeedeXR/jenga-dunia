@@ -15,6 +15,11 @@
     "scope": "project-write"
   },
   {
+    "id": "graph.append_param",
+    "description": "Push one element onto an array parameter (brush strokes): journaled with just the element, so a long sculpt session grows the journal linearly",
+    "scope": "project-write"
+  },
+  {
     "id": "graph.connect",
     "description": "Connect an output to an input (journaled; rejects bad ports, type mismatches and cycles)",
     "scope": "project-write"

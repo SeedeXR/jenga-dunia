@@ -52,7 +52,7 @@ test.describe("sculpting against the real core", () => {
     await page.mouse.down();
     await page.mouse.move(cx + 60, cy, { steps: 12 });
     await page.mouse.up();
-    await expect(page.getByTestId("log")).toContainText("graph.set_param: ok");
+    await expect(page.getByTestId("log")).toContainText("graph.append_param: ok");
     await expect(page.getByTestId("graph-panel").locator(".react-flow__node", { hasText: "jd.sculpt.strokes@1" })).toContainText("strokes=");
     // Live preview re-evaluates: the raised ridge lifts the maximum height.
     await expect(page.getByTestId("layer-stats")).not.toHaveText(before ?? "");
@@ -64,9 +64,9 @@ test.describe("sculpting against the real core", () => {
       .trim()
       .split("\n")
       .map((l) => JSON.parse(l) as { op: string; params: { key?: string; value?: unknown } });
-    const stroke = journal.find((e) => e.op === "graph.set_param" && e.params.key === "strokes");
+    const stroke = journal.find((e) => e.op === "graph.append_param" && e.params.key === "strokes");
     expect(stroke, `the stroke is journaled with its points; journal ops: ${journal.map((e) => e.op + (e.params.key ? `(${e.params.key})` : "")).join(", ")}`).toBeTruthy();
-    const pts = (stroke!.params.value as { points: [number, number][] }[])[0]!.points;
+    const pts = (stroke!.params.value as { points: [number, number][] }).points;
     expect(pts.length).toBeGreaterThan(2);
     for (const [u, v] of pts) {
       expect(u).toBeGreaterThanOrEqual(0);
@@ -87,8 +87,8 @@ test.describe("sculpting against the real core", () => {
       .trim()
       .split("\n")
       .map((l) => JSON.parse(l) as { op: string; params: { key?: string; value?: unknown } });
-    const southStroke = journal2.filter((e) => e.op === "graph.set_param" && e.params.key === "strokes").pop()!;
-    const south = (southStroke.params.value as { points: [number, number][] }[]).pop()!.points;
+    const southStroke = journal2.filter((e) => e.op === "graph.append_param" && e.params.key === "strokes").pop()!;
+    const south = (southStroke.params.value as { points: [number, number][] }).points;
     for (const [, v] of south) expect(v, "lower half of the screen is south → v < extent/2").toBeLessThan(512);
     await page.screenshot({ path: testInfo.outputPath("sculpt.png") });
     expect(errors, "no uncaught page errors").toEqual([]);

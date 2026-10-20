@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AppendParam",
+  "description": "`graph.append_param` params.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "Node id.",
+      "$ref": "#/$defs/NodeId"
+    },
+    "key": {
+      "description": "Array-valued parameter key (created when absent).",
+      "type": "string"
+    },
+    "value": {
+      "description": "Element to push."
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "key",
+    "value"
+  ],
+  "$defs": {
+    "NodeId": {
+      "description": "Identifies a graph node.",
+      "type": "string"
+    }
+  }
+}

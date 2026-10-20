@@ -56,6 +56,7 @@ vi.mock("@tauri-apps/api/core", () => ({
         return { ...base, status: "ok", result: { id: "01SCULPT00000000000000000A" } };
       case "graph.connect":
       case "graph.set_param":
+      case "graph.append_param":
         return { ...base, status: "ok", result: { nodes: [{ id: "01SCULPT00000000000000000A", kind: "jd.sculpt.strokes@1", params: {}, bypass: false }], edges: [], undo_depth: 1, redo_depth: 0 } };
       case "terrain.generate":
         return { ...base, status: "ok", result: { layer: "height", size_px: [2048, 2048], stats: { min: 1.5, max: 498.2, mean: 250.1, non_finite: 0 }, content_hash: "abcdef0123456789abcdef", duration_ms: 42 } };
@@ -208,8 +209,8 @@ describe("App", () => {
       [10, 20],
       [30, 40],
     ]);
-    const stroke = calls.find((c) => (c.args as { request?: { op: string; params: { key?: string } } }).request?.op === "graph.set_param" && (c.args as { request: { params: { key?: string } } }).request.params.key === "strokes");
-    expect(stroke).toMatchObject({ args: { request: { params: { value: [{ points: [[10, 20], [30, 40]], radius_m: 150, mode: "flatten", amount: 0.5 }] } } } });
+    const stroke = calls.find((c) => (c.args as { request?: { op: string; params: { key?: string } } }).request?.op === "graph.append_param" && (c.args as { request: { params: { key?: string } } }).request.params.key === "strokes");
+    expect(stroke).toMatchObject({ args: { request: { params: { value: { points: [[10, 20], [30, 40]], radius_m: 150, mode: "flatten", amount: 0.5 } } } } });
   });
 
   it("a world preset fills resolution and extent (Unreal 2049²)", async () => {

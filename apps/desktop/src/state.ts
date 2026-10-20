@@ -297,8 +297,8 @@ export const useStore = create<State>((set, get) => {
       const { selectedNode, graph, brush } = get();
       const node = graph.nodes.find((n) => n.id === selectedNode && n.kind.startsWith("jd.sculpt.strokes@"));
       if (!node || points.length === 0) return;
-      const strokes = Array.isArray(node.params?.strokes) ? (node.params.strokes as unknown[]) : [];
-      await get().setParam(node.id, "strokes", [...strokes, { points: points.map(([u, v]) => [Math.round(u * 10) / 10, Math.round(v * 10) / 10]), radius_m: brush.radius_m, strength_m: brush.strength_m, mode: brush.mode, amount: brush.amount }]);
+      // One journal entry per stroke (graph.append_param), not the whole array each time.
+      await mutate("graph.append_param", { id: node.id, key: "strokes", value: { points: points.map(([u, v]) => [Math.round(u * 10) / 10, Math.round(v * 10) / 10]), radius_m: brush.radius_m, strength_m: brush.strength_m, mode: brush.mode, amount: brush.amount } });
     },
     setLive: (on) => {
       set({ live: on });
