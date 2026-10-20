@@ -45,6 +45,10 @@
         "cancelling": {
           "description": "Cancel requested.",
           "type": "boolean"
+        },
+        "state": {
+          "description": "`running`, or `queued` for a detached job waiting for a worker slot.",
+          "type": "string"
         }
       },
       "required": [
@@ -54,7 +58,8 @@
         "done",
         "total",
         "current",
-        "cancelling"
+        "cancelling",
+        "state"
       ]
     }
   }

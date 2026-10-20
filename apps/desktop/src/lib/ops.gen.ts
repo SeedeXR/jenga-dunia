@@ -185,6 +185,8 @@ export type GraphDisconnectResult = {
 export type GraphEvaluateRequest = {
   /** Level of detail (0 = full resolution). */
   "lod"?: number;
+  /** Detached jobs only: give up after this many seconds (`E_TIMEOUT` in the result). */
+  "timeout_s"?: number | null;
 };
 
 export type NodeReport = {
@@ -214,6 +216,8 @@ export type GraphEvaluateResult = {
 export type GraphEvaluateAsyncRequest = {
   /** Level of detail (0 = full resolution). */
   "lod"?: number;
+  /** Detached jobs only: give up after this many seconds (`E_TIMEOUT` in the result). */
+  "timeout_s"?: number | null;
 };
 
 export type GraphEvaluateAsyncResult = {
@@ -386,6 +390,8 @@ export type JobInfo = {
   "current": string;
   /** Cancel requested. */
   "cancelling": boolean;
+  /** `running`, or `queued` for a detached job waiting for a worker slot. */
+  "state": string;
 };
 
 export type JobsListResult = JobInfo[];

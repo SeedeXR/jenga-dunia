@@ -11,6 +11,15 @@
       "minimum": 0,
       "maximum": 255,
       "default": 0
+    },
+    "timeout_s": {
+      "description": "Detached jobs only: give up after this many seconds (`E_TIMEOUT` in the result).",
+      "type": [
+        "number",
+        "null"
+      ],
+      "format": "float",
+      "default": null
     }
   },
   "additionalProperties": false

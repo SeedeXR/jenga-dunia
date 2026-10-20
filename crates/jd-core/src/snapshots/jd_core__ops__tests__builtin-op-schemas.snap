@@ -900,6 +900,15 @@ expression: list
           "minimum": 0,
           "maximum": 255,
           "default": 0
+        },
+        "timeout_s": {
+          "description": "Detached jobs only: give up after this many seconds (`E_TIMEOUT` in the result).",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float",
+          "default": null
         }
       },
       "additionalProperties": false
@@ -1004,6 +1013,15 @@ expression: list
           "minimum": 0,
           "maximum": 255,
           "default": 0
+        },
+        "timeout_s": {
+          "description": "Detached jobs only: give up after this many seconds (`E_TIMEOUT` in the result).",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float",
+          "default": null
         }
       },
       "additionalProperties": false
@@ -2453,6 +2471,10 @@ expression: list
             "cancelling": {
               "description": "Cancel requested.",
               "type": "boolean"
+            },
+            "state": {
+              "description": "`running`, or `queued` for a detached job waiting for a worker slot.",
+              "type": "string"
             }
           },
           "required": [
@@ -2462,7 +2484,8 @@ expression: list
             "done",
             "total",
             "current",
-            "cancelling"
+            "cancelling",
+            "state"
           ]
         }
       }
@@ -2565,6 +2588,10 @@ expression: list
             "cancelling": {
               "description": "Cancel requested.",
               "type": "boolean"
+            },
+            "state": {
+              "description": "`running`, or `queued` for a detached job waiting for a worker slot.",
+              "type": "string"
             }
           },
           "required": [
@@ -2574,7 +2601,8 @@ expression: list
             "done",
             "total",
             "current",
-            "cancelling"
+            "cancelling",
+            "state"
           ]
         }
       }

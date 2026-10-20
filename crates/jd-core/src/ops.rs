@@ -860,6 +860,9 @@ pub mod graph {
         /// Level of detail (0 = full resolution).
         #[serde(default)]
         pub lod: u8,
+        /// Detached jobs only: give up after this many seconds (`E_TIMEOUT` in the result).
+        #[serde(default)]
+        pub timeout_s: Option<f32>,
     }
 
     /// Node as reported by `graph.list`.
@@ -1299,14 +1302,56 @@ pub mod graph {
             Scope::ProjectWrite,
             |ctx, e| {
                 ctx.with_project(|_| Ok(()))?; // fail now, not on the thread, when nothing is open
+                if let Some(t) = e.timeout_s
+                    && !(t > 0.0 && t.is_finite())
+                {
+                    return Err(JdError::invalid("timeout_s", "must be a positive number of seconds"));
+                }
                 let guard = ctx.jobs.start_owned("graph.evaluate");
                 let id = guard.id;
                 let ctx2 = ctx.clone();
                 std::thread::Builder::new()
                     .name(format!("jd-job-{id}"))
                     .spawn(move || {
-                        let envelope = match evaluate(&ctx2, e.lod, id, &guard.ctl) {
+                        // Queue: wait for a worker slot (half the cores by default); a cancel while
+                        // queued ends the job without running it.
+                        if !ctx2.jobs.acquire_slot(id, &guard.ctl.cancel) {
+                            let err = JdError::new(ErrorCode::E_CANCELLED, "cancelled while queued").detail("job_id", id);
+                            ctx2.jobs.finish(id, serde_json::json!({ "status": "error", "error": err }));
+                            drop(guard);
+                            return;
+                        }
+                        // Timeout: a watchdog raises the cancel flag at the deadline; the evaluator
+                        // then stops at its next check and the envelope says E_TIMEOUT.
+                        let timed_out = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                        let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                        if let Some(t) = e.timeout_s {
+                            let (cancel, timed_out, done) = (guard.ctl.cancel.clone(), timed_out.clone(), done.clone());
+                            let deadline = std::time::Instant::now() + std::time::Duration::from_secs_f32(t);
+                            std::thread::spawn(move || {
+                                while std::time::Instant::now() < deadline {
+                                    if done.load(std::sync::atomic::Ordering::Relaxed) {
+                                        return;
+                                    }
+                                    std::thread::sleep(std::time::Duration::from_millis(10));
+                                }
+                                if !done.load(std::sync::atomic::Ordering::Relaxed) {
+                                    timed_out.store(true, std::sync::atomic::Ordering::Relaxed);
+                                    cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+                                }
+                            });
+                        }
+                        let outcome = evaluate(&ctx2, e.lod, id, &guard.ctl);
+                        done.store(true, std::sync::atomic::Ordering::Relaxed);
+                        ctx2.jobs.release_slot();
+                        let envelope = match outcome {
                             Ok((r, w)) => serde_json::json!({ "status": "ok", "result": r, "warnings": w }),
+                            Err(err) if err.code == ErrorCode::E_CANCELLED && timed_out.load(std::sync::atomic::Ordering::Relaxed) => {
+                                let t = JdError::new(ErrorCode::E_TIMEOUT, format!("evaluation exceeded timeout_s = {}", e.timeout_s.unwrap_or(0.0)))
+                                    .next("Raise timeout_s, lower the lod, or reduce iterations.")
+                                    .detail("job_id", id);
+                                serde_json::json!({ "status": "error", "error": t })
+                            }
                             Err(err) => serde_json::json!({ "status": "error", "error": err }),
                         };
                         ctx2.jobs.finish(id, envelope);
@@ -1336,6 +1381,123 @@ pub mod graph {
                 std::thread::sleep(std::time::Duration::from_millis(20));
             }
             panic!("job {id} did not finish");
+        }
+
+        #[test]
+        fn detached_jobs_queue_on_one_slot_and_honour_timeouts() {
+            let reg = Registry::with_builtins();
+            let dir = tempfile::tempdir().expect("tmp");
+            let path = dir.path().join("q.jdproj");
+            let ctx = Context::default();
+            ctx.jobs.set_max_detached(1);
+            let world = WorldSettings {
+                resolution_px: [256, 256],
+                extent_m: [256.0, 256.0],
+                tile_size: 256,
+                halo: 4,
+                ..Default::default()
+            };
+            assert_eq!(
+                call(
+                    &reg,
+                    &ctx,
+                    "project.create",
+                    serde_json::json!({ "path": path, "name": "Q", "world": world })
+                )
+                .status,
+                crate::envelope::Status::Ok
+            );
+            // noise → hydraulic(2000) → output: long enough to observe queueing.
+            let view = call(&reg, &ctx, "graph.list", serde_json::json!({}))
+                .result
+                .expect("view");
+            let noise = view["nodes"]
+                .as_array()
+                .expect("n")
+                .iter()
+                .find(|n| n["kind"].as_str().unwrap_or("").starts_with("jd.noise"))
+                .expect("noise")["id"]
+                .as_str()
+                .expect("id")
+                .to_owned();
+            let output = view["nodes"]
+                .as_array()
+                .expect("n")
+                .iter()
+                .find(|n| n["kind"].as_str().unwrap_or("").starts_with("jd.output"))
+                .expect("out")["id"]
+                .as_str()
+                .expect("id")
+                .to_owned();
+            let hid = call(&reg, &ctx, "graph.add_node", serde_json::json!({ "kind": "jd.erosion.hydraulic@1", "params": { "iterations": 2000 } })).result.expect("id")["id"].as_str().expect("s").to_owned();
+            call(
+                &reg,
+                &ctx,
+                "graph.connect",
+                serde_json::json!({ "from": noise, "to": hid, "to_port": "in" }),
+            );
+            call(
+                &reg,
+                &ctx,
+                "graph.connect",
+                serde_json::json!({ "from": hid, "from_port": "out", "to": output, "to_port": "in" }),
+            );
+            let a = call(&reg, &ctx, "graph.evaluate_async", serde_json::json!({}))
+                .job_id
+                .expect("a");
+            let b = call(&reg, &ctx, "graph.evaluate_async", serde_json::json!({}))
+                .job_id
+                .expect("b");
+            // Give both threads a moment: one runs, the other waits for the single slot.
+            let mut states = (String::new(), String::new());
+            for _ in 0..200 {
+                let listed = call(&reg, &ctx, "jobs.list", serde_json::json!({}))
+                    .result
+                    .expect("list");
+                let arr = listed.as_array().expect("arr");
+                let st = |id: u64| {
+                    arr.iter()
+                        .find(|j| j["id"] == id)
+                        .and_then(|j| j["state"].as_str())
+                        .unwrap_or("")
+                        .to_owned()
+                };
+                states = (st(a), st(b));
+                if states.0 == "running" && states.1 == "queued" {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            assert_eq!(states, ("running".to_owned(), "queued".to_owned()));
+            // Cancelling the queued job ends it without running; cancelling the running one frees the slot.
+            assert_eq!(
+                call(&reg, &ctx, "jobs.cancel", serde_json::json!({ "id": b })).result,
+                Some(serde_json::json!(true))
+            );
+            let env_b = wait_done(&reg, &ctx, b);
+            assert_eq!(env_b["error"]["code"], "E_CANCELLED", "{env_b}");
+            assert_eq!(env_b["error"]["message"], "cancelled while queued");
+            call(&reg, &ctx, "jobs.cancel", serde_json::json!({ "id": a }));
+            assert_eq!(wait_done(&reg, &ctx, a)["error"]["code"], "E_CANCELLED");
+            // Timeout: the watchdog cancels and the envelope says E_TIMEOUT.
+            let bad = call(
+                &reg,
+                &ctx,
+                "graph.evaluate_async",
+                serde_json::json!({ "timeout_s": -1.0 }),
+            );
+            assert_eq!(bad.error.map(|e| e.code), Some(ErrorCode::E_INPUT_INVALID));
+            let t = call(
+                &reg,
+                &ctx,
+                "graph.evaluate_async",
+                serde_json::json!({ "timeout_s": 0.05 }),
+            )
+            .job_id
+            .expect("t");
+            let env_t = wait_done(&reg, &ctx, t);
+            assert_eq!(env_t["error"]["code"], "E_TIMEOUT", "{env_t}");
+            assert_eq!(env_t["error"]["details"]["job_id"], t);
         }
 
         #[test]

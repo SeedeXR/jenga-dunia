@@ -9,7 +9,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Instant;
 
 use jd_graph::JobCtl;
@@ -20,6 +20,8 @@ struct Entry {
     started: Instant,
     progress: Arc<Mutex<(usize, usize, String)>>,
     cancel: Arc<AtomicBool>,
+    /// Detached jobs wait here for a worker slot; synchronous ops are always running.
+    running_now: Arc<AtomicBool>,
 }
 
 /// A running job as reported by `jobs.list`.
@@ -39,15 +41,31 @@ pub struct JobInfo {
     pub current: String,
     /// Cancel requested.
     pub cancelling: bool,
+    /// `running`, or `queued` for a detached job waiting for a worker slot.
+    pub state: String,
 }
 
 /// Process-wide job table.
-#[derive(Default)]
 pub struct Jobs {
     next: AtomicU64,
     running: Mutex<BTreeMap<u64, Entry>>,
     /// Envelopes of detached jobs that finished, until collected (bounded).
     finished: Mutex<BTreeMap<u64, serde_json::Value>>,
+    /// Worker slots for detached jobs: (in use, max) + a condvar to wait on.
+    slots: (Mutex<(usize, usize)>, Condvar),
+}
+
+impl Default for Jobs {
+    fn default() -> Self {
+        // Half the cores for background evaluations, so the interactive path stays responsive.
+        let max = std::thread::available_parallelism().map_or(1, |n| (n.get() / 2).max(1));
+        Self {
+            next: AtomicU64::new(0),
+            running: Mutex::new(BTreeMap::new()),
+            finished: Mutex::new(BTreeMap::new()),
+            slots: (Mutex::new((0, max)), Condvar::new()),
+        }
+    }
 }
 
 /// Owned variant of [`JobGuard`] for detached jobs (lives on the worker thread).
@@ -111,6 +129,7 @@ impl Jobs {
                     started: Instant::now(),
                     progress: progress.clone(),
                     cancel: cancel.clone(),
+                    running_now: Arc::new(AtomicBool::new(true)),
                 },
             );
         }
@@ -139,6 +158,61 @@ impl Jobs {
             jobs: Arc::clone(self),
             id,
             ctl,
+        }
+    }
+
+    /// Cap on concurrently running detached jobs (default: half the cores, at least 1).
+    pub fn set_max_detached(&self, max: usize) {
+        if let Ok(mut s) = self.slots.0.lock() {
+            s.1 = max.max(1);
+            self.slots.1.notify_all();
+        }
+    }
+
+    /// Mark a detached job as waiting for a slot, then block until one is free. Returns false
+    /// when the job was cancelled while queued.
+    pub fn acquire_slot(&self, id: u64, cancel: &AtomicBool) -> bool {
+        let running_now = self
+            .running
+            .lock()
+            .ok()
+            .and_then(|r| r.get(&id).map(|e| e.running_now.clone()));
+        if let Some(flag) = &running_now {
+            flag.store(false, Ordering::Relaxed);
+        }
+        let Ok(mut s) = self.slots.0.lock() else {
+            return false;
+        };
+        while s.0 >= s.1 {
+            if cancel.load(Ordering::Relaxed) {
+                return false;
+            }
+            let (guard, _) = match self
+                .slots
+                .1
+                .wait_timeout(s, std::time::Duration::from_millis(50))
+            {
+                Ok(x) => x,
+                Err(_) => return false,
+            };
+            s = guard;
+        }
+        if cancel.load(Ordering::Relaxed) {
+            return false;
+        }
+        s.0 += 1;
+        drop(s);
+        if let Some(flag) = running_now {
+            flag.store(true, Ordering::Relaxed);
+        }
+        true
+    }
+
+    /// Give a worker slot back.
+    pub fn release_slot(&self) {
+        if let Ok(mut s) = self.slots.0.lock() {
+            s.0 = s.0.saturating_sub(1);
+            self.slots.1.notify_one();
         }
     }
 
@@ -196,6 +270,12 @@ impl Jobs {
                     total,
                     current,
                     cancelling: e.cancel.load(Ordering::Relaxed),
+                    state: if e.running_now.load(Ordering::Relaxed) {
+                        "running"
+                    } else {
+                        "queued"
+                    }
+                    .into(),
                 }
             })
             .collect()
