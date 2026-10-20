@@ -1729,6 +1729,10 @@ export type NodeParams_jd_input_heightmap_1 = {
   /** Sample value meaning "no data" (filled with the lowest valid height). Default: the GeoTIFF
 `GDAL_NODATA` tag when present, otherwise none; non-finite samples are always treated as nodata. */
   "nodata"?: number | null;
+  /** Place a GeoTIFF by its tie point and pixel scale (reprojected when its EPSG code differs
+from the world's CRS) instead of stretching it over the world; files without
+georeferencing are always stretched. */
+  "georeference"?: boolean;
 };
 
 export type NodeParams_jd_mask_class_1 = {

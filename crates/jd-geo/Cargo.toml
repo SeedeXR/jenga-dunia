@@ -1,0 +1,16 @@
+[package]
+name = "jd-geo"
+description = "Jenga Dunia geodesy: EPSG codes → projections (pure Rust proj4rs), point transforms between a world's CRS and lon/lat, and the placement of georeferenced rasters."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+jd-types.workspace = true
+proj4rs = "0.2"
+
+[lints]
+workspace = true

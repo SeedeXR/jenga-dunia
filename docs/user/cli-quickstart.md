@@ -603,6 +603,22 @@ $ jd --json op terrain.export_heightmap --project World.jdproj --params '{"layer
 
 Layers are stored in local metres and the origin says where pixel (0, 0) sits in the CRS: the georeferenced TIFF carries it as its tie point and the CRS as its GeoKeys, a GeoTIFF import sets both automatically, and the desktop's Settings panel has the same three fields (an empty `crs` clears it). Generators sample world space, so moving the origin moves the window over the infinite noise field — two worlds whose origins differ by one extent are seamlessly adjacent (unit test: the layer hash changes with the origin); imported and sculpted layers do not move.
 
+### Import a GeoTIFF from another CRS
+
+A GeoTIFF that says where it is goes where it says. The source here is a WGS 84 world (0.02° × 0.02° around 39° E / 0° N, so its "metres" are degrees) exported with its georeference; the target is a 1 km UTM 37N window across the central meridian and the equator:
+
+```
+$ jd --json op project.create --save --params '{"path":"Src.jdproj","name":"Src","world":{"extent_m":[0.02,0.02],"resolution_px":[41,41],"tile_size":64,"halo":4,"origin":[38.99,-0.01],"seed":7,"crs":"EPSG:4326"}}'
+$ jd --json op terrain.export_heightmap --project Src.jdproj --params '{"layer":"height","path":"src.tif","format":"tiff32","georeference":true}'
+source    min 54.4  max 432.2  mean 248.0
+$ jd --json op project.create --save --params '{"path":"Utm.jdproj","name":"Utm","world":{"extent_m":[1000,1000],"resolution_px":[32,32],"tile_size":64,"halo":4,"origin":[499500,-500],"seed":1,"crs":"EPSG:32637"}}'
+$ jd op project.import_asset --project Utm.jdproj --save --params '{"path":"…/Src.jdproj/exports/src.tif"}'
+$ jd op graph.add_node --project Utm.jdproj --save --params '{"kind":"jd.input.heightmap@1","params":{"path":"src.tif"}}'      # → jd.output.height `dem`
+imported  min 63.3  max 382.0  mean 188.2      (the 1 km window inside the 2.2 km source; 1 ms)
+```
+
+`jd.input.heightmap@1` reads the file's tie point, pixel scale and EPSG code; when the world has a CRS of its own and it differs, every world pixel centre is projected into the file's CRS (`jd-geo`, pure-Rust proj4rs: WGS 84, Web Mercator, UTM zones, or any `+proj=` string) on a control grid every 16 pixels and interpolated between, then sampled bilinearly — outside the file the edge repeats. Unit test: a lon/lat ramp placed on a UTM world matches an independent transform at every probed pixel to 0.05 units. `georeference: false` keeps the old behaviour (stretch over the world); files without georeferencing are always stretched.
+
 ### Timeline: keyframed parameters
 
 ```

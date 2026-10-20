@@ -49,7 +49,9 @@ pub use flow::{
     wetness_index_with,
 };
 pub use heightfield::{Heightfield, HeightfieldStats, Tile, TileCoord};
-pub use import::{ForeignImport, GeoTags, geotiff_tags, read_foreign, resample_to_world};
+pub use import::{
+    ForeignImport, GeoTags, geotiff_tags, read_foreign, resample_to_world, resample_to_world_geo,
+};
 pub use karst::{KarstParams, Sinkhole, SinkholeProfile, karst_sinkholes};
 pub use mesh::{
     BakedMaps, GridMesh, MaterialLayer, MeshExportReport, MeshTopology, auto_step, bake_maps,

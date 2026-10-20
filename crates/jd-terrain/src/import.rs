@@ -32,6 +32,11 @@ pub struct ForeignImport {
     /// `GDAL_NODATA` tag when present, otherwise none; non-finite samples are always treated as nodata.
     #[serde(default)]
     pub nodata: Option<f32>,
+    /// Place a GeoTIFF by its tie point and pixel scale (reprojected when its EPSG code differs
+    /// from the world's CRS) instead of stretching it over the world; files without
+    /// georeferencing are always stretched.
+    #[serde(default = "yes")]
+    pub georeference: bool,
 }
 
 /// Georeferencing read from a GeoTIFF (what the file says, no reprojection).
@@ -269,6 +274,104 @@ fn decode(path: &Path, opts: &ForeignImport) -> JdResult<(Vec<f32>, u32, u32)> {
     }
 }
 
+/// Place a georeferenced raster on the world grid: every world pixel centre goes to world metres,
+/// through the CRS transform when the file's EPSG differs from the world's, then to a file pixel
+/// via the tie point and pixel scale, and is sampled bilinearly (edge-clamped outside the file).
+/// The transform runs on a control grid every [`CONTROL_STEP`] pixels and is interpolated
+/// between (the usual approximation), so a 4k² import costs ~65k projections, not 16M.
+pub fn resample_to_world_geo(
+    data: &[f32],
+    w: u32,
+    h: u32,
+    tags: &GeoTags,
+    world: &WorldSettings,
+) -> JdResult<Heightfield> {
+    if w == 0 || h == 0 || data.len() != (w as usize) * (h as usize) {
+        return Err(corrupt("heightmap", "size does not match sample count"));
+    }
+    if data.iter().any(|v| !v.is_finite()) {
+        return Err(JdError::invalid("in", "heightmap has non-finite samples"));
+    }
+    let (Some(scale), Some(tie)) = (tags.pixel_scale, tags.tiepoint) else {
+        return Err(JdError::invalid(
+            "in",
+            "the file has no tie point / pixel scale to place it by",
+        ));
+    };
+    if !(scale[0] > 0.0 && scale[1] > 0.0) {
+        return Err(corrupt("heightmap", "pixel scale must be positive"));
+    }
+    let transformer = match (&world.crs, tags.epsg) {
+        (Some(wc), Some(fe)) if crate::export::epsg_code(Some(wc)) != Some(fe) => {
+            Some(jd_geo::Transformer::new(wc, &format!("EPSG:{fe}"))?)
+        }
+        _ => None, // same CRS, or one side unknown: metres are taken as the file's units
+    };
+    let mut out = Heightfield::from_world(world)?;
+    let (ow, oh) = (out.width(), out.height());
+    let sp = world.spacing_m();
+    // Control grid of file-pixel coordinates (col, row) at every CONTROL_STEP world pixels.
+    let (cx, cy) = (ow.div_ceil(CONTROL_STEP) + 1, oh.div_ceil(CONTROL_STEP) + 1);
+    let mut pts: Vec<(f64, f64)> = Vec::with_capacity((cx * cy) as usize);
+    for gy in 0..cy {
+        for gx in 0..cx {
+            let px = (gx * CONTROL_STEP).min(ow) as f64;
+            let py = (gy * CONTROL_STEP).min(oh) as f64;
+            pts.push((world.origin[0] + px * sp[0], world.origin[1] + py * sp[1]));
+        }
+    }
+    if let Some(t) = &transformer {
+        t.transform(&mut pts)?;
+    }
+    let ctrl: Vec<(f64, f64)> = pts
+        .iter()
+        .map(|(fx, fy)| {
+            (
+                tie[0] + (fx - tie[3]) / scale[0],
+                tie[1] + (tie[4] - fy) / scale[1],
+            )
+        })
+        .collect();
+    let at = |x: u32, y: u32| data[(y.min(h - 1) * w + x.min(w - 1)) as usize];
+    out.fill_with(|x, y| {
+        // Interpolate the control grid at the pixel centre, then sample the file bilinearly.
+        let (u, v) = (
+            (x as f64 + 0.5) / CONTROL_STEP as f64,
+            (y as f64 + 0.5) / CONTROL_STEP as f64,
+        );
+        let (gx, gy) = (
+            (u.floor() as u32).min(cx - 2),
+            (v.floor() as u32).min(cy - 2),
+        );
+        let (fu, fv) = (u - gx as f64, v - gy as f64);
+        let c = |i: u32, j: u32| ctrl[(j * cx + i) as usize];
+        let lerp =
+            |a: (f64, f64), b: (f64, f64), t: f64| (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
+        let (col, row) = lerp(
+            lerp(c(gx, gy), c(gx + 1, gy), fu),
+            lerp(c(gx, gy + 1), c(gx + 1, gy + 1), fu),
+            fv,
+        );
+        let (sx, sy) = (col - 0.5, row - 0.5);
+        let (x0, y0) = (
+            sx.floor().clamp(0.0, (w - 1) as f64),
+            sy.floor().clamp(0.0, (h - 1) as f64),
+        );
+        let (tx, ty) = (
+            (sx - x0).clamp(0.0, 1.0) as f32,
+            (sy - y0).clamp(0.0, 1.0) as f32,
+        );
+        let (x0, y0) = (x0 as u32, y0 as u32);
+        let top = at(x0, y0) * (1.0 - tx) + at(x0 + 1, y0) * tx;
+        let bot = at(x0, y0 + 1) * (1.0 - tx) + at(x0 + 1, y0 + 1) * tx;
+        top * (1.0 - ty) + bot * ty
+    });
+    Ok(out)
+}
+
+/// World pixels between two projected control points.
+pub const CONTROL_STEP: u32 = 16;
+
 /// Bilinearly resample row-major `data` (w × h) onto the world grid. Field row 0 is south, so a
 /// north-up file (the image convention) is flipped. Non-finite samples are rejected.
 pub fn resample_to_world(
@@ -314,6 +417,62 @@ pub fn resample_to_world(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn georeferenced_placement_reprojects_a_lon_lat_raster_onto_a_utm_world() {
+        // A 41 × 41 WGS 84 raster over lon 38.99..39.01, lat -0.01..0.01 whose value is the
+        // longitude offset in units of 0.0005° (0..40): north-up, tie point at its NW corner.
+        let (w, h) = (41u32, 41u32);
+        let data: Vec<f32> = (0..h * w).map(|i| (i % w) as f32).collect();
+        let tags = GeoTags {
+            pixel_scale: Some([0.0005, 0.0005]),
+            tiepoint: Some([0.0, 0.0, 0.0, 38.99 - 0.00025, 0.01 + 0.00025, 0.0]), // pixel-corner tie
+            nodata: None,
+            epsg: Some(4326),
+        };
+        // The world: UTM 37N, 1 km around the central meridian / equator, 32 × 32 cells.
+        let world = WorldSettings {
+            resolution_px: [32, 32],
+            extent_m: [1000.0, 1000.0],
+            origin: [499_500.0, -500.0],
+            crs: Some("EPSG:32637".to_owned()),
+            tile_size: 32,
+            halo: 0,
+            ..Default::default()
+        };
+        let hf = resample_to_world_geo(&data, w, h, &tags, &world).expect("geo");
+        // Expected at a world pixel: its centre in metres → lon/lat by the same transform.
+        let t = jd_geo::Transformer::new("EPSG:32637", "EPSG:4326").expect("t");
+        for (x, y) in [(0u32, 0u32), (16, 16), (31, 31), (5, 27)] {
+            let mut p = [(
+                499_500.0 + (x as f64 + 0.5) * 31.25,
+                -500.0 + (y as f64 + 0.5) * 31.25,
+            )];
+            t.transform(&mut p).expect("to lon/lat");
+            let expected = (p[0].0 - 38.99) / 0.0005;
+            assert!(
+                (hf.get(x, y) as f64 - expected).abs() < 0.05,
+                "pixel ({x}, {y}): {} vs {expected}",
+                hf.get(x, y)
+            );
+        }
+        // Same-CRS placement without a transform, and the structured errors.
+        let same = WorldSettings {
+            crs: Some("EPSG:4326".to_owned()),
+            origin: [38.99, -0.01],
+            extent_m: [0.02, 0.02],
+            ..world.clone()
+        };
+        let hf2 = resample_to_world_geo(&data, w, h, &tags, &same).expect("same crs");
+        // 32 world cells span the 40 file pixels: the left edge reads ≈ 0.6, the right ≈ 39.4.
+        assert!(
+            hf2.get(0, 0) < 1.5 && hf2.get(31, 0) > 38.5,
+            "{} … {}",
+            hf2.get(0, 0),
+            hf2.get(31, 0)
+        );
+        assert!(resample_to_world_geo(&data, w, h, &GeoTags::default(), &world).is_err());
+    }
 
     fn world(res: u32) -> WorldSettings {
         WorldSettings {

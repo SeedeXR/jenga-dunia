@@ -891,7 +891,7 @@ pub fn register_all(r: &mut Registry) {
     ).with_memory(20.0));
     r.register(NodeDef::new::<InputParams, _>(
         "jd.input.heightmap@1",
-        "Load a heightmap from the project's assets/ (PNG 16-bit, EXR, TIFF, RAW, or a binary FBX mesh rasterised over its footprint) and resample it onto the world grid",
+        "Load a heightmap from the project's assets/ (PNG 16-bit, EXR, TIFF, RAW, or a binary FBX mesh rasterised over its footprint) and resample it onto the world grid — a GeoTIFF with a tie point is placed by it and reprojected when its EPSG code differs from the world's CRS (`georeference: false` stretches instead)",
         vec![],
         vec![port("out", PortType::Heightfield, false)],
         |ctx, p, _| {
@@ -911,7 +911,15 @@ pub fn register_all(r: &mut Registry) {
                 return Err(JdError::invalid("path", "file resolves outside the project's assets/ directory"));
             }
             let (data, w, h) = read_foreign(&file, &ip.import)?;
-            Ok(out("out", resample_to_world(&data, w, h, ip.import.north_up, &ctx.lod_world)?))
+            // A GeoTIFF that says where it is goes where it says (reprojected when its CRS differs
+            // from the world's); everything else is stretched over the world.
+            let placed = match jd_terrain::geotiff_tags(&file)? {
+                Some(tags) if ip.import.georeference && tags.pixel_scale.is_some() && tags.tiepoint.is_some() => {
+                    jd_terrain::resample_to_world_geo(&data, w, h, &tags, &ctx.lod_world)?
+                }
+                _ => resample_to_world(&data, w, h, ip.import.north_up, &ctx.lod_world)?,
+            };
+            Ok(out("out", placed))
         },
     ));
     r.register(NodeDef::new::<FillParams, _>(

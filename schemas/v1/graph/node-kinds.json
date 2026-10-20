@@ -1646,7 +1646,7 @@
   },
   {
     "kind": "jd.input.heightmap@1",
-    "description": "Load a heightmap from the project's assets/ (PNG 16-bit, EXR, TIFF, RAW, or a binary FBX mesh rasterised over its footprint) and resample it onto the world grid",
+    "description": "Load a heightmap from the project's assets/ (PNG 16-bit, EXR, TIFF, RAW, or a binary FBX mesh rasterised over its footprint) and resample it onto the world grid — a GeoTIFF with a tie point is placed by it and reprojected when its EPSG code differs from the world's CRS (`georeference: false` stretches instead)",
     "inputs": [],
     "outputs": [
       {
@@ -1707,6 +1707,11 @@
           ],
           "format": "float",
           "default": null
+        },
+        "georeference": {
+          "description": "Place a GeoTIFF by its tie point and pixel scale (reprojected when its EPSG code differs\nfrom the world's CRS) instead of stretching it over the world; files without\ngeoreferencing are always stretched.",
+          "type": "boolean",
+          "default": true
         }
       },
       "additionalProperties": false,

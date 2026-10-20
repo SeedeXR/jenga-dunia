@@ -10,6 +10,7 @@ publish.workspace = true
 
 [dependencies]
 jd-types.workspace = true
+jd-geo.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 schemars.workspace = true
