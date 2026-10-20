@@ -4,8 +4,11 @@
 //! where `d` is the distance to the polyline, so strokes are order-independent and undo removes a
 //! whole stroke by dropping it from the node's params.
 //!
-//! ponytail: every pixel tests every segment (pixels × segments); per-stroke bounding boxes and
-//! tile-level dirty sets when strokes count in the thousands.
+//! Each pixel only tests the strokes whose bounding box (polyline ± radius) contains it; the
+//! smooth brush blurs via a summed-area table, so cost is O(pixels) regardless of brush size.
+//!
+//! ponytail: the blurred copy still covers the whole field; tile-level dirty sets when strokes
+//! count in the thousands.
 
 use crate::Heightfield;
 use jd_types::{JdError, JdResult};
@@ -50,18 +53,32 @@ fn half() -> f32 {
 
 /// Box-filtered copy of `h` (radius in pixels, edge-clamped) for smooth strokes.
 fn box_mean(h: &Heightfield, rx: u32, ry: u32) -> Heightfield {
-    let (w, hh) = (h.width(), h.height());
+    let (w, hh) = (h.width() as usize, h.height() as usize);
+    // Summed-area table in f64 (one extra zero row/column) so any box is four lookups.
+    let v = h.to_vec();
+    let stride = w + 1;
+    let mut sat = vec![0.0f64; (w + 1) * (hh + 1)];
+    for y in 0..hh {
+        let mut row = 0.0f64;
+        for x in 0..w {
+            row += f64::from(v[y * w + x]);
+            sat[(y + 1) * stride + x + 1] = sat[y * stride + x + 1] + row;
+        }
+    }
     let mut out = h.clone();
     out.fill_with(|x, y| {
-        let (x0, x1) = (x.saturating_sub(rx), (x + rx).min(w - 1));
-        let (y0, y1) = (y.saturating_sub(ry), (y + ry).min(hh - 1));
-        let mut sum = 0.0f32;
-        for yy in y0..=y1 {
-            for xx in x0..=x1 {
-                sum += h.get(xx, yy);
-            }
-        }
-        sum / ((x1 - x0 + 1) * (y1 - y0 + 1)) as f32
+        let (x, y) = (x as usize, y as usize);
+        let (x0, x1) = (
+            x.saturating_sub(rx as usize),
+            (x + rx as usize).min(w - 1) + 1,
+        );
+        let (y0, y1) = (
+            y.saturating_sub(ry as usize),
+            (y + ry as usize).min(hh - 1) + 1,
+        );
+        let sum = sat[y1 * stride + x1] - sat[y0 * stride + x1] - sat[y1 * stride + x0]
+            + sat[y0 * stride + x0];
+        (sum / ((x1 - x0) * (y1 - y0)) as f64) as f32
     });
     out
 }
@@ -145,13 +162,32 @@ pub fn apply_strokes(
             }
         })
         .collect();
+    // Outside polyline ± radius the falloff is exactly 0, so those pixels can skip the stroke.
+    let bboxes: Vec<[f32; 4]> = strokes
+        .iter()
+        .map(|s| {
+            s.points
+                .iter()
+                .fold([f32::MAX, f32::MAX, f32::MIN, f32::MIN], |b, p| {
+                    [
+                        b[0].min(p[0] - s.radius_m),
+                        b[1].min(p[1] - s.radius_m),
+                        b[2].max(p[0] + s.radius_m),
+                        b[3].max(p[1] + s.radius_m),
+                    ]
+                })
+        })
+        .collect();
     out.fill_with(|x, y| {
         let p = [
             (x as f32 + 0.5) * spacing_m[0],
             (y as f32 + 0.5) * spacing_m[1],
         ];
         let mut v = h.get(x, y);
-        for (s, target) in strokes.iter().zip(&targets) {
+        for ((s, target), b) in strokes.iter().zip(&targets).zip(&bboxes) {
+            if p[0] < b[0] || p[1] < b[1] || p[0] > b[2] || p[1] > b[3] {
+                continue;
+            }
             let d = s
                 .points
                 .windows(2)
@@ -183,6 +219,47 @@ pub fn apply_strokes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn box_mean_matches_brute_force_and_bbox_skip_leaves_far_pixels_untouched() {
+        let mut h = Heightfield::new(37, 23, 64, 0).expect("hf");
+        h.fill_with(|x, y| ((x * 7919 + y * 104729) % 1000) as f32 - 500.0);
+        let fast = box_mean(&h, 3, 2);
+        for y in 0..23u32 {
+            for x in 0..37u32 {
+                let (x0, x1) = (x.saturating_sub(3), (x + 3).min(36));
+                let (y0, y1) = (y.saturating_sub(2), (y + 2).min(22));
+                let mut sum = 0.0f64;
+                for yy in y0..=y1 {
+                    for xx in x0..=x1 {
+                        sum += f64::from(h.get(xx, yy));
+                    }
+                }
+                let brute = (sum / f64::from((x1 - x0 + 1) * (y1 - y0 + 1))) as f32;
+                assert!(
+                    (fast.get(x, y) - brute).abs() < 1e-3,
+                    "({x},{y}) {} vs {brute}",
+                    fast.get(x, y)
+                );
+            }
+        }
+        // A raise stroke in one corner leaves the opposite corner bit-identical.
+        let out = apply_strokes(
+            &h,
+            [1.0, 1.0],
+            &[Stroke {
+                points: vec![[3.0, 3.0], [6.0, 4.0]],
+                radius_m: 4.0,
+                strength_m: 10.0,
+                mode: StrokeMode::Raise,
+                amount: 0.0,
+            }],
+        )
+        .expect("strokes");
+        assert!(out.get(4, 3) > h.get(4, 3));
+        assert_eq!(out.get(30, 20), h.get(30, 20));
+        assert_eq!(out.get(11, 3), h.get(11, 3), "just outside the bbox");
+    }
 
     #[test]
     fn flatten_and_smooth_pull_towards_target_and_local_mean() {

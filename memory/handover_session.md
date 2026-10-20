@@ -116,11 +116,13 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `13:05:00` D∞ pushed as `48ca199`; gates: 96 Rust tests, 8 vitest, 5 e2e. One e2e flake observed under the full suite (graph.spec undo→redo: redo left 3 nodes; passed 2/2 and 1/1 on rerun) — not reproduced, watch for it. **Sea level** (`jd-terrain::flow::sea_level` + `jd.hydrology.sea_level@1`): `ocean` = below `level_m` *and* border-connected (4-connected flood from border cells; landlocked basins stay 0), smoothstep shore over `shore_m`, `depth` = level − h. Test: coast vs inland pit vs soft ramp (0.5 at mid-shore), NaN/negative shore rejected. CLI verification on a 512² noise world: 73 ms; 24 836 cells below 0 m → 13 691 ocean, 11 176 landlocked (composite `docs/user/images/cli-sea-level.png`). `scripts/pre-push.sh` freshness checks diff against the index → `git add -A` first (header says so now).
 
-### Open / next (as of 2026-10-20 13:10, head after sea-level commit)
-1. **CI**: everything through `d5647ba` green; `48ca199` (D∞) and the sea-level commit polling.
+- `13:30:00` Sea level pushed as `4f1dbfb`. **Sculpt perf**: `box_mean` is now a summed-area table (f64, O(N)) and each pixel skips strokes whose polyline ± radius box excludes it (falloff is exactly 0 there, so raise/flatten output is bit-identical; smooth differs only by f64-vs-f32 summation). Measured old vs new debug CLI on a 2048² world, one 600 m smooth stroke: sculpt node 70 554 ms → 681 ms, min/max identical, mean 249.711186 both. Test: SAT equals brute force on a pseudo-random 37×23 field; far pixels bit-identical.
+
+### Open / next (as of 2026-10-20 13:35, head after sculpt-perf commit)
+1. **CI**: everything through `4f1dbfb` (sea level) green; the sculpt-perf commit polling.
 2. **Figma**: connector unavailable this session; plugin OAuth pending on the owner's side → tutorial images stay in `docs/user/images/`; place them in file `fxyeV62hgLoNmG3dU1LX6G` when a connector works.
 3. **Native leftovers**: Edit-menu capture; native sculpt capture/recording (needs Accessibility); signed/notarised bundle (needs an Apple developer account).
-4. **Phase 3 follow-ups**: hydraulic concentration cap / layered materials / open drains; thermal + hydraulic WGSL twins (`jd-gpu`); particle hydraulic; MFD (D∞ ✔; `wetness` still D8-only); sea level ✔ (viewport water plane / ocean shading ☐); hydrology-first generation; smooth-brush blur limited to the stroke's bounding box (currently whole-field).
+4. **Phase 3 follow-ups**: hydraulic concentration cap / layered materials / open drains; thermal + hydraulic WGSL twins (`jd-gpu`); particle hydraulic; MFD (D∞ ✔; `wetness` still D8-only); sea level ✔ (viewport water plane / ocean shading ☐); hydrology-first generation; smooth-brush blur done via summed-area table (whole-field blur is now O(N); tile-level dirty sets remain).
 5. **Phase 2 leftovers**: detached async jobs (queues/budgets/timeouts), adopt `JdOps` types in `state.ts`, GeoTIFF tags/nodata on import, textured PBR for GLB, Windows/Linux measurements, tile-level `jd-cache` with LRU.
 6. **Docs**: hydrology recipe ✔, `desktop-rivers.png` ✔; a desktop capture of the rivers inspector showing the `method` select is still open (needs the native app rebuilt from this head).
 
