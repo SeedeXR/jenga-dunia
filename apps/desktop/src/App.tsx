@@ -490,6 +490,9 @@ export default function App() {
           <Field label={`Turbidity ${s.sun.turbidity}`}>
             <input className="w-28" type="range" min={2} max={10} step={0.5} value={s.sun.turbidity} onChange={(e) => s.setSun({ turbidity: Number(e.target.value) })} title="Atmospheric haze for the sky dome: 2 clear mountain air, 3 clear, 6 hazy, 10 thick haze (Preetham daylight model)" data-testid="sun-turbidity" />
           </Field>
+          <Field label={`Clouds ${Math.round(s.sun.clouds * 100)} %`}>
+            <input className="w-28" type="range" min={0} max={1} step={0.05} value={s.sun.clouds} onChange={(e) => s.setSun({ clouds: Number(e.target.value) })} title="Cloud cover on the sky dome and in the HDRI bake: a seeded cumulus-like noise layer, brighter on the sun side" data-testid="sky-clouds" />
+          </Field>
           <h2 className="mt-4 mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Scatter</h2>
           <Field label="Mask">
             <select className={inputCls} value={s.scatter.mask ?? ""} onChange={(e) => s.setScatter({ mask: e.target.value || null })} title="0..1 layer used as the instance density (a class mask, rivers, wetness…)" data-testid="scatter-mask">

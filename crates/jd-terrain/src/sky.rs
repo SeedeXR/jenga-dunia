@@ -35,6 +35,16 @@ pub struct SkyParams {
     /// pixel that holds it when the pixel is larger than the disc.
     #[serde(default = "d_sun")]
     pub sun_radiance: f32,
+    /// Cloud cover 0..1 (0 = clear): a seeded noise layer of cumulus-like patches, brighter on the
+    /// sun side and dimming the disc under cover; a shaded noise field, not a scattering model.
+    #[serde(default)]
+    pub cloud_cover: f32,
+    /// Angular size of the cloud cells, degrees (> 0; 25 ≈ fair-weather cumulus seen from below).
+    #[serde(default = "d_cloud_scale")]
+    pub cloud_scale_deg: f32,
+    /// Seed of the cloud field.
+    #[serde(default)]
+    pub cloud_seed: u64,
 }
 
 fn d_azimuth() -> f32 {
@@ -52,6 +62,9 @@ fn d_exposure() -> f32 {
 fn d_sun() -> f32 {
     80_000.0
 }
+fn d_cloud_scale() -> f32 {
+    25.0
+}
 
 impl Default for SkyParams {
     fn default() -> Self {
@@ -61,6 +74,9 @@ impl Default for SkyParams {
             turbidity: d_turbidity(),
             exposure: d_exposure(),
             sun_radiance: d_sun(),
+            cloud_cover: 0.0,
+            cloud_scale_deg: d_cloud_scale(),
+            cloud_seed: 0,
         }
     }
 }
@@ -96,6 +112,26 @@ pub struct Sky {
 }
 
 /// Direction of (azimuth clockwise from north, elevation) in the terrain frame: x east, y up, z south.
+/// Seeded value noise on a 2-D lattice, 0..1, smooth between lattice points.
+fn value_noise(u: f32, v: f32, seed: u64) -> f32 {
+    let hash = |x: i64, y: i64| -> f32 {
+        let mut h = seed
+            ^ (x as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            ^ (y as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
+        h ^= h >> 31;
+        h = h.wrapping_mul(0x94D0_49BB_1331_11EB);
+        h ^= h >> 29;
+        (h >> 40) as f32 / (1u64 << 24) as f32
+    };
+    let (x0, y0) = (u.floor(), v.floor());
+    let (fx, fy) = (u - x0, v - y0);
+    let (sx, sy) = (fx * fx * (3.0 - 2.0 * fx), fy * fy * (3.0 - 2.0 * fy));
+    let (xi, yi) = (x0 as i64, y0 as i64);
+    let top = hash(xi, yi) + (hash(xi + 1, yi) - hash(xi, yi)) * sx;
+    let bottom = hash(xi, yi + 1) + (hash(xi + 1, yi + 1) - hash(xi, yi + 1)) * sx;
+    top + (bottom - top) * sy
+}
+
 fn direction(azimuth_deg: f32, elevation_deg: f32) -> [f32; 3] {
     let (az, el) = (azimuth_deg.to_radians(), elevation_deg.to_radians());
     [el.cos() * az.sin(), el.sin(), -el.cos() * az.cos()]
@@ -119,6 +155,12 @@ impl Sky {
         if !(p.sun_radiance >= 0.0 && p.sun_radiance.is_finite()) || !p.sun_azimuth_deg.is_finite()
         {
             return Err(JdError::invalid("sun_radiance", "must be finite and ≥ 0"));
+        }
+        if !(0.0..=1.0).contains(&p.cloud_cover) {
+            return Err(JdError::invalid("cloud_cover", "must be within 0..=1"));
+        }
+        if !(p.cloud_scale_deg > 0.0 && p.cloud_scale_deg.is_finite()) {
+            return Err(JdError::invalid("cloud_scale_deg", "must be positive"));
         }
         let t = p.turbidity;
         let theta_s = (90.0 - p.sun_elevation_deg).to_radians();
@@ -209,6 +251,39 @@ impl Sky {
         ]
     }
 
+    /// Cloud density 0..1 in direction `d`: 3-octave value noise of the direction projected onto
+    /// a plane above the viewer (so cells flatten towards the horizon), thresholded by the cover.
+    pub fn cloud_density(&self, d: [f32; 3]) -> f32 {
+        let p = &self.params;
+        if p.cloud_cover <= 0.0 || d[1] <= 0.02 {
+            return 0.0;
+        }
+        let k = 90.0 / p.cloud_scale_deg;
+        let (u, v) = (d[0] / (d[1] + 0.15) * k, d[2] / (d[1] + 0.15) * k);
+        let (mut n, mut amp, mut freq, mut norm) = (0.0f32, 1.0f32, 1.0f32, 0.0f32);
+        for octave in 0..3u64 {
+            n += amp * value_noise(u * freq, v * freq, p.cloud_seed ^ (octave * 0x9E37));
+            norm += amp;
+            amp *= 0.5;
+            freq *= 2.1;
+        }
+        let n = n / norm;
+        let threshold = 1.0 - p.cloud_cover;
+        let density = ((n - threshold) / 0.25).clamp(0.0, 1.0);
+        let density = density * density * (3.0 - 2.0 * density);
+        density * (d[1] / 0.08).clamp(0.0, 1.0)
+    }
+
+    /// Cloud radiance in direction `d`: neutral, a little above the zenith luminance, brighter
+    /// towards the sun and darker in its own shadow side.
+    fn cloud_radiance(&self, d: [f32; 3]) -> [f32; 3] {
+        let cos_gamma =
+            (d[0] * self.sun[0] + d[1] * self.sun[1] + d[2] * self.sun[2]).clamp(-1.0, 1.0);
+        let lit = 0.9 + 0.7 * cos_gamma.max(0.0);
+        let y = self.zenith[0] * self.params.exposure * lit;
+        [y, y, y]
+    }
+
     /// Equirectangular map (`width` × `width / 2`): row 0 is the zenith, column 0 looks north and
     /// longitude runs clockwise (east at a quarter width), the layout renderers expect.
     pub fn equirect(&self, width: u32) -> (u32, u32, Vec<[f32; 3]>) {
@@ -236,6 +311,23 @@ impl Sky {
                 * el.to_radians().cos().max(1e-3);
             let spread = (omega_disc / omega_px).min(1.0);
             px[(row * width + col) as usize] = [self.params.sun_radiance * spread; 3];
+        }
+        // Clouds over everything, the sun pixel included: thick cover dims the disc.
+        if self.params.cloud_cover > 0.0 {
+            for row in 0..height {
+                let elevation = 90.0 - (row as f32 + 0.5) / height as f32 * 180.0;
+                for col in 0..width {
+                    let d = direction((col as f32 + 0.5) / width as f32 * 360.0, elevation);
+                    let dens = self.cloud_density(d);
+                    if dens > 0.0 {
+                        let c = self.cloud_radiance(d);
+                        let p = &mut px[(row * width + col) as usize];
+                        for k in 0..3 {
+                            p[k] += (c[k] - p[k]) * dens;
+                        }
+                    }
+                }
+            }
         }
         (width, height, px)
     }
@@ -302,6 +394,67 @@ pub fn sky_preview_png(p: &SkyParams, width: u32) -> JdResult<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clouds_brighten_the_sky_only_when_asked() {
+        let clear = Sky::new(&SkyParams::default()).expect("sky");
+        let cloudy = Sky::new(&SkyParams {
+            cloud_cover: 0.7,
+            cloud_seed: 3,
+            ..SkyParams::default()
+        })
+        .expect("sky");
+        let (w, h, a) = clear.equirect(128);
+        let (_, _, b) = cloudy.equirect(128);
+        let zero = Sky::new(&SkyParams {
+            cloud_cover: 0.0,
+            cloud_seed: 3,
+            ..SkyParams::default()
+        })
+        .expect("sky")
+        .equirect(128)
+        .2;
+        assert_eq!(a, zero, "cover 0 is the clear sky, bit for bit");
+        // Upper hemisphere brightness without the sun pixel (its energy dwarfs the sky and clouds dim it).
+        let upper = |px: &[[f32; 3]]| {
+            px.iter()
+                .take((w * h / 2) as usize)
+                .map(|c| c[1].min(10.0))
+                .sum::<f32>()
+        };
+        let changed = a.iter().zip(&b).filter(|(x, y)| x != y).count();
+        assert!(
+            changed > (w * h / 20) as usize,
+            "clouds cover part of the dome: {changed} px"
+        );
+        assert!(
+            upper(&b) > upper(&a) * 1.05,
+            "clouds are brighter than blue sky: {} vs {}",
+            upper(&a),
+            upper(&b)
+        );
+        assert!(
+            b.iter()
+                .skip((w * h / 2) as usize)
+                .zip(a.iter().skip((w * h / 2) as usize))
+                .all(|(x, y)| x == y),
+            "nothing below the horizon"
+        );
+        assert!(
+            Sky::new(&SkyParams {
+                cloud_cover: 1.5,
+                ..SkyParams::default()
+            })
+            .is_err()
+        );
+        assert!(
+            Sky::new(&SkyParams {
+                cloud_scale_deg: 0.0,
+                ..SkyParams::default()
+            })
+            .is_err()
+        );
+    }
 
     #[test]
     fn clear_sky_is_blue_at_the_zenith_bright_around_the_sun_and_hazier_with_turbidity() {

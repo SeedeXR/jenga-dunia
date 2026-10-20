@@ -352,7 +352,7 @@ const snowLine = Object.values(after.nodes).find((n) => n.kind.startsWith("jd.cl
 mark(18, snowLine === 900 && (rec.replayed?.length ?? rec.replayed ?? 1) >= 1 ? "VERIFIED" : "FAILED", `recovery: ${journal.length} pending journal entr${journal.length === 1 ? "y" : "ies"} replayed by \`jd open --recover\`, graph.json now has snow_line_m = ${snowLine}`);
 const logDir = path.join(proj, "logs");
 mark(18, "PARTIAL", `logs: every CLI run logs through tracing (JD_LOG); ${existsSync(logDir) ? "project log directory present" : "no per-project log files yet (stderr only)"}`);
-mark(5, "PARTIAL", "atmosphere beyond the clear-sky model (clouds, fog, rain) is not built");
+mark(5, "PARTIAL", "clouds: a seeded cover layer on the sky bake/preview (cloud_cover); fog and rain are not modelled");
 mark(15, "VERIFIED", "this report records the numbers; conversion losses: PNG16 quantisation (W_EXPORT_LOSS), USD without textures (step 4), FBX albedo only (no normal/roughness maps)");
 
 // ── Report ─────────────────────────────────────────────────────────────────────────────────────

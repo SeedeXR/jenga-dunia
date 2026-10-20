@@ -862,6 +862,13 @@ real sun — ≈ 1.6·10⁹ cd/m², i.e. 1.6·10⁶ kcd/m² × the default expos
 scene with the right sun-to-sky balance; in the map the disc's energy is spread over the
 pixel that holds it when the pixel is larger than the disc. */
   "sun_radiance"?: number;
+  /** Cloud cover 0..1 (0 = clear): a seeded noise layer of cumulus-like patches, brighter on the
+sun side and dimming the disc under cover; a shaded noise field, not a scattering model. */
+  "cloud_cover"?: number;
+  /** Angular size of the cloud cells, degrees (> 0; 25 ≈ fair-weather cumulus seen from below). */
+  "cloud_scale_deg"?: number;
+  /** Seed of the cloud field. */
+  "cloud_seed"?: number;
   /** Width of the equirectangular map in pixels (even, 16..=8192); the height is half. */
   "width"?: number;
   /** Output `.exr`; relative paths resolve against the project's `exports/`. A `.png` preview is written beside it. */
@@ -895,6 +902,13 @@ real sun — ≈ 1.6·10⁹ cd/m², i.e. 1.6·10⁶ kcd/m² × the default expos
 scene with the right sun-to-sky balance; in the map the disc's energy is spread over the
 pixel that holds it when the pixel is larger than the disc. */
   "sun_radiance"?: number;
+  /** Cloud cover 0..1 (0 = clear): a seeded noise layer of cumulus-like patches, brighter on the
+sun side and dimming the disc under cover; a shaded noise field, not a scattering model. */
+  "cloud_cover"?: number;
+  /** Angular size of the cloud cells, degrees (> 0; 25 ≈ fair-weather cumulus seen from below). */
+  "cloud_scale_deg"?: number;
+  /** Seed of the cloud field. */
+  "cloud_seed"?: number;
   /** Width of the equirectangular preview in pixels (even, 16..=2048); the height is half. */
   "width"?: number;
 };

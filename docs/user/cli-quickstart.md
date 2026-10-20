@@ -582,6 +582,16 @@ turbidity 6:  zenith [0.180, 0.396, 0.759]   horizon [0.271, 0.255, 0.307]  (haz
 
 `sky.bake` writes the Preetham–Shirley–Smits (1999) analytic daylight model as an equirectangular HDRI: the sky's luminance and chromaticity are Perez distributions whose coefficients are linear in `turbidity` (2 clear mountain air … 10 thick haze), scaled by a zenith fitted to the sun's zenith angle, converted xyY → linear sRGB and multiplied by `exposure`. The sun is a 0.27° disc at `sun_radiance` (default the real sun, ≈ 1.6·10⁹ cd/m² after exposure); because the disc is smaller than any map pixel, the pixel that holds it receives the disc's energy (radiance × Ω_disc / Ω_pixel), which is what makes the render above cast sharp shadows from the HDRI alone. Row 0 is the zenith, column 0 looks north, longitude runs clockwise. Rendered in Blender 5.2 with `scripts/blender/render_glb.py … sky_t2.exr` (world environment, sun lamp off). Hošek–Wilkie 2012 is the better model but ships as coefficient tables under their own licence; the viewport still draws its gradient dome — texturing it with this bake is the next step.
 
+**Clouds.** `cloud_cover` (0..1), `cloud_scale_deg` and `cloud_seed` add a cloud layer to the same bake and preview — and to the desktop's dome through the Sun panel's **Clouds** slider:
+
+```
+$ jd --json op sky.preview --project World.jdproj --params '{"sun_elevation_deg":30,"sun_azimuth_deg":140,"turbidity":3,"exposure":0.15,"cloud_cover":0.55,"cloud_seed":7,"width":1024}'
+```
+
+![Equirectangular sky preview with 55 % cloud cover: bright cumulus-like patches across the upper half, thinning and flattening towards the horizon, the sun's side of each patch brighter](images/cli-sky-clouds.png)
+
+The clouds are a shaded noise field, not a scattering model: three octaves of seeded value noise on the direction projected onto a plane above the viewer (so cells flatten towards the horizon), thresholded by the cover with a soft edge, coloured a neutral grey-white around the zenith luminance and brighter towards the sun; thick cover dims the sun pixel. Cover 0 reproduces the clear sky bit for bit. Fog and rain are not modelled.
+
 ### Timeline: keyframed parameters
 
 ```

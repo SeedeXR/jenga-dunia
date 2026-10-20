@@ -57,6 +57,14 @@ test.describe("desktop UI against the real core", () => {
     await expect(page.getByTestId("viewport-info")).toContainText("sun 12°/140°");
     // The dome is the physical sky, re-baked for the new sun; haze is a slider too.
     await expect(page.getByTestId("viewport-info")).toContainText("sky 512×256");
+    // Clouds: the slider re-bakes the dome with cover (the log names the cover it baked with).
+    await page.getByTestId("sky-clouds").evaluate((el) => {
+      const input = el as HTMLInputElement;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(input, "0.6");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await expect(page.getByTestId("log")).toContainText("clouds 60 %", { timeout: 30_000 });
     await expect(page.getByTestId("sun-turbidity")).toHaveValue("3");
     // The horizon skirt: the noise continued 3× beyond the border, coarse, with a hole for the world.
     await page.getByTestId("horizon-toggle").click();

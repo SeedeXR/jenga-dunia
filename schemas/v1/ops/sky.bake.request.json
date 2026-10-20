@@ -34,6 +34,25 @@
       "format": "float",
       "default": 80000.0
     },
+    "cloud_cover": {
+      "description": "Cloud cover 0..1 (0 = clear): a seeded noise layer of cumulus-like patches, brighter on the\nsun side and dimming the disc under cover; a shaded noise field, not a scattering model.",
+      "type": "number",
+      "format": "float",
+      "default": 0.0
+    },
+    "cloud_scale_deg": {
+      "description": "Angular size of the cloud cells, degrees (> 0; 25 ≈ fair-weather cumulus seen from below).",
+      "type": "number",
+      "format": "float",
+      "default": 25.0
+    },
+    "cloud_seed": {
+      "description": "Seed of the cloud field.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0,
+      "default": 0
+    },
     "width": {
       "description": "Width of the equirectangular map in pixels (even, 16..=8192); the height is half.",
       "type": "integer",
