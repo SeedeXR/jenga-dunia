@@ -129,8 +129,14 @@ describe("App", () => {
     fireEvent.change(screen.getByTestId("seed"), { target: { value: "7" } });
     fireEvent.click(screen.getByTestId("generate"));
     await waitFor(() => expect(screen.getByTestId("layer-stats")).toBeInTheDocument());
-    const gen = calls.find((c) => (c.args as { request?: { op: string } }).request?.op === "terrain.generate");
-    expect(gen).toMatchObject({ args: { request: { params: { noise: { seed: 7, kind: "open_simplex2", fractal: "fbm" }, layer: "height" } } } });
+    // Generate edits the graph's noise node (every differing setting, journaled) and evaluates the graph.
+    const seedEdit = calls.find((c) => {
+      const r = (c.args as { request?: { op: string; params: { key?: string } } }).request;
+      return r?.op === "graph.set_param" && r.params.key === "seed";
+    });
+    expect(seedEdit).toMatchObject({ args: { request: { params: { id: "01N", key: "seed", value: 7 } } } });
+    expect(calls.some((c) => (c.args as { request?: { op: string; params: { lod?: number } } }).request?.op === "graph.evaluate")).toBe(true);
+    expect(calls.some((c) => (c.args as { request?: { op: string } }).request?.op === "terrain.generate")).toBe(false);
     expect(screen.getByTestId("layer-stats")).toHaveTextContent("1.5 / 498.2 m");
     expect(screen.getByTestId("viewport")).toHaveTextContent("preview 2");
     expect(calls.some((c) => c.cmd === "layer_preview")).toBe(true);

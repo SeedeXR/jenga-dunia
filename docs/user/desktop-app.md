@@ -161,6 +161,16 @@ Undo and redo are operations like everything else (`graph.undo` / `graph.redo`, 
 
 *Waves: `wind_speed_mps`, `fetch_km` and `wind_azimuth_deg` on the same node raise a wind sea. The app asks the core for the spectrum (`ocean.waves`: JONSWAP fetch-limited growth capped at the fully developed Pierson–Moskowitz sea) and moves the water plane along a Gerstner sum of its three components every frame, so a 3 m/s breeze makes 0.2 m ripples and a 20 m/s gale 9.8 m swells 380 m long (3.2 m / 96 m if the fetch is only 100 km). Waves break where the water is shallower than Hs / 0.78, and the shoreline foam widens to that surf zone — 12.6 m of depth in the gale above. The header shows the significant height and peak wavelength being drawn; recording below. **Export water maps** (Export panel) writes `exports/water/` — depth, colour, foam and a tileable wave normal map for the node's clarity and wind (`ocean.bake`, see the CLI quickstart). Not yet: refraction and shadowing by headlands.*
 
+## Desert landscapes
+
+![Desert project: a 0..40 m plain generated from the panel, an aeolian node and a karst node in the graph, the viewport zoomed onto dune ripples with a red sinkhole floor](images/desktop-desert.png)
+
+*A desert in three nodes: set **Height min / max** to 0..40 m with a large feature size and few octaves and **Generate** a plain (1); add `jd.erosion.aeolian@1` (Werner slabs hop downwind into dunes; 60 steps here) and `jd.erosion.karst@1` (dolines on ground flatter than `max_slope_deg`, 15° between the dunes) and wire noise → dunes → sinkholes → height (2); publish the node's `sinkholes` output as a second layer and colour by it (3) — the red floors are the pits. Strata for mesas, wadis, playas and the rest of the desert family are CLI recipes in the quickstart for now. The UI-driven test `apps/desktop/e2e/desert.spec.ts` builds exactly this and is the source of the capture.*
+
+**Screen recording:** [`videos/desert-dunes-sinkholes.mp4`](videos/desert-dunes-sinkholes.mp4) (31 s, 1440×900) — the desert flow above, recorded from the test with `JD_VIDEO=1`.
+
+**Generate and the graph are one terrain.** The Generate panel writes its settings into the graph's noise node (journaled `graph.set_param` edits, so undo and autosave cover them) and evaluates the graph at full resolution; Evaluate and the live preview then show the same terrain, and every node you add works on the plain you generated. Until this release the panel ran a standalone `terrain.generate` beside the graph: on a small world the starter graph's own preview could publish `height` right after a quick Generate and overwrite it, and erosion nodes added afterwards eroded the starter noise, not the generated plain. A graph without a noise node (one built from an imported heightmap) still uses the standalone op.
+
 ## Tutorial: sculpting
 
 1. Click **Sculpt** (top of the viewport). If the graph has no stroke node yet, a `jd.sculpt.strokes` node is inserted in front of the output and selected; the button reads **Sculpting…** and a **Brush** panel appears on the right: **mode** (raise/lower by a strength in metres — negative digs; **smooth** blends towards the local mean; **flatten** pulls towards the height under the first point of the stroke), radius, and strength or amount (0–1).

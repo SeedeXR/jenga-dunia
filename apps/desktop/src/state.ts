@@ -499,7 +499,21 @@ export const useStore = create<State>((set, get) => {
       }
     },
     generate: async () => {
-      const r = await run("terrain.generate", { noise: get().noise, layer: "height" });
+      // One source of truth: the panel's settings go into the graph's noise node and the graph is
+      // evaluated — so Generate, Evaluate and the live preview all show the same terrain. Without
+      // a noise node (a graph built from an imported heightmap) the standalone op fills `height`.
+      const noise = get().noise;
+      const node = get().graph.nodes.find((n) => n.kind.startsWith("jd.noise."));
+      if (node) {
+        for (const [key, value] of Object.entries(noise)) {
+          if (JSON.stringify(node.params?.[key]) !== JSON.stringify(value)) await mutate("graph.set_param", { id: node.id, key, value });
+        }
+        clearTimeout(liveTimer); // the full evaluation below supersedes the preview those edits queued
+        const r = await run("graph.evaluate", { lod: 0 });
+        if (r.status === "ok" && r.result) await adopt(r.result);
+        return;
+      }
+      const r = await run("terrain.generate", { noise, layer: "height" });
       if (r.status === "ok" && r.result) {
         set({ layer: r.result });
         await refreshPreview();
