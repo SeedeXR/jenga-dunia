@@ -1551,6 +1551,62 @@
     }
   },
   {
+    "kind": "jd.ocean.bathymetry@1",
+    "description": "Sediment infill of the sea floor: sand and mud cells (from a `seabed` class map) rise towards the local mean over `smooth_m`, capped at `max_fill_m` and `level_m`; rock, reef and land are untouched",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      },
+      {
+        "name": "seabed",
+        "ty": "heightfield",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "BathymetryParams",
+      "description": "Bathymetry settings.",
+      "type": "object",
+      "properties": {
+        "level_m": {
+          "description": "Sea level, metres: sediment never builds above it.",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        },
+        "smooth_m": {
+          "description": "Smoothing reach, metres (> 0): hollows narrower than this fill in.",
+          "type": "number",
+          "format": "float",
+          "default": 200.0
+        },
+        "max_fill_m": {
+          "description": "Thickest sediment layer laid down anywhere, metres (≥ 0).",
+          "type": "number",
+          "format": "float",
+          "default": 20.0
+        },
+        "strength": {
+          "description": "How much of the infill to apply, 0..1 (1 = level the hollow completely).",
+          "type": "number",
+          "format": "float",
+          "default": 1.0
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
     "kind": "jd.output.height@1",
     "description": "Publishes its input as a named heightfield layer",
     "inputs": [

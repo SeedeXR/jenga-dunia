@@ -381,6 +381,18 @@ at rock_slope_deg 20 the same floor reads                    sand 27.6 %  rock 6
 
 `jd.biome.seabed@1` classifies every ocean cell (below `level_m` and connected to the border, like the sea-level node) by depth and slope with the rules coastal geomorphology gives: submarine slopes steeper than `rock_slope_deg` hold no sediment and read **rock** (2); the floor deeper than `mud_min_depth_m` is still enough for fines to settle, **mud** (3); the shelf above the wave base `sand_max_depth_m` is wave-sorted **sand** (1); and a gentle shelf inside `reef_depth_m` that is more than `river_reach_m` from any cell of the optional `rivers` or `shore` masks becomes **reef** (4) — reefs need clear, sediment-free water, so on the steep coastal world above, whose shallow shelves are all within reach of wave-worked cliffs, no reef forms. Land is 0. The class map works with `jd.mask.class@1` exactly like the land biomes, so each bed gets its own material, scatter (kelp, boulders) and colour overlay. No sediment transport or currents yet.
 
+### Bathymetry: sediment fills the floor
+
+```
+$ jd op graph.add_node --project Coast.jdproj --save --params '{"kind":"jd.ocean.bathymetry@1","params":{"level_m":250,"smooth_m":200,"max_fill_m":20}}'
+# rivers.out → bathymetry.in; seabed.seabed → bathymetry.seabed; bathymetry.out → an output
+bathymetry node 56 ms (128², default world, 250 m sea)
+before  min 42.548  max 412.711  mean 229.370
+after   min 42.548  max 412.711  mean 230.109      (+0.74 m averaged over the world: ~10 m of sediment on the 7 % of cells that are sand or mud)
+```
+
+`jd.ocean.bathymetry@1` takes the terrain and a `seabed` class map and raises every **sand** (1) or **mud** (3) cell towards the local mean height over `smooth_m` (a summed-area box filter, O(N)), never lowering a cell, never by more than `max_fill_m`, and never above `level_m` — sediment settles into hollows and levels the shelf, it does not build above the water. Rock (2), reef (4) and land keep the shape erosion gave them, so the chain coastal → seabed → bathymetry turns a noisy flooded landscape into a floor with smooth sediment plains between rock outcrops. `strength` (0..1) scales the fill. Not modelled: transport along the slope, sorting by grain size, a sediment budget.
+
 ### Snow cover
 
 ```

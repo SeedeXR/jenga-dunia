@@ -872,6 +872,19 @@ pub fn register_all(r: &mut Registry) {
             Ok(out("seabed", classify_seabed(field(i, "in")?, spacing_m(ctx), rivers.map(|r| &**r), shore.map(|s| &**s), &sp)?))
         },
     ).with_memory(8.0));
+    r.register(NodeDef::new::<jd_terrain::BathymetryParams, _>(
+        "jd.ocean.bathymetry@1",
+        "Sediment infill of the sea floor: sand and mud cells (from a `seabed` class map) rise towards the local mean over `smooth_m`, capped at `max_fill_m` and `level_m`; rock, reef and land are untouched",
+        vec![
+            port("in", PortType::Heightfield, true),
+            port("seabed", PortType::Heightfield, true),
+        ],
+        vec![port("out", PortType::Heightfield, false)],
+        |ctx, p, i| {
+            let bp: jd_terrain::BathymetryParams = params(p)?;
+            Ok(out("out", jd_terrain::bathymetry(field(i, "in")?, spacing_m(ctx), field(i, "seabed")?, &bp)?))
+        },
+    ).with_memory(16.0));
     r.register(NodeDef::new::<ClassMaskParams, _>(
         "jd.mask.class@1",
         "0/1 mask of the cells whose class id equals `id` (feed a `jd.biome.classify@1` map)",

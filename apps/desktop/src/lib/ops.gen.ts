@@ -1285,6 +1285,17 @@ export type NodeParams_jd_noise_fbm_1 = {
   "offset_m"?: [number, number];
 };
 
+export type NodeParams_jd_ocean_bathymetry_1 = {
+  /** Sea level, metres: sediment never builds above it. */
+  "level_m"?: number;
+  /** Smoothing reach, metres (> 0): hollows narrower than this fill in. */
+  "smooth_m"?: number;
+  /** Thickest sediment layer laid down anywhere, metres (≥ 0). */
+  "max_fill_m"?: number;
+  /** How much of the infill to apply, 0..1 (1 = level the hollow completely). */
+  "strength"?: number;
+};
+
 export type NodeParams_jd_output_height_1 = {
   /** Layer name the result is published under. */
   "layer"?: string;
@@ -1419,6 +1430,7 @@ export interface NodeKinds {
   "jd.math.remap@1": NodeParams_jd_math_remap_1;
   "jd.math.scale@1": NodeParams_jd_math_scale_1;
   "jd.noise.fbm@1": NodeParams_jd_noise_fbm_1;
+  "jd.ocean.bathymetry@1": NodeParams_jd_ocean_bathymetry_1;
   "jd.output.height@1": NodeParams_jd_output_height_1;
   "jd.sculpt.strokes@1": NodeParams_jd_sculpt_strokes_1;
 }

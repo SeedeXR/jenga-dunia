@@ -6,6 +6,7 @@
 //! Export writes the formats engines actually consume (`docs/architecture/08-io-formats.md`).
 
 pub mod aeolian;
+pub mod bathymetry;
 pub mod climate;
 pub mod coastal;
 pub mod decimate;
@@ -26,6 +27,7 @@ pub mod seabed;
 pub mod sim;
 
 pub use aeolian::{AeolianParams, aeolian_transport};
+pub use bathymetry::{BathymetryParams, bathymetry};
 pub use climate::{SnowParams, snow_cover};
 pub use coastal::{CoastalParams, coastal_erode};
 pub use decimate::decimate;

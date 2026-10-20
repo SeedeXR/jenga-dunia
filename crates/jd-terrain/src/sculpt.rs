@@ -52,7 +52,7 @@ fn half() -> f32 {
 }
 
 /// Box-filtered copy of `h` (radius in pixels, edge-clamped) for smooth strokes.
-fn box_mean(h: &Heightfield, rx: u32, ry: u32) -> Heightfield {
+pub(crate) fn box_mean(h: &Heightfield, rx: u32, ry: u32) -> Heightfield {
     let (w, hh) = (h.width() as usize, h.height() as usize);
     // Summed-area table in f64 (one extra zero row/column) so any box is four lookups.
     let v = h.to_vec();

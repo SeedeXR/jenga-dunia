@@ -166,6 +166,38 @@ test.describe("hydrology nodes against the real core", () => {
     await level.blur();
     await expect(page.getByTestId("viewport-info")).toContainText("sea 0 m");
     await page.screenshot({ path: testInfo.outputPath("hydrology-seabed.png") }); // tutorial image source
+
+    // Bathymetry: sediment fills the sand and mud hollows of that floor (rock and reef keep their
+    // shape); published as `floor`, it is a height layer the viewer can show with the class colours.
+    await page.getByTestId("graph-kind").selectOption("jd.ocean.bathymetry@1");
+    await page.getByTestId("graph-add").click();
+    const bathy = panel.locator(".react-flow__node", { hasText: "jd.ocean.bathymetry@1" });
+    await fitView(page, bathy);
+    await bathy.click();
+    const bathyLevel = inspector.locator("label", { hasText: "level_m" }).locator("input");
+    await bathyLevel.fill("250");
+    await bathyLevel.blur();
+    await expect(bathy).toContainText("level_m=250");
+    await wire(page, rivers, bathy, "out", "in");
+    await wire(page, seabed, bathy, "seabed", "seabed");
+    await page.getByTestId("graph-kind").selectOption("jd.output.height@1");
+    await page.getByTestId("graph-add").click();
+    const out4 = panel.locator(".react-flow__node", { hasText: "jd.output.height@1" }).last();
+    await expect(panel.locator(".react-flow__node", { hasText: "jd.output.height@1" })).toHaveCount(4);
+    await fitView(page, out4);
+    await out4.click();
+    const floorLayer = inspector.locator("label", { hasText: "layer" }).locator("input");
+    await floorLayer.fill("floor");
+    await floorLayer.blur();
+    await expect(out4).toContainText("layer=floor");
+    await wire(page, bathy, out4, "out");
+    const evaluated2 = await logCount(page, "graph.evaluate: ok");
+    await page.getByTestId("graph-evaluate").click();
+    await expect.poll(() => logCount(page, "graph.evaluate: ok")).toBeGreaterThan(evaluated2);
+    await page.getByTestId("layer-pick").selectOption("floor");
+    await expect(page.getByTestId("layer-stats")).toContainText("230.1 m"); // mean rose from 229.4 m: hollows filled
+    await page.screenshot({ path: testInfo.outputPath("hydrology-bathymetry.png") }); // tutorial image source
+    await page.getByTestId("layer-pick").selectOption("height");
     await page.getByTestId("color-pick").selectOption("");
 
     // Autosave (interval overridden to 2 s here): after the last edit the project is saved — journal truncated, documents current.
