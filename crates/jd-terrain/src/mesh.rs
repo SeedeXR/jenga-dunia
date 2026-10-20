@@ -121,7 +121,7 @@ pub fn auto_step(width: u32, height: u32, max_vertices: u32) -> u32 {
     step
 }
 
-fn pad4(v: &mut Vec<u8>, byte: u8) {
+pub(crate) fn pad4(v: &mut Vec<u8>, byte: u8) {
     while !v.len().is_multiple_of(4) {
         v.push(byte);
     }
@@ -273,9 +273,25 @@ pub fn export_glb(
         json["materials"][0]["pbrMetallicRoughness"]["baseColorFactor"] =
             serde_json::json!([1.0, 1.0, 1.0, 1.0]);
     }
-    let mut json_bytes = serde_json::to_vec(&json)?;
-    pad4(&mut json_bytes, b' ');
+    let bytes = write_glb(path, &json, &bin)?;
+    Ok(MeshExportReport {
+        path: path.to_path_buf(),
+        format: "glb".into(),
+        vertices: n_vertices as u32,
+        triangles: n_triangles,
+        step,
+        bytes,
+        extent_m,
+        texture_px: texture.then_some([gw, gh]),
+    })
+}
 
+/// Write a two-chunk GLB container (JSON + BIN, both 4-byte padded); returns the bytes written.
+pub(crate) fn write_glb(path: &Path, json: &serde_json::Value, bin: &[u8]) -> JdResult<u64> {
+    let mut json_bytes = serde_json::to_vec(json)?;
+    pad4(&mut json_bytes, b' ');
+    let mut bin = bin.to_vec();
+    pad4(&mut bin, 0);
     let total = 12 + 8 + json_bytes.len() + 8 + bin.len();
     let mut out = Vec::with_capacity(total);
     out.extend_from_slice(b"glTF");
@@ -291,16 +307,7 @@ pub fn export_glb(
         fs::create_dir_all(parent)?;
     }
     fs::write(path, &out)?;
-    Ok(MeshExportReport {
-        path: path.to_path_buf(),
-        format: "glb".into(),
-        vertices: n_vertices as u32,
-        triangles: n_triangles,
-        step,
-        bytes: out.len() as u64,
-        extent_m,
-        texture_px: texture.then_some([gw, gh]),
-    })
+    Ok(out.len() as u64)
 }
 
 /// A regular grid mesh in metres: +X east, +Y up, +Z south, centred on the world (same frame as

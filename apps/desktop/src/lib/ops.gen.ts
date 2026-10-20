@@ -882,7 +882,8 @@ export type TerrainScatterRequest = {
   "mask": string;
   /** Height layer sampled for `z` (null = 0). */
   "height"?: string | null;
-  /** Output `.csv` or `.json`; relative paths resolve against the project's `exports/`. */
+  /** Output `.csv`, `.json` or `.glb` (proxy mesh instanced with `EXT_mesh_gpu_instancing`);
+relative paths resolve against the project's `exports/`. */
   "path": string;
   /** Target spacing between points in metres (grid cell size); must be ≥ one sample spacing. */
   "spacing_m": number;
@@ -1223,7 +1224,7 @@ export interface JdOps {
   "terrain.generate": { request: TerrainGenerateRequest; result: TerrainGenerateResult };
   /** Downsampled u16 preview of a layer (base64) for agents and viewers */
   "terrain.preview": { request: TerrainPreviewRequest; result: TerrainPreviewResult };
-  /** Scatter instance points over the world from a 0..1 density mask layer (stratified jittered grid, deterministic by seed) and write them as CSV or JSON with heights */
+  /** Scatter instance points over the world from a 0..1 density mask layer (stratified jittered grid, deterministic by seed) and write them as CSV or JSON with heights, or as GLB instances */
   "terrain.scatter": { request: TerrainScatterRequest; result: TerrainScatterResult };
   /** Statistics and content hash of a layer */
   "terrain.stats": { request: TerrainStatsRequest; result: TerrainStatsResult };

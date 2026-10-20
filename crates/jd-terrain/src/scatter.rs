@@ -129,8 +129,14 @@ pub fn scatter_points(
     Ok(out)
 }
 
-/// Write points as CSV (`u,v,z,r` header) or JSON (array of objects), by extension.
-pub fn write_points(path: &std::path::Path, points: &[ScatterPoint]) -> JdResult<u64> {
+/// Write points as CSV (`u,v,z,r` header), JSON (array of objects) or GLB (one proxy mesh
+/// instanced with `EXT_mesh_gpu_instancing`), by extension. `extent_m` places GLB instances in
+/// the terrain mesh frame (+X east, +Y up, +Z south, world-centred).
+pub fn write_points(
+    path: &std::path::Path,
+    points: &[ScatterPoint],
+    extent_m: [f64; 2],
+) -> JdResult<u64> {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
@@ -144,12 +150,13 @@ pub fn write_points(path: &std::path::Path, points: &[ScatterPoint]) -> JdResult
             s.into_bytes()
         }
         Some("json") => serde_json::to_vec(points)?,
+        Some("glb") => return write_instances_glb(path, points, extent_m),
         _ => {
             return Err(JdError::new(
                 jd_types::ErrorCode::E_FORMAT_UNSUPPORTED,
                 "unsupported scatter format",
             )
-            .next("Use .csv or .json."));
+            .next("Use .csv, .json or .glb."));
         }
     };
     if let Some(parent) = path.parent() {
@@ -157,6 +164,85 @@ pub fn write_points(path: &std::path::Path, points: &[ScatterPoint]) -> JdResult
     }
     std::fs::write(path, &bytes)?;
     Ok(bytes.len() as u64)
+}
+
+/// GLB with one 1 m proxy pyramid and an `EXT_mesh_gpu_instancing` node: per instance a
+/// translation in the terrain mesh frame, a yaw from `r` and a 0.75..1.25 uniform scale.
+/// Engines swap the proxy for the real asset and keep the transforms.
+fn write_instances_glb(
+    path: &std::path::Path,
+    points: &[ScatterPoint],
+    extent_m: [f64; 2],
+) -> JdResult<u64> {
+    if points.is_empty() {
+        return Err(JdError::invalid("mask", "no points to export"));
+    }
+    let f32s = |bin: &mut Vec<u8>, vals: &[f32]| {
+        for v in vals {
+            bin.extend_from_slice(&v.to_le_bytes());
+        }
+    };
+    let mut bin = Vec::with_capacity(points.len() * 40 + 128);
+    // Proxy: apex up, 0.6 m square base; 4 sides + 2 base triangles, counter-clockwise outside.
+    let verts: [f32; 15] = [
+        0.0, 1.0, 0.0, -0.3, 0.0, 0.3, 0.3, 0.0, 0.3, 0.3, 0.0, -0.3, -0.3, 0.0, -0.3,
+    ];
+    f32s(&mut bin, &verts);
+    let idx_off = bin.len();
+    for i in [0u16, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 1, 1, 4, 3, 1, 3, 2] {
+        bin.extend_from_slice(&i.to_le_bytes());
+    }
+    let tr_off = bin.len();
+    let (mut min, mut max) = ([f32::MAX; 3], [f32::MIN; 3]);
+    for p in points {
+        let t = [
+            (p.u as f64 - extent_m[0] / 2.0) as f32,
+            p.z,
+            (extent_m[1] / 2.0 - p.v as f64) as f32,
+        ];
+        for k in 0..3 {
+            min[k] = min[k].min(t[k]);
+            max[k] = max[k].max(t[k]);
+        }
+        f32s(&mut bin, &t);
+    }
+    let rot_off = bin.len();
+    for p in points {
+        let half = std::f32::consts::PI * p.r; // yaw 2π·r as a quaternion about +Y
+        f32s(&mut bin, &[0.0, half.sin(), 0.0, half.cos()]);
+    }
+    let sc_off = bin.len();
+    for p in points {
+        let s = 0.75 + 0.5 * (p.r * 7.31).fract();
+        f32s(&mut bin, &[s, s, s]);
+    }
+    let n = points.len();
+    let json = serde_json::json!({
+        "asset": { "version": "2.0", "generator": format!("jenga-dunia {}", env!("CARGO_PKG_VERSION")) },
+        "extensionsUsed": ["EXT_mesh_gpu_instancing"],
+        "extensionsRequired": ["EXT_mesh_gpu_instancing"],
+        "buffers": [{ "byteLength": bin.len() }],
+        "bufferViews": [
+            { "buffer": 0, "byteOffset": 0, "byteLength": idx_off, "target": 34962 },
+            { "buffer": 0, "byteOffset": idx_off, "byteLength": tr_off - idx_off, "target": 34963 },
+            { "buffer": 0, "byteOffset": tr_off, "byteLength": rot_off - tr_off },
+            { "buffer": 0, "byteOffset": rot_off, "byteLength": sc_off - rot_off },
+            { "buffer": 0, "byteOffset": sc_off, "byteLength": bin.len() - sc_off }
+        ],
+        "accessors": [
+            { "bufferView": 0, "componentType": 5126, "count": 5, "type": "VEC3", "min": [-0.3, 0.0, -0.3], "max": [0.3, 1.0, 0.3] },
+            { "bufferView": 1, "componentType": 5123, "count": 18, "type": "SCALAR" },
+            { "bufferView": 2, "componentType": 5126, "count": n, "type": "VEC3", "min": min, "max": max },
+            { "bufferView": 3, "componentType": 5126, "count": n, "type": "VEC4" },
+            { "bufferView": 4, "componentType": 5126, "count": n, "type": "VEC3" }
+        ],
+        "materials": [{ "name": "proxy", "pbrMetallicRoughness": { "baseColorFactor": [0.2, 0.5, 0.2, 1.0], "metallicFactor": 0.0, "roughnessFactor": 0.9 } }],
+        "meshes": [{ "name": "proxy", "primitives": [{ "attributes": { "POSITION": 0 }, "indices": 1, "material": 0, "mode": 4 }] }],
+        "nodes": [{ "mesh": 0, "name": "instances", "extensions": { "EXT_mesh_gpu_instancing": { "attributes": { "TRANSLATION": 2, "ROTATION": 3, "SCALE": 4 } } } }],
+        "scenes": [{ "nodes": [0] }],
+        "scene": 0
+    });
+    crate::mesh::write_glb(path, &json, &bin)
 }
 
 #[cfg(test)]
@@ -221,10 +307,40 @@ mod tests {
             "finer than a sample"
         );
         let dir = tempfile::tempdir().expect("tmp");
-        let n = write_points(&dir.path().join("p.csv"), &g[..3]).expect("csv");
+        let ext = [640.0, 640.0];
+        let n = write_points(&dir.path().join("p.csv"), &g[..3], ext).expect("csv");
         let txt = std::fs::read_to_string(dir.path().join("p.csv")).expect("read");
         assert!(txt.starts_with("u,v,z,r\n5,5,") && n as usize == txt.len());
-        write_points(&dir.path().join("p.json"), &g[..3]).expect("json");
-        assert!(write_points(&dir.path().join("p.txt"), &g[..3]).is_err());
+        write_points(&dir.path().join("p.json"), &g[..3], ext).expect("json");
+        assert!(write_points(&dir.path().join("p.txt"), &g[..3], ext).is_err());
+        // GLB instances: valid container, one instancing node, translations in the mesh frame.
+        let glb = dir.path().join("p.glb");
+        let bytes = write_points(&glb, &g, ext).expect("glb");
+        let raw = std::fs::read(&glb).expect("read");
+        assert_eq!(bytes as usize, raw.len());
+        assert_eq!(&raw[..4], b"glTF");
+        let json_len = u32::from_le_bytes([raw[12], raw[13], raw[14], raw[15]]) as usize;
+        let doc: serde_json::Value = serde_json::from_slice(&raw[20..20 + json_len]).expect("json");
+        let attrs = &doc["nodes"][0]["extensions"]["EXT_mesh_gpu_instancing"]["attributes"];
+        let tr = attrs["TRANSLATION"].as_u64().expect("tr") as usize;
+        assert_eq!(doc["accessors"][tr]["count"], g.len());
+        let bin_off = 20 + json_len + 8;
+        let view =
+            &doc["bufferViews"][doc["accessors"][tr]["bufferView"].as_u64().expect("v") as usize];
+        let o = bin_off + view["byteOffset"].as_u64().expect("o") as usize;
+        let t0: Vec<f32> = (0..3)
+            .map(|k| f32::from_le_bytes(raw[o + 4 * k..o + 4 * k + 4].try_into().expect("f32")))
+            .collect();
+        // First point (u 5, v 5, z = height at x≈0): x = 5 − 320, y = z, z = 320 − 5.
+        assert!(
+            (t0[0] + 315.0).abs() < 1e-3
+                && (t0[1] - g[0].z).abs() < 1e-6
+                && (t0[2] - 315.0).abs() < 1e-3,
+            "{t0:?}"
+        );
+        assert!(
+            write_points(&dir.path().join("e.glb"), &[], ext).is_err(),
+            "no points"
+        );
     }
 }

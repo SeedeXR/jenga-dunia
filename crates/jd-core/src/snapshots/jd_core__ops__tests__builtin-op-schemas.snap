@@ -5132,7 +5132,7 @@ expression: list
   },
   {
     "id": "terrain.scatter",
-    "description": "Scatter instance points over the world from a 0..1 density mask layer (stratified jittered grid, deterministic by seed) and write them as CSV or JSON with heights",
+    "description": "Scatter instance points over the world from a 0..1 density mask layer (stratified jittered grid, deterministic by seed) and write them as CSV or JSON with heights, or as GLB instances",
     "scope": "export",
     "request_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -5153,7 +5153,7 @@ expression: list
           "default": "height"
         },
         "path": {
-          "description": "Output `.csv` or `.json`; relative paths resolve against the project's `exports/`.",
+          "description": "Output `.csv`, `.json` or `.glb` (proxy mesh instanced with `EXT_mesh_gpu_instancing`);\nrelative paths resolve against the project's `exports/`.",
           "type": "string"
         },
         "spacing_m": {

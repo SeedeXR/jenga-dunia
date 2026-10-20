@@ -2673,7 +2673,8 @@ pub mod terrain {
         /// Height layer sampled for `z` (null = 0).
         #[serde(default = "default_layer_opt")]
         pub height: Option<String>,
-        /// Output `.csv` or `.json`; relative paths resolve against the project's `exports/`.
+        /// Output `.csv`, `.json` or `.glb` (proxy mesh instanced with `EXT_mesh_gpu_instancing`);
+        /// relative paths resolve against the project's `exports/`.
         pub path: PathBuf,
         /// Spacing, jitter, seed.
         #[serde(flatten)]
@@ -2877,7 +2878,7 @@ pub mod terrain {
         );
         r.register::<TerrainScatter, ScatterReport, _>(
             "terrain.scatter",
-            "Scatter instance points over the world from a 0..1 density mask layer (stratified jittered grid, deterministic by seed) and write them as CSV or JSON with heights",
+            "Scatter instance points over the world from a 0..1 density mask layer (stratified jittered grid, deterministic by seed) and write them as CSV or JSON with heights, or as GLB instances",
             Scope::Export,
             |ctx, p| {
                 let (path, extent) = ctx.with_project(|proj| {
@@ -2890,7 +2891,7 @@ pub mod terrain {
                     Some(h) => ctx.with_layer(h, |hf| jd_terrain::scatter_points(&mask, Some(hf), extent, &p.scatter))?,
                     None => jd_terrain::scatter_points(&mask, None, extent, &p.scatter)?,
                 };
-                let bytes = jd_terrain::write_points(&path, &points)?;
+                let bytes = jd_terrain::write_points(&path, &points, extent)?;
                 Ok((ScatterReport { path, count: points.len() as u64, bytes, spacing_m: p.scatter.spacing_m }, Vec::new()))
             },
         );

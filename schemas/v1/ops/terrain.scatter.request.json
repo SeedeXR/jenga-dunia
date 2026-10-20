@@ -17,7 +17,7 @@
       "default": "height"
     },
     "path": {
-      "description": "Output `.csv` or `.json`; relative paths resolve against the project's `exports/`.",
+      "description": "Output `.csv`, `.json` or `.glb` (proxy mesh instanced with `EXT_mesh_gpu_instancing`);\nrelative paths resolve against the project's `exports/`.",
       "type": "string"
     },
     "spacing_m": {

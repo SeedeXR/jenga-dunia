@@ -259,6 +259,17 @@ $ jd --json op terrain.scatter --project Bio.jdproj --params '{"mask":"forest","
 
 ![Biome map with yellow tree points covering exactly the forest class](images/cli-scatter.png)
 
+**Instances as a GLB.** Give `terrain.scatter` a `.glb` path and it writes one 1 m proxy pyramid instanced with `EXT_mesh_gpu_instancing`: per instance a translation in the terrain-mesh frame (metres, +Y up, world-centred — drop it next to `jd export mesh` output and the points sit on the surface), a yaw from `r` and a 0.75..1.25 uniform scale. Engines and DCCs that read the extension (Blender, three.js, glTFast) swap the proxy for the real asset and keep the transforms.
+
+```
+$ jd --json op terrain.scatter --project Bio.jdproj --params '{"mask":"forest","height":"land","spacing_m":40,"seed":1,"path":"trees.glb"}'
+{"op":"terrain.scatter","status":"ok","result":{"path":".../exports/trees.glb","count":10966,"bytes":440156,"spacing_m":40.0}}
+```
+
+![Blender render: green proxy pyramids over the forest band of the textured terrain mesh, scaled up twelve times for visibility](images/cli-scatter-glb.png)
+
+Verified by importing `trees.glb` and `land.glb` into Blender 5.2 headless: 10 966 instance objects sharing one mesh datablock, 393 distinct yaws, scales 0.75–1.25, heights 293–907 m (the forest rule is 300–900 m sampled at jittered points), and a vertical ray from above 20 of 21 sampled instances hits the terrain within 0.55 m of the instance base (the picture scales the proxies ×12 in Blender; 1 m pyramids are sub-pixel on a 5 km world). The Khronos validator reports 0 errors / 0 warnings on the container and accessors but cannot validate the extension itself (`UNSUPPORTED_EXTENSION` info).
+
 On the 5 120 m world above the 40 m grid has 128² = 16 384 candidates and the forest mask covers 66.8 % of the area — 10 966 points, i.e. the expected share, in 30 ms including the file write. A spacing finer than the layer's sample spacing is refused (`spacing_m … must be ≥ the sample spacing (10 m)`). On the 512² world shown (heights −50..1200 m): rock 21.6 %, snow 4.4 %, grassland 7.2 %, forest 66.8 %; classify took 61 ms (debug). In the desktop the rules are a table in the inspector (add a row, type `min,max` ranges; see the desktop guide).
 
 ### Export for Unity or Unreal

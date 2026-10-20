@@ -180,7 +180,9 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `09:20:00` **Job priorities (jobs slice 5)**: `graph.evaluate_async {priority: low|normal|high}`; the FIFO counter + skipped-ticket set became one `BTreeSet<(Reverse<u8>, seq)>` wait queue whose first entry takes the next slot (less code than the FIFO it replaces); `JobInfo.priority`; Tasks list shows non-normal priority. Unit test (1 slot: a running, b queued, c high + d low submitted after → cancel a starts c), MCP probe on 5 slots (7 jobs, cancel one → high overtook normal), schemas + ops.gen.ts regenerated, 06-jobs.md slice 5, quickstart transcript.
 
-### Open / next (as of 2026-10-20 09:20, head after job-priorities commit)
+- `10:00:00` **Scatter → GLB instances**: `terrain.scatter` path `.glb` writes one 1 m proxy pyramid + an `EXT_mesh_gpu_instancing` node (TRANSLATION in the terrain-mesh frame, ROTATION yaw from `r`, SCALE 0.75..1.25); `mesh::write_glb` factored out of `export_glb` (shared container writer). Forest recipe: 10 966 instances, 440 KB, 43 ms. Khronos validator: 0 errors / 0 warnings, `UNSUPPORTED_EXTENSION` info (it does not know the extension). Blender 5.2 headless import: 10 966 objects sharing 1 mesh, 393 distinct yaws, scales 0.75–1.25, z 293–907 m, 20/21 vertical rays hit the terrain within 0.55 m. CI validates `trees.glb` too. Capture `cli-scatter-glb.png` (Blender render, proxies ×12 for visibility, stated in the doc).
+
+### Open / next (as of 2026-10-20 10:00, head after scatter-GLB commit)
 1. **CI**: green through `c0cc8ae`; `02571d2` failed on the queue-order race, fixed in `97bb0f7`; `2c6840f` (colour-by-layer) and the priorities commit polling.
 2. **Figma**: connector unavailable this session; plugin OAuth pending on the owner's side → tutorial images stay in `docs/user/images/`; place them in file `fxyeV62hgLoNmG3dU1LX6G` when a connector works.
 3. **Native leftovers**: Edit-menu capture; native sculpt capture/recording (needs Accessibility); signed/notarised bundle (needs an Apple developer account).

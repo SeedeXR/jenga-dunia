@@ -126,6 +126,8 @@ jobs:
           ./target/debug/jd --json op graph.evaluate --project "$RUNNER_TEMP/mesh.jdproj" | tail -1 | grep -q '"status":"ok"'
           ./target/debug/jd --json export mesh --project "$RUNNER_TEMP/mesh.jdproj" terrain.glb | tail -1 | grep -q '"format":"glb"'
           pnpm --dir apps/desktop validate:glb "$RUNNER_TEMP/mesh.jdproj/exports/terrain.glb"
+          ./target/debug/jd --json op terrain.scatter --project "$RUNNER_TEMP/mesh.jdproj" --params '{"mask":"height","spacing_m":64,"path":"trees.glb"}' | tail -1 | grep -q '"status":"ok"'
+          pnpm --dir apps/desktop validate:glb "$RUNNER_TEMP/mesh.jdproj/exports/trees.glb"
       - name: Install Playwright Chromium
         working-directory: apps/desktop
         run: pnpm exec playwright install --with-deps chromium
