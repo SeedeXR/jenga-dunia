@@ -7,6 +7,40 @@ import TerrainView, { type ViewportInfo } from "./viewport/TerrainView";
 import { type NoiseSettings, useStore } from "./state";
 import type { FractalKind, HeightmapFormat, NoiseKind } from "./lib/ops.gen";
 
+/** A resizable panel's size, kept in the browser store (`jd.layout.<key>`) and restored on launch: the
+ *  inline style sets the saved px, a ResizeObserver writes every change (try/catch: storage may be off). */
+function usePersistedSize(key: string, axis: "width" | "height"): { ref: React.RefCallback<HTMLElement>; style: React.CSSProperties } {
+  const saved = useRef<number | null>(null);
+  if (saved.current === null) {
+    try {
+      const v = Number(localStorage.getItem(`jd.layout.${key}`));
+      saved.current = Number.isFinite(v) && v > 0 ? v : 0;
+    } catch {
+      saved.current = 0;
+    }
+  }
+  const observer = useRef<ResizeObserver | null>(null);
+  const ref = useCallback(
+    (el: HTMLElement | null) => {
+      observer.current?.disconnect();
+      observer.current = null;
+      if (!el || typeof ResizeObserver === "undefined") return;
+      observer.current = new ResizeObserver(() => {
+        const px = Math.round(axis === "width" ? el.getBoundingClientRect().width : el.getBoundingClientRect().height);
+        if (px <= 0) return;
+        try {
+          localStorage.setItem(`jd.layout.${key}`, String(px));
+        } catch {
+          /* no storage: the size lasts the session */
+        }
+      });
+      observer.current.observe(el);
+    },
+    [key, axis],
+  );
+  return { ref, style: saved.current ? { [axis]: `${saved.current}px` } : {} };
+}
+
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="flex items-center justify-between gap-2 py-1 text-jd-fg-1">
@@ -56,6 +90,9 @@ export default function App() {
   const [projPath, setProjPath] = useState("");
   const [importPath, setImportPath] = useState("");
   const [frames, setFrames] = useState(24);
+  const leftSize = usePersistedSize("left", "width");
+  const rightSize = usePersistedSize("right", "width");
+  const graphSize = usePersistedSize("graph", "height");
   const [projName, setProjName] = useState("World");
   const [extent, setExtent] = useState(4096);
   const [resolution, setResolution] = useState(2048);
@@ -248,7 +285,7 @@ export default function App() {
 
       <div className="grid grid-cols-[auto_1fr_auto] overflow-hidden">
         {/* Left: project */}
-        <aside className="w-[260px] min-w-[200px] max-w-[520px] resize-x overflow-y-auto border-r border-jd-line bg-jd-bg-1 p-3" title="Drag the bottom-right corner to resize this panel" data-testid="panel-left">
+        <aside ref={leftSize.ref} style={leftSize.style} className="w-[260px] min-w-[200px] max-w-[520px] resize-x overflow-y-auto border-r border-jd-line bg-jd-bg-1 p-3" title="Drag the bottom-right corner to resize this panel" data-testid="panel-left">
           <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Project</h2>
           <Field label="Path">
             <span className="flex gap-1">
@@ -437,7 +474,7 @@ export default function App() {
             </button>
           </div>
           {showGraph && (
-            <div className="h-[300px] max-h-[70vh] min-h-[160px] resize-y overflow-hidden border-t border-jd-line" title="Drag the bottom-right corner to resize the graph" data-testid="panel-graph">
+            <div ref={graphSize.ref} style={graphSize.style} className="h-[300px] max-h-[70vh] min-h-[160px] resize-y overflow-hidden border-t border-jd-line" title="Drag the bottom-right corner to resize the graph" data-testid="panel-graph">
               <GraphPanel />
             </div>
           )}
@@ -449,7 +486,7 @@ export default function App() {
         </main>
 
         {/* Right: terrain inspector */}
-        <aside className="w-[280px] min-w-[220px] max-w-[560px] resize-x overflow-y-auto border-l border-jd-line bg-jd-bg-1 p-3" title="Drag the bottom-right corner to resize this panel" data-testid="panel-right">
+        <aside ref={rightSize.ref} style={rightSize.style} className="w-[280px] min-w-[220px] max-w-[560px] resize-x overflow-y-auto border-l border-jd-line bg-jd-bg-1 p-3" title="Drag the bottom-right corner to resize this panel" data-testid="panel-right">
           {s.sculpting && (
             <>
               <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Brush</h2>

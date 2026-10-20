@@ -38,6 +38,17 @@ test.describe("project settings against the real core", () => {
     expect(await resizeOf("panel-left")).toBe("horizontal");
     expect(await resizeOf("panel-right")).toBe("horizontal");
     expect(await resizeOf("panel-graph")).toBe("vertical");
+    // Sizes persist: a resized panel comes back at the same width after a reload (browser store).
+    await page.getByTestId("panel-left").evaluate((el) => {
+      (el as HTMLElement).style.width = "300px";
+    });
+    await expect.poll(() => page.evaluate(() => localStorage.getItem("jd.layout.left"))).toBe("300");
+    await page.reload();
+    await expect(page.getByTestId("project-path")).toBeVisible();
+    expect(await page.getByTestId("panel-left").evaluate((el) => getComputedStyle(el).width)).toBe("300px");
+    await page.getByTestId("project-path").fill(proj);
+    await page.getByTestId("open-project").click();
+    await expect(page.locator("header")).toContainText("World — 128²");
     await expect(page.getByTestId("wind-azimuth")).toHaveValue("270");
     await expect(page.getByTestId("wind-speed")).toHaveValue("8");
 

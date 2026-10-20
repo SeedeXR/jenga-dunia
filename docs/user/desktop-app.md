@@ -69,7 +69,7 @@ Logs: `~/Library/Logs/com.seedexr.jengadunia/jd-app.log` on macOS (`$XDG_DATA_HO
 
 Every project starts with a two-node graph (`Noise → Height`), the same `graph.json` the CLI and MCP server edit. The panel under the viewport is that graph; **Hide graph** collapses it.
 
-**Layout.** The three columns and the graph strip are resizable with native handles: drag the bottom-right corner of the left or right panel sideways (200–520 px and 220–560 px) and the corner of the graph panel up or down (160 px to 70 % of the window); **Hide graph** gives the viewport the whole height. Sizes last for the session (UI-driven check: `apps/desktop/e2e/settings.spec.ts` reads the panels' `resize` style).
+**Layout.** The three columns and the graph strip are resizable with native handles: drag the bottom-right corner of the left or right panel sideways (200–520 px and 220–560 px) and the corner of the graph panel up or down (160 px to 70 % of the window); **Hide graph** gives the viewport the whole height. Sizes persist in the browser store, so the layout comes back on the next launch (UI-driven check: `apps/desktop/e2e/settings.spec.ts` reads the panels' `resize` style and reloads after a resize).
 
 ![Node graph: add, evaluate, edit, connect, inspect](images/tutorial-03-graph.png)
 

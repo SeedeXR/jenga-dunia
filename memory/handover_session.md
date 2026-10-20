@@ -328,7 +328,9 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `23:25:00` **Maya FBX cross-check** (found `/Applications/Autodesk/maya2027` + `FBX SDK/2020.3.9`): `integrations/maya/fbx_check.py` (mayapy + `maya.standalone`, `fbxmaya` plugin, `cmds.file(i=True, type="FBX")`, polyEvaluate + world bounds → JSON), `scripts/maya-fbx-check.sh`, acceptance item 11 runs it when a mayapy exists. 256² test file: 65 536 verts, 65 025 quads, 130 050 tris, UV `map1`, 2 550 × 406.6 × 2 550 m (Maya cm ×100), min y 49.5 m, 1.6 s. Unreal remains the only engine without a build here.
 
-### Open / next (as of 2026-10-21 23:25, head after maya-fbx commit)
+- `23:40:00` **Saved layout**: `usePersistedSize(key, axis)` in App.tsx — a ResizeObserver writes the panel's px to `localStorage` (`jd.layout.left|right|graph`), the initial inline style restores it; settings e2e resizes the left panel to 300 px, reloads and reads it back.
+
+### Open / next (as of 2026-10-21 23:40, head after saved-layout commit)
 0. **CI**: green through `76de799` on every job that ran; macOS jobs on stale heads showed `cancelled` from queue pile-up, and since `f00dbcf` the workflow cancels stale runs itself (`concurrency: ci-<ref>`), so a `cancelled` run on a superseded head is expected. `5472e25` had a one-off `terrain.spec.ts` 5-min timeout on ubuntu (no step detail in the log; passes locally on every gate run) — watch for a repeat. Red runs to re-check only if the newest head is red.
 1. **Disk**: `target/` grows ~3–4 GB per gate run (incremental + duplicate test binaries); `cargo clean` + rebuild was needed twice today. Run gates with `CARGO_INCREMENTAL=0` and delete `target/debug/incremental` between iterations; a full clean when free space < 8 GiB.
 2. **Figma**: connector unavailable this session; plugin OAuth pending on the owner's side → tutorial images stay in `docs/user/images/`; place them in file `fxyeV62hgLoNmG3dU1LX6G` when a connector works.
