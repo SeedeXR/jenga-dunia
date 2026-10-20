@@ -45,6 +45,20 @@
       },
       "minItems": 2,
       "maxItems": 2
+    },
+    "texture_px": {
+      "description": "Baked base-colour texture size in pixels when one was embedded.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "integer",
+        "format": "uint32",
+        "minimum": 0
+      },
+      "minItems": 2,
+      "maxItems": 2
     }
   },
   "required": [

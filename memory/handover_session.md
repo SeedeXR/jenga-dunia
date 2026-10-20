@@ -130,12 +130,14 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `15:45:00` GeoTIFF + flake fixes pushed as `3d1cf64`. **Malformed corpus**: `fixtures/malformed/` (empty, magic-only, truncated IDAT, 2³¹ dims, IFD/strip offsets past EOF, odd RAW byte counts, garbage EXR header — 15 files, hand-written in Python) + integration test `crates/jd-terrain/tests/malformed.rs` (catch_unwind → must be `Err` with FORMAT_CORRUPT/UNSUPPORTED/INPUT_INVALID). All pass; the only "accepted" file was an RGB PNG, which `into_luma16()` converts on purpose → removed from the corpus and documented in `fixtures/README.md`. Note: `From<io::Error>` maps unknown kinds to `E_INTERNAL` (no `E_IO` code exists); empty files are caught by the decoders before that matters.
 
-### Open / next (as of 2026-10-20 15:50, head after corpus commit)
-1. **CI**: everything through `fc3128e` green; `663916c` failed (sculpt.spec vs autosave, fixed in `3d1cf64`); `3d1cf64` and the corpus commit polling.
+- `16:05:00` Corpus pushed as `36b4316`. **Textured GLB**: `export_glb(…, texture)` bakes a base-colour PNG (`hypsometric_rgb(t, slope)` — the viewport's STOPS/ROCK ported to Rust, slope from the exported normals' y) into a 5th buffer view with `images`/`samplers`/`textures` and `baseColorTexture`; UV v = 0 is the south edge and the PNG's row 0 is the south field row, so no flip. `terrain.export_mesh.texture` (default true), CLI `--no-texture`, report `texture_px`. Test: west edge green / east edge snow on a gentle ramp, image view 4-byte aligned; the first version of the test used a 45° slope and failed on purpose-correct rock tinting (slope blend 0.41) — test fixed, kernel right. Verified: 512² export 15.08 MB textured vs 14.66 MB flat, Khronos validator 0/0/0 (textured) and 0/0/1 info (flat: the unused TEXCOORD).
+
+### Open / next (as of 2026-10-20 16:10, head after textured-GLB commit)
+1. **CI**: everything through `fc3128e` green; `663916c` failed (sculpt.spec vs autosave, fixed in `3d1cf64`); `3d1cf64`, `36b4316` and the textured-GLB commit polling.
 2. **Figma**: connector unavailable this session; plugin OAuth pending on the owner's side → tutorial images stay in `docs/user/images/`; place them in file `fxyeV62hgLoNmG3dU1LX6G` when a connector works.
 3. **Native leftovers**: Edit-menu capture; native sculpt capture/recording (needs Accessibility); signed/notarised bundle (needs an Apple developer account).
 4. **Phase 3 follow-ups**: hydraulic concentration cap / layered materials / open drains; thermal + hydraulic WGSL twins (`jd-gpu`); particle hydraulic; MFD (D∞ ✔; `wetness` still D8-only); sea level ✔ (viewport water plane ✔; ocean shading/shoreline foam ☐); hydrology-first generation; smooth-brush blur done via summed-area table (whole-field blur is now O(N); tile-level dirty sets remain).
-5. **Phase 2 leftovers**: detached async jobs (queues/budgets/timeouts), CRS-aware GeoTIFF import (`jd-geo`; tags/nodata ✔), textured PBR for GLB, Windows/Linux measurements, tile-level `jd-cache` with LRU.
+5. **Phase 2 leftovers**: detached async jobs (queues/budgets/timeouts), CRS-aware GeoTIFF import (`jd-geo`; tags/nodata ✔), normal/roughness maps for GLB (albedo ✔), Windows/Linux measurements, tile-level `jd-cache` with LRU.
 6. **Docs**: hydrology recipe ✔, `desktop-rivers.png` ✔; rivers inspector `method` capture ✔ (e2e); a *native* capture of the same needs the app rebuilt from this head.
 
 ---

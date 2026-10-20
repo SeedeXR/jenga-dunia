@@ -158,6 +158,9 @@ enum ExportCommand {
         /// Grid step (1 = every sample; default keeps the mesh within ~1 M vertices).
         #[arg(long)]
         step: Option<u32>,
+        /// Skip the baked base-colour texture (flat material, smaller file).
+        #[arg(long)]
+        no_texture: bool,
         /// Layer name.
         #[arg(long, default_value = "height")]
         layer: String,
@@ -433,6 +436,7 @@ fn main() -> ExitCode {
                     project,
                     path,
                     step,
+                    no_texture,
                     layer,
                 },
         } => {
@@ -443,7 +447,7 @@ fn main() -> ExitCode {
                 json!({ "path": project }),
             )];
             if outs[0].status == Status::Ok {
-                let mut params = json!({ "layer": layer, "path": path });
+                let mut params = json!({ "layer": layer, "path": path, "texture": !no_texture });
                 if let Some(step) = step {
                     params["step"] = json!(step);
                 }

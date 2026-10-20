@@ -561,6 +561,8 @@ export type TerrainExportMeshRequest = {
   "step"?: number | null;
   /** Vertex budget used when `step` is not given (default 1025² = 1 050 625). */
   "max_vertices"?: number;
+  /** Embed a baked base-colour texture (hypsometric ramp + slope, one texel per vertex). */
+  "texture"?: boolean;
 };
 
 export type TerrainExportMeshResult = {
@@ -578,6 +580,8 @@ export type TerrainExportMeshResult = {
   "bytes": number;
   /** World extent covered, metres. */
   "extent_m": [number, number];
+  /** Baked base-colour texture size in pixels when one was embedded. */
+  "texture_px"?: [number, number] | null;
 };
 
 export type NoiseKind = "open_simplex2" | "open_simplex2_s" | "perlin" | "value" | "value_cubic" | "cellular";
@@ -882,7 +886,7 @@ export interface JdOps {
   "project.set_name": { request: ProjectSetNameRequest; result: ProjectSetNameResult };
   /** Write a layer as EXR (f32), PNG16, RAW r16 or r32 with a JSON sidecar */
   "terrain.export_heightmap": { request: TerrainExportHeightmapRequest; result: TerrainExportHeightmapResult };
-  /** Write a layer as a binary glTF (.glb) grid mesh: metres, +Y up, centred on the world, normals + UVs + PBR material */
+  /** Write a layer as a binary glTF (.glb) grid mesh: metres, +Y up, centred on the world, normals + UVs + PBR material with a baked base-colour texture */
   "terrain.export_mesh": { request: TerrainExportMeshRequest; result: TerrainExportMeshResult };
   /** Generate a noise heightfield for the open project's world and store it as a layer */
   "terrain.generate": { request: TerrainGenerateRequest; result: TerrainGenerateResult };

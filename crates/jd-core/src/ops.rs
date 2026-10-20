@@ -1763,6 +1763,13 @@ pub mod terrain {
         /// Vertex budget used when `step` is not given (default 1025² = 1 050 625).
         #[serde(default = "default_max_vertices")]
         pub max_vertices: u32,
+        /// Embed a baked base-colour texture (hypsometric ramp + slope, one texel per vertex).
+        #[serde(default = "yes")]
+        pub texture: bool,
+    }
+
+    fn yes() -> bool {
+        true
     }
 
     fn default_max_vertices() -> u32 {
@@ -1881,7 +1888,7 @@ pub mod terrain {
         );
         r.register::<TerrainExportMesh, jd_terrain::MeshExportReport, _>(
             "terrain.export_mesh",
-            "Write a layer as a binary glTF (.glb) grid mesh: metres, +Y up, centred on the world, normals + UVs + PBR material",
+            "Write a layer as a binary glTF (.glb) grid mesh: metres, +Y up, centred on the world, normals + UVs + PBR material with a baked base-colour texture",
             Scope::Export,
             |ctx, p| {
                 let (path, extent) = ctx.with_project(|proj| {
@@ -1897,7 +1904,7 @@ pub mod terrain {
                             format!("mesh sampled every {step} pixels to stay within {} vertices; pass `step: 1` for the full grid", p.max_vertices),
                         ));
                     }
-                    jd_terrain::export_glb(hf, extent, &path, step)
+                    jd_terrain::export_glb(hf, extent, &path, step, p.texture)
                 })?;
                 Ok((report, warnings))
             },

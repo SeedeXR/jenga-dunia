@@ -3,8 +3,12 @@
 //! indices and one PBR material. No dependency beyond `serde_json`; validated in CI with the
 //! Khronos glTF validator (`apps/desktop/scripts/validate-glb.mjs`).
 //!
-//! ponytail: one dense grid primitive, optional `step` decimation; LOD/chunked meshes, draco
-//! and textures come with the material graph (08-io-formats.md).
+//! With `texture` the material carries a baked base-colour PNG (the viewport's hypsometric ramp
+//! blended towards rock on steep slopes), one texel per exported vertex, so the file looks like
+//! the app in Blender / three.js / engines without any material setup.
+//!
+//! ponytail: one dense grid primitive, optional `step` decimation, one baked albedo; LOD/chunked
+//! meshes, draco, normal/roughness maps come with the material graph (08-io-formats.md).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -30,6 +34,76 @@ pub struct MeshExportReport {
     pub bytes: u64,
     /// World extent covered, metres.
     pub extent_m: [f64; 2],
+    /// Baked base-colour texture size in pixels when one was embedded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub texture_px: Option<[u32; 2]>,
+}
+
+/// Hypsometric ramp (normalised height → RGB): lowland green → ochre → bare rock → snow.
+/// Same stops as the viewport (`apps/desktop/src/viewport/TerrainView.tsx`).
+const STOPS: [(f32, [f32; 3]); 5] = [
+    (0.0, [0.16, 0.3, 0.2]),
+    (0.25, [0.36, 0.48, 0.24]),
+    (0.5, [0.62, 0.52, 0.34]),
+    (0.75, [0.52, 0.5, 0.48]),
+    (1.0, [0.95, 0.95, 0.97]),
+];
+const ROCK: [f32; 3] = [0.42, 0.4, 0.38];
+
+/// Colour for a normalised height `t` (0..1) and a slope factor (0 flat … 1 steep).
+pub fn hypsometric_rgb(t: f32, slope: f32) -> [u8; 3] {
+    let t = t.clamp(0.0, 1.0);
+    let mut k = 0;
+    while k < STOPS.len() - 2 && t > STOPS[k + 1].0 {
+        k += 1;
+    }
+    let (t0, c0) = STOPS[k];
+    let (t1, c1) = STOPS[k + 1];
+    let f = ((t - t0) / (t1 - t0).max(1e-6)).clamp(0.0, 1.0);
+    let mut out = [0u8; 3];
+    for i in 0..3 {
+        let c = c0[i] + (c1[i] - c0[i]) * f;
+        let c = c + (ROCK[i] - c) * slope.clamp(0.0, 1.0);
+        out[i] = (c * 255.0).round().clamp(0.0, 255.0) as u8;
+    }
+    out
+}
+
+/// Bake the base-colour texture for the exported grid (`gw`×`gh`, row 0 = south, matching the
+/// mesh UVs where v = 0 on the south edge) as PNG bytes.
+fn bake_albedo(
+    sample: &dyn Fn(u32, u32) -> f32,
+    normal_y: &dyn Fn(u32, u32) -> f32,
+    gw: u32,
+    gh: u32,
+    min_h: f32,
+    max_h: f32,
+) -> JdResult<Vec<u8>> {
+    let range = (max_h - min_h).max(1e-6);
+    let mut px = Vec::with_capacity((gw * gh * 3) as usize);
+    for gz in 0..gh {
+        for gx in 0..gw {
+            let t = (sample(gx, gz) - min_h) / range;
+            let slope = ((1.0 - normal_y(gx, gz)) * 1.4).clamp(0.0, 1.0);
+            px.extend_from_slice(&hypsometric_rgb(t, slope));
+        }
+    }
+    let mut out = std::io::Cursor::new(Vec::new());
+    image::write_buffer_with_format(
+        &mut out,
+        &px,
+        gw,
+        gh,
+        image::ExtendedColorType::Rgb8,
+        image::ImageFormat::Png,
+    )
+    .map_err(|e| {
+        JdError::new(
+            jd_types::ErrorCode::E_INTERNAL,
+            format!("PNG encode failed: {e}"),
+        )
+    })?;
+    Ok(out.into_inner())
 }
 
 /// Smallest step so the grid has at most `max_vertices` vertices.
@@ -55,6 +129,7 @@ pub fn export_glb(
     extent_m: [f64; 2],
     path: &Path,
     step: u32,
+    texture: bool,
 ) -> JdResult<MeshExportReport> {
     hf.validate_finite()?;
     if step == 0 {
@@ -100,6 +175,7 @@ pub fn export_glb(
         }
     }
     let pos_len = bin.len();
+    let mut normal_y: Vec<f32> = Vec::with_capacity(n_vertices as usize);
     for gz in 0..gh {
         for gx in 0..gw {
             // Central differences over the exported grid (clamped at the border).
@@ -110,6 +186,7 @@ pub fn export_glb(
             let dx = (sample(x1, gz) - sample(x0, gz)) as f64 / guard(xm(x1) - xm(x0));
             let dz = (sample(gx, z1) - sample(gx, z0)) as f64 / guard(zm(z1) - zm(z0));
             let len = (dx * dx + 1.0 + dz * dz).sqrt();
+            normal_y.push((1.0 / len) as f32);
             for v in [(-dx / len) as f32, (1.0 / len) as f32, (-dz / len) as f32] {
                 bin.extend_from_slice(&v.to_le_bytes());
             }
@@ -140,8 +217,24 @@ pub fn export_glb(
     let idx_len = bin.len() - idx_off;
     let n_triangles = (gw - 1) * (gh - 1) * 2;
     pad4(&mut bin, 0);
+    // Optional baked albedo: one more buffer view holding a PNG; UVs already map v = 0 to south.
+    let mut image_view = None;
+    if texture {
+        let png = bake_albedo(
+            &sample,
+            &|gx, gz| normal_y[(gz * gw + gx) as usize],
+            gw,
+            gh,
+            min[1],
+            max[1],
+        )?;
+        let off = bin.len();
+        bin.extend_from_slice(&png);
+        image_view = Some((off, png.len()));
+        pad4(&mut bin, 0);
+    }
 
-    let json = serde_json::json!({
+    let mut json = serde_json::json!({
         "asset": { "version": "2.0", "generator": format!("jenga-dunia {}", env!("CARGO_PKG_VERSION")) },
         "buffers": [{ "byteLength": bin.len() }],
         "bufferViews": [
@@ -162,6 +255,19 @@ pub fn export_glb(
         "scenes": [{ "nodes": [0] }],
         "scene": 0
     });
+    if let Some((off, len)) = image_view {
+        json["bufferViews"]
+            .as_array_mut()
+            .ok_or_else(|| JdError::new(jd_types::ErrorCode::E_INTERNAL, "bufferViews"))?
+            .push(serde_json::json!({ "buffer": 0, "byteOffset": off, "byteLength": len }));
+        json["images"] = serde_json::json!([{ "bufferView": 4, "mimeType": "image/png", "name": "terrain-albedo" }]);
+        json["samplers"] = serde_json::json!([{ "magFilter": 9729, "minFilter": 9987, "wrapS": 33071, "wrapT": 33071 }]);
+        json["textures"] = serde_json::json!([{ "sampler": 0, "source": 0 }]);
+        json["materials"][0]["pbrMetallicRoughness"]["baseColorTexture"] =
+            serde_json::json!({ "index": 0, "texCoord": 0 });
+        json["materials"][0]["pbrMetallicRoughness"]["baseColorFactor"] =
+            serde_json::json!([1.0, 1.0, 1.0, 1.0]);
+    }
     let mut json_bytes = serde_json::to_vec(&json)?;
     pad4(&mut json_bytes, b' ');
 
@@ -188,6 +294,7 @@ pub fn export_glb(
         step,
         bytes: out.len() as u64,
         extent_m,
+        texture_px: texture.then_some([gw, gh]),
     })
 }
 
@@ -217,7 +324,7 @@ mod tests {
         let mut hf = Heightfield::new(9, 7, 8, 0).expect("hf");
         hf.fill_with(|x, y| (x as f32) * 2.0 + (y as f32) * 0.5);
         let p = dir.path().join("t.glb");
-        let r = export_glb(&hf, [90.0, 70.0], &p, 1).expect("export");
+        let r = export_glb(&hf, [90.0, 70.0], &p, 1, false).expect("export");
         assert_eq!((r.vertices, r.triangles, r.step), (63, 96, 1));
         let bytes = fs::read(&p).expect("read");
         assert_eq!(bytes.len() as u64, r.bytes);
@@ -263,12 +370,55 @@ mod tests {
     }
 
     #[test]
+    fn textured_export_embeds_a_png_that_follows_height_and_slope() {
+        // Height rises gently west → east (1 m per 10 m cell, so slope barely tints the colour):
+        // the west edge is lowland green, the east edge snow.
+        let mut hf = Heightfield::new(33, 17, 64, 0).expect("hf");
+        hf.fill_with(|x, _| x as f32);
+        let dir = tempfile::tempdir().expect("tmp");
+        let p = dir.path().join("t.glb");
+        let r = export_glb(&hf, [330.0, 170.0], &p, 1, true).expect("export");
+        assert_eq!(r.texture_px, Some([33, 17]));
+        let bytes = std::fs::read(&p).expect("read");
+        let (json, bin) = chunks(&bytes);
+        assert_eq!(json["images"][0]["mimeType"], "image/png");
+        assert_eq!(
+            json["materials"][0]["pbrMetallicRoughness"]["baseColorTexture"]["index"],
+            0
+        );
+        let view = &json["bufferViews"][json["images"][0]["bufferView"].as_u64().unwrap() as usize];
+        let (off, len) = (
+            view["byteOffset"].as_u64().unwrap() as usize,
+            view["byteLength"].as_u64().unwrap() as usize,
+        );
+        let img = image::load_from_memory(&bin[off..off + len])
+            .expect("png")
+            .into_rgb8();
+        assert_eq!(img.dimensions(), (33, 17));
+        let west = img.get_pixel(0, 8).0;
+        let east = img.get_pixel(32, 8).0;
+        assert!(
+            west[1] > west[0] && west[1] > west[2],
+            "lowland is green: {west:?}"
+        );
+        assert!(east.iter().all(|c| *c > 200), "summit is snow: {east:?}");
+        // Validator-relevant: the image view is 4-byte aligned and inside the buffer.
+        assert_eq!(off % 4, 0);
+        assert!(off + len <= bin.len());
+        // Steep ground reads as rock: a cliff colour sits between the ramp colour and ROCK.
+        let flat = hypsometric_rgb(0.5, 0.0);
+        let steep = hypsometric_rgb(0.5, 1.0);
+        assert_ne!(flat, steep);
+        assert_eq!(steep, [107, 102, 97]);
+    }
+
+    #[test]
     fn south_row_lands_at_positive_z() {
         let dir = tempfile::tempdir().expect("tmp");
         let mut hf = Heightfield::new(8, 8, 8, 0).expect("hf");
         hf.fill_with(|_, y| if y == 0 { 100.0 } else { 0.0 }); // row 0 = south is high
         let p = dir.path().join("o.glb");
-        export_glb(&hf, [80.0, 80.0], &p, 1).expect("export");
+        export_glb(&hf, [80.0, 80.0], &p, 1, false).expect("export");
         let bytes = fs::read(&p).expect("read");
         let (_, bin) = chunks(&bytes);
         let v = |i: usize| -> [f32; 3] {
@@ -291,7 +441,8 @@ mod tests {
         assert_eq!(auto_step(100, 100, 1025 * 1025), 1);
         let dir = tempfile::tempdir().expect("tmp");
         let hf = Heightfield::new(64, 64, 32, 4).expect("hf");
-        let r = export_glb(&hf, [640.0, 640.0], &dir.path().join("s.glb"), 4).expect("export");
+        let r =
+            export_glb(&hf, [640.0, 640.0], &dir.path().join("s.glb"), 4, false).expect("export");
         assert_eq!(
             (r.vertices, r.triangles),
             (289, 512),
@@ -303,9 +454,10 @@ mod tests {
             (mx[0].as_f64().unwrap() - 320.0 + 5.0).abs() < 1e-3,
             "last column sits on the east edge: {mx}"
         );
-        assert!(export_glb(&hf, [640.0, 640.0], &dir.path().join("x.glb"), 0).is_err());
+        assert!(export_glb(&hf, [640.0, 640.0], &dir.path().join("x.glb"), 0, false).is_err());
         // A huge step still keeps the first and last sample: a 2×2 grid, two triangles.
-        let r = export_glb(&hf, [640.0, 640.0], &dir.path().join("y.glb"), 64).expect("export");
+        let r =
+            export_glb(&hf, [640.0, 640.0], &dir.path().join("y.glb"), 64, false).expect("export");
         assert_eq!((r.vertices, r.triangles), (4, 2));
     }
 }

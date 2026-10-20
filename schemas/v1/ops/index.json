@@ -121,7 +121,7 @@
   },
   {
     "id": "terrain.export_mesh",
-    "description": "Write a layer as a binary glTF (.glb) grid mesh: metres, +Y up, centred on the world, normals + UVs + PBR material",
+    "description": "Write a layer as a binary glTF (.glb) grid mesh: metres, +Y up, centred on the world, normals + UVs + PBR material with a baked base-colour texture",
     "scope": "export"
   },
   {

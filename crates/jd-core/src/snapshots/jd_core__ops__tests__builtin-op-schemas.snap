@@ -3420,7 +3420,7 @@ expression: list
   },
   {
     "id": "terrain.export_mesh",
-    "description": "Write a layer as a binary glTF (.glb) grid mesh: metres, +Y up, centred on the world, normals + UVs + PBR material",
+    "description": "Write a layer as a binary glTF (.glb) grid mesh: metres, +Y up, centred on the world, normals + UVs + PBR material with a baked base-colour texture",
     "scope": "export",
     "request_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -3453,6 +3453,11 @@ expression: list
           "format": "uint32",
           "minimum": 0,
           "default": 1050625
+        },
+        "texture": {
+          "description": "Embed a baked base-colour texture (hypsometric ramp + slope, one texel per vertex).",
+          "type": "boolean",
+          "default": true
         }
       },
       "additionalProperties": false,
@@ -3504,6 +3509,20 @@ expression: list
           "items": {
             "type": "number",
             "format": "double"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "texture_px": {
+          "description": "Baked base-colour texture size in pixels when one was embedded.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           },
           "minItems": 2,
           "maxItems": 2

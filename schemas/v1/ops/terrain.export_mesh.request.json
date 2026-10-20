@@ -29,6 +29,11 @@
       "format": "uint32",
       "minimum": 0,
       "default": 1050625
+    },
+    "texture": {
+      "description": "Embed a baked base-colour texture (hypsometric ramp + slope, one texel per vertex).",
+      "type": "boolean",
+      "default": true
     }
   },
   "additionalProperties": false,

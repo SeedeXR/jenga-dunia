@@ -120,7 +120,11 @@ $ jd --json export mesh --project M.jdproj terrain.glb
   "vertices":262144,"triangles":522242,"step":1,"bytes":14656644,"extent_m":[2048.0,2048.0]}}
 ```
 
-(512² world.) The `.glb` is a single grid mesh in metres, +Y up, centred on the world like the viewport, with normals, UVs and a flat PBR material — it opens directly in Blender, three.js or any glTF 2.0 importer, and the Khronos glTF Validator reports 0 errors (CI runs it on every push). Worlds above ~1 M vertices are sampled every `step` pixels (`W_MESH_DECIMATED`); pass `--step 1` for the full grid.
+(512² world.) The `.glb` is a single grid mesh in metres, +Y up, centred on the world like the viewport, with normals, UVs and a PBR material whose base colour is a baked texture — the viewport's hypsometric ramp (lowland green → ochre → rock → snow) blended towards rock on steep slopes, one texel per vertex — so it opens looking like the app in Blender, three.js or any glTF 2.0 importer. `--no-texture` (op param `texture: false`) writes the flat material instead. The Khronos glTF Validator reports 0 errors and 0 warnings for both (CI runs it on every push); on a 512² world the texture adds 0.42 MB to a 14.7 MB mesh.
+
+![The textured GLB rendered in an independent glTF viewer: iso and top views with green valleys, ochre mid-slopes, grey rock on steep faces and snow on the peaks](images/cli-glb-textured.png)
+
+*The exported `terrain.glb` opened in a third-party viewer (Optima), not in Jenga Dunia — the colours come from the embedded texture alone.* Worlds above ~1 M vertices are sampled every `step` pixels (`W_MESH_DECIMATED`); pass `--step 1` for the full grid.
 
 ### Hydrology recipe: rivers, lakes and wetness
 
