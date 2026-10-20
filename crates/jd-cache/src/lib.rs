@@ -17,7 +17,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::ErrorKind;
+use std::io::{ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
 
 use jd_terrain::Heightfield;
@@ -142,15 +142,22 @@ impl LayerCache {
         let hash = hf.content_hash().to_hex().to_string();
         let blob = self.blob_path(&hash);
         if !blob.exists() {
-            let mut bytes = Vec::with_capacity(HEADER + 4 * (hf.width() * hf.height()) as usize);
-            bytes.extend_from_slice(MAGIC);
+            // Streamed row by row: a 16k² layer is 1 GiB and must not be copied to write it.
+            let tmp = tmp_path(&blob);
+            let mut out = std::io::BufWriter::with_capacity(1 << 20, fs::File::create(&tmp)?);
+            out.write_all(MAGIC)?;
             for v in [hf.width(), hf.height(), hf.tile_size(), hf.halo()] {
-                bytes.extend_from_slice(&v.to_le_bytes());
+                out.write_all(&v.to_le_bytes())?;
             }
-            for v in hf.to_vec() {
-                bytes.extend_from_slice(&v.to_le_bytes());
+            let mut row = vec![0.0f32; hf.width() as usize];
+            for y in 0..hf.height() {
+                hf.row(y, &mut row);
+                for v in &row {
+                    out.write_all(&v.to_le_bytes())?;
+                }
             }
-            write_atomic(&blob, &bytes)?;
+            out.into_inner().map_err(|e| e.into_error())?.sync_all()?;
+            fs::rename(&tmp, &blob)?;
         }
         let mut index = self.read_index()?;
         index.insert(name.to_owned(), hash.clone());
@@ -167,8 +174,8 @@ impl LayerCache {
             return Ok(None);
         };
         let blob = self.blob_path(&hash);
-        let bytes = match fs::read(&blob) {
-            Ok(b) => b,
+        let file = match fs::File::open(&blob) {
+            Ok(f) => f,
             Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(e.into()),
         };
@@ -181,18 +188,30 @@ impl LayerCache {
                 .next("Delete the project's cache/ directory — it is disposable — and re-run the operation.")
                 .detail("layer", name)
         };
-        if bytes.len() < HEADER || &bytes[..4] != MAGIC {
+        let len = file.metadata()?.len();
+        let mut input = std::io::BufReader::with_capacity(1 << 20, file);
+        let mut head = [0u8; HEADER];
+        if input.read_exact(&mut head).is_err() || &head[..4] != MAGIC {
             return Err(corrupt());
         }
         let u32_at =
-            |i: usize| u32::from_le_bytes([bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3]]);
+            |i: usize| u32::from_le_bytes([head[i], head[i + 1], head[i + 2], head[i + 3]]);
         let (w, h, tile, halo) = (u32_at(4), u32_at(8), u32_at(12), u32_at(16));
-        let (rows, rest) = bytes[HEADER..].as_chunks::<4>();
-        if !rest.is_empty() || rows.len() != (w as usize) * (h as usize) {
+        if len != HEADER as u64 + 4 * w as u64 * h as u64 {
             return Err(corrupt());
         }
         let mut hf = Heightfield::new(w, h, tile, halo).map_err(|_| corrupt())?;
-        hf.fill_with(|x, y| f32::from_le_bytes(rows[(y * w + x) as usize]));
+        // Streamed row by row into the tiles — no whole-field byte buffer.
+        let mut bytes = vec![0u8; 4 * w as usize];
+        let mut row = vec![0.0f32; w as usize];
+        for y in 0..h {
+            input.read_exact(&mut bytes).map_err(|_| corrupt())?;
+            for (v, b) in row.iter_mut().zip(bytes.as_chunks::<4>().0) {
+                *v = f32::from_le_bytes(*b);
+            }
+            hf.set_row(y, &row);
+        }
+        hf.rebuild_halos();
         Ok(Some(hf))
     }
 
@@ -217,10 +236,14 @@ impl LayerCache {
 
 /// Write via a uniquely named temporary file and rename, so an interrupted write never leaves a
 /// torn blob/index and two writers (two processes, or two evaluations) never share a temp file.
-fn write_atomic(path: &Path, bytes: &[u8]) -> JdResult<()> {
+fn tmp_path(path: &Path) -> PathBuf {
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let tmp = path.with_extension(format!("{}-{seq}.tmp", std::process::id()));
+    path.with_extension(format!("{}-{seq}.tmp", std::process::id()))
+}
+
+fn write_atomic(path: &Path, bytes: &[u8]) -> JdResult<()> {
+    let tmp = tmp_path(path);
     fs::write(&tmp, bytes)?;
     fs::rename(&tmp, path)?;
     Ok(())

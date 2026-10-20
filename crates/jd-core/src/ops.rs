@@ -45,7 +45,7 @@ pub struct Context {
     /// Heightfield layers produced by terrain/graph ops, keyed by layer name. Backed by the open
     /// project's on-disk cache (`jd-cache`), so layers outlive the process and the CLI can
     /// evaluate in one invocation and export in the next.
-    layers: Arc<Mutex<BTreeMap<String, jd_terrain::Heightfield>>>,
+    layers: Arc<Mutex<BTreeMap<String, Arc<jd_terrain::Heightfield>>>>,
     /// Running jobs (progress + cancel), see `jobs.list` / `jobs.cancel`.
     pub jobs: Arc<crate::jobs::Jobs>,
 }
@@ -59,6 +59,17 @@ impl Context {
         root: &Path,
         name: &str,
         hf: jd_terrain::Heightfield,
+    ) -> JdResult<()> {
+        self.set_layer_arc(root, name, Arc::new(hf))
+    }
+
+    /// [`Self::set_layer_for`] for a field another holder (the evaluator's outputs) already
+    /// shares: no whole-field clone — a 16k² layer is 1 GiB.
+    pub fn set_layer_arc(
+        &self,
+        root: &Path,
+        name: &str,
+        hf: Arc<jd_terrain::Heightfield>,
     ) -> JdResult<()> {
         if self.project_root().as_deref() != Some(root) {
             return Err(JdError::new(
@@ -98,7 +109,7 @@ impl Context {
             && let Some(root) = root
             && let Some(hf) = jd_cache::LayerCache::open(&root).get(name)?
         {
-            g.insert(name.to_owned(), hf);
+            g.insert(name.to_owned(), Arc::new(hf));
         }
         match g.get(name) {
             Some(hf) => f(hf),
@@ -1352,9 +1363,8 @@ pub mod graph {
                     // Never overwrite the full-resolution layer with a preview.
                     name = format!("{name}#lod{}", lod);
                 }
-                let hf = v.as_field();
                 layers.insert(name.clone(), v.content_hash().to_hex().to_string());
-                ctx.set_layer_for(&root, &name, (**hf).clone())?;
+                ctx.set_layer_arc(&root, &name, Arc::clone(v.as_field()))?;
             }
         }
         let mut warnings = Vec::new();

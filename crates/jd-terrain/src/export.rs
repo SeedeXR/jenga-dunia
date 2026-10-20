@@ -216,10 +216,12 @@ pub fn export_heightmap_geo(
         return Err(JdError::invalid("range_m", "must be finite with min < max"));
     }
     let (w, h) = (hf.width(), hf.height());
-    let data = rows(hf, flip);
+    // The 16-bit and raw formats are quantised / written row by row (a 16k² layer is 1 GiB; the
+    // whole-field f32 copy is only made for the encoders that need one: EXR, TIFF).
     let bytes = match format {
         HeightmapFormat::Exr => {
             use exr::prelude::*;
+            let data = rows(hf, flip);
             let channel = AnyChannel::new("Y", FlatSamples::F32(data));
             let layer = Layer::new(
                 Vec2(w as usize, h as usize),
@@ -237,7 +239,7 @@ pub fn export_heightmap_geo(
             fs::metadata(path)?.len()
         }
         HeightmapFormat::Png16 => {
-            let q = quantise(&data, range);
+            let q = quantise_rows(hf, flip, range);
             let img = image::ImageBuffer::<image::Luma<u16>, Vec<u16>>::from_raw(w, h, q)
                 .ok_or_else(|| JdError::new(ErrorCode::E_INTERNAL, "PNG buffer size mismatch"))?;
             img.save_with_format(path, image::ImageFormat::Png)
@@ -248,21 +250,28 @@ pub fn export_heightmap_geo(
             fs::metadata(path)?.len()
         }
         HeightmapFormat::RawR16 => {
-            let q = quantise(&data, range);
-            let mut buf = Vec::with_capacity(q.len() * 2);
+            let q = quantise_rows(hf, flip, range);
+            let mut out = std::io::BufWriter::with_capacity(1 << 20, fs::File::create(path)?);
             for v in q {
-                buf.extend_from_slice(&v.to_le_bytes());
+                out.write_all(&v.to_le_bytes())?;
             }
-            write_all(path, &buf)?
+            finish(out)?;
+            fs::metadata(path)?.len()
         }
         HeightmapFormat::RawR32 => {
-            let mut buf = Vec::with_capacity(data.len() * 4);
-            for v in data {
-                buf.extend_from_slice(&v.to_le_bytes());
+            let mut out = std::io::BufWriter::with_capacity(1 << 20, fs::File::create(path)?);
+            let mut row = vec![0.0f32; w as usize];
+            for y in 0..h {
+                hf.row(if flip { h - 1 - y } else { y }, &mut row);
+                for v in &row {
+                    out.write_all(&v.to_le_bytes())?;
+                }
             }
-            write_all(path, &buf)?
+            finish(out)?;
+            fs::metadata(path)?.len()
         }
         HeightmapFormat::Tiff32 => {
+            let data = rows(hf, flip);
             {
                 // No BufWriter: tiff writes strips in large chunks, and the encoder's final
                 // directory is written on drop, so the file must be complete before we measure it.
@@ -344,11 +353,21 @@ fn quantise(data: &[f32], range: [f32; 2]) -> Vec<u16> {
         .collect()
 }
 
-fn write_all(path: &Path, buf: &[u8]) -> JdResult<u64> {
-    let mut f = fs::File::create(path)?;
-    f.write_all(buf)?;
-    f.sync_all()?;
-    Ok(buf.len() as u64)
+/// [`quantise`] straight from the field's rows (top row first when `flip`), without the f32 copy.
+fn quantise_rows(hf: &Heightfield, flip: bool, range: [f32; 2]) -> Vec<u16> {
+    let (w, h) = (hf.width(), hf.height());
+    let mut out = Vec::with_capacity((w as usize) * (h as usize));
+    let mut row = vec![0.0f32; w as usize];
+    for y in 0..h {
+        hf.row(if flip { h - 1 - y } else { y }, &mut row);
+        out.extend(quantise(&row, range));
+    }
+    out
+}
+
+fn finish(out: std::io::BufWriter<fs::File>) -> JdResult<()> {
+    out.into_inner().map_err(|e| e.into_error())?.sync_all()?;
+    Ok(())
 }
 
 /// Read a heightmap written by [`export_heightmap`] (uses the sidecar for RAW/PNG ranges and flips).

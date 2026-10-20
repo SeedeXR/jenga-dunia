@@ -209,27 +209,92 @@ impl Heightfield {
     }
 
     /// Copy neighbouring interiors into every tile's halo (edge-clamped at the field border).
+    /// Two phases so no whole-field clone is needed: gather every ring from the interiors
+    /// (read-only, parallel), then write the rings (mutable, parallel). Deterministic.
     pub fn rebuild_halos(&mut self) {
         if self.halo == 0 {
             return;
         }
-        let snapshot = self.clone();
         let (ts, halo) = (self.tile_size as i64, self.halo as i64);
-        self.tiles.par_iter_mut().for_each(|t| {
+        let (w, h) = (self.width as i64, self.height as i64);
+        let ring_cells = |t: &Tile| {
             let s = t.stride() as i64;
-            let (ox, oy) = (t.coord.x as i64 * ts, t.coord.y as i64 * ts);
-            for py in 0..s {
-                for px in 0..s {
+            (0..s)
+                .flat_map(move |py| (0..s).map(move |px| (px, py)))
+                .filter(move |(px, py)| {
                     let (ix, iy) = (px - halo, py - halo);
-                    if ix >= 0 && iy >= 0 && ix < ts && iy < ts {
-                        continue; // interior stays
-                    }
-                    let fx = (ox + ix).clamp(0, snapshot.width as i64 - 1) as u32;
-                    let fy = (oy + iy).clamp(0, snapshot.height as i64 - 1) as u32;
-                    t.data[(py * s + px) as usize] = snapshot.get(fx, fy);
-                }
+                    !(ix >= 0 && iy >= 0 && ix < ts && iy < ts)
+                })
+        };
+        let rings: Vec<Vec<f32>> = self
+            .tiles
+            .par_iter()
+            .map(|t| {
+                let (ox, oy) = (t.coord.x as i64 * ts, t.coord.y as i64 * ts);
+                ring_cells(t)
+                    .map(|(px, py)| {
+                        let fx = (ox + px - halo).clamp(0, w - 1) as u32;
+                        let fy = (oy + py - halo).clamp(0, h - 1) as u32;
+                        self.get(fx, fy)
+                    })
+                    .collect()
+            })
+            .collect();
+        self.tiles.par_iter_mut().zip(rings).for_each(|(t, ring)| {
+            let s = t.stride() as i64;
+            let cells: Vec<(i64, i64)> = ring_cells(t).collect();
+            for ((px, py), v) in cells.into_iter().zip(ring) {
+                t.data[(py * s + px) as usize] = v;
             }
         });
+    }
+
+    /// Overwrite interior row `y` from `row` (`width` samples) without touching the halos;
+    /// call [`Self::rebuild_halos`] once after the last row. Lets a reader stream a field in
+    /// without a whole-field buffer.
+    pub fn set_row(&mut self, y: u32, row: &[f32]) {
+        assert_eq!(row.len(), self.width as usize, "row length");
+        let (ts, halo) = (self.tile_size as usize, self.halo as usize);
+        let (tx_count, ty) = (self.tiles_x as usize, (y / self.tile_size) as usize);
+        let iy = (y % self.tile_size) as usize;
+        for tx in 0..tx_count {
+            let t = &mut self.tiles[ty * tx_count + tx];
+            let s = t.stride();
+            let x0 = tx * ts;
+            let n = ts.min(self.width as usize - x0);
+            let at = (iy + halo) * s + halo;
+            t.data[at..at + n].copy_from_slice(&row[x0..x0 + n]);
+            // Edge tiles beyond the field repeat the last valid pixel (as fill_with does)…
+            let last = row[x0 + n - 1];
+            for v in &mut t.data[at + n..at + ts] {
+                *v = last;
+            }
+            // …and the last row repeats down the rest of the bottom tiles.
+            if y == self.height - 1 {
+                for pad in iy + 1..ts {
+                    let to = (pad + halo) * s + halo;
+                    let (src, dst) = t.data.split_at_mut(to);
+                    dst[..ts].copy_from_slice(&src[at..at + ts]);
+                }
+            }
+        }
+    }
+
+    /// Copy interior row `y` into `row` (`width` samples) — the streaming counterpart of
+    /// [`Self::set_row`].
+    pub fn row(&self, y: u32, row: &mut [f32]) {
+        assert_eq!(row.len(), self.width as usize, "row length");
+        let (ts, halo) = (self.tile_size as usize, self.halo as usize);
+        let (tx_count, ty) = (self.tiles_x as usize, (y / self.tile_size) as usize);
+        let iy = (y % self.tile_size) as usize;
+        for tx in 0..tx_count {
+            let t = &self.tiles[ty * tx_count + tx];
+            let s = t.stride();
+            let x0 = tx * ts;
+            let n = ts.min(self.width as usize - x0);
+            let at = (iy + halo) * s + halo;
+            row[x0..x0 + n].copy_from_slice(&t.data[at..at + n]);
+        }
     }
 
     /// Row-major copy of the whole field (no halos). Allocates `width·height` floats.
@@ -321,6 +386,26 @@ impl Heightfield {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rows_stream_in_and_out_and_halos_match_the_interiors() {
+        let mut a = Heightfield::new(70, 50, 32, 4).expect("a");
+        a.fill_with(|x, y| (x as f32 * 0.5 + y as f32 * 1.25).sin() * 100.0);
+        let mut b = Heightfield::new(70, 50, 32, 4).expect("b");
+        let mut row = vec![0.0f32; 70];
+        for y in 0..50 {
+            a.row(y, &mut row);
+            b.set_row(y, &row);
+        }
+        b.rebuild_halos();
+        assert_eq!(a, b, "tiles, edge padding and halos all match");
+        assert_eq!(a.content_hash(), b.content_hash());
+        // The halo of the middle tile holds its neighbours' interiors (clone-free rebuild).
+        let t = &a.tiles()[4]; // tile (1, 1) of the 3 × 2 grid
+        assert_eq!(t.get_padded(-1, 0), a.get(31, 32));
+        assert_eq!(t.get_padded(32, 5), a.get(64, 37));
+        assert_eq!(t.get_padded(3, -2), a.get(35, 30));
+    }
 
     #[test]
     fn fill_get_and_halos_are_consistent_for_non_multiple_sizes() {
