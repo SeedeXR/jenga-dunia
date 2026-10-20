@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Every gate CI runs, in one go. Run before `git push`; stops at the first failure.
-# Usage: scripts/pre-push.sh   (from the repo root; ~2–3 min warm)
+# Usage: git add -A && scripts/pre-push.sh   (from the repo root; ~2–3 min warm — the freshness checks diff against the index)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 cargo fmt --all --check

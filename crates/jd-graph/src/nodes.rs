@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use jd_terrain::{
-    ForeignImport, Heightfield, HydraulicParams, NoiseParams, Stroke, THERMAL_MAX_RATE,
-    apply_strokes, carve_rivers, fill_depressions, flow_accumulation, generate_noise,
+    FlowMethod, ForeignImport, Heightfield, HydraulicParams, NoiseParams, Stroke, THERMAL_MAX_RATE,
+    apply_strokes, carve_rivers, fill_depressions, flow_accumulation_with, generate_noise,
     hydraulic_erode, read_foreign, resample_to_world, slope_mask, thermal_erode, wetness_index,
 };
 use jd_types::{JdError, JdResult};
@@ -220,6 +220,9 @@ struct FlowParams {
     /// Output ln(1 + area) / ln(1 + N) in 0..1 (true) or the raw upstream cell count (false).
     #[serde(default = "yes")]
     log_scale: bool,
+    /// Routing: `d8` (single steepest neighbour) or `dinf` (Tarboton facets, smoother streams).
+    #[serde(default)]
+    method: FlowMethod,
 }
 fn yes() -> bool {
     true
@@ -255,6 +258,9 @@ struct RiversParams {
     /// Incision depth at the largest rivers, metres.
     #[serde(default = "rivers_depth")]
     depth_m: f32,
+    /// Flow routing used to find channels: `d8` or `dinf` (fewer parallel-line artefacts).
+    #[serde(default)]
+    method: FlowMethod,
 }
 fn rivers_threshold() -> f32 {
     0.55
@@ -475,7 +481,7 @@ pub fn register_all(r: &mut Registry) {
         vec![port("out", PortType::Heightfield, false)],
         |ctx, p, i| {
             let fp: FlowParams = params(p)?;
-            Ok(out("out", flow_accumulation(field(i, "in")?, spacing_m(ctx), fp.log_scale)?))
+            Ok(out("out", flow_accumulation_with(field(i, "in")?, spacing_m(ctx), fp.log_scale, fp.method)?))
         },
     ));
     r.register(NodeDef::new::<InputParams, _>(
@@ -521,7 +527,7 @@ pub fn register_all(r: &mut Registry) {
         vec![port("out", PortType::Heightfield, false), port("rivers", PortType::Heightfield, false)],
         |ctx, p, i| {
             let rp: RiversParams = params(p)?;
-            let (carved, rivers) = carve_rivers(field(i, "in")?, spacing_m(ctx), rp.threshold, rp.depth_m)?;
+            let (carved, rivers) = carve_rivers(field(i, "in")?, spacing_m(ctx), rp.threshold, rp.depth_m, rp.method)?;
             Ok(BTreeMap::from([("out".to_owned(), Value::field(carved)), ("rivers".to_owned(), Value::field(rivers))]))
         },
     ));

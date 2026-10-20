@@ -1,8 +1,8 @@
-//! Flow routing (`docs/research/algorithms.md` §6): D8 receivers and flow accumulation by
-//! descending-height order. Deterministic (ties broken by cell index), O(N log N) for the sort.
+//! Flow routing (`docs/research/algorithms.md` §6): D8 and D∞ (Tarboton 1997) receivers,
+//! flow accumulation by descending-height order, priority-flood filling, rivers and wetness.
+//! Deterministic (ties broken by cell index), O(N log N) for the sort.
 //!
-//! ponytail: D8 only (45° quantisation shows parallel-line artefacts on planar slopes); D∞ /
-//! MFD and priority-flood depression filling follow with the hydrology nodes.
+//! ponytail: no MFD (Freeman/Quinn) yet; D∞ already removes most of D8's parallel-line streaks.
 
 use crate::Heightfield;
 use jd_types::{JdError, JdResult};
@@ -46,6 +46,94 @@ pub fn d8_receivers(h: &[f32], w: usize, hh: usize, spacing_m: [f32; 2]) -> Vec<
     out
 }
 
+/// Flow routing method.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum FlowMethod {
+    /// Single steepest neighbour (O'Callaghan & Mark 1984): fast, 45° quantised.
+    #[default]
+    D8,
+    /// Tarboton 1997: steepest of eight triangular facets, flow split between its two neighbours.
+    #[serde(rename = "dinf")]
+    DInf,
+}
+
+/// D∞ receivers: up to two downslope neighbours with weights summing to 1 (or none for pits).
+pub fn dinf_receivers(
+    h: &[f32],
+    w: usize,
+    hh: usize,
+    spacing_m: [f32; 2],
+) -> Vec<[(Option<u32>, f32); 2]> {
+    // Facets go from a cardinal neighbour (e1) to the adjacent diagonal (e2); d1 is the spacing
+    // along e1's axis, d2 the spacing along the other axis.
+    const FACETS: [((i64, i64), (i64, i64)); 8] = [
+        ((1, 0), (1, -1)),
+        ((0, -1), (1, -1)),
+        ((0, -1), (-1, -1)),
+        ((-1, 0), (-1, -1)),
+        ((-1, 0), (-1, 1)),
+        ((0, 1), (-1, 1)),
+        ((0, 1), (1, 1)),
+        ((1, 0), (1, 1)),
+    ];
+    let mut out = vec![[(None, 0.0f32); 2]; w * hh];
+    out.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
+        for (x, cell) in row.iter_mut().enumerate() {
+            let h0 = h[y * w + x];
+            let mut best: Option<(f32, f32, usize, usize, f32)> = None; // (slope, angle r, e1, e2, rmax)
+            for (e1, e2) in FACETS {
+                let (x1, y1) = (x as i64 + e1.0, y as i64 + e1.1);
+                let (x2, y2) = (x as i64 + e2.0, y as i64 + e2.1);
+                let inside =
+                    |xx: i64, yy: i64| xx >= 0 && yy >= 0 && xx < w as i64 && yy < hh as i64;
+                if !inside(x1, y1) || !inside(x2, y2) {
+                    continue;
+                }
+                let (i1, i2) = (y1 as usize * w + x1 as usize, y2 as usize * w + x2 as usize);
+                let (d1, d2) = if e1.0 != 0 {
+                    (spacing_m[0], spacing_m[1])
+                } else {
+                    (spacing_m[1], spacing_m[0])
+                };
+                let s1 = (h0 - h[i1]) / d1;
+                let s2 = (h[i1] - h[i2]) / d2;
+                let rmax = (d2 / d1).atan();
+                let (mut r, mut s) = (s2.atan2(s1), (s1 * s1 + s2 * s2).sqrt());
+                if r < 0.0 {
+                    r = 0.0;
+                    s = s1;
+                } else if r > rmax {
+                    r = rmax;
+                    s = (h0 - h[i2]) / d1.hypot(d2);
+                }
+                if s > 0.0 && best.is_none_or(|(bs, ..)| s > bs) {
+                    best = Some((s, r, i1, i2, rmax));
+                }
+            }
+            if let Some((_, r, i1, i2, rmax)) = best {
+                let w2 = if rmax > 0.0 {
+                    (r / rmax).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                *cell = [(Some(i1 as u32), 1.0 - w2), (Some(i2 as u32), w2)];
+            }
+        }
+    });
+    out
+}
+
 /// Flow accumulation: every cell contributes one unit of rain-weighted area and passes its
 /// total to its D8 receiver, visiting cells from highest to lowest. Pits keep what they collect.
 /// With `log_scale` the output is `ln(1 + acc) / ln(1 + N)` in 0..1, otherwise the raw count.
@@ -53,6 +141,16 @@ pub fn flow_accumulation(
     h: &Heightfield,
     spacing_m: [f32; 2],
     log_scale: bool,
+) -> JdResult<Heightfield> {
+    flow_accumulation_with(h, spacing_m, log_scale, FlowMethod::D8)
+}
+
+/// [`flow_accumulation`] with a selectable routing method.
+pub fn flow_accumulation_with(
+    h: &Heightfield,
+    spacing_m: [f32; 2],
+    log_scale: bool,
+    method: FlowMethod,
 ) -> JdResult<Heightfield> {
     if !spacing_m.iter().all(|s| *s > 0.0 && s.is_finite()) {
         return Err(JdError::invalid(
@@ -65,14 +163,25 @@ pub fn flow_accumulation(
     if v.iter().any(|x| !x.is_finite()) {
         return Err(JdError::invalid("in", "heightfield has non-finite samples"));
     }
-    let recv = d8_receivers(&v, w, hh, spacing_m);
+    let recv: Vec<[(Option<u32>, f32); 2]> = match method {
+        FlowMethod::D8 => d8_receivers(&v, w, hh, spacing_m)
+            .into_iter()
+            .map(|r| [(r, 1.0), (None, 0.0)])
+            .collect(),
+        FlowMethod::DInf => dinf_receivers(&v, w, hh, spacing_m),
+    };
     let mut order: Vec<u32> = (0..(w * hh) as u32).collect();
     // Descending height, ties by index: identical output regardless of thread count.
     order.par_sort_unstable_by(|a, b| v[*b as usize].total_cmp(&v[*a as usize]).then(a.cmp(b)));
     let mut acc = vec![1.0f32; w * hh];
     for &i in &order {
-        if let Some(j) = recv[i as usize] {
-            acc[j as usize] += acc[i as usize];
+        let a = acc[i as usize];
+        for (j, wt) in recv[i as usize] {
+            if let Some(j) = j
+                && wt > 0.0
+            {
+                acc[j as usize] += a * wt;
+            }
         }
     }
     let n = (w * hh) as f32;
@@ -171,6 +280,7 @@ pub fn carve_rivers(
     spacing_m: [f32; 2],
     threshold: f32,
     depth_m: f32,
+    method: FlowMethod,
 ) -> JdResult<(Heightfield, Heightfield)> {
     if !(0.0..1.0).contains(&threshold) {
         return Err(JdError::invalid("threshold", "must be within 0..1"));
@@ -179,7 +289,7 @@ pub fn carve_rivers(
         return Err(JdError::invalid("depth_m", "must be finite and ≥ 0"));
     }
     let (filled, _) = fill_depressions(h, 0.001)?;
-    let acc = flow_accumulation(&filled, spacing_m, true)?;
+    let acc = flow_accumulation_with(&filled, spacing_m, true, method)?;
     let mut mask = Heightfield::new(h.width(), h.height(), h.tile_size(), h.halo())?;
     mask.fill_with(|x, y| {
         let t = ((acc.get(x, y) - threshold) / (1.0 - threshold)).clamp(0.0, 1.0);
@@ -297,7 +407,8 @@ mod tests {
         // A V-shaped valley: water from both slopes gathers along x = 16 and flows north (y → 0).
         let mut h = Heightfield::new(33, 24, 32, 4).expect("hf");
         h.fill_with(|x, y| (x as f32 - 16.0).abs() * 4.0 + y as f32 * 0.5);
-        let (carved, mask) = carve_rivers(&h, [1.0, 1.0], 0.6, 10.0).expect("carve");
+        let (carved, mask) =
+            carve_rivers(&h, [1.0, 1.0], 0.6, 10.0, FlowMethod::D8).expect("carve");
         assert!(
             mask.get(16, 2) > 0.5,
             "valley floor near the outlet is river: {}",
@@ -312,13 +423,13 @@ mod tests {
         );
         assert_eq!(carved.get(2, 20), h.get(2, 20));
         assert_eq!(
-            carve_rivers(&h, [1.0, 1.0], 0.6, 10.0)
+            carve_rivers(&h, [1.0, 1.0], 0.6, 10.0, FlowMethod::D8)
                 .expect("again")
                 .0
                 .content_hash(),
             carved.content_hash()
         );
-        assert!(carve_rivers(&h, [1.0, 1.0], 1.0, 10.0).is_err());
+        assert!(carve_rivers(&h, [1.0, 1.0], 1.0, 10.0, FlowMethod::D8).is_err());
     }
 
     #[test]
@@ -338,6 +449,38 @@ mod tests {
         assert_eq!(
             wetness_index(&h, [1.0, 1.0]).expect("again").content_hash(),
             twi.content_hash()
+        );
+    }
+
+    #[test]
+    fn dinf_matches_d8_on_cardinal_slopes_and_splits_diagonal_flow() {
+        // Westward plane: D∞ sends everything to the single cardinal neighbour, like D8.
+        let mut h = Heightfield::new(32, 8, 32, 0).expect("hf");
+        h.fill_with(|x, _| x as f32);
+        let d8 = flow_accumulation(&h, [1.0, 1.0], false).expect("d8");
+        let dinf = flow_accumulation_with(&h, [1.0, 1.0], false, FlowMethod::DInf).expect("dinf");
+        assert_eq!(d8.to_vec(), dinf.to_vec());
+        // A plane sloping between west and north-west (≈ 22.5°) splits each cell's flow two ways.
+        let mut p = Heightfield::new(16, 16, 16, 0).expect("hf");
+        let a = 22.5f32.to_radians();
+        p.fill_with(|x, y| x as f32 * a.cos() + y as f32 * a.sin());
+        let v = p.to_vec();
+        let recv = dinf_receivers(&v, 16, 16, [1.0, 1.0]);
+        let [(r1, w1), (r2, w2)] = recv[8 * 16 + 8];
+        assert!(r1.is_some() && r2.is_some(), "two receivers");
+        assert!(
+            (w1 + w2 - 1.0).abs() < 1e-6 && (w1 - 0.5).abs() < 0.05 && (w2 - 0.5).abs() < 0.05,
+            "weights {w1} / {w2}"
+        );
+        // Total area is conserved: cells without receivers (the low edge) hold exactly N.
+        let acc = flow_accumulation_with(&p, [1.0, 1.0], false, FlowMethod::DInf).expect("dinf");
+        let total: f32 = (0..256)
+            .filter(|&i| recv[i][0].0.is_none())
+            .map(|i| acc.get((i % 16) as u32, (i / 16) as u32))
+            .sum();
+        assert!(
+            (total - 256.0).abs() < 1e-2,
+            "outlets hold the whole area: {total}"
         );
     }
 
