@@ -131,6 +131,65 @@ expression: list
     }
   },
   {
+    "id": "diag.bundle",
+    "description": "Write a diagnostic bundle for a bug report: host environment, project.json / graph.json / scene.json, the tail of the journal, versions — no heightfield data",
+    "scope": "export",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "DiagBundle",
+      "description": "`diag.bundle` params.",
+      "type": "object",
+      "properties": {
+        "dir": {
+          "description": "Output directory; relative paths resolve against the project's `exports/`. Default `exports/diagnostics-<UTC stamp>`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "journal_lines": {
+          "description": "How many journal entries to include from the end.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 200
+        }
+      },
+      "additionalProperties": false
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "DiagBundleReport",
+      "description": "`diag.bundle` result.",
+      "type": "object",
+      "properties": {
+        "dir": {
+          "description": "Where the bundle went.",
+          "type": "string"
+        },
+        "files": {
+          "description": "Files written.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "bytes": {
+          "description": "Total bytes.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "dir",
+        "files",
+        "bytes"
+      ]
+    }
+  },
+  {
     "id": "diag.env",
     "description": "Report host environment and detected tools",
     "scope": "none",

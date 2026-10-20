@@ -779,6 +779,18 @@ $ jd --json diag bench s1 | tail -1
   "total_ms":307.6,"peak_rss_bytes":45219840,"profile":"release","content_hash":"859db903b963db8a…"}}
 ```
 
+**Bug reports.** `jd diag bundle` collects what a report needs and nothing private: the host environment, the project's `project.json` / `graph.json` / `scene.json`, the tail of the journal and the versions — no heightfield or asset data.
+
+```
+$ jd diag bundle --project Dunes.jdproj                   # --out <dir>, --journal-lines 200
+ok  project.open
+ok  diag.bundle
+{"dir": "Dunes.jdproj/exports/diagnostics-20261020T174108Z",
+ "files": ["env.json", "versions.json", "project.json", "graph.json", "scene.json", "journal-tail.ndjson"], "bytes": 3289}
+```
+
+Zip that directory and attach it; the same op is `diag.bundle` for the MCP server and the desktop.
+
 `jd diag bench` runs a benchmark scene from `docs/spec/performance-targets.md` with the real kernels (S1: 1024² fBm + ridged noise, add, 50 thermal steps) and reports wall time per stage, the process's peak resident memory and the content hash of the result — the same hash on every machine means the kernels are deterministic. `--size 2048` scales the scene; `profile` says `debug` when the binary is not optimised (those numbers are not comparable). CI runs S1 on every push as a smoke with a 15 s / 1 GB budget.
 
 ## Errors and exit codes

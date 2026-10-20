@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DiagBundleReport",
+  "description": "`diag.bundle` result.",
+  "type": "object",
+  "properties": {
+    "dir": {
+      "description": "Where the bundle went.",
+      "type": "string"
+    },
+    "files": {
+      "description": "Files written.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "bytes": {
+      "description": "Total bytes.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "dir",
+    "files",
+    "bytes"
+  ]
+}

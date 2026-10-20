@@ -35,6 +35,22 @@ platform does not report it). */
   "content_hash": string;
 };
 
+export type DiagBundleRequest = {
+  /** Output directory; relative paths resolve against the project's `exports/`. Default `exports/diagnostics-<UTC stamp>`. */
+  "dir"?: string | null;
+  /** How many journal entries to include from the end. */
+  "journal_lines"?: number;
+};
+
+export type DiagBundleResult = {
+  /** Where the bundle went. */
+  "dir": string;
+  /** Files written. */
+  "files": string[];
+  /** Total bytes. */
+  "bytes": number;
+};
+
 export type DiagEnvRequest = Record<string, unknown>;
 
 export type ToolStatus = {
@@ -1710,6 +1726,8 @@ export type NodeParams_jd_terrain_strata_1 = {
 export interface JdOps {
   /** Run a benchmark scene (S1: fBm + ridged + add + thermal×50) with the real kernels; per-stage wall time, peak RSS, content hash */
   "diag.bench": { request: DiagBenchRequest; result: DiagBenchResult };
+  /** Write a diagnostic bundle for a bug report: host environment, project.json / graph.json / scene.json, the tail of the journal, versions — no heightfield data */
+  "diag.bundle": { request: DiagBundleRequest; result: DiagBundleResult };
   /** Report host environment and detected tools */
   "diag.env": { request: DiagEnvRequest; result: DiagEnvResult };
   /** Add a node (journaled) */

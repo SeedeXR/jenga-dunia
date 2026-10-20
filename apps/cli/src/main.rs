@@ -177,6 +177,18 @@ enum ExportCommand {
 enum DiagCommand {
     /// Host environment, memory, detected tools.
     Env,
+    /// Write a diagnostic bundle for a bug report (environment, project/graph/scene documents, journal tail; no terrain data).
+    Bundle {
+        /// Project directory to describe.
+        #[arg(long)]
+        project: PathBuf,
+        /// Output directory (default exports/diagnostics-<UTC stamp> inside the project).
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Journal entries to include from the end.
+        #[arg(long, default_value_t = 200)]
+        journal_lines: u32,
+    },
     /// Run a benchmark scene with the real kernels (release build for comparable numbers).
     Bench {
         /// Scene id (s1 = 1024² fBm + ridged + add + thermal×50).
@@ -481,6 +493,29 @@ fn main() -> ExitCode {
         Command::Diag {
             what: DiagCommand::Env,
         } => vec![invoke(&registry, &ctx, "diag.env", json!({}))],
+        Command::Diag {
+            what:
+                DiagCommand::Bundle {
+                    project,
+                    out,
+                    journal_lines,
+                },
+        } => {
+            let open = invoke(&registry, &ctx, "project.open", json!({ "path": project }));
+            if open.status != Status::Ok {
+                vec![open]
+            } else {
+                vec![
+                    open,
+                    invoke(
+                        &registry,
+                        &ctx,
+                        "diag.bundle",
+                        json!({ "dir": out, "journal_lines": journal_lines }),
+                    ),
+                ]
+            }
+        }
         Command::Diag {
             what: DiagCommand::Bench { scene, size },
         } => {

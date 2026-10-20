@@ -398,6 +398,33 @@ pub mod builtin {
         pub name: String,
     }
 
+    /// `diag.bundle` params.
+    #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct DiagBundle {
+        /// Output directory; relative paths resolve against the project's `exports/`. Default `exports/diagnostics-<UTC stamp>`.
+        #[serde(default)]
+        pub dir: Option<PathBuf>,
+        /// How many journal entries to include from the end.
+        #[serde(default = "journal_lines")]
+        pub journal_lines: u32,
+    }
+
+    fn journal_lines() -> u32 {
+        200
+    }
+
+    /// `diag.bundle` result.
+    #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct DiagBundleReport {
+        /// Where the bundle went.
+        pub dir: PathBuf,
+        /// Files written.
+        pub files: Vec<String>,
+        /// Total bytes.
+        pub bytes: u64,
+    }
+
     /// `project.set_settings` params: fields left out keep their current value.
     #[derive(Debug, Default, Serialize, Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
@@ -771,6 +798,47 @@ pub mod builtin {
             "Report host environment and detected tools",
             Scope::None,
             |_, _| Ok((crate::diag::env_info(), Vec::new())),
+        );
+        r.register::<DiagBundle, DiagBundleReport, _>(
+            "diag.bundle",
+            "Write a diagnostic bundle for a bug report: host environment, project.json / graph.json / scene.json, the tail of the journal, versions — no heightfield data",
+            Scope::Export,
+            |ctx, p| {
+                let (root, name) = ctx.with_project(|pr| Ok((pr.root().to_path_buf(), pr.doc.name.clone())))?;
+                let stamp = jiff::Timestamp::now().strftime("%Y%m%dT%H%M%SZ").to_string();
+                let dir = match &p.dir {
+                    Some(d) if d.is_absolute() => d.clone(),
+                    Some(d) => root.join("exports").join(d),
+                    None => root.join("exports").join(format!("diagnostics-{stamp}")),
+                };
+                std::fs::create_dir_all(&dir)?;
+                let mut files = Vec::new();
+                let mut put = |name: &str, bytes: &[u8]| -> JdResult<()> {
+                    std::fs::write(dir.join(name), bytes)?;
+                    files.push(name.to_owned());
+                    Ok(())
+                };
+                put("env.json", &serde_json::to_vec_pretty(&crate::diag::env_info())?)?;
+                put(
+                    "versions.json",
+                    &serde_json::to_vec_pretty(&serde_json::json!({
+                        "jd": env!("CARGO_PKG_VERSION"), "schema_version": SchemaVersion::CURRENT, "project": name,
+                        "os": std::env::consts::OS, "arch": std::env::consts::ARCH, "written": stamp,
+                    }))?,
+                )?;
+                for f in ["project.json", "graph.json", "scene.json"] {
+                    if let Ok(bytes) = std::fs::read(root.join(f)) {
+                        put(f, &bytes)?;
+                    }
+                }
+                if let Ok(journal) = std::fs::read_to_string(root.join("journal").join("ops.ndjson")) {
+                    let lines: Vec<&str> = journal.lines().collect();
+                    let tail = &lines[lines.len().saturating_sub(p.journal_lines as usize)..];
+                    put("journal-tail.ndjson", (tail.join("\n") + "\n").as_bytes())?;
+                }
+                let bytes = files.iter().map(|f| std::fs::metadata(dir.join(f)).map(|m| m.len()).unwrap_or(0)).sum();
+                Ok((DiagBundleReport { dir, files, bytes }, Vec::new()))
+            },
         );
         r.register::<crate::diag::BenchParams, crate::diag::BenchReport, _>(
             "diag.bench",
@@ -1598,6 +1666,62 @@ pub mod graph {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn diag_bundle_collects_documents_env_and_journal_tail() {
+            use crate::envelope::Status;
+            let reg = Registry::with_builtins();
+            let dir = tempfile::tempdir().expect("tmp");
+            let ctx = Context::default();
+            let world = WorldSettings {
+                resolution_px: [32, 32],
+                extent_m: [32.0, 32.0],
+                tile_size: 64,
+                halo: 0,
+                ..Default::default()
+            };
+            reg.invoke(&ctx, Request::new("project.create", serde_json::json!({ "path": dir.path().join("d.jdproj"), "name": "D", "world": world })));
+            for _ in 0..3 {
+                call(
+                    &reg,
+                    &ctx,
+                    "project.set_settings",
+                    serde_json::json!({ "preview_lod": 1 }),
+                );
+            }
+            let r = call(
+                &reg,
+                &ctx,
+                "diag.bundle",
+                serde_json::json!({ "dir": "diag", "journal_lines": 2 }),
+            );
+            assert_eq!(r.status, Status::Ok, "{:?}", r.error);
+            let rep: super::super::builtin::DiagBundleReport =
+                serde_json::from_value(r.result.expect("report")).expect("shape");
+            assert_eq!(
+                rep.files,
+                [
+                    "env.json",
+                    "versions.json",
+                    "project.json",
+                    "graph.json",
+                    "scene.json",
+                    "journal-tail.ndjson"
+                ]
+            );
+            assert!(rep.files.iter().all(|f| rep.dir.join(f).is_file()) && rep.bytes > 0);
+            assert_eq!(
+                std::fs::read_to_string(rep.dir.join("journal-tail.ndjson"))
+                    .expect("tail")
+                    .lines()
+                    .count(),
+                2
+            );
+            assert!(
+                rep.dir
+                    .starts_with(dir.path().join("d.jdproj").join("exports"))
+            );
+        }
 
         #[test]
         fn the_world_wind_drives_wind_nodes_unless_they_set_their_own() {

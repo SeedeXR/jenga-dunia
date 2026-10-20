@@ -73,7 +73,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [ ] Streaming, origin rebasing, 16k+ worlds under 4 GB
 - [ ] GPU kernels + parity tests
 - [ ] `jd-geo` (DEM/OSM/contours with attribution) and `jd-vision` (MoGe-2, DA3 via ONNX; licence gate)
-- [~] Fuzzing: FBX reader hardened (nesting ≤ 64, arrays ≤ 1 GiB, bounded zlib) + proptest mutation test ✔ · cargo-fuzz targets / other parsers ☐ · signed releases ✗ (no Apple developer account) · diagnostic bundles ☐
+- [~] Fuzzing: FBX reader hardened (nesting ≤ 64, arrays ≤ 1 GiB, bounded zlib) + proptest mutation test ✔ · cargo-fuzz targets / other parsers ☐ · signed releases ✗ (no Apple developer account) · diagnostic bundles ✔ (`diag.bundle` / `jd diag bundle --project`: env, versions, project/graph/scene documents, journal tail; no terrain data; unit test)
 - [~] Acceptance scenario §20: `scripts/acceptance.mjs` builds the demo project (mountains/valleys/river/coast, stream power + rivers + coastal, 6 biome rules + masks + snow, PBR bakes, LOD chain, GLB/USD/FBX/engine profiles, validators, Blender import, MCP replay, cancel, recovery) and writes `docs/spec/acceptance-report.md`; CI runs the quick world. extended 2026-10-21 with the ocean floor (seabed + bathymetry), desert family (karst + strata-hardened yardangs + spline road), water/sky bakes, rocks + rock-proxy scatter, keyed snow timeline. 14 VERIFIED · PARTIAL: 4 (user material graph), 5 (clouds/fog/weather state), 18 (per-project logs) · UNVERIFIED: 13 (Unity/Unreal/browser viewer)
 
 ## Deferred (with reasons)

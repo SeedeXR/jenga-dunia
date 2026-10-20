@@ -5,6 +5,11 @@
     "scope": "none"
   },
   {
+    "id": "diag.bundle",
+    "description": "Write a diagnostic bundle for a bug report: host environment, project.json / graph.json / scene.json, the tail of the journal, versions — no heightfield data",
+    "scope": "export"
+  },
+  {
     "id": "diag.env",
     "description": "Report host environment and detected tools",
     "scope": "none"
