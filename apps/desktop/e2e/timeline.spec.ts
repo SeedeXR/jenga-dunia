@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { connectCore, fitView, installBridge, logCount, selectNode, wire } from "./bridge";
@@ -71,6 +71,14 @@ test.describe("timeline against the real core", () => {
     await page.screenshot({ path: testInfo.outputPath("timeline.png") }); // tutorial image source
     // Undo takes the time back to 0 (journaled like any edit).
     await page.getByTestId("graph-undo").click();
+    await expect(page.getByTestId("graph-time-value")).toHaveText("0.00");
+    // Export frames: four heightmaps from t = 0 to 1 through timeline.export, the project's time untouched.
+    const frames = page.getByTestId("frames-count");
+    await frames.fill("4");
+    await page.getByTestId("frames-export").click();
+    await expect(page.getByTestId("log")).toContainText("timeline.export: ok", { timeout: 60_000 });
+    const frameDir = path.join(ws, "Time.jdproj", "exports", "frames");
+    expect(readdirSync(frameDir).filter((f) => f.endsWith(".png")).sort()).toEqual(["height_0000.png", "height_0001.png", "height_0002.png", "height_0003.png"]);
     await expect(page.getByTestId("graph-time-value")).toHaveText("0.00");
     expect(errors).toEqual([]);
   });

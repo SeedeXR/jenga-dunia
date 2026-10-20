@@ -46,6 +46,7 @@ export default function App() {
   const s = useStore();
   const [projPath, setProjPath] = useState("");
   const [importPath, setImportPath] = useState("");
+  const [frames, setFrames] = useState(24);
   const [projName, setProjName] = useState("World");
   const [extent, setExtent] = useState(4096);
   const [resolution, setResolution] = useState(2048);
@@ -601,6 +602,18 @@ export default function App() {
           >
             <Upload size={14} /> Export water maps
           </button>
+          <div className="mt-1 flex gap-1">
+            <input className={`${inputCls} w-16`} type="number" min={2} max={10000} value={frames} onChange={(e) => setFrames(Number(e.target.value))} title="Frames across the timeline (t = 0 … 1)" data-testid="frames-count" />
+            <button
+              className="btn flex-1 justify-center"
+              disabled={!s.project || s.busy}
+              onClick={() => void s.exportFrames(frames)}
+              title="Write exports/frames/: one 16-bit heightmap per frame from t = 0 to 1, keyframed parameters animating (timeline.export)"
+              data-testid="frames-export"
+            >
+              <Upload size={14} /> Export frames
+            </button>
+          </div>
         </aside>
       </div>
 

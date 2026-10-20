@@ -118,6 +118,8 @@ interface State {
   exportHeightmap: (path: string, format: HeightmapFormat) => Promise<void>;
   /** Write exports/water/: depth, colour, foam and the wave normal tile for the graph's sea-level node (`ocean.bake`). */
   exportWater: () => Promise<void>;
+  /** Write exports/frames/: one 16-bit heightmap per frame across the timeline (`timeline.export`). */
+  exportFrames: (frames: number) => Promise<void>;
   /** Copy a heightmap or mesh file into assets/ and add an input node that reads it. */
   importAsset: (path: string) => Promise<void>;
   save: () => Promise<void>;
@@ -639,6 +641,9 @@ export const useStore = create<State>((set, get) => {
         fetch_km: p.fetch_km == null ? null : Number(p.fetch_km),
         wind_azimuth_deg: Number(p.wind_azimuth_deg ?? get().project?.world.wind?.azimuth_deg ?? 270),
       });
+    },
+    exportFrames: async (frames) => {
+      await run("timeline.export", { frames, dir: "frames", format: "png16" });
     },
     exportHeightmap: async (path, format) => {
       // A live preview only published `height#lod<N>`; exports always use the full-resolution layer.
