@@ -4,7 +4,7 @@ import { Brush, FolderOpen, FolderPlus, FolderSearch, Mountain, Route, Save, Upl
 import { useCallback, useEffect, useRef, useState } from "react";
 import GraphPanel from "./graph/GraphPanel";
 import TerrainView, { type ViewportInfo } from "./viewport/TerrainView";
-import { useStore } from "./state";
+import { type NoiseSettings, useStore } from "./state";
 import type { FractalKind, HeightmapFormat, NoiseKind } from "./lib/ops.gen";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -27,6 +27,14 @@ export const PRESETS: { label: string; resolution: number; extent: number }[] = 
   { label: "Unity / Unreal 2049² · 8 km", resolution: 2049, extent: 8192 },
   { label: "Unreal 4033² · 16 km", resolution: 4033, extent: 16128 },
   { label: "Unity 4097² · 16 km", resolution: 4097, extent: 16384 },
+];
+
+/** Terrain presets: patches on the noise settings (seed and lattice stay as set). */
+export const NOISE_PRESETS: { label: string; patch: Partial<NoiseSettings> }[] = [
+  { label: "Mountains 0..500 m", patch: { fractal: "fbm", feature_size_m: 1024, octaves: 6, gain: 0.5, height_range_m: [0, 500] } },
+  { label: "Ridged alpine 0..1200 m", patch: { fractal: "ridged", feature_size_m: 1400, octaves: 7, gain: 0.5, height_range_m: [0, 1200] } },
+  { label: "Rolling hills 0..150 m", patch: { fractal: "fbm", feature_size_m: 800, octaves: 5, gain: 0.45, height_range_m: [0, 150] } },
+  { label: "Desert plain 0..40 m", patch: { fractal: "fbm", feature_size_m: 1200, octaves: 3, gain: 0.5, height_range_m: [0, 40] } },
 ];
 
 export function formatFor(path: string): HeightmapFormat {
@@ -488,6 +496,23 @@ export default function App() {
             <span className="text-xs text-jd-fg-2" data-testid="scatter-count">{s.scatter.points ? `${s.scatter.points.length.toLocaleString()} instances` : ""}</span>
           </div>
           <h2 className="mt-4 mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Terrain · Noise</h2>
+          <Field label="Preset">
+            <select
+              className={`${inputCls} w-36`}
+              value=""
+              onChange={(e) => {
+                const p = NOISE_PRESETS.find((x) => x.label === e.target.value);
+                if (p) s.setNoise(p.patch);
+              }}
+              title="Fills the noise fields below; a desert plain is the start for dunes (jd.erosion.aeolian@1) and sinkholes (jd.erosion.karst@1)"
+              data-testid="noise-preset"
+            >
+              <option value="">choose…</option>
+              {NOISE_PRESETS.map((p) => (
+                <option key={p.label}>{p.label}</option>
+              ))}
+            </select>
+          </Field>
           <Field label="Lattice">
             <select className={inputCls} value={s.noise.kind} onChange={(e) => s.setNoise({ kind: e.target.value as NoiseKind })}>
               {["open_simplex2", "open_simplex2s", "perlin", "value", "value_cubic", "cellular"].map((k) => (

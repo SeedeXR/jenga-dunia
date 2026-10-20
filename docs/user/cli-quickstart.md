@@ -572,7 +572,25 @@ classify 59 ms (256²)   shares: wadi gravel 0.3 %  sand sheet 95.8 %  reg 2.9 %
 
 ![Desert biome class map: a sand-sheet plain with reg rims and varnished rock on the steep sinkhole walls, wadi gravel along the channels](images/cli-desert-biome.png)
 
-The desert surfaces fall out of the same rule engine as the temperate biomes: the wettest cells (the wadi beds, MFD-routed so the index reads as moisture) take gravel first, then slope sorts the rest into sand sheet, reg (the stone pavement that armours gently sloping desert ground) and varnished rock on anything steep — here the sinkhole walls and dune slip faces. Each class is a `jd.mask.class@1` mask for materials and scatter. The playa floor (`fill.lakes > 0`) and the sinkhole floors are masks of their own; the classify node does not take extra masks yet, so a salt-crust class has to be composited downstream — that is the open item.
+The desert surfaces fall out of the same rule engine as the temperate biomes: the wettest cells (the wadi beds, MFD-routed so the index reads as moisture) take gravel first, then slope sorts the rest into sand sheet, reg (the stone pavement that armours gently sloping desert ground) and varnished rock on anything steep — here the sinkhole walls and dune slip faces. Each class is a `jd.mask.class@1` mask for materials and scatter.
+
+**Salt crust on the playa floors.** The classify node also takes a free `mask` input and a `mask` band per rule — any 0..1 field: a painted mask, a corridor, or here the standing-water depth of the fill node, so evaporite floors become a class of their own:
+
+```
+$ jd op graph.set_param --project Salt.jdproj --save --params '{"id":"<classify>","key":"rules","value":[
+    {"name":"salt crust","mask":[0.5,1e9]},
+    {"name":"sand sheet","slope":[0,0.06]},
+    {"name":"reg (desert pavement)","slope":[0.06,0.2]},
+    {"name":"varnished rock","slope":[0.2,1.01]}]}'
+# fill.lakes → classify.mask (fill.out → classify.height, slope.out → classify.slope); jd.mask.class@1 id 1 → `salt`
+Desert plain 256² (2.56 km, karst 6/km², fill): playa depth 0..14.9 m, mean 0.78 m
+salt crust  playa ≥ 0.05 m: 23.6 %   ≥ 0.5 m: 20.4 %   ≥ 1 m: 17.7 % of the plain   (471 ms per evaluation)
+mask port unwired: 0.0 % — a rule with a `mask` band never matches without the input, like `slope` and `wetness`
+```
+
+![Salt-crust mask of the desert plain: broad white pans where the filled hollows stand deeper than half a metre, small discs on the sinkhole floors](images/cli-desert-salt.png)
+
+The pans are large because `fill` levels every closed hollow of a noisy plain, not only the sinkholes; raise the band's lower bound to keep the deep basins only, or feed the `sinkholes` mask of the karst node instead for crusts on the dolines alone.
 
 ### Snow cover
 

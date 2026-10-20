@@ -1263,6 +1263,8 @@ export type BiomeRule = {
   "slope"?: [number, number] | null;
   /** Wetness band in 0..1 (the `jd.hydrology.wetness@1` index) [min, max). */
   "wetness"?: [number, number] | null;
+  /** Band on the optional `mask` input [min, max): any field — `lakes` from `jd.hydrology.fill@1` for salt crusts on playa floors, a painted mask, a corridor. */
+  "mask"?: [number, number] | null;
 };
 
 export type NodeParams_jd_biome_classify_1 = {

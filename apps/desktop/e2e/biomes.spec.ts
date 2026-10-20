@@ -60,7 +60,7 @@ test.describe("biome rules editor against the real core", () => {
       .map((l) => JSON.parse(l) as { op: string; params: { key?: string; value?: unknown } });
     const sets = journal.filter((e) => e.op === "graph.set_param" && e.params.key === "rules");
     const last = sets[sets.length - 1]!.params.value as { name: string; slope: number[] | null; height_m: number[] | null }[];
-    expect(last).toEqual([{ name: "scree", height_m: null, slope: [0.6, 2], wetness: null }]);
+    expect(last).toEqual([{ name: "scree", height_m: null, slope: [0.6, 2], wetness: null, mask: null }]);
 
     // Snow cover: a climate node fed from the noise, published as a second output and used to
     // colour the terrain — a 0..1 mask like any other. The unwired classify node would make the

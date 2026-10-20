@@ -130,7 +130,7 @@
   },
   {
     "kind": "jd.biome.classify@1",
-    "description": "Classify every cell into a biome by ordered rules on height, slope (0..1) and wetness (0..1); outputs the class id map (1-based rule index, 0 = none)",
+    "description": "Classify every cell into a biome by ordered rules on height, slope (0..1), wetness (0..1) and an optional `mask` field (e.g. `lakes` depth → salt crust); outputs the class id map (1-based rule index, 0 = none)",
     "inputs": [
       {
         "name": "height",
@@ -144,6 +144,11 @@
       },
       {
         "name": "wetness",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "mask",
         "ty": "heightfield",
         "required": false
       }
@@ -208,6 +213,20 @@
             },
             "wetness": {
               "description": "Wetness band in 0..1 (the `jd.hydrology.wetness@1` index) [min, max).",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "minItems": 2,
+              "maxItems": 2,
+              "default": null
+            },
+            "mask": {
+              "description": "Band on the optional `mask` input [min, max): any field — `lakes` from `jd.hydrology.fill@1` for salt crusts on playa floors, a painted mask, a corridor.",
               "type": [
                 "array",
                 "null"

@@ -1,0 +1,10 @@
+{
+  "src": "../../../apps/desktop/test-results/desert-desert-landscapes-a-b6b01-ured-by-the-sinkhole-floors/desert.png",
+  "out": "desktop-desert.png",
+  "annotations": [
+    { "type": "box", "x": 1166, "y": 326, "w": 268, "h": 26, "label": "1", "text": "Preset ▸ Desert plain 0..40 m fills the noise fields; Generate", "tx": 1150, "ty": 372, "anchor": "end" },
+    { "type": "box", "x": 305, "y": 572, "w": 565, "h": 36, "label": "2", "text": "noise → aeolian dunes → karst sinkholes → height; `sinkholes` as a 2nd layer" },
+    { "type": "box", "x": 826, "y": 9, "w": 82, "h": 20, "label": "3", "text": "colour: sinkholes", "tx": 700, "ty": 55 },
+    { "type": "arrow", "x1": 640, "y1": 300, "x2": 528, "y2": 168, "text": "dolines on the interdune flats; the ripples are Werner dunes", "tx": 430, "ty": 330 }
+  ]
+}

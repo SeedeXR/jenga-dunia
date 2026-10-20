@@ -48,7 +48,7 @@ Logs: `~/Library/Logs/com.seedexr.jengadunia/jd-app.log` on macOS (`$XDG_DATA_HO
 1. **Path** — type the project directory (created on disk as a `.jdproj` folder), or use the folder button / **File → Open…** for a native dialog.
 2. **Preset** — Unity 1025²/2049²/4097², Unreal 2049²/4033² or plain squares fill resolution and extent.
 3. **New (⌘N)** — or **Open (⌘O)** for an existing project; the header shows `name — resolution² · extent m`.
-4. **Generate (⌘G)** — after choosing lattice, fractal, seed, feature size, octaves, lacunarity, gain and height range.
+4. **Generate (⌘G)** — after choosing lattice, fractal, seed, feature size, octaves, lacunarity, gain and height range, or a **Preset** (Mountains 0..500 m, Ridged alpine 0..1200 m, Rolling hills 0..150 m, Desert plain 0..40 m) that fills those fields.
 5. **Export heightmap (⌘E)** — `.exr`/`.tif`/`.r32` (exact), `.png`/`.r16` (16-bit, warns about quantisation).
 6. **Log** — every operation with warnings and errors (stable code, why, what to do next).
 
@@ -157,7 +157,7 @@ Undo and redo are operations like everything else (`graph.undo` / `graph.redo`, 
 
 ![Inspector with the biome rules table: one row named scree with a slope range, add-row button](images/desktop-biome-rules.png)
 
-*Rules as a table: for parameters that are lists of records (biome rules) the inspector shows a table — **+ row** adds a rule, each cell applies on blur (`min,max` for ranges, empty for "no constraint"), the bin removes a row. Every edit is one journaled `graph.set_param`; a value the core refuses (an inverted range) is reported in the log before anything is journaled and the table keeps the last good value. Recorded brush strokes stay a count — they are data, not something to type. UI-driven test: `apps/desktop/e2e/biomes.spec.ts`.*
+*Rules as a table: for parameters that are lists of records (biome rules) the inspector shows a table — **+ row** adds a rule, each cell applies on blur (`min,max` for ranges, empty for "no constraint"), the bin removes a row. The columns come from the node schema, so the `mask` band (the classify node's free `mask` input: playa depth for a salt crust, a painted mask) appears beside height, slope and wetness. Every edit is one journaled `graph.set_param`; a value the core refuses (an inverted range) is reported in the log before anything is journaled and the table keeps the last good value. Recorded brush strokes stay a count — they are data, not something to type. UI-driven test: `apps/desktop/e2e/biomes.spec.ts`.*
 
 *Sea in the viewport: as soon as the graph contains a `jd.hydrology.sea_level@1` node (1) the viewport draws water at its `level_m` — edit the value (2) and it moves with it; the header's viewport line reports the height (boxed, top right). The surface is shaded by the depth of the terrain under each vertex: a pale foam band within ~1 % of the height range of the shore, translucent turquoise shallows darkening to opaque navy with an e-folding depth of 12 % of the height range, and nothing drawn over land (alpha 0), so the shoreline reads without a custom shader (`buildSeaGeometry`, unit-tested). Water is only drawn while the **height** layer is shown (masks like `ocean` or `rivers` are 0..1 and would hide under it). Same e2e test.*
 
@@ -191,7 +191,7 @@ Undo and redo are operations like everything else (`graph.undo` / `graph.redo`, 
 
 ![Desert project: a 0..40 m plain generated from the panel, an aeolian node and a karst node in the graph, the viewport zoomed onto dune ripples with a red sinkhole floor](images/desktop-desert.png)
 
-*A desert in three nodes: set **Height min / max** to 0..40 m with a large feature size and few octaves and **Generate** a plain (1); add `jd.erosion.aeolian@1` (Werner slabs hop downwind into dunes; 60 steps here) and `jd.erosion.karst@1` (dolines on ground flatter than `max_slope_deg`, 15° between the dunes) and wire noise → dunes → sinkholes → height (2); publish the node's `sinkholes` output as a second layer and colour by it (3) — the red floors are the pits. Strata for mesas, wadis, playas and the rest of the desert family are CLI recipes in the quickstart for now. The UI-driven test `apps/desktop/e2e/desert.spec.ts` builds exactly this and is the source of the capture.*
+*A desert in three nodes: pick **Preset ▸ Desert plain 0..40 m** in the Terrain · Noise panel (it fills feature size 1200 m, 3 octaves, 0..40 m; Mountains, Ridged alpine and Rolling hills are the other presets) and **Generate** a plain (1); add `jd.erosion.aeolian@1` (Werner slabs hop downwind into dunes; 60 steps here) and `jd.erosion.karst@1` (dolines on ground flatter than `max_slope_deg`, 15° between the dunes) and wire noise → dunes → sinkholes → height (2); publish the node's `sinkholes` output as a second layer and colour by it (3) — the red floors are the pits. Strata for mesas, wadis, playas and the rest of the desert family are CLI recipes in the quickstart for now. The UI-driven test `apps/desktop/e2e/desert.spec.ts` builds exactly this and is the source of the capture.*
 
 **Screen recording:** [`videos/desert-dunes-sinkholes.mp4`](videos/desert-dunes-sinkholes.mp4) (31 s, 1440×900) — the desert flow above, recorded from the test with `JD_VIDEO=1`.
 

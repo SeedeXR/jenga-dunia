@@ -286,6 +286,9 @@ struct BiomeRule {
     /// Wetness band in 0..1 (the `jd.hydrology.wetness@1` index) [min, max).
     #[serde(default)]
     wetness: Option<[f32; 2]>,
+    /// Band on the optional `mask` input [min, max): any field — `lakes` from `jd.hydrology.fill@1` for salt crusts on playa floors, a painted mask, a corridor.
+    #[serde(default)]
+    mask: Option<[f32; 2]>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -304,6 +307,7 @@ fn validate_biome_rules(bp: &BiomeParams) -> JdResult<()> {
             ("height_m", rule.height_m),
             ("slope", rule.slope),
             ("wetness", rule.wetness),
+            ("mask", rule.mask),
         ] {
             if let Some([lo, hi]) = range
                 && (lo >= hi || lo.is_nan() || hi.is_nan())
@@ -328,6 +332,7 @@ fn default_biome_rules() -> Vec<BiomeRule> {
         height_m: h,
         slope: s,
         wetness: None,
+        mask: None,
     };
     vec![
         r("rock", None, Some([0.6, 2.0])),
@@ -833,11 +838,12 @@ pub fn register_all(r: &mut Registry) {
     ).with_memory(24.0));
     r.register(NodeDef::new::<BiomeParams, _>(
         "jd.biome.classify@1",
-        "Classify every cell into a biome by ordered rules on height, slope (0..1) and wetness (0..1); outputs the class id map (1-based rule index, 0 = none)",
+        "Classify every cell into a biome by ordered rules on height, slope (0..1), wetness (0..1) and an optional `mask` field (e.g. `lakes` depth → salt crust); outputs the class id map (1-based rule index, 0 = none)",
         vec![
             port("height", PortType::Heightfield, true),
             port("slope", PortType::Heightfield, false),
             port("wetness", PortType::Heightfield, false),
+            port("mask", PortType::Heightfield, false),
         ],
         vec![port("biome", PortType::Heightfield, false)],
         |_, p, i| {
@@ -847,7 +853,8 @@ pub fn register_all(r: &mut Registry) {
             let h = field(i, "height")?;
             let slope = i.get("slope").map(|v| v.as_field());
             let wet = i.get("wetness").map(|v| v.as_field());
-            for (name, f) in [("slope", slope), ("wetness", wet)] {
+            let mask = i.get("mask").map(|v| v.as_field());
+            for (name, f) in [("slope", slope), ("wetness", wet), ("mask", mask)] {
                 if let Some(f) = f
                     && (f.width(), f.height()) != (h.width(), h.height())
                 {
@@ -865,12 +872,12 @@ pub fn register_all(r: &mut Registry) {
                         (Some(r), Some(f)) => within(f.get(x, y), r),
                         (Some(_), None) => false,
                     };
-                    let ok_w = match (rule.wetness, wet) {
+                    let band = |want: Option<[f32; 2]>, f: Option<&Arc<Heightfield>>| match (want, f) {
                         (None, _) => true,
                         (Some(r), Some(f)) => within(f.get(x, y), r),
                         (Some(_), None) => false,
                     };
-                    if ok_h && ok_s && ok_w {
+                    if ok_h && ok_s && band(rule.wetness, wet) && band(rule.mask, mask) {
                         return (k + 1) as f32;
                     }
                 }
@@ -1271,6 +1278,22 @@ mod tests {
         for ((c, s), m) in classes.iter().zip(&steep).zip(&mask) {
             assert_eq!(*c == 1.0, *s >= 0.6, "slope {s} → rock? {c}");
             assert_eq!(*m == 1.0, *c == 1.0);
+        }
+        // A `mask` band works like the others: unwired it never matches, wired it takes the cells in band.
+        let salt = add(
+            &mut g,
+            "jd.biome.classify@1",
+            serde_json::json!({ "rules": [{ "name": "salt crust", "mask": [0.6, 2.0] }, { "name": "other" }] }),
+        );
+        connect(&mut g, &noise, "out", &salt, "height");
+        let (outs, _) = ev.evaluate_with(&g, &world(), 0, None).expect("eval");
+        let c = outs[&(salt.clone(), "biome".into())].as_field().to_vec();
+        assert!(c.iter().all(|c| *c == 2.0), "no mask wired → never salt");
+        connect(&mut g, &slope, "out", &salt, "mask");
+        let (outs, _) = ev.evaluate_with(&g, &world(), 0, None).expect("eval");
+        let c = outs[&(salt.clone(), "biome".into())].as_field().to_vec();
+        for (c, s) in c.iter().zip(&steep) {
+            assert_eq!(*c == 1.0, *s >= 0.6, "mask {s} → salt? {c}");
         }
         // Bad ranges are refused.
         let bad = add(

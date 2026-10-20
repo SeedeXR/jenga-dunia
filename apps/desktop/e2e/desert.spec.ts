@@ -30,11 +30,10 @@ test.describe("desert landscapes against the real core", () => {
     await page.getByTestId("new-project").click();
     await expect(page.locator("header")).toContainText("World — 128²");
 
-    // A desert plain: broad features, few octaves, 0..40 m of relief.
-    await page.getByLabel("Feature size (m)").fill("1200");
-    await page.getByLabel("Octaves").fill("3");
-    const range = page.locator("label", { hasText: "Height min / max (m)" }).locator("input");
-    await range.nth(1).fill("40");
+    // A desert plain: the preset sets broad features, few octaves, 0..40 m of relief.
+    await page.getByTestId("noise-preset").selectOption("Desert plain 0..40 m");
+    await expect(page.getByLabel("Feature size (m)")).toHaveValue("1200");
+    await expect(page.getByLabel("Octaves")).toHaveValue("3");
     await page.getByTestId("seed").fill("3");
     await page.getByTestId("generate").click();
     await expect(page.getByTestId("layer-stats")).toBeVisible();
