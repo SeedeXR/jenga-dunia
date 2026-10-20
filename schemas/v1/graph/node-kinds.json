@@ -230,6 +230,75 @@
     }
   },
   {
+    "kind": "jd.climate.snow@1",
+    "description": "Snow cover 0..1 from height alone: a soft snow line, retention that falls with slope, sun-facing slopes melt, windward slopes scour — for biome rules, scatter and colour overlays",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "snow",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "SnowParams",
+      "description": "Snow cover settings.",
+      "type": "object",
+      "properties": {
+        "snow_line_m": {
+          "description": "Height where cover reaches half, metres.",
+          "type": "number",
+          "format": "float",
+          "default": 800.0
+        },
+        "transition_m": {
+          "description": "Width of the soft transition around the snow line, metres (> 0).",
+          "type": "number",
+          "format": "float",
+          "default": 150.0
+        },
+        "max_slope_deg": {
+          "description": "Slope (degrees, (0, 90]) at which snow no longer holds; retention falls linearly to 0 there.",
+          "type": "number",
+          "format": "float",
+          "default": 60.0
+        },
+        "sun_azimuth_deg": {
+          "description": "Compass direction of the sun (degrees clockwise from north; 180 = south, the northern-hemisphere default).",
+          "type": "number",
+          "format": "float",
+          "default": 180.0
+        },
+        "sun_strength": {
+          "description": "How much sun-facing slopes lose, 0..1 (0 = aspect ignored).",
+          "type": "number",
+          "format": "float",
+          "default": 0.5
+        },
+        "wind_azimuth_deg": {
+          "description": "Compass direction the wind blows from, degrees clockwise from north.",
+          "type": "number",
+          "format": "float",
+          "default": 270.0
+        },
+        "wind_strength": {
+          "description": "How much windward slopes lose to scouring, 0..1 (0 = wind ignored).",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
     "kind": "jd.erosion.droplet@1",
     "description": "Particle (droplet) hydraulic erosion after Beyer: seeded droplets follow the slope with inertia, erode through a brush and deposit as they slow — gullies and fans; outputs the terrain and the signed `delta`",
     "inputs": [

@@ -313,6 +313,19 @@ Verified by importing `trees.glb` and `land.glb` into Blender 5.2 headless: 10 9
 
 On the 5 120 m world above the 40 m grid has 128² = 16 384 candidates and the forest mask covers 66.8 % of the area — 10 966 points, i.e. the expected share, in 30 ms including the file write. A spacing finer than the layer's sample spacing is refused (`spacing_m … must be ≥ the sample spacing (10 m)`). On the 512² world shown (heights −50..1200 m): rock 21.6 %, snow 4.4 %, grassland 7.2 %, forest 66.8 %; classify took 61 ms (debug). In the desktop the rules are a table in the inspector (add a row, type `min,max` ranges; see the desktop guide).
 
+### Snow cover
+
+```
+$ jd op graph.add_node --project Bio.jdproj --save --params '{"kind":"jd.climate.snow@1","params":{"snow_line_m":700,"transition_m":120,"wind_azimuth_deg":270,"wind_strength":0.7}}'
+$ jd op graph.add_node --project Bio.jdproj --save --params '{"kind":"jd.output.height@1","params":{"layer":"snow"}}'
+# land source → snow.in; snow.snow → the output
+land          min 51.978  max 1085.047  mean 567.398
+snow_default  min 0.0     max 0.999     mean 0.038      (snow_line_m 800, transition 150, sun from the south at 0.5)
+snow_windy    min 0.0     max 0.995     mean 0.041      (snow line 700 ± 120, west wind scouring at 0.7)
+```
+
+`jd.climate.snow@1` is a static cover mask from the height layer alone — the heightfield form of the snow-distribution literature (`docs/research/materials-geomorphology.md`): a smooth band around `snow_line_m` (half cover at the line, `transition_m` wide), retention falling linearly to zero at `max_slope_deg` (cliffs hold nothing), slopes whose downslope direction faces `sun_azimuth_deg` losing up to `sun_strength` of their cover, and slopes facing into `wind_azimuth_deg` scoured by up to `wind_strength`. Directional terms fade in with the gradient so flat ground never flickers. The mask is 0..1 like `rivers` or a class mask: colour the viewport by it, scatter from it, or feed it to biome rules via `jd.mask.class@1`-style multiplies. On the 5 120 m / 512² biome world the node takes 67 ms; coverage 3.8 % (default) → 4.1 % with the lower, wind-scoured line (the west wind strips the west-facing flanks and leaves more on the lee). Not modelled: sky visibility, melt over time, drifting — see the research notes for the next terms.
+
 ### Export for Unity or Unreal
 
 ```

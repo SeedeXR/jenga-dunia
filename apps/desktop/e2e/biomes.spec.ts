@@ -2,7 +2,10 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, installBridge } from "./bridge";
+import { connectCore, installBridge, wire } from "./bridge";
+
+const NOISE = "01JDGRAPH000000000000N01SE";
+const HEIGHT = "01JDGRAPH0000000000HE1GHT0";
 
 test.describe("biome rules editor against the real core", () => {
   let ws: string;
@@ -58,6 +61,38 @@ test.describe("biome rules editor against the real core", () => {
     const sets = journal.filter((e) => e.op === "graph.set_param" && e.params.key === "rules");
     const last = sets[sets.length - 1]!.params.value as { name: string; slope: number[] | null; height_m: number[] | null }[];
     expect(last).toEqual([{ name: "scree", height_m: null, slope: [0.6, 2], wetness: null }]);
+
+    // Snow cover: a climate node fed from the noise, published as a second output and used to
+    // colour the terrain — a 0..1 mask like any other. The unwired classify node would make the
+    // evaluation fail (E_GRAPH_MISSING_INPUT), so it goes first.
+    await node.click();
+    await inspector.getByRole("button", { name: /Remove node/ }).click();
+    await expect(page.getByTestId("log")).toContainText("graph.remove_node: ok");
+    const panel = page.getByTestId("graph-panel");
+    const noise = panel.locator(`.react-flow__node[data-id="${NOISE}"]`);
+    await page.getByTestId("graph-kind").selectOption("jd.climate.snow@1");
+    await page.getByTestId("graph-add").click();
+    const snow = panel.locator(".react-flow__node", { hasText: "jd.climate.snow@1" });
+    await snow.click();
+    const line = inspector.locator("label", { hasText: "snow_line_m" }).locator("input");
+    await expect(line).toHaveAttribute("placeholder", "800");
+    await line.fill("300");
+    await line.blur();
+    await expect(snow).toContainText("snow_line_m=300");
+    await wire(page, noise, snow);
+    await page.getByTestId("graph-kind").selectOption("jd.output.height@1");
+    await page.getByTestId("graph-add").click();
+    const out2 = panel.locator(`.react-flow__node:not([data-id="${HEIGHT}"])`, { hasText: "jd.output.height@1" });
+    await out2.click();
+    const layerInput = inspector.locator("label", { hasText: "layer" }).locator("input");
+    await layerInput.fill("snow");
+    await layerInput.blur();
+    await wire(page, snow, out2, "snow");
+    await page.getByTestId("graph-evaluate").click();
+    await expect(page.getByTestId("layer-pick")).toBeVisible();
+    await page.getByTestId("color-pick").selectOption("snow");
+    await expect(page.getByTestId("viewport-info")).toContainText("colour snow");
+    await page.screenshot({ path: testInfo.outputPath("biomes-snow.png") }); // tutorial image source
     expect(errors, "no uncaught page errors").toEqual([]);
     await core.close();
   });

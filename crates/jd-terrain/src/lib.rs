@@ -5,6 +5,7 @@
 //! for a given seed and independent of tiling or thread count (ADR-0007).
 //! Export writes the formats engines actually consume (`docs/architecture/08-io-formats.md`).
 
+pub mod climate;
 pub mod droplet;
 pub mod export;
 pub mod fbx;
@@ -19,6 +20,7 @@ pub mod scatter;
 pub mod sculpt;
 pub mod sim;
 
+pub use climate::{SnowParams, snow_cover};
 pub use droplet::{DropletParams, DropletResult, droplet_erode};
 pub use export::{
     ExportOptions, GeoRef, HeightmapFormat, epsg_code, export_heightmap, export_heightmap_geo,

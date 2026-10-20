@@ -1001,6 +1001,23 @@ temperate default set (beach, grassland, forest, rock, snow). */
   "rules"?: BiomeRule[];
 };
 
+export type NodeParams_jd_climate_snow_1 = {
+  /** Height where cover reaches half, metres. */
+  "snow_line_m"?: number;
+  /** Width of the soft transition around the snow line, metres (> 0). */
+  "transition_m"?: number;
+  /** Slope (degrees, (0, 90]) at which snow no longer holds; retention falls linearly to 0 there. */
+  "max_slope_deg"?: number;
+  /** Compass direction of the sun (degrees clockwise from north; 180 = south, the northern-hemisphere default). */
+  "sun_azimuth_deg"?: number;
+  /** How much sun-facing slopes lose, 0..1 (0 = aspect ignored). */
+  "sun_strength"?: number;
+  /** Compass direction the wind blows from, degrees clockwise from north. */
+  "wind_azimuth_deg"?: number;
+  /** How much windward slopes lose to scouring, 0..1 (0 = wind ignored). */
+  "wind_strength"?: number;
+};
+
 export type NodeParams_jd_erosion_droplet_1 = {
   /** Number of droplets (1..=5 000 000). Aim for 1–2 per cell: 512² wants ~400 000; fewer gives
 diffuse, unstructured lowering, more deepens the same gullies. */
@@ -1276,6 +1293,7 @@ export interface NodeKinds {
   "jd.analysis.flow@1": NodeParams_jd_analysis_flow_1;
   "jd.analysis.slope@1": NodeParams_jd_analysis_slope_1;
   "jd.biome.classify@1": NodeParams_jd_biome_classify_1;
+  "jd.climate.snow@1": NodeParams_jd_climate_snow_1;
   "jd.erosion.droplet@1": NodeParams_jd_erosion_droplet_1;
   "jd.erosion.hydraulic@1": NodeParams_jd_erosion_hydraulic_1;
   "jd.erosion.stream_power@1": NodeParams_jd_erosion_stream_power_1;

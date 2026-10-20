@@ -5,9 +5,10 @@ use std::sync::Arc;
 
 use jd_terrain::{
     DropletParams, FlowMethod, ForeignImport, Heightfield, HydraulicParams, NoiseParams,
-    StreamPowerParams, Stroke, THERMAL_MAX_RATE, apply_strokes, carve_rivers, droplet_erode,
-    fill_depressions, flow_accumulation_with, generate_noise, hydraulic_erode, read_foreign,
-    resample_to_world, sea_level, slope_mask, stream_power_erode, thermal_erode, wetness_index,
+    SnowParams, StreamPowerParams, Stroke, THERMAL_MAX_RATE, apply_strokes, carve_rivers,
+    droplet_erode, fill_depressions, flow_accumulation_with, generate_noise, hydraulic_erode,
+    read_foreign, resample_to_world, sea_level, slope_mask, snow_cover, stream_power_erode,
+    thermal_erode, wetness_index,
 };
 use jd_types::{JdError, JdResult};
 use rayon::prelude::*;
@@ -630,6 +631,16 @@ pub fn register_all(r: &mut Registry) {
                 (-(d2x + d2y) / cp.scale as f64).clamp(-1.0, 1.0) as f32
             });
             Ok(out("out", o))
+        },
+    ));
+    r.register(NodeDef::new::<SnowParams, _>(
+        "jd.climate.snow@1",
+        "Snow cover 0..1 from height alone: a soft snow line, retention that falls with slope, sun-facing slopes melt, windward slopes scour — for biome rules, scatter and colour overlays",
+        vec![port("in", PortType::Heightfield, true)],
+        vec![port("snow", PortType::Heightfield, false)],
+        |ctx, p, i| {
+            let sp: SnowParams = params(p)?;
+            Ok(out("snow", snow_cover(field(i, "in")?, spacing_m(ctx), &sp)?))
         },
     ));
     r.register(NodeDef::new::<SlopeParams, _>(
