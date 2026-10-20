@@ -429,15 +429,18 @@ at rock_slope_deg 20 the same floor reads                    sand 27.6 %  rock 6
 
 ```
 $ jd op ocean.bake --project World.jdproj --params '{"level_m":250,"visibility_m":4,"wind_speed_mps":20,"wave_px":256}'
-dir exports/water   files water_depth.png water_colour.png water_foam.png wave_normal.png
+dir exports/water   files water_depth.png water_colour.png water_foam.png wave_normal.png wave_displacement.png
 px 128×128 (the world's resolution, capped by max_px)   max_depth_m 195.39   wave_tile_m 320 (a quarter of the world)   wave_px 256
 waves: Hs 9.84 m  Tp 15.6 s  L 380 m  breaking 12.6 m
 tile components (snapped to the 320 m tile): 320.0 m @ 90°, 143.1 m @ 116.6°, 88.8 m @ 56.3°   (spectrum: 380 / 172.7 / 76 m @ 90 / 115 / 55°)
+displacement_scale_m 4.96 for a 12 m/s sea (Hs 3.54 m): the largest offset any pixel of wave_displacement.png reaches
 ```
+
+![Wave displacement tile: the three snapped Gerstner components summed at t = 0, east / up / north offsets around mid-grey, periodic on the tile](images/cli-wave-displacement.png)
 
 ![Water colour map: the murky 4 m water is all tint, land is the sand colour at zero depth](images/cli-water-colour.png) ![Foam map: a thin white band along every shore and the surf zone](images/cli-water-foam.png) ![Tileable wave normal map: smooth diagonal bands from the three Gerstner components](images/cli-wave-normal.png)
 
-`ocean.bake` writes what the desktop viewport draws as four PNGs an engine's water material can use, row 0 = south like every other bake: **depth** (16-bit grey, `depth / max_depth_m`; 0 on land and at the waterline), **colour** (sRGB, the bottom seen through the water by the same Beer–Lambert rule as the viewport — the tint takes over as the water gets deep or murky), **foam** (8-bit grey: the shoreline band, widened to the surf zone where the wind sea breaks, depth < Hs / 0.78) and a **wave normal** tile (tangent space +X east / +Y north / +Z up) that repeats seamlessly: each Gerstner component is snapped to the nearest wave vector that fits a whole number of times into `wave_tile_m`, and the result lists the snapped wavelengths and directions beside the spectrum's. The parameters mirror the sea-level node (`level_m`, `visibility_m`, `tint`, `wind_speed_mps`, `fetch_km`, `wind_azimuth_deg`); the desktop's **Export water maps** button passes the node's values. Not baked: displacement (use the components to drive your own vertex animation), refraction, caustics.
+`ocean.bake` writes what the desktop viewport draws as five PNGs an engine's water material can use, row 0 = south like every other bake: **depth** (16-bit grey, `depth / max_depth_m`; 0 on land and at the waterline), **colour** (sRGB, the bottom seen through the water by the same Beer–Lambert rule as the viewport — the tint takes over as the water gets deep or murky), **foam** (8-bit grey: the shoreline band, widened to the surf zone where the wind sea breaks, depth < Hs / 0.78) and a **wave normal** tile (tangent space +X east / +Y north / +Z up) that repeats seamlessly: each Gerstner component is snapped to the nearest wave vector that fits a whole number of times into `wave_tile_m`, and the result lists the snapped wavelengths and directions beside the spectrum's. The parameters mirror the sea-level node (`level_m`, `visibility_m`, `tint`, `wind_speed_mps`, `fetch_km`, `wind_azimuth_deg`); the desktop's **Export water maps** button passes the node's values. Not baked: displacement (use the components to drive your own vertex animation), refraction, caustics. **Displacement** (`wave_displacement.png`, 16-bit RGB, tileable) is the Gerstner sea at t = 0 — R east, G up, B north, each `v / displacement_scale_m · 0.5 + 0.5` with the viewport's steepness Qᵢ = 0.5 / (kᵢ Aᵢ N) — for engines that vertex-displace a still frame; animate instead from `tile_components` (phase advances by k · speed_mps · t).
 
 ### Bathymetry: sediment fills the floor
 

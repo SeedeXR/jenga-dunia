@@ -3663,7 +3663,7 @@ pub mod terrain {
     pub struct OceanBakeResult {
         /// Directory the four PNGs were written to.
         pub dir: PathBuf,
-        /// `water_depth.png` (16-bit grey, depth / max_depth_m), `water_colour.png` (sRGB), `water_foam.png` (8-bit grey), `wave_normal.png` (tangent space, tileable).
+        /// `water_depth.png` (16-bit grey, depth / max_depth_m), `water_colour.png` (sRGB), `water_foam.png` (8-bit grey), `wave_normal.png` (tangent space, tileable), `wave_displacement.png` (16-bit RGB: east / up / north offsets at t = 0, `v / displacement_scale_m · 0.5 + 0.5`, tileable).
         pub files: Vec<String>,
         /// Depth / colour / foam map size, pixels.
         pub px: [u32; 2],
@@ -3677,6 +3677,8 @@ pub mod terrain {
         pub waves: jd_terrain::WaveSpectrum,
         /// The components as snapped to the tile (wavelength and direction may differ slightly from `waves`).
         pub tile_components: Vec<jd_terrain::WaveComponent>,
+        /// Metres per full channel swing of `wave_displacement.png` (the largest offset the sea reaches).
+        pub displacement_scale_m: f32,
     }
 
     /// `terrain.textures` params.
@@ -3860,9 +3862,10 @@ pub mod terrain {
                 let maps = ctx.with_layer(&p.layer, |hf| jd_terrain::bake_water(hf, p.level_m, &p.look, waves.breaking_depth_m, p.max_px))?;
                 let tile_m = p.wave_tile_m.unwrap_or((extent[0] / 4.0) as f32);
                 let (normal, tile_components) = jd_terrain::bake_wave_normal(&waves.components, tile_m, p.wave_px)?;
+                let (displacement, displacement_scale_m) = jd_terrain::bake_wave_displacement(&tile_components, tile_m, p.wave_px)?;
                 std::fs::create_dir_all(&dir)?;
-                let files = ["water_depth.png", "water_colour.png", "water_foam.png", "wave_normal.png"];
-                for (name, bytes) in files.iter().zip([&maps.depth, &maps.colour, &maps.foam, &normal]) {
+                let files = ["water_depth.png", "water_colour.png", "water_foam.png", "wave_normal.png", "wave_displacement.png"];
+                for (name, bytes) in files.iter().zip([&maps.depth, &maps.colour, &maps.foam, &normal, &displacement]) {
                     std::fs::write(dir.join(name), bytes)?;
                 }
                 Ok((
@@ -3875,6 +3878,7 @@ pub mod terrain {
                         wave_px: p.wave_px,
                         waves,
                         tile_components,
+                        displacement_scale_m,
                     },
                     Vec::new(),
                 ))

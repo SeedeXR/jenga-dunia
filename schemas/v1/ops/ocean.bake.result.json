@@ -9,7 +9,7 @@
       "type": "string"
     },
     "files": {
-      "description": "`water_depth.png` (16-bit grey, depth / max_depth_m), `water_colour.png` (sRGB), `water_foam.png` (8-bit grey), `wave_normal.png` (tangent space, tileable).",
+      "description": "`water_depth.png` (16-bit grey, depth / max_depth_m), `water_colour.png` (sRGB), `water_foam.png` (8-bit grey), `wave_normal.png` (tangent space, tileable), `wave_displacement.png` (16-bit RGB: east / up / north offsets at t = 0, `v / displacement_scale_m · 0.5 + 0.5`, tileable).",
       "type": "array",
       "items": {
         "type": "string"
@@ -52,6 +52,11 @@
       "items": {
         "$ref": "#/$defs/WaveComponent"
       }
+    },
+    "displacement_scale_m": {
+      "description": "Metres per full channel swing of `wave_displacement.png` (the largest offset the sea reaches).",
+      "type": "number",
+      "format": "float"
     }
   },
   "required": [
@@ -62,7 +67,8 @@
     "wave_tile_m",
     "wave_px",
     "waves",
-    "tile_components"
+    "tile_components",
+    "displacement_scale_m"
   ],
   "$defs": {
     "WaveSpectrum": {

@@ -445,9 +445,91 @@ pub fn bake_wave_normal(
     Ok((png(&img)?, snapped))
 }
 
+/// Bake the Gerstner displacement of the wind sea at t = 0 as a tileable 16-bit RGB map:
+/// R = east, G = up, B = north offset, each `v / scale · 0.5 + 0.5`, where `scale` (returned,
+/// metres) is the largest offset any pixel can reach, Σ A·(1 + Q). Pass the components as
+/// snapped by [`bake_wave_normal`] so the tile wraps; an engine animates by scrolling each
+/// component's phase, or vertex-displaces a still frame from this map.
+pub fn bake_wave_displacement(
+    components: &[WaveComponent],
+    tile_m: f32,
+    px: u32,
+) -> JdResult<(Vec<u8>, f32)> {
+    if !(tile_m > 0.0 && tile_m.is_finite()) {
+        return Err(JdError::invalid("wave_tile_m", "must be positive"));
+    }
+    if !(16..=4096).contains(&px) {
+        return Err(JdError::invalid("wave_px", "must be within 16..=4096"));
+    }
+    let two_pi = 2.0 * std::f32::consts::PI;
+    let n = components.len().max(1) as f32;
+    // GPU Gems 1 ch. 1: Qᵢ = Q / (kᵢ Aᵢ N) with Q = 0.5, capped at 1 — the viewport's convention.
+    let q = |c: &WaveComponent| (0.5 / (two_pi / c.wavelength_m * c.amplitude_m * n)).min(1.0);
+    let scale = components
+        .iter()
+        .map(|c| c.amplitude_m * (1.0 + q(c)))
+        .sum::<f32>()
+        .max(1e-3);
+    let mut img = image::ImageBuffer::<image::Rgb<u16>, Vec<u16>>::new(px, px);
+    let step = tile_m / px as f32;
+    for row in 0..px {
+        for col in 0..px {
+            let x = col as f32 * step;
+            let z = -(row as f32 * step);
+            let (mut ox, mut oy, mut oz) = (0.0f32, 0.0f32, 0.0f32);
+            for c in components {
+                let k = two_pi / c.wavelength_m;
+                let rad = c.direction_deg.to_radians();
+                let (dx, dz) = (rad.sin(), -rad.cos());
+                let phi = k * (dx * x + dz * z) + c.phase;
+                let qa = q(c) * c.amplitude_m * phi.cos();
+                ox += qa * dx;
+                oz += qa * dz;
+                oy += c.amplitude_m * phi.sin();
+            }
+            let enc = |v: f32| ((v / scale * 0.5 + 0.5).clamp(0.0, 1.0) * 65535.0).round() as u16;
+            img.put_pixel(col, row, image::Rgb([enc(ox), enc(oy), enc(-oz)]));
+        }
+    }
+    let mut bytes = Vec::new();
+    img.write_to(
+        &mut std::io::Cursor::new(&mut bytes),
+        image::ImageFormat::Png,
+    )
+    .map_err(|e| JdError::new(jd_types::ErrorCode::E_INTERNAL, format!("png encode: {e}")))?;
+    Ok((bytes, scale))
+}
+
 #[cfg(test)]
 mod bake_tests {
     use super::*;
+
+    #[test]
+    fn displacement_tile_is_zero_mean_bounded_and_wraps() {
+        let waves = wave_spectrum(&WaveParams {
+            wind_speed_mps: 12.0,
+            fetch_km: None,
+            wind_azimuth_deg: 270.0,
+        })
+        .expect("spectrum");
+        let (_, snapped) = bake_wave_normal(&waves.components, 320.0, 64).expect("normal");
+        let (png, scale) = bake_wave_displacement(&snapped, 320.0, 64).expect("displacement");
+        assert!(scale > 0.0 && scale < 3.0 * waves.significant_height_m);
+        let img = image::load_from_memory(&png).expect("png").to_rgb16();
+        assert_eq!(img.dimensions(), (64, 64));
+        let up: Vec<f32> = img.pixels().map(|p| p[1] as f32 / 65535.0 - 0.5).collect();
+        let mean = up.iter().sum::<f32>() / up.len() as f32;
+        assert!(mean.abs() < 0.02, "zero-mean surface, got {mean}");
+        assert!(up.iter().any(|v| v.abs() > 0.05), "the sea is not flat");
+        // Snapped components make the tile periodic: the first column continues the last.
+        let wrap = |col: u32, row: u32| img.get_pixel(col, row)[1] as f32;
+        let (a, b, c) = (wrap(0, 10), wrap(63, 10), wrap(1, 10));
+        assert!(
+            (a - b).abs() <= (a - c).abs() * 1.5 + 300.0,
+            "wraps: {a} {b} {c}"
+        );
+        assert!(bake_wave_displacement(&snapped, 0.0, 64).is_err());
+    }
 
     #[test]
     fn water_maps_follow_depth_and_the_wave_tile_wraps() {

@@ -530,7 +530,7 @@ export type WaveSpectrum = {
 export type OceanBakeResult = {
   /** Directory the four PNGs were written to. */
   "dir": string;
-  /** `water_depth.png` (16-bit grey, depth / max_depth_m), `water_colour.png` (sRGB), `water_foam.png` (8-bit grey), `wave_normal.png` (tangent space, tileable). */
+  /** `water_depth.png` (16-bit grey, depth / max_depth_m), `water_colour.png` (sRGB), `water_foam.png` (8-bit grey), `wave_normal.png` (tangent space, tileable), `wave_displacement.png` (16-bit RGB: east / up / north offsets at t = 0, `v / displacement_scale_m · 0.5 + 0.5`, tileable). */
   "files": string[];
   /** Depth / colour / foam map size, pixels. */
   "px": [number, number];
@@ -544,6 +544,8 @@ export type OceanBakeResult = {
   "waves": WaveSpectrum;
   /** The components as snapped to the tile (wavelength and direction may differ slightly from `waves`). */
   "tile_components": WaveComponent[];
+  /** Metres per full channel swing of `wave_displacement.png` (the largest offset the sea reaches). */
+  "displacement_scale_m": number;
 };
 
 export type OceanWavesRequest = {

@@ -55,8 +55,8 @@ pub use mesh::{
 };
 pub use noise::{FractalKind, NoiseKind, NoiseParams, generate_noise};
 pub use ocean::{
-    WaterLook, WaterMaps, WaveComponent, WaveParams, WaveSpectrum, bake_water, bake_wave_normal,
-    water_colour, wave_spectrum,
+    WaterLook, WaterMaps, WaveComponent, WaveParams, WaveSpectrum, bake_water,
+    bake_wave_displacement, bake_wave_normal, water_colour, wave_spectrum,
 };
 pub use profiles::{EngineProfile, ProfileReport, ProfileSettings, export_profile};
 pub use rocks::{RockParams, rock_mesh};
