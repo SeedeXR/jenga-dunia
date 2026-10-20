@@ -4820,6 +4820,94 @@ expression: list
     }
   },
   {
+    "id": "terrain.scatter",
+    "description": "Scatter instance points over the world from a 0..1 density mask layer (stratified jittered grid, deterministic by seed) and write them as CSV or JSON with heights",
+    "scope": "export",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TerrainScatter",
+      "description": "`terrain.scatter` params.",
+      "type": "object",
+      "properties": {
+        "mask": {
+          "description": "0..1 density mask layer (a biome class mask, wetness, a painted mask…).",
+          "type": "string"
+        },
+        "height": {
+          "description": "Height layer sampled for `z` (null = 0).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": "height"
+        },
+        "path": {
+          "description": "Output `.csv` or `.json`; relative paths resolve against the project's `exports/`.",
+          "type": "string"
+        },
+        "spacing_m": {
+          "description": "Target spacing between points in metres (grid cell size); must be ≥ one sample spacing.",
+          "type": "number",
+          "format": "float"
+        },
+        "jitter": {
+          "description": "Random offset inside the cell, 0 (regular grid) .. 1 (anywhere in the cell).",
+          "type": "number",
+          "format": "float",
+          "default": 1.0
+        },
+        "seed": {
+          "description": "Seed for the jitter and the density test.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "mask",
+        "path",
+        "spacing_m"
+      ]
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ScatterReport",
+      "description": "`terrain.scatter` result.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "Written file.",
+          "type": "string"
+        },
+        "count": {
+          "description": "Points written.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "bytes": {
+          "description": "Bytes written.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "spacing_m": {
+          "description": "Candidates per axis the grid had.",
+          "type": "number",
+          "format": "float"
+        }
+      },
+      "required": [
+        "path",
+        "count",
+        "bytes",
+        "spacing_m"
+      ]
+    }
+  },
+  {
     "id": "terrain.stats",
     "description": "Statistics and content hash of a layer",
     "scope": "project-read",

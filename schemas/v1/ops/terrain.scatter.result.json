@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ScatterReport",
+  "description": "`terrain.scatter` result.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "Written file.",
+      "type": "string"
+    },
+    "count": {
+      "description": "Points written.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "bytes": {
+      "description": "Bytes written.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "spacing_m": {
+      "description": "Candidates per axis the grid had.",
+      "type": "number",
+      "format": "float"
+    }
+  },
+  "required": [
+    "path",
+    "count",
+    "bytes",
+    "spacing_m"
+  ]
+}

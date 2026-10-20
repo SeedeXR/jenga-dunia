@@ -810,6 +810,32 @@ standard base64 with padding. One decoder serves both transports. */
   "bytes_base64": string;
 };
 
+export type TerrainScatterRequest = {
+  /** 0..1 density mask layer (a biome class mask, wetness, a painted mask…). */
+  "mask": string;
+  /** Height layer sampled for `z` (null = 0). */
+  "height"?: string | null;
+  /** Output `.csv` or `.json`; relative paths resolve against the project's `exports/`. */
+  "path": string;
+  /** Target spacing between points in metres (grid cell size); must be ≥ one sample spacing. */
+  "spacing_m": number;
+  /** Random offset inside the cell, 0 (regular grid) .. 1 (anywhere in the cell). */
+  "jitter"?: number;
+  /** Seed for the jitter and the density test. */
+  "seed"?: number;
+};
+
+export type TerrainScatterResult = {
+  /** Written file. */
+  "path": string;
+  /** Points written. */
+  "count": number;
+  /** Bytes written. */
+  "bytes": number;
+  /** Candidates per axis the grid had. */
+  "spacing_m": number;
+};
+
 export type TerrainStatsRequest = {
   /** Layer name. */
   "layer"?: string;
@@ -1085,6 +1111,8 @@ export interface JdOps {
   "terrain.generate": { request: TerrainGenerateRequest; result: TerrainGenerateResult };
   /** Downsampled u16 preview of a layer (base64) for agents and viewers */
   "terrain.preview": { request: TerrainPreviewRequest; result: TerrainPreviewResult };
+  /** Scatter instance points over the world from a 0..1 density mask layer (stratified jittered grid, deterministic by seed) and write them as CSV or JSON with heights */
+  "terrain.scatter": { request: TerrainScatterRequest; result: TerrainScatterResult };
   /** Statistics and content hash of a layer */
   "terrain.stats": { request: TerrainStatsRequest; result: TerrainStatsResult };
 }

@@ -2250,6 +2250,39 @@ pub mod terrain {
         pub options: ExportOptions,
     }
 
+    /// `terrain.scatter` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct TerrainScatter {
+        /// 0..1 density mask layer (a biome class mask, wetness, a painted mask…).
+        pub mask: String,
+        /// Height layer sampled for `z` (null = 0).
+        #[serde(default = "default_layer_opt")]
+        pub height: Option<String>,
+        /// Output `.csv` or `.json`; relative paths resolve against the project's `exports/`.
+        pub path: PathBuf,
+        /// Spacing, jitter, seed.
+        #[serde(flatten)]
+        pub scatter: jd_terrain::ScatterParams,
+    }
+
+    fn default_layer_opt() -> Option<String> {
+        Some(default_layer())
+    }
+
+    /// `terrain.scatter` result.
+    #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct ScatterReport {
+        /// Written file.
+        pub path: PathBuf,
+        /// Points written.
+        pub count: u64,
+        /// Bytes written.
+        pub bytes: u64,
+        /// Candidates per axis the grid had.
+        pub spacing_m: f32,
+    }
+
     /// `terrain.export_mesh` params.
     #[derive(Debug, Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
@@ -2409,6 +2442,25 @@ pub mod terrain {
                     jd_terrain::export_glb(hf, extent, &path, step, p.texture)
                 })?;
                 Ok((report, warnings))
+            },
+        );
+        r.register::<TerrainScatter, ScatterReport, _>(
+            "terrain.scatter",
+            "Scatter instance points over the world from a 0..1 density mask layer (stratified jittered grid, deterministic by seed) and write them as CSV or JSON with heights",
+            Scope::Export,
+            |ctx, p| {
+                let (path, extent) = ctx.with_project(|proj| {
+                    let path = if p.path.is_absolute() { p.path.clone() } else { proj.root().join("exports").join(&p.path) };
+                    Ok((path, proj.doc.world.extent_m))
+                })?;
+                // Two layers: clone the mask out first (the layer lock is not re-entrant).
+                let mask = ctx.with_layer(&p.mask, |hf| Ok(hf.clone()))?;
+                let points = match &p.height {
+                    Some(h) => ctx.with_layer(h, |hf| jd_terrain::scatter_points(&mask, Some(hf), extent, &p.scatter))?,
+                    None => jd_terrain::scatter_points(&mask, None, extent, &p.scatter)?,
+                };
+                let bytes = jd_terrain::write_points(&path, &points)?;
+                Ok((ScatterReport { path, count: points.len() as u64, bytes, spacing_m: p.scatter.spacing_m }, Vec::new()))
             },
         );
         r.register::<TerrainExport, ExportReport, _>(

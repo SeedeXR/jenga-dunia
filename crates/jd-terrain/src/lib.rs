@@ -12,6 +12,7 @@ pub mod import;
 pub mod mesh;
 pub mod noise;
 pub mod preview;
+pub mod scatter;
 pub mod sculpt;
 pub mod sim;
 
@@ -24,6 +25,7 @@ pub use heightfield::{Heightfield, HeightfieldStats, Tile, TileCoord};
 pub use import::{ForeignImport, GeoTags, geotiff_tags, read_foreign, resample_to_world};
 pub use mesh::{MeshExportReport, auto_step, export_glb};
 pub use noise::{FractalKind, NoiseKind, NoiseParams, generate_noise};
+pub use scatter::{ScatterParams, ScatterPoint, scatter_points, write_points};
 pub use sculpt::{Stroke, StrokeMode, apply_strokes};
 pub use sim::{
     HydraulicParams, HydraulicResult, StreamPowerParams, THERMAL_MAX_RATE, hydraulic_erode,
