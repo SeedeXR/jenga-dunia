@@ -548,7 +548,137 @@ pub fn export_ply(
     report(path, "ply", &mesh, step, extent_m)
 }
 
-/// Export by extension: `.glb` (default, with optional texture), `.obj`, `.stl`, `.ply`.
+/// USDA (ASCII OpenUSD): one `Xform` with a `Mesh` — points, triangles, vertex normals,
+/// `primvars:st`, hypsometric `primvars:displayColor`, extent; `metersPerUnit = 1`, `upAxis = "Y"`.
+/// Validate with `usdchecker`; for large worlds prefer `.glb`/`.ply` (USDA is text).
+pub fn export_usda(
+    hf: &Heightfield,
+    extent_m: [f64; 2],
+    path: &Path,
+    step: u32,
+) -> JdResult<MeshExportReport> {
+    let mesh = GridMesh::build(hf, extent_m, step)?;
+    let n = mesh.vertices() as usize;
+    let mut out = String::with_capacity(n * 90);
+    out.push_str(&format!(
+        "#usda 1.0\n(\n    defaultPrim = \"Terrain\"\n    metersPerUnit = 1\n    upAxis = \"Y\"\n    doc = \"jenga-dunia {} — terrain grid, metres, +Y up, +Z south, centred on the world\"\n)\n\ndef Xform \"Terrain\" (\n    kind = \"component\"\n)\n{{\n    def Mesh \"Grid\"\n    {{\n",
+        env!("CARGO_PKG_VERSION")
+    ));
+    let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+    for p in mesh.positions.as_chunks::<3>().0 {
+        for k in 0..3 {
+            lo[k] = lo[k].min(p[k]);
+            hi[k] = hi[k].max(p[k]);
+        }
+    }
+    out.push_str(&format!(
+        "        float3[] extent = [({}, {}, {}), ({}, {}, {})]\n",
+        lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]
+    ));
+    out.push_str("        uniform token subdivisionScheme = \"none\"\n");
+    out.push_str(&format!(
+        "        int[] faceVertexCounts = [{}]\n",
+        vec!["3"; mesh.triangles() as usize].join(", ")
+    ));
+    let idx: Vec<String> = mesh.indices.iter().map(|i| i.to_string()).collect();
+    out.push_str(&format!(
+        "        int[] faceVertexIndices = [{}]\n",
+        idx.join(", ")
+    ));
+    let pts: Vec<String> = mesh
+        .positions
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .map(|p| format!("({}, {}, {})", p[0], p[1], p[2]))
+        .collect();
+    out.push_str(&format!(
+        "        point3f[] points = [{}]\n",
+        pts.join(", ")
+    ));
+    let nrm: Vec<String> = mesh
+        .normals
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .map(|p| format!("({}, {}, {})", p[0], p[1], p[2]))
+        .collect();
+    out.push_str(&format!(
+        "        normal3f[] normals = [{}] (\n            interpolation = \"vertex\"\n        )\n",
+        nrm.join(", ")
+    ));
+    let st: Vec<String> = mesh
+        .uvs
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|t| format!("({}, {})", t[0], t[1]))
+        .collect();
+    out.push_str(&format!("        texCoord2f[] primvars:st = [{}] (\n            interpolation = \"vertex\"\n        )\n", st.join(", ")));
+    let range = (mesh.height_range[1] - mesh.height_range[0]).max(1e-6);
+    let col: Vec<String> = mesh
+        .positions
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .zip(mesh.normals.as_chunks::<3>().0)
+        .map(|(p, nr)| {
+            let c = hypsometric_rgb(
+                (p[1] - mesh.height_range[0]) / range,
+                ((1.0 - nr[1]) * 1.4).clamp(0.0, 1.0),
+            );
+            format!(
+                "({:.4}, {:.4}, {:.4})",
+                c[0] as f32 / 255.0,
+                c[1] as f32 / 255.0,
+                c[2] as f32 / 255.0
+            )
+        })
+        .collect();
+    out.push_str(&format!("        color3f[] primvars:displayColor = [{}] (\n            interpolation = \"vertex\"\n        )\n", col.join(", ")));
+    out.push_str("    }\n}\n");
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, out)?;
+    report(path, "usda", &mesh, step, extent_m)
+}
+
+/// USDZ: the USDA layer packaged with the system `usdzip` (Apple USD Tools / OpenUSD), which
+/// handles the 64-byte alignment rules. `E_DEPENDENCY_MISSING` when no `usdzip` is on PATH.
+pub fn export_usdz(
+    hf: &Heightfield,
+    extent_m: [f64; 2],
+    path: &Path,
+    step: u32,
+) -> JdResult<MeshExportReport> {
+    let usda = path.with_extension("usda");
+    let mut rep = export_usda(hf, extent_m, &usda, step)?;
+    let status = std::process::Command::new("usdzip")
+        .arg(path)
+        .arg(&usda)
+        .output()
+        .map_err(|e| {
+            JdError::new(jd_types::ErrorCode::E_DEPENDENCY_MISSING, format!("usdzip not available: {e}"))
+                .next("Install OpenUSD tools (macOS 27 ships them in /usr/bin; `pip install usd-core` elsewhere) or export .usda and package it yourself.")
+        })?;
+    if !status.status.success() {
+        return Err(JdError::new(
+            jd_types::ErrorCode::E_SERIALIZE,
+            format!(
+                "usdzip failed: {}",
+                String::from_utf8_lossy(&status.stderr).trim()
+            ),
+        )
+        .detail("path", path.display().to_string()));
+    }
+    rep.path = path.to_path_buf();
+    rep.format = "usdz".into();
+    rep.bytes = fs::metadata(path)?.len();
+    Ok(rep)
+}
+
+/// Export by extension: `.glb` (default, with optional texture), `.obj`, `.stl`, `.ply`, `.usda`, `.usdz`.
 pub fn export_mesh(
     hf: &Heightfield,
     extent_m: [f64; 2],
@@ -565,11 +695,13 @@ pub fn export_mesh(
         Some("obj") => export_obj(hf, extent_m, path, step),
         Some("stl") => export_stl(hf, extent_m, path, step),
         Some("ply") => export_ply(hf, extent_m, path, step),
+        Some("usda") => export_usda(hf, extent_m, path, step),
+        Some("usdz") => export_usdz(hf, extent_m, path, step),
         Some(other) => Err(JdError::new(
             jd_types::ErrorCode::E_FORMAT_UNSUPPORTED,
             format!("unsupported mesh extension `{other}`"),
         )
-        .next("Use .glb, .obj, .stl or .ply.")),
+        .next("Use .glb, .obj, .stl, .ply, .usda or .usdz.")),
     }
 }
 
@@ -739,6 +871,44 @@ mod tests {
             20 * (6 * 4 + 3) + 24 * (1 + 12)
         );
         assert!(export_mesh(&hf, [50.0, 40.0], &dir.path().join("g.fbx"), 1, false).is_err());
+    }
+
+    #[test]
+    fn usda_has_the_stage_metadata_and_counts() {
+        let mut hf = Heightfield::new(4, 3, 64, 0).expect("hf");
+        hf.fill_with(|x, y| x as f32 + y as f32);
+        let dir = tempfile::tempdir().expect("tmp");
+        let r = export_mesh(&hf, [40.0, 30.0], &dir.path().join("t.usda"), 1, false).expect("usda");
+        assert_eq!(
+            (r.format.as_str(), r.vertices, r.triangles),
+            ("usda", 12, 12)
+        );
+        let text = std::fs::read_to_string(dir.path().join("t.usda")).expect("read");
+        assert!(text.starts_with("#usda 1.0\n"));
+        for needle in [
+            "metersPerUnit = 1",
+            "upAxis = \"Y\"",
+            "defaultPrim = \"Terrain\"",
+            "def Mesh \"Grid\"",
+            "primvars:st",
+            "primvars:displayColor",
+            "uniform token subdivisionScheme = \"none\"",
+        ] {
+            assert!(text.contains(needle), "missing {needle}");
+        }
+        assert!(
+            text.contains(&format!(
+                "int[] faceVertexCounts = [{}]",
+                ["3"; 12].join(", ")
+            )),
+            "one faceVertexCount per triangle"
+        );
+        // 4×3 samples over 40×30 m: centres at x = ±15, z = ±10; heights 0..5.
+        assert!(
+            text.contains("float3[] extent = [(-15, 0, -10), (15, 5, 10)]"),
+            "{}",
+            text.lines().find(|l| l.contains("extent")).unwrap_or("")
+        );
     }
 
     #[test]

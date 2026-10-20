@@ -142,6 +142,8 @@ $ jd --json export mesh --project M.jdproj terrain.glb
 The same command writes **OBJ**, binary **STL** and binary **PLY** by extension — `jd export mesh --project X.jdproj terrain.obj` (positions, UVs, normals, `v/vt/vn` faces, no MTL), `terrain.stl` (face normals, the usual unwelded STL vertices) and `terrain.ply` (normals plus the hypsometric colours as per-vertex RGB, for MeshLab/CloudCompare/Blender). All three share the GLB's grid, frame (metres, +Y up, south at +Z) and `--step` decimation. On the 512² world at step 2 (66 049 vertices, 131 072 triangles): OBJ 11.9 MB in 0.11 s, STL 6.25 MB in 0.12 s, PLY 3.33 MB in 0.08 s (debug build); an external importer reports 0 flipped, degenerate or non-manifold faces for each.
 
 ![The PLY export rendered in an external viewer with its vertex colours](images/cli-mesh-ply.png)
+
+**OpenUSD.** `terrain.usda` writes an ASCII USD stage (`metersPerUnit = 1`, `upAxis = "Y"`, `defaultPrim = "Terrain"`, a `Mesh` with points, triangles, vertex normals, `primvars:st` and hypsometric `primvars:displayColor`); `terrain.usdz` packages it with the system `usdzip` (Apple USD Tools on macOS 27, OpenUSD elsewhere — `E_DEPENDENCY_MISSING` names the install when it is absent). Both pass `usdchecker` ("Success!") on the 512² world at step 4 (16 641 vertices: 2.45 MB, 0.07 s for `.usda`, 0.14 s for `.usdz`). USDA is text — for large worlds export `.glb` or `.ply`, or let `usdcrush` compress the package.
  Worlds above ~1 M vertices are sampled every `step` pixels (`W_MESH_DECIMATED`); pass `--step 1` for the full grid.
 
 ### Hydrology recipe: rivers, lakes and wetness

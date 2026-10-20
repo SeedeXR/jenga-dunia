@@ -57,7 +57,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [ ] Material graph + baking
 
 ## Phase 4 — Interoperability
-- [~] USD/USDA/USDC/USDZ writer + usdchecker ☐; OBJ/STL/PLY ✔ (`jd export mesh x.obj|stl|ply`, shared grid, PLY vertex colours; validated in an external importer); GeoTIFF ✔ (export writes pixel scale / tie point / EPSG GeoKeys; import reads them)
+- [~] USD: USDA writer ✔ + USDZ via system `usdzip` ✔, both `usdchecker`-clean; native USDC ☐ (openusd crate); OBJ/STL/PLY ✔ (`jd export mesh x.obj|stl|ply`, shared grid, PLY vertex colours; validated in an external importer); GeoTIFF ✔ (export writes pixel scale / tie point / EPSG GeoKeys; import reads them)
 - [ ] QEM decimation, LOD chains, MikkTSpace, topology validation + stats
 - [ ] Material translation layer + loss reports
 - [ ] Blender bridge add-on (separate licence) + headless round-trip test

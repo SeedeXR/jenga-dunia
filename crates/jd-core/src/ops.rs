@@ -2442,7 +2442,7 @@ pub mod terrain {
         );
         r.register::<TerrainExportMesh, jd_terrain::MeshExportReport, _>(
             "terrain.export_mesh",
-            "Write a layer as a grid mesh — .glb (normals, UVs, PBR material with baked base-colour texture), .obj, binary .stl or binary .ply with vertex colours — metres, +Y up, centred on the world",
+            "Write a layer as a grid mesh — .glb (normals, UVs, PBR material with baked base-colour texture), .obj, binary .stl, binary .ply with vertex colours, .usda, or .usdz (needs usdzip) — metres, +Y up, centred on the world",
             Scope::Export,
             |ctx, p| {
                 let (path, extent) = ctx.with_project(|proj| {

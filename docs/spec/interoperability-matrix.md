@@ -8,7 +8,7 @@ Auditable per-format status (brief §9.5). Status values: `verified` (validator/
 | USDA | — | P1 | P2 | UsdGeomMesh | UsdPreviewSurface | path refs | Xform prims | PointInstancer (P2) | no | DCC shader graphs | own writer | — | usdchecker, usdcat | planned |
 | USDC / USDZ | P2 | P2 | P2 | same | UsdPreviewSurface; MaterialX (P3) | png/jpg/exr inside usdz (stored, 64-B aligned) | same | same | no | usdz size limits for ARKit | `openusd`, `zip` | MIT + TOST-1.0 | usdchecker --arkit, usdzip | planned |
 | FBX | P2 (`ufbx`) | P2 via Blender bridge; P4 SDK adapter / fbxcel | no | meshes, normals, UVs | Phong/Lambert; PBR lossy | embedded/ref | nodes | none standard | no | proprietary; materials lossy | `ufbx`; Blender; opt SDK | MIT/Unlicense; GPL (bridge, separate); proprietary (SDK, user-installed) | none open | planned |
-| OBJ/MTL | P1 | P1 | P1 | polys, normals, UVs | MTL basic | refs | groups | no | no | no units/axis/hierarchy | `tobj` | MIT | — | planned |
+| OBJ/MTL | P1 ✔ (OBJ, no MTL) | P1 | P1 | polys, normals, UVs | MTL basic | refs | groups | no | no | no units/axis/hierarchy | `tobj` | MIT | — | planned |
 | STL | P1 | P1 | P1 | tris | no | no | no | no | no | geometry only | `stl_io` | MIT | — | planned |
 | PLY | P1 | P1 | P1 | verts/faces/colours | no | no | no | no | no | — | `ply-rs` | MIT | — | planned |
 | EXR f32 heightmap | P1 | P1 | P1 | raster | — | — | layers | — | — | engines don't import EXR terrain directly | `exr` | BSD-3 | exrinfo | planned |
