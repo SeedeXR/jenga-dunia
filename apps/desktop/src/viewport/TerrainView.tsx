@@ -1,4 +1,5 @@
 // Terrain viewport: three.js WebGPURenderer with automatic WebGL 2 fallback (ADR-0003).
+import type { OceanWavesResult, WaveComponent } from "../lib/ops.gen";
 // The mesh is a regular grid displaced on the CPU from the u16 preview; colours follow height.
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
@@ -16,6 +17,8 @@ export interface ViewportInfo {
   instances?: number;
   /** Baked material maps applied (texture size), when any. */
   pbrPx?: [number, number];
+  /** Wind sea being animated: significant height and peak wavelength, metres. */
+  waves?: { heightM: number; lengthM: number };
 }
 
 interface Props {
@@ -31,6 +34,8 @@ interface Props {
   seaLevelM?: number | null;
   /** Water clarity and tint (from the sea-level node); defaults to open-ocean water. */
   water?: WaterLook | null;
+  /** Wind sea (`ocean.waves` for the sea-level node's wind): the sea surface is animated as a Gerstner sum of its components. */
+  waves?: OceanWavesResult | null;
   /** Sun direction: azimuth clockwise from north (0 = light from the north), elevation above the horizon. */
   sun?: { azimuthDeg: number; elevationDeg: number };
   /** Baked albedo/normal/roughness maps for the shown layer; textured when set and no overlay is active. */
@@ -140,6 +145,29 @@ export interface WaterLook {
   visibilityM: number;
   /** Colour of the suspended matter that scatters back (linear RGB 0..1). */
   tint: [number, number, number];
+  /** Depth (m) above which the wind sea breaks (H/d = 0.78): foam covers the surf zone. Default: none. */
+  breakingDepthM?: number;
+}
+
+/** Gerstner (trochoidal) displacement of the surface point (`x` east, `z` south in the terrain frame)
+ *  at `tS` seconds: the sum of the components' circular orbits — crests sharpen, troughs flatten.
+ *  Directions are degrees clockwise from north; steepness is shared so the sum never cusps. */
+export function gerstner(components: WaveComponent[], x: number, z: number, tS: number, out: [number, number, number]): [number, number, number] {
+  out[0] = out[1] = out[2] = 0;
+  const n = components.length;
+  for (const c of components) {
+    const k = (2 * Math.PI) / c.wavelength_m;
+    const rad = (c.direction_deg * Math.PI) / 180;
+    const dx = Math.sin(rad);
+    const dz = -Math.cos(rad); // north is −z
+    const phi = k * (dx * x + dz * z) - k * c.speed_mps * tS + c.phase;
+    const q = Math.min(1, 0.5 / (k * c.amplitude_m * n)); // GPU Gems 1 ch. 1: Qᵢ = Q / (kᵢ Aᵢ N)
+    const cos = Math.cos(phi);
+    out[0] += q * c.amplitude_m * dx * cos;
+    out[2] += q * c.amplitude_m * dz * cos;
+    out[1] += c.amplitude_m * Math.sin(phi);
+  }
+  return out;
 }
 
 /** Pure-water absorption per channel in m⁻¹ (Pope & Fry 1997, rounded): red dies first, blue last. */
@@ -176,7 +204,8 @@ export function buildSeaGeometry(p: Preview, extent: [number, number], seaM: num
   const pos = geo.attributes.position as THREE.BufferAttribute;
   const colors = new Float32Array(pos.count * 4);
   const range = max - min || 1;
-  const foamM = Math.max(0.5, range * 0.01);
+  // Foam: a thin shoreline band, widened to the surf zone when a wind sea breaks on the shelf.
+  const foamM = Math.max(0.5, range * 0.01, look.breakingDepthM ?? 0);
   const foam = new THREE.Color(0xdff3f5);
   const c = new THREE.Color();
   for (let j = 0; j < height; j++) {
@@ -216,6 +245,8 @@ interface SceneState {
   backend: ViewportInfo["backend"];
   triangles: number;
   sea: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | null;
+  /** Rest positions of the sea vertices and the wind sea displacing them each frame. */
+  seaWaves: { base: Float32Array; components: WaveComponent[]; heightM: number; lengthM: number } | null;
   sun: THREE.DirectionalLight;
   hemi: THREE.HemisphereLight;
   /** Gradient sky dome (vertex colours, inside faces). */
@@ -239,13 +270,36 @@ function infoOf(s: SceneState): ViewportInfo {
     backend: s.backend,
     triangles: s.triangles,
     ...(s.sea ? { seaM: s.sea.position.y } : {}),
+    ...(s.sea && s.seaWaves ? { waves: { heightM: s.seaWaves.heightM, lengthM: s.seaWaves.lengthM } } : {}),
     sun: s.sunDeg,
     ...(s.instances ? { instances: s.instances.count } : {}),
     ...(s.pbrPx ? { pbrPx: s.pbrPx } : {}),
   };
 }
 
-export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevelM = null, water = null, sun, overlay = null, instances = null, maps = null }: Props) {
+/** Move the sea vertices along their Gerstner orbits for this frame (CPU: the sea grid is the
+ *  preview's size, a few thousand vertices). ponytail: skip above 70k vertices — a TSL position
+ *  node is the upgrade if the sea ever needs the full-resolution preview. */
+function animateSea(s: SceneState, tS: number): void {
+  const w = s.seaWaves;
+  if (!s.sea || !w || w.components.length === 0) return;
+  const pos = s.sea.geometry.attributes.position as THREE.BufferAttribute;
+  if (pos.count > 70_000) return;
+  const arr = pos.array as Float32Array;
+  const d: [number, number, number] = [0, 0, 0];
+  for (let i = 0; i < pos.count; i++) {
+    const x = w.base[i * 3]!;
+    const z = w.base[i * 3 + 2]!;
+    gerstner(w.components, x, z, tS, d);
+    arr[i * 3] = x + d[0];
+    arr[i * 3 + 1] = w.base[i * 3 + 1]! + d[1];
+    arr[i * 3 + 2] = z + d[2];
+  }
+  pos.needsUpdate = true;
+  s.sea.geometry.computeVertexNormals();
+}
+
+export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevelM = null, water = null, waves = null, sun, overlay = null, instances = null, maps = null }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<SceneState | null>(null);
   // Latest sculpt props without re-creating the renderer effect.
@@ -315,6 +369,7 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
       backend: "none",
       triangles: 0,
       sea: null,
+      seaWaves: null,
       sun,
       hemi,
       sky,
@@ -420,6 +475,7 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
       onInfo?.(infoOf(state));
       const loop = () => {
         if (!alive) return;
+        animateSea(state, performance.now() / 1000);
         renderer.render(scene, camera);
         state.frame = requestAnimationFrame(loop);
       };
@@ -529,10 +585,13 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
       s.sea = new THREE.Mesh(geo, mat);
       s.sea.position.y = seaLevelM;
       s.scene.add(s.sea);
+      s.seaWaves = waves ? { base: Float32Array.from(geo.attributes.position!.array as Float32Array), components: waves.components, heightM: waves.significant_height_m, lengthM: waves.wavelength_m } : null;
+    } else {
+      s.seaWaves = null;
     }
     onInfo?.(infoOf(s));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seaLevelM, water?.visibilityM, water?.tint?.[0], water?.tint?.[1], water?.tint?.[2], extentM, preview, onInfo]);
+  }, [seaLevelM, water?.visibilityM, water?.tint?.[0], water?.tint?.[1], water?.tint?.[2], water?.breakingDepthM, waves, extentM, preview, onInfo]);
 
   // Scatter instances: one InstancedMesh of cones in the terrain frame (x = u − extent/2, z = extent/2 − v),
   // yaw and a 0.75..1.25 scale from `r` exactly as the GLB export writes them.

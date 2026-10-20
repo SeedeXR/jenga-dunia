@@ -395,6 +395,23 @@ struct SeaLevelParams {
     /// plankton, brown silt, green algae. Dominates as the water gets murkier.
     #[serde(default = "tint")]
     tint: [f32; 3],
+    /// Wind speed 10 m above the sea, m/s (0 = calm): 3 ripples, 8 a moderate sea, 20 a gale. Sets
+    /// the wave height and length the viewport animates (`ocean.waves`: JONSWAP growth capped at
+    /// the fully developed Pierson–Moskowitz sea); the ocean mask ignores it.
+    #[serde(default = "wind_speed_mps")]
+    wind_speed_mps: f32,
+    /// Fetch, km: how far the wind has blown over open water. Omit for a fully developed sea.
+    #[serde(default)]
+    fetch_km: Option<f32>,
+    /// Where the wind blows FROM, degrees clockwise from north; waves travel the opposite way.
+    #[serde(default = "wind_azimuth_deg")]
+    wind_azimuth_deg: f32,
+}
+fn wind_speed_mps() -> f32 {
+    8.0
+}
+fn wind_azimuth_deg() -> f32 {
+    270.0
 }
 fn shore_m() -> f32 {
     2.0
@@ -884,6 +901,12 @@ pub fn register_all(r: &mut Registry) {
             if sp.tint.iter().any(|c| !(0.0..=1.0).contains(c)) {
                 return Err(JdError::invalid("tint", "components must be within 0..=1"));
             }
+            // The wind sea is drawn, not evaluated; validate it here so a bad edit fails at the node.
+            jd_terrain::wave_spectrum(&jd_terrain::WaveParams {
+                wind_speed_mps: sp.wind_speed_mps,
+                fetch_km: sp.fetch_km,
+                wind_azimuth_deg: sp.wind_azimuth_deg,
+            })?;
             let (ocean, depth) = sea_level(field(i, "in")?, sp.level_m, sp.shore_m)?;
             Ok(BTreeMap::from([("ocean".to_owned(), Value::field(ocean)), ("depth".to_owned(), Value::field(depth))]))
         },

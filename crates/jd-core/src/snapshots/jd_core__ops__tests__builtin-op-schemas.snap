@@ -2635,6 +2635,128 @@ expression: list
     }
   },
   {
+    "id": "ocean.waves",
+    "description": "Wind sea for a wind speed and fetch (JONSWAP growth capped at the fully developed Pierson–Moskowitz sea): significant height, peak period and wavelength, breaking depth, and the Gerstner components the viewport animates",
+    "scope": "none",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WaveParams",
+      "description": "Wind-sea settings.",
+      "type": "object",
+      "properties": {
+        "wind_speed_mps": {
+          "description": "Wind speed 10 m above the sea, m/s (≥ 0; 0 = flat calm): 3 ripples, 8 moderate sea, 20 gale.",
+          "type": "number",
+          "format": "float",
+          "default": 8.0
+        },
+        "fetch_km": {
+          "description": "Fetch, km: how far the wind has blown over open water (> 0). Omit for a fully developed sea.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float",
+          "default": null
+        },
+        "wind_azimuth_deg": {
+          "description": "Where the wind blows FROM, degrees clockwise from north; waves travel the opposite way.",
+          "type": "number",
+          "format": "float",
+          "default": 270.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WaveSpectrum",
+      "description": "The wind sea: bulk statistics plus the Gerstner components that draw it.",
+      "type": "object",
+      "properties": {
+        "significant_height_m": {
+          "description": "Significant wave height Hs (mean of the highest third), m.",
+          "type": "number",
+          "format": "float"
+        },
+        "peak_period_s": {
+          "description": "Peak period Tp, s.",
+          "type": "number",
+          "format": "float"
+        },
+        "wavelength_m": {
+          "description": "Peak wavelength, m.",
+          "type": "number",
+          "format": "float"
+        },
+        "fully_developed": {
+          "description": "Whether the fetch was long enough for the sea to be fully developed for this wind.",
+          "type": "boolean"
+        },
+        "breaking_depth_m": {
+          "description": "Depth (m) shallower than which waves of this height break (H/d = 0.78): the surf zone.",
+          "type": "number",
+          "format": "float"
+        },
+        "components": {
+          "description": "Gerstner components, largest first.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WaveComponent"
+          }
+        }
+      },
+      "required": [
+        "significant_height_m",
+        "peak_period_s",
+        "wavelength_m",
+        "fully_developed",
+        "breaking_depth_m",
+        "components"
+      ],
+      "$defs": {
+        "WaveComponent": {
+          "description": "One trochoidal (Gerstner) wave.",
+          "type": "object",
+          "properties": {
+            "amplitude_m": {
+              "description": "Crest height above the mean surface, m.",
+              "type": "number",
+              "format": "float"
+            },
+            "wavelength_m": {
+              "description": "Crest-to-crest distance, m.",
+              "type": "number",
+              "format": "float"
+            },
+            "direction_deg": {
+              "description": "Travel direction, degrees clockwise from north.",
+              "type": "number",
+              "format": "float"
+            },
+            "speed_mps": {
+              "description": "Deep-water phase speed √(g L / 2π), m/s.",
+              "type": "number",
+              "format": "float"
+            },
+            "phase": {
+              "description": "Phase offset, radians.",
+              "type": "number",
+              "format": "float"
+            }
+          },
+          "required": [
+            "amplitude_m",
+            "wavelength_m",
+            "direction_deg",
+            "speed_mps",
+            "phase"
+          ]
+        }
+      }
+    }
+  },
+  {
     "id": "project.cache_gc",
     "description": "Evict the oldest cached layer blobs until the project's cache fits `settings.cache_limit_bytes` (the cache is disposable); reports what is left",
     "scope": "project-write",

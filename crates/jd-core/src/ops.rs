@@ -2834,6 +2834,12 @@ pub mod terrain {
 
     /// Register terrain ops.
     pub fn register_all(r: &mut Registry) {
+        r.register::<jd_terrain::WaveParams, jd_terrain::WaveSpectrum, _>(
+            "ocean.waves",
+            "Wind sea for a wind speed and fetch (JONSWAP growth capped at the fully developed Pierson–Moskowitz sea): significant height, peak period and wavelength, breaking depth, and the Gerstner components the viewport animates",
+            Scope::None,
+            |_, p| Ok((jd_terrain::wave_spectrum(&p)?, Vec::new())),
+        );
         r.register::<TerrainTextures, TexturesResult, _>(
             "terrain.textures",
             "Bake the material maps of a layer — albedo, tangent-space normal, roughness — as PNGs (base64) for viewers and engines",

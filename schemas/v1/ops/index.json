@@ -95,6 +95,11 @@
     "scope": "none"
   },
   {
+    "id": "ocean.waves",
+    "description": "Wind sea for a wind speed and fetch (JONSWAP growth capped at the fully developed Pierson–Moskowitz sea): significant height, peak period and wavelength, breaking depth, and the Gerstner components the viewport animates",
+    "scope": "none"
+  },
+  {
     "id": "project.cache_gc",
     "description": "Evict the oldest cached layer blobs until the project's cache fits `settings.cache_limit_bytes` (the cache is disposable); reports what is left",
     "scope": "project-write"

@@ -1,6 +1,6 @@
 // Frontend store: a mirror of what the core reports, never the source of truth (docs/architecture/12-ui-workspace.md).
 import { create } from "zustand";
-import type { Edge, GraphEvaluateResult, GraphListResult, HeightmapFormat, JdOps, JobInfo as JobInfoGen, NodeDefInfo, NodeView, NoiseParams, OpId, ProjectOpenResult, ProjectSaveResult, ScatterPoint, TerrainStatsResult } from "./lib/ops.gen";
+import type { Edge, GraphEvaluateResult, GraphListResult, HeightmapFormat, JdOps, JobInfo as JobInfoGen, NodeDefInfo, NodeView, NoiseParams, OceanWavesRequest, OceanWavesResult, OpId, ProjectOpenResult, ProjectSaveResult, ScatterPoint, TerrainStatsResult } from "./lib/ops.gen";
 import { layerPreview, layerTextures, op, type JdError, type LayerMaps, type Preview, type Response, type Warning } from "./lib/api";
 
 export type ProjectSummary = ProjectOpenResult;
@@ -40,6 +40,9 @@ interface State {
   mapsMs: number;
   /** Texture the viewport with the baked maps (off = height ramp vertex colours). */
   pbr: boolean;
+  /** Wind sea of the sea-level node (`ocean.waves`), drawn by the viewport; null without a sea. */
+  waves: OceanWavesResult | null;
+  loadWaves: (wind: OceanWavesRequest | null) => Promise<void>;
   setPbr: (on: boolean) => void;
   noise: NoiseSettings;
   busy: boolean;
@@ -340,6 +343,12 @@ export const useStore = create<State>((set, get) => {
     preview: null,
     maps: null,
     mapsMs: 0,
+    waves: null,
+    loadWaves: async (wind) => {
+      if (!wind) return set({ waves: null });
+      const r = await run("ocean.waves", wind);
+      set({ waves: r.status === "ok" ? (r.result ?? null) : null });
+    },
     pbr: true,
     setPbr: (on) => {
       set({ pbr: on });

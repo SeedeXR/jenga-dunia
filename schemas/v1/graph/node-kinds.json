@@ -1089,6 +1089,27 @@
             0.3499999940395355,
             0.4000000059604645
           ]
+        },
+        "wind_speed_mps": {
+          "description": "Wind speed 10 m above the sea, m/s (0 = calm): 3 ripples, 8 a moderate sea, 20 a gale. Sets\nthe wave height and length the viewport animates (`ocean.waves`: JONSWAP growth capped at\nthe fully developed Pierson–Moskowitz sea); the ocean mask ignores it.",
+          "type": "number",
+          "format": "float",
+          "default": 8.0
+        },
+        "fetch_km": {
+          "description": "Fetch, km: how far the wind has blown over open water. Omit for a fully developed sea.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float",
+          "default": null
+        },
+        "wind_azimuth_deg": {
+          "description": "Where the wind blows FROM, degrees clockwise from north; waves travel the opposite way.",
+          "type": "number",
+          "format": "float",
+          "default": 270.0
         }
       },
       "additionalProperties": false

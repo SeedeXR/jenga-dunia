@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
-import { buildSeaGeometry, waterColour } from "./TerrainView";
+import { buildSeaGeometry, gerstner, waterColour } from "./TerrainView";
 import type { Preview } from "../lib/api";
 
 // A 4×4 preview sloping west → east from 0 to 300 m (u16 quantised over min..max).
@@ -50,5 +50,33 @@ describe("buildSeaGeometry", () => {
     const deep = waterColour(200, { visibilityM: 30, tint: [0.1, 0.35, 0.4] }, c);
     expect(deep.clarity).toBeLessThan(0.2); // blue still carries at 200 m in clear water
     expect(Math.abs(c.b - 0.4)).toBeLessThan(0.02);
+  });
+});
+
+describe("gerstner", () => {
+  const east = { amplitude_m: 1, wavelength_m: 100, direction_deg: 90, speed_mps: 12.5, phase: 0 };
+  it("lifts a crest a quarter wavelength downwind and pushes the surface horizontally at the node", () => {
+    // Travelling east: x = 25 m is a quarter wavelength into the wave (φ = π/2) → full height, no slide.
+    const crest = gerstner([east], 25, 0, 0, [0, 0, 0]);
+    expect(crest[1]).toBeCloseTo(1);
+    expect(crest[0]).toBeCloseTo(0);
+    // At the node (φ = 0) the orbit is all horizontal, bounded by the steepness Q·A ≤ A.
+    const node = gerstner([east], 0, 0, 0, [0, 0, 0]);
+    expect(node[1]).toBeCloseTo(0);
+    expect(node[0]).toBeGreaterThan(0);
+    expect(node[0]).toBeLessThanOrEqual(1);
+    // One period later (L / c = 8 s) the surface is back where it was.
+    expect(gerstner([east], 25, 0, 8, [0, 0, 0])[1]).toBeCloseTo(1);
+    // A northbound wave moves vertices along −z, never x.
+    const north = gerstner([{ ...east, direction_deg: 0 }], 0, 0, 0, [0, 0, 0]);
+    expect(north[0]).toBeCloseTo(0);
+    expect(north[2]).toBeLessThan(0);
+  });
+  it("widens the shoreline foam to the surf zone when the sea breaks", () => {
+    // Column 1 (depth 10 m) is deep blue-green water at 110 m without waves, foam when waves break above 50 m.
+    const calm = buildSeaGeometry(ramp(), [300, 300], 110).getAttribute("color");
+    const surf = buildSeaGeometry(ramp(), [300, 300], 110, { visibilityM: 15, tint: [0.1, 0.35, 0.4], breakingDepthM: 50 }).getAttribute("color");
+    expect(surf.getX(1)).toBeGreaterThan(calm.getX(1) + 0.3);
+    expect(surf.getW(1)).toBeGreaterThan(calm.getW(1));
   });
 });

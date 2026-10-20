@@ -356,6 +356,19 @@ coastal node 3.6 s for 256² × 120 steps (debug build)
 
 `jd.erosion.coastal@1` re-floods the ocean from the field border every step (the same rule as `jd.hydrology.sea_level@1`, so inland basins are not coasts), then every land cell within `band_m` above `level_m` that touches the sea loses `rate_m × exposure` (exposure = share of its eight neighbours that are ocean) down to one step below the level, and that material is shared among those ocean neighbours. A cut cell floods on the next step and exposes the one behind it — cliff retreat with a wave-cut platform just under the surface — while the deposits build beaches that can rise above the level and become land again. The `shore` output is the wave work per cell normalised to the busiest one, a ready mask for beach and cliff materials. No fetch, wave direction or longshore drift yet, so spits, bars and deltas are a later term.
 
+### Waves: wind speed and fetch
+
+```
+$ jd op ocean.waves --params '{"wind_speed_mps":20}'                  # a gale with unlimited fetch
+significant_height_m 9.84   peak_period_s 15.6   wavelength_m 380.0   breaking_depth_m 12.6   fully_developed true
+$ jd op ocean.waves --params '{"wind_speed_mps":20,"fetch_km":100}'   # the same wind 100 km from the weather shore
+significant_height_m 3.23   peak_period_s 7.85   wavelength_m 96.3    breaking_depth_m 4.1    fully_developed false
+$ jd op ocean.waves --params '{"wind_speed_mps":3}'                   # a breeze
+significant_height_m 0.22   peak_period_s 2.34   wavelength_m 8.6     breaking_depth_m 0.3    fully_developed true
+```
+
+`ocean.waves` is the wind sea of the forecasting curves: JONSWAP fetch-limited growth (Hasselmann et al. 1973, in its U10 form — Hs = 1.6·10⁻³ √χ U²/g, Tp = 0.2857 χ^⅓ U/g with χ = gF/U²) capped at the fully developed Pierson–Moskowitz sea (Hs ≈ 0.0246 U², Tp ≈ 0.78 U), the wavelength from deep-water dispersion L = g Tp²/2π, and the depth at which such waves break (H/d = 0.78). The result also lists three Gerstner components — 0.4, 0.2 and 0.1 Hs at L, L/2.2 and L/5, spread 0°, +25° and −35° about the downwind direction, each with its phase speed — which is exactly what the desktop viewport animates. The sea-level node carries the same `wind_speed_mps`, `fetch_km` (omit for a fully developed sea) and `wind_azimuth_deg` parameters, validated at evaluation like any other; a negative wind or a zero fetch is `E_INPUT_INVALID`. Not modelled: swell from elsewhere, refraction and shadowing by the coast, wave-height bakes.
+
 ### Seabed: what lies under the water
 
 ```

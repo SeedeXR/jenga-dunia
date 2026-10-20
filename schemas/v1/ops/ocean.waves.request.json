@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WaveParams",
+  "description": "Wind-sea settings.",
+  "type": "object",
+  "properties": {
+    "wind_speed_mps": {
+      "description": "Wind speed 10 m above the sea, m/s (≥ 0; 0 = flat calm): 3 ripples, 8 moderate sea, 20 gale.",
+      "type": "number",
+      "format": "float",
+      "default": 8.0
+    },
+    "fetch_km": {
+      "description": "Fetch, km: how far the wind has blown over open water (> 0). Omit for a fully developed sea.",
+      "type": [
+        "number",
+        "null"
+      ],
+      "format": "float",
+      "default": null
+    },
+    "wind_azimuth_deg": {
+      "description": "Where the wind blows FROM, degrees clockwise from north; waves travel the opposite way.",
+      "type": "number",
+      "format": "float",
+      "default": 270.0
+    }
+  },
+  "additionalProperties": false
+}

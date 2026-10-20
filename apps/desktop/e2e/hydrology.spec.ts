@@ -113,6 +113,14 @@ test.describe("hydrology nodes against the real core", () => {
     await visibility.blur();
     await expect(page.getByTestId("log")).toContainText("graph.set_param: ok");
     await expect(sea).toContainText("visibility_m=4");
+    // The wind raises the sea: a 20 m/s gale with unlimited fetch is a 9.8 m / 380 m Pierson–Moskowitz
+    // sea (`ocean.waves`), which the viewport animates and reports.
+    const wind = inspector.locator("label", { hasText: "wind_speed_mps" }).locator("input");
+    await expect(wind).toHaveAttribute("placeholder", "8");
+    await wind.fill("20");
+    await wind.blur();
+    await expect(sea).toContainText("wind_speed_mps=20");
+    await expect(page.getByTestId("viewport-info")).toContainText("waves 9.8 m / 380 m");
     // Back out to the overview (undo the two zoom steps above) so the whole shoreline is in frame.
     await page.getByTestId("viewport").hover();
     for (let i = 0; i < 2; i++) await page.mouse.wheel(0, 300);

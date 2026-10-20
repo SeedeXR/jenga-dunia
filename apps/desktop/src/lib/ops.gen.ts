@@ -420,6 +420,43 @@ export type JobsResultResult = {
   "response"?: unknown;
 };
 
+export type OceanWavesRequest = {
+  /** Wind speed 10 m above the sea, m/s (≥ 0; 0 = flat calm): 3 ripples, 8 moderate sea, 20 gale. */
+  "wind_speed_mps"?: number;
+  /** Fetch, km: how far the wind has blown over open water (> 0). Omit for a fully developed sea. */
+  "fetch_km"?: number | null;
+  /** Where the wind blows FROM, degrees clockwise from north; waves travel the opposite way. */
+  "wind_azimuth_deg"?: number;
+};
+
+export type WaveComponent = {
+  /** Crest height above the mean surface, m. */
+  "amplitude_m": number;
+  /** Crest-to-crest distance, m. */
+  "wavelength_m": number;
+  /** Travel direction, degrees clockwise from north. */
+  "direction_deg": number;
+  /** Deep-water phase speed √(g L / 2π), m/s. */
+  "speed_mps": number;
+  /** Phase offset, radians. */
+  "phase": number;
+};
+
+export type OceanWavesResult = {
+  /** Significant wave height Hs (mean of the highest third), m. */
+  "significant_height_m": number;
+  /** Peak period Tp, s. */
+  "peak_period_s": number;
+  /** Peak wavelength, m. */
+  "wavelength_m": number;
+  /** Whether the fetch was long enough for the sea to be fully developed for this wind. */
+  "fully_developed": boolean;
+  /** Depth (m) shallower than which waves of this height break (H/d = 0.78): the surf zone. */
+  "breaking_depth_m": number;
+  /** Gerstner components, largest first. */
+  "components": WaveComponent[];
+};
+
 export type ProjectCacheGcRequest = Record<string, unknown>;
 
 export type ProjectCacheGcResult = {
@@ -1178,6 +1215,14 @@ absorption per colour channel and the baked water maps; the ocean mask itself ig
   /** Colour of the suspended matter that scatters back out of the water (RGB 0..1): blue-green
 plankton, brown silt, green algae. Dominates as the water gets murkier. */
   "tint"?: [number, number, number];
+  /** Wind speed 10 m above the sea, m/s (0 = calm): 3 ripples, 8 a moderate sea, 20 a gale. Sets
+the wave height and length the viewport animates (`ocean.waves`: JONSWAP growth capped at
+the fully developed Pierson–Moskowitz sea); the ocean mask ignores it. */
+  "wind_speed_mps"?: number;
+  /** Fetch, km: how far the wind has blown over open water. Omit for a fully developed sea. */
+  "fetch_km"?: number | null;
+  /** Where the wind blows FROM, degrees clockwise from north; waves travel the opposite way. */
+  "wind_azimuth_deg"?: number;
 };
 
 export type NodeParams_jd_hydrology_wetness_1 = Record<string, unknown>;
@@ -1305,6 +1350,8 @@ export interface JdOps {
   "jobs.list": { request: JobsListRequest; result: JobsListResult };
   /** State of a job: running (progress), done (the finished op's envelope, handed over once) or unknown */
   "jobs.result": { request: JobsResultRequest; result: JobsResultResult };
+  /** Wind sea for a wind speed and fetch (JONSWAP growth capped at the fully developed Pierson–Moskowitz sea): significant height, peak period and wavelength, breaking depth, and the Gerstner components the viewport animates */
+  "ocean.waves": { request: OceanWavesRequest; result: OceanWavesResult };
   /** Evict the oldest cached layer blobs until the project's cache fits `settings.cache_limit_bytes` (the cache is disposable); reports what is left */
   "project.cache_gc": { request: ProjectCacheGcRequest; result: ProjectCacheGcResult };
   /** Close the open project (unsaved changes stay in the journal) */

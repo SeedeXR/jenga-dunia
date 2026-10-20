@@ -17,6 +17,7 @@ pub mod heightfield;
 pub mod import;
 pub mod mesh;
 pub mod noise;
+pub mod ocean;
 pub mod preview;
 pub mod profiles;
 pub mod scatter;
@@ -43,6 +44,7 @@ pub use mesh::{
     export_obj, export_ply, export_stl, export_usda, export_usdz,
 };
 pub use noise::{FractalKind, NoiseKind, NoiseParams, generate_noise};
+pub use ocean::{WaveComponent, WaveParams, WaveSpectrum, wave_spectrum};
 pub use profiles::{EngineProfile, ProfileReport, ProfileSettings, export_profile};
 pub use scatter::{ScatterParams, ScatterPoint, scatter_points, write_points};
 pub use sculpt::{Stroke, StrokeMode, apply_strokes};
