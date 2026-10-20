@@ -734,6 +734,13 @@ export type NodeParams_jd_hydrology_rivers_1 = {
   "method"?: FlowMethod;
 };
 
+export type NodeParams_jd_hydrology_sea_level_1 = {
+  /** Sea level in metres (world heights). */
+  "level_m"?: number;
+  /** Shoreline softness: the ocean mask fades from 1 to 0 over this many metres above the level. */
+  "shore_m"?: number;
+};
+
 export type NodeParams_jd_hydrology_wetness_1 = Record<string, unknown>;
 
 export type NodeParams_jd_input_heightmap_1 = {
@@ -882,6 +889,7 @@ export interface NodeKinds {
   "jd.filter.blur@1": NodeParams_jd_filter_blur_1;
   "jd.hydrology.fill@1": NodeParams_jd_hydrology_fill_1;
   "jd.hydrology.rivers@1": NodeParams_jd_hydrology_rivers_1;
+  "jd.hydrology.sea_level@1": NodeParams_jd_hydrology_sea_level_1;
   "jd.hydrology.wetness@1": NodeParams_jd_hydrology_wetness_1;
   "jd.input.heightmap@1": NodeParams_jd_input_heightmap_1;
   "jd.math.add@1": NodeParams_jd_math_add_1;

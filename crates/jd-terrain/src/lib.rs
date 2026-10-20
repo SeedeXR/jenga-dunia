@@ -18,7 +18,7 @@ pub mod sim;
 pub use export::{HeightmapFormat, export_heightmap};
 pub use flow::{
     FlowMethod, carve_rivers, d8_receivers, fill_depressions, flow_accumulation,
-    flow_accumulation_with, wetness_index,
+    flow_accumulation_with, sea_level, wetness_index,
 };
 pub use heightfield::{Heightfield, HeightfieldStats, Tile, TileCoord};
 pub use import::{ForeignImport, read_foreign, resample_to_world};

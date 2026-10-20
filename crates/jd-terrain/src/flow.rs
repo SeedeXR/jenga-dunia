@@ -300,6 +300,75 @@ pub fn carve_rivers(
     Ok((out, mask))
 }
 
+/// Sea level: `ocean` is 1 where the terrain lies below `level_m` **and** is connected to the
+/// field border through such cells (inland basins below sea level stay 0); the mask softens to 0
+/// over `shore_m` of height above the level. `depth` is `level_m - h` (≥ 0) on ocean cells.
+pub fn sea_level(
+    h: &Heightfield,
+    level_m: f32,
+    shore_m: f32,
+) -> JdResult<(Heightfield, Heightfield)> {
+    if !level_m.is_finite() {
+        return Err(JdError::invalid("level_m", "must be finite"));
+    }
+    if !(shore_m >= 0.0 && shore_m.is_finite()) {
+        return Err(JdError::invalid("shore_m", "must be finite and ≥ 0"));
+    }
+    let (w, hh) = (h.width() as usize, h.height() as usize);
+    let v = h.to_vec();
+    if v.iter().any(|x| !x.is_finite()) {
+        return Err(JdError::invalid("in", "heightfield has non-finite samples"));
+    }
+    // Flood from every border cell below the level through 4-connected cells below the level.
+    let below = |i: usize| v[i] < level_m + shore_m;
+    let mut sea = vec![false; w * hh];
+    let mut stack: Vec<usize> = (0..w * hh)
+        .filter(|&i| (i % w == 0 || i % w == w - 1 || i < w || i >= w * (hh - 1)) && below(i))
+        .collect();
+    for &i in &stack {
+        sea[i] = true;
+    }
+    while let Some(i) = stack.pop() {
+        let (x, y) = (i % w, i / w);
+        for j in [
+            (x > 0).then(|| i - 1),
+            (x + 1 < w).then(|| i + 1),
+            (y > 0).then(|| i - w),
+            (y + 1 < hh).then(|| i + w),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if !sea[j] && below(j) {
+                sea[j] = true;
+                stack.push(j);
+            }
+        }
+    }
+    let mut ocean = Heightfield::new(h.width(), h.height(), h.tile_size(), h.halo())?;
+    let mut depth = ocean.clone();
+    ocean.fill_with(|x, y| {
+        let i = y as usize * w + x as usize;
+        if !sea[i] {
+            return 0.0;
+        }
+        if shore_m <= 0.0 {
+            return 1.0;
+        }
+        let t = ((level_m + shore_m - v[i]) / shore_m).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    });
+    depth.fill_with(|x, y| {
+        let i = y as usize * w + x as usize;
+        if sea[i] {
+            (level_m - v[i]).max(0.0)
+        } else {
+            0.0
+        }
+    });
+    Ok((ocean, depth))
+}
+
 /// Topographic wetness index (Beven & Kirkby 1979): `ln(a / tan β)` with `a` the upslope area per
 /// unit contour length (D8 accumulation × cell area / cell width) and `β` the local slope; the
 /// result is normalised to 0..1 across the field so it reads as a mask (wet valleys → 1).
@@ -482,6 +551,36 @@ mod tests {
             (total - 256.0).abs() < 1e-2,
             "outlets hold the whole area: {total}"
         );
+    }
+
+    #[test]
+    fn sea_level_floods_from_the_border_but_not_inland_basins() {
+        // Flat land at 50 m with a coast (x < 8 at −20 m) and an inland pit at −30 m.
+        let mut h = Heightfield::new(32, 32, 32, 0).expect("hf");
+        h.fill_with(|x, y| {
+            if x < 8 {
+                -20.0
+            } else if (15..17).contains(&x) && (15..17).contains(&y) {
+                -30.0
+            } else {
+                50.0
+            }
+        });
+        let (ocean, depth) = sea_level(&h, 0.0, 0.0).expect("sea");
+        assert_eq!(ocean.get(2, 10), 1.0);
+        assert_eq!(depth.get(2, 10), 20.0);
+        assert_eq!(ocean.get(15, 15), 0.0, "inland basin is not ocean");
+        assert_eq!(depth.get(15, 15), 0.0);
+        assert_eq!(ocean.get(20, 20), 0.0);
+        // A soft shore ramps 1 → 0 across shore_m above the level.
+        let mut ramp = Heightfield::new(64, 4, 64, 0).expect("hf");
+        ramp.fill_with(|x, _| x as f32 - 32.0);
+        let (o, _) = sea_level(&ramp, 0.0, 10.0).expect("sea");
+        assert_eq!(o.get(20, 1), 1.0);
+        assert!((o.get(37, 1) - 0.5).abs() < 1e-5, "{}", o.get(37, 1));
+        assert_eq!(o.get(50, 1), 0.0);
+        assert!(sea_level(&ramp, f32::NAN, 1.0).is_err());
+        assert!(sea_level(&ramp, 0.0, -1.0).is_err());
     }
 
     #[test]

@@ -6,7 +6,8 @@ use std::sync::Arc;
 use jd_terrain::{
     FlowMethod, ForeignImport, Heightfield, HydraulicParams, NoiseParams, Stroke, THERMAL_MAX_RATE,
     apply_strokes, carve_rivers, fill_depressions, flow_accumulation_with, generate_noise,
-    hydraulic_erode, read_foreign, resample_to_world, slope_mask, thermal_erode, wetness_index,
+    hydraulic_erode, read_foreign, resample_to_world, sea_level, slope_mask, thermal_erode,
+    wetness_index,
 };
 use jd_types::{JdError, JdResult};
 use rayon::prelude::*;
@@ -247,6 +248,20 @@ struct FillParams {
 }
 fn fill_eps() -> f32 {
     0.001
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SeaLevelParams {
+    /// Sea level in metres (world heights).
+    #[serde(default)]
+    level_m: f32,
+    /// Shoreline softness: the ocean mask fades from 1 to 0 over this many metres above the level.
+    #[serde(default = "shore_m")]
+    shore_m: f32,
+}
+fn shore_m() -> f32 {
+    2.0
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -518,6 +533,17 @@ pub fn register_all(r: &mut Registry) {
             let fp: FillParams = params(p)?;
             let (filled, lakes) = fill_depressions(field(i, "in")?, fp.epsilon_m)?;
             Ok(BTreeMap::from([("out".to_owned(), Value::field(filled)), ("lakes".to_owned(), Value::field(lakes))]))
+        },
+    ));
+    r.register(NodeDef::new::<SeaLevelParams, _>(
+        "jd.hydrology.sea_level@1",
+        "Ocean mask (1 below `level_m` where connected to the border; inland basins stay dry) with a soft shoreline, and water `depth` in metres",
+        vec![port("in", PortType::Heightfield, true)],
+        vec![port("ocean", PortType::Heightfield, false), port("depth", PortType::Heightfield, false)],
+        |_, p, i| {
+            let sp: SeaLevelParams = params(p)?;
+            let (ocean, depth) = sea_level(field(i, "in")?, sp.level_m, sp.shore_m)?;
+            Ok(BTreeMap::from([("ocean".to_owned(), Value::field(ocean)), ("depth".to_owned(), Value::field(depth))]))
         },
     ));
     r.register(NodeDef::new::<RiversParams, _>(
