@@ -122,6 +122,27 @@ $ jd --json export mesh --project M.jdproj terrain.glb
 
 (512² world.) The `.glb` is a single grid mesh in metres, +Y up, centred on the world like the viewport, with normals, UVs and a flat PBR material — it opens directly in Blender, three.js or any glTF 2.0 importer, and the Khronos glTF Validator reports 0 errors (CI runs it on every push). Worlds above ~1 M vertices are sampled every `step` pixels (`W_MESH_DECIMATED`); pass `--step 1` for the full grid.
 
+### Hydrology recipe: rivers, lakes and wetness
+
+```
+$ jd --json new Rivers.jdproj --extent 4096 --resolution 512
+$ jd op graph.add_node --project Rivers.jdproj --save --params '{"kind":"jd.hydrology.rivers@1","params":{"threshold":0.6,"depth_m":25}}'
+$ jd op graph.add_node --project Rivers.jdproj --save --params '{"kind":"jd.output.height@1","params":{"layer":"rivers"}}'
+$ jd op graph.add_node --project Rivers.jdproj --save --params '{"kind":"jd.hydrology.wetness@1"}'
+$ jd op graph.add_node --project Rivers.jdproj --save --params '{"kind":"jd.output.height@1","params":{"layer":"wetness"}}'
+# connect noise.out → rivers.in, rivers.out → height.in, rivers.rivers → rivers-output.in,
+# rivers.out → wetness.in, wetness.out → wetness-output.in (graph.connect with from_port / to_port)
+$ jd --json op graph.evaluate --project Rivers.jdproj
+{"op":"graph.evaluate","status":"ok","result":{"lod":0,"duration_ms":663,
+  "nodes":[{"kind":"jd.noise.fbm@1","duration_ms":197,...},{"kind":"jd.hydrology.rivers@1","duration_ms":321,...},
+           {"kind":"jd.hydrology.wetness@1","duration_ms":143,...}, ...],
+  "layers":{"height":"…","rivers":"…","wetness":"…"}}}
+$ jd op terrain.stats --project Rivers.jdproj --params '{"layer":"rivers"}'    # min 0, max 0.844, mean 0.002
+$ jd op terrain.export_heightmap --project Rivers.jdproj --params '{"layer":"rivers","path":"rivers.png","format":"png16","range_m":[0,1]}'
+```
+
+(512² world, debug build.) `jd.hydrology.rivers` fills depressions, routes D8 flow and incises channels where accumulation is high; `wetness` is the topographic wetness index. Every output node publishes its own layer, so the desktop's layer picker shows **height**, **rivers** and **wetness** side by side, and each can be exported as a mask.
+
 ### Bring in a real DEM or engine heightmap
 
 ```

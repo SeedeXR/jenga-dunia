@@ -133,6 +133,12 @@ struct HydraulicNodeParams {
     /// Deposition constant Kd.
     #[serde(default = "one_f")]
     deposit_k: f32,
+    /// Suspended sediment cap as a fraction of water depth (excess settles the same step).
+    #[serde(default = "hyd_cap")]
+    max_concentration: f32,
+}
+fn hyd_cap() -> f32 {
+    0.3
 }
 fn hyd_iterations() -> u32 {
     100
@@ -442,6 +448,7 @@ pub fn register_all(r: &mut Registry) {
                     capacity_k: hp.capacity_k,
                     dissolve_k: hp.dissolve_k,
                     deposit_k: hp.deposit_k,
+                    max_concentration: hp.max_concentration,
                     ..Default::default()
                 }, Some(&ctx.cancel))?;
             Ok(BTreeMap::from([

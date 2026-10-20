@@ -698,6 +698,8 @@ export type NodeParams_jd_erosion_hydraulic_1 = {
   "dissolve_k"?: number;
   /** Deposition constant Kd. */
   "deposit_k"?: number;
+  /** Suspended sediment cap as a fraction of water depth (excess settles the same step). */
+  "max_concentration"?: number;
 };
 
 export type NodeParams_jd_erosion_thermal_1 = {

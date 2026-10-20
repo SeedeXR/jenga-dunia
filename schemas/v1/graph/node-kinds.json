@@ -136,6 +136,12 @@
           "type": "number",
           "format": "float",
           "default": 1.0
+        },
+        "max_concentration": {
+          "description": "Suspended sediment cap as a fraction of water depth (excess settles the same step).",
+          "type": "number",
+          "format": "float",
+          "default": 0.30000001192092896
         }
       },
       "additionalProperties": false

@@ -85,6 +85,12 @@ Undo and redo are operations like everything else (`graph.undo` / `graph.redo`, 
 
 **Screen recording:** [`videos/graph-editor.mp4`](videos/graph-editor.mp4) (17 s, 1440×900) — the whole flow above: edit the seed, add a blur node, connect it by dragging the handles, move a node, evaluate, delete with the keyboard, undo and redo. It is the UI-driven test `apps/desktop/e2e/graph.spec.ts` running against the real core, recorded with `JD_VIDEO=1 pnpm exec playwright test e2e/graph.spec.ts` (actions slowed to human pace), so it is regenerated whenever the editor changes.
 
+## Hydrology layers in the viewport
+
+![Rivers project: carved terrain with the layer picker showing height, rivers and wetness](images/desktop-rivers.png)
+
+*Native capture (v0.0.1): a `noise → rivers → height` graph with two extra outputs (`rivers`, `wetness`) built from the CLI (see the hydrology recipe in the CLI quickstart) and opened in the app. The header's **layer** picker lists every published layer; the viewport shows the carved terrain, and picking `rivers` or `wetness` shows those masks with their own stats.*
+
 ## Tutorial: sculpting
 
 1. Click **Sculpt** (top of the viewport). If the graph has no stroke node yet, a `jd.sculpt.strokes` node is inserted in front of the output and selected; the button reads **Sculpting…** and a **Brush** panel appears on the right: **mode** (raise/lower by a strength in metres — negative digs; **smooth** blends towards the local mean; **flatten** pulls towards the height under the first point of the stroke), radius, and strength or amount (0–1).

@@ -108,12 +108,17 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `11:40:00` **Review 5 (jobs/brushes/placement, 6 findings) applied**: MCP `call_tool` now runs the op in `spawn_blocking` (a long evaluation pinned a tokio worker, so `jobs.cancel` could starve on small runners); the evaluator re-checks the cancel flag after the last node ("cancelled ⇒ nothing published" now holds; core test asserts no `height` layer after a cancel); `jobs.list` polling guarded by a generation counter so a late response cannot resurrect a finished job; live-preview evaluations are polled too (header + Cancel show for them, not only `busy`); smooth brush box radius is per-axis (round in metres under anisotropic spacing, test); new unit test for `Jobs` (guard dropped on panic); vitest asserts the brush-mode select and that strokes carry `mode`/`amount`; jobs e2e uses 20 000 iterations. Known perf ceiling (not fixed): smooth blurs the whole field per sculpt evaluation — restrict to the stroke's bounding box later.
 
-### Open / next (as of 2026-10-20 09:55, head `fd63a43`)
-1. **CI**: `645408b` (document open + native log), `1678900` (package UTI), `fd63a43` (brush cursor) polling; everything through `208b120` green.
-2. **Figma**: connector unavailable this session ("server not found") and plugin OAuth pending on the owner's side → tutorial images stay in `docs/user/images/` (annotated by `annotate.mjs`); place them in file `fxyeV62hgLoNmG3dU1LX6G` when a connector works.
-3. **Native leftovers**: Edit-menu capture (System Events click did not open it); native sculpt capture/recording (clicks need Accessibility — tutorial-04 is the e2e capture, labelled); signed/notarised bundle needs an Apple developer account.
-4. **Phase 3 follow-ups**: hydraulic concentration cap / layered materials / open drains; thermal + hydraulic WGSL twins (`jd-gpu`); particle hydraulic; D∞/MFD + priority-flood + rivers/lakes; smooth/flatten brushes; stroke files under `strokes/`.
-5. **Phase 2 leftovers**: `jd-jobs` (async + progress/cancel), adopt `JdOps` types in `state.ts`, GeoTIFF tags/nodata on import, textured PBR for GLB, Windows/Linux measurements, auto-layout for nodes added without a position (CLI adds land at 0,0 and overlap).
+- `12:10:00` Hydraulic `max_concentration` (default 0.3 of the remaining water depth; excess settles the same step, mass conserved; test asserts the cap everywhere). Hydrology recipe (noise → rivers → height/rivers outputs, wetness) built through the CLI: evaluate 663 ms debug for 512², rivers mask max 0.84, PNG16 export — written into cli-quickstart §5. Gotcha: zsh does not word-split `set -- $var`; use `read -r a b c <<< "$str"` in capture scripts.
+
+- `12:25:00` **Disk full** mid-gate (`target/debug` had grown to 27 GB: 12 GB incremental + 14 GB deps after a day of rebuilds) → `rm -rf target/debug`, rebuilt. Rule: check `df -h` when a build fails oddly; `cargo clean` the debug profile every few sessions (release + bundle stay, 2.5 GB). Native capture `docs/user/images/desktop-rivers.png` (layer picker with height/rivers/wetness, carved terrain) embedded in the desktop guide.
+
+### Open / next (as of 2026-10-20 11:50, head `d5376fe`)
+1. **CI**: `6302f40` (rivers), `e72f190` (wetness), `d5376fe` (review-5 fixes) polling; everything through `4007945` green.
+2. **Figma**: connector unavailable this session; plugin OAuth pending on the owner's side → tutorial images stay in `docs/user/images/`; place them in file `fxyeV62hgLoNmG3dU1LX6G` when a connector works.
+3. **Native leftovers**: Edit-menu capture; native sculpt capture/recording (needs Accessibility); signed/notarised bundle (needs an Apple developer account).
+4. **Phase 3 follow-ups**: hydraulic concentration cap / layered materials / open drains; thermal + hydraulic WGSL twins (`jd-gpu`); particle hydraulic; D∞/MFD; sea level; hydrology-first generation; smooth-brush blur limited to the stroke's bounding box (currently whole-field).
+5. **Phase 2 leftovers**: detached async jobs (queues/budgets/timeouts), adopt `JdOps` types in `state.ts`, GeoTIFF tags/nodata on import, textured PBR for GLB, Windows/Linux measurements, tile-level `jd-cache` with LRU.
+6. **Docs**: a hydrology recipe (noise → fill → rivers → wetness) in the CLI quickstart and a desktop capture of the `rivers`/`lakes` layers via the layer picker.
 
 ---
 

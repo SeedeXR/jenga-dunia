@@ -189,6 +189,9 @@ pub struct HydraulicParams {
     pub deposit_k: f32,
     /// Floor for sin(tilt) so flat water still carries some sediment.
     pub min_tilt: f32,
+    /// Suspended sediment may not exceed this fraction of the water depth; the excess settles
+    /// back onto the terrain the same step (keeps thin films from carrying metres of rock).
+    pub max_concentration: f32,
 }
 
 impl Default for HydraulicParams {
@@ -202,6 +205,7 @@ impl Default for HydraulicParams {
             dissolve_k: 0.5,
             deposit_k: 1.0,
             min_tilt: 0.1,
+            max_concentration: 0.3,
         }
     }
 }
@@ -238,6 +242,9 @@ pub fn hydraulic_erode(
     check_spacing(spacing_m)?;
     if !(p.dt > 0.0 && p.dt <= 1.0) {
         return Err(JdError::invalid("dt", "must be within (0, 1]"));
+    }
+    if !(p.max_concentration > 0.0 && p.max_concentration.is_finite()) {
+        return Err(JdError::invalid("max_concentration", "must be positive"));
     }
     for (name, v) in [
         ("rain_rate", p.rain_rate),
@@ -383,10 +390,17 @@ pub fn hydraulic_erode(
                         t += delta;
                         s -= delta;
                     }
+                    // 4. Evaporation.
+                    let d_final = d_new * (1.0 - p.evaporation * p.dt);
+                    // Concentration cap against the water that remains: the excess settles now.
+                    let cap = p.max_concentration * d_final;
+                    if s > cap {
+                        t += s - cap;
+                        s = cap;
+                    }
                     trow[x] = t;
                     srow[x] = s;
-                    // 4. Evaporation.
-                    wrow[x] = d_new * (1.0 - p.evaporation * p.dt);
+                    wrow[x] = d_final;
                 }
             });
         terrain = terrain2;
@@ -542,6 +556,14 @@ mod tests {
             assert!(f.stats().min >= -1e3);
         }
         assert!(r.water.stats().min >= 0.0 && r.sediment.stats().min >= 0.0);
+        // Suspended sediment never exceeds the concentration cap anywhere.
+        let (wv, sv) = (r.water.to_vec(), r.sediment.to_vec());
+        assert!(
+            wv.iter()
+                .zip(&sv)
+                .all(|(d, s)| *s <= p.max_concentration * d + 1e-5),
+            "sediment within cap"
+        );
         // Deterministic.
         assert_eq!(
             hydraulic_erode(&h, [4.0, 4.0], &p, None)
