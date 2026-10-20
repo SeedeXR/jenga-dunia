@@ -2442,7 +2442,7 @@ pub mod terrain {
         );
         r.register::<TerrainExportMesh, jd_terrain::MeshExportReport, _>(
             "terrain.export_mesh",
-            "Write a layer as a binary glTF (.glb) grid mesh: metres, +Y up, centred on the world, normals + UVs + PBR material with a baked base-colour texture",
+            "Write a layer as a grid mesh — .glb (normals, UVs, PBR material with baked base-colour texture), .obj, binary .stl or binary .ply with vertex colours — metres, +Y up, centred on the world",
             Scope::Export,
             |ctx, p| {
                 let (path, extent) = ctx.with_project(|proj| {
@@ -2458,7 +2458,7 @@ pub mod terrain {
                             format!("mesh sampled every {step} pixels to stay within {} vertices; pass `step: 1` for the full grid", p.max_vertices),
                         ));
                     }
-                    jd_terrain::export_glb(hf, extent, &path, step, p.texture)
+                    jd_terrain::export_mesh(hf, extent, &path, step, p.texture)
                 })?;
                 Ok((report, warnings))
             },

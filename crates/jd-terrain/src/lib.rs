@@ -26,7 +26,10 @@ pub use flow::{
 };
 pub use heightfield::{Heightfield, HeightfieldStats, Tile, TileCoord};
 pub use import::{ForeignImport, GeoTags, geotiff_tags, read_foreign, resample_to_world};
-pub use mesh::{MeshExportReport, auto_step, export_glb};
+pub use mesh::{
+    GridMesh, MeshExportReport, auto_step, export_glb, export_mesh, export_obj, export_ply,
+    export_stl,
+};
 pub use noise::{FractalKind, NoiseKind, NoiseParams, generate_noise};
 pub use profiles::{EngineProfile, ProfileReport, ProfileSettings, export_profile};
 pub use scatter::{ScatterParams, ScatterPoint, scatter_points, write_points};

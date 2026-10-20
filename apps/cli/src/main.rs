@@ -148,12 +148,12 @@ enum ExportCommand {
         #[arg(long, default_value = "height")]
         layer: String,
     },
-    /// Export a heightfield layer as a binary glTF (.glb) grid mesh (metres, +Y up, centred).
+    /// Export a heightfield layer as a grid mesh: .glb (textured PBR), .obj, binary .stl or .ply (metres, +Y up, centred).
     Mesh {
         /// Project directory.
         #[arg(long)]
         project: PathBuf,
-        /// Output .glb (relative paths go under the project's exports/).
+        /// Output .glb / .obj / .stl / .ply (relative paths go under the project's exports/).
         path: PathBuf,
         /// Grid step (1 = every sample; default keeps the mesh within ~1 M vertices).
         #[arg(long)]

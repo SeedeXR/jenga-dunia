@@ -1153,7 +1153,7 @@ export interface JdOps {
   "project.set_settings": { request: ProjectSetSettingsRequest; result: ProjectSetSettingsResult };
   /** Write a layer as EXR (f32), PNG16, RAW r16 or r32 with a JSON sidecar */
   "terrain.export_heightmap": { request: TerrainExportHeightmapRequest; result: TerrainExportHeightmapResult };
-  /** Write a layer as a binary glTF (.glb) grid mesh: metres, +Y up, centred on the world, normals + UVs + PBR material with a baked base-colour texture */
+  /** Write a layer as a grid mesh — .glb (normals, UVs, PBR material with baked base-colour texture), .obj, binary .stl or binary .ply with vertex colours — metres, +Y up, centred on the world */
   "terrain.export_mesh": { request: TerrainExportMeshRequest; result: TerrainExportMeshResult };
   /** Write a Unity or Unreal terrain import set: heightmap in the engine's encoding and row order, one 8-bit weightmap per mask layer, and a README with the computed Terrain Height / Z scale */
   "terrain.export_profile": { request: TerrainExportProfileRequest; result: TerrainExportProfileResult };

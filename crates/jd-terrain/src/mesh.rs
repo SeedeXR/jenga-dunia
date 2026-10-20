@@ -7,8 +7,13 @@
 //! blended towards rock on steep slopes), one texel per exported vertex, so the file looks like
 //! the app in Blender / three.js / engines without any material setup.
 //!
-//! ponytail: one dense grid primitive, optional `step` decimation, one baked albedo; LOD/chunked
-//! meshes, draco, normal/roughness maps come with the material graph (08-io-formats.md).
+//! OBJ, binary STL and binary PLY (with vertex colours) share one [`GridMesh`] builder; the GLB
+//! path keeps its own streaming writer. [`export_mesh`] picks the writer from the extension.
+//!
+//! ponytail: one dense grid primitive, optional `step` decimation, one baked albedo; the GLB
+//! writer duplicates the grid sampling (~30 lines) rather than buffering a `GridMesh` for huge
+//! worlds — fold them together when LOD/chunked meshes land. Draco, normal/roughness maps and
+//! MTL materials come with the material graph (08-io-formats.md).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -298,6 +303,276 @@ pub fn export_glb(
     })
 }
 
+/// A regular grid mesh in metres: +X east, +Y up, +Z south, centred on the world (same frame as
+/// the GLB writer and the viewport).
+pub struct GridMesh {
+    /// Vertex positions, 3 per vertex.
+    pub positions: Vec<f32>,
+    /// Unit normals, 3 per vertex.
+    pub normals: Vec<f32>,
+    /// UVs, 2 per vertex (v = 0 on the south edge).
+    pub uvs: Vec<f32>,
+    /// Triangle indices, counter-clockwise from +Y.
+    pub indices: Vec<u32>,
+    /// Grid size in vertices.
+    pub grid: [u32; 2],
+    /// Height range of the sampled vertices.
+    pub height_range: [f32; 2],
+}
+
+impl GridMesh {
+    /// Sample the field every `step` pixels (always including the last row/column).
+    pub fn build(hf: &Heightfield, extent_m: [f64; 2], step: u32) -> JdResult<Self> {
+        hf.validate_finite()?;
+        if step == 0 {
+            return Err(JdError::invalid("step", "must be ≥ 1"));
+        }
+        if !(extent_m[0] > 0.0 && extent_m[1] > 0.0) {
+            return Err(JdError::invalid("extent_m", "must be positive"));
+        }
+        let (w, h) = (hf.width(), hf.height());
+        let (gw, gh) = ((w - 1).div_ceil(step) + 1, (h - 1).div_ceil(step) + 1);
+        if gw < 2 || gh < 2 {
+            return Err(JdError::invalid(
+                "step",
+                "grid must keep at least 2×2 samples",
+            ));
+        }
+        if (gw as u64) * (gh as u64) > u32::MAX as u64 {
+            return Err(JdError::invalid(
+                "step",
+                "too many vertices for 32-bit indices",
+            ));
+        }
+        let (sx, sz) = (extent_m[0] / w as f64, extent_m[1] / h as f64);
+        let sample = |gx: u32, gz: u32| hf.get((gx * step).min(w - 1), (gz * step).min(h - 1));
+        let xm = |gx: u32| ((gx * step).min(w - 1) as f64 + 0.5) * sx - extent_m[0] / 2.0;
+        let zm = |gz: u32| extent_m[1] / 2.0 - ((gz * step).min(h - 1) as f64 + 0.5) * sz;
+        let n = (gw * gh) as usize;
+        let (mut positions, mut normals, mut uvs) = (
+            Vec::with_capacity(n * 3),
+            Vec::with_capacity(n * 3),
+            Vec::with_capacity(n * 2),
+        );
+        let (mut lo, mut hi) = (f32::MAX, f32::MIN);
+        for gz in 0..gh {
+            for gx in 0..gw {
+                let y = sample(gx, gz);
+                lo = lo.min(y);
+                hi = hi.max(y);
+                positions.extend_from_slice(&[xm(gx) as f32, y, zm(gz) as f32]);
+                let (x0, x1) = (gx.saturating_sub(1), (gx + 1).min(gw - 1));
+                let (z0, z1) = (gz.saturating_sub(1), (gz + 1).min(gh - 1));
+                let guard = |d: f64| if d.abs() < 1e-9 { 1e-9 } else { d };
+                let dx = (sample(x1, gz) - sample(x0, gz)) as f64 / guard(xm(x1) - xm(x0));
+                let dz = (sample(gx, z1) - sample(gx, z0)) as f64 / guard(zm(z1) - zm(z0));
+                let len = (dx * dx + 1.0 + dz * dz).sqrt();
+                normals.extend_from_slice(&[
+                    (-dx / len) as f32,
+                    (1.0 / len) as f32,
+                    (-dz / len) as f32,
+                ]);
+                uvs.extend_from_slice(&[gx as f32 / (gw - 1) as f32, gz as f32 / (gh - 1) as f32]);
+            }
+        }
+        let mut indices = Vec::with_capacity(((gw - 1) * (gh - 1) * 6) as usize);
+        for gz in 0..gh - 1 {
+            for gx in 0..gw - 1 {
+                let a = gz * gw + gx;
+                let (b, c, d) = (a + 1, a + gw, a + gw + 1);
+                indices.extend_from_slice(&[a, b, c, b, d, c]);
+            }
+        }
+        Ok(Self {
+            positions,
+            normals,
+            uvs,
+            indices,
+            grid: [gw, gh],
+            height_range: [lo, hi],
+        })
+    }
+
+    fn triangles(&self) -> u32 {
+        (self.indices.len() / 3) as u32
+    }
+    fn vertices(&self) -> u32 {
+        (self.positions.len() / 3) as u32
+    }
+}
+
+fn report(
+    path: &Path,
+    format: &str,
+    mesh: &GridMesh,
+    step: u32,
+    extent_m: [f64; 2],
+) -> JdResult<MeshExportReport> {
+    Ok(MeshExportReport {
+        path: path.to_path_buf(),
+        format: format.into(),
+        vertices: mesh.vertices(),
+        triangles: mesh.triangles(),
+        step,
+        bytes: fs::metadata(path)?.len(),
+        extent_m,
+        texture_px: None,
+    })
+}
+
+/// Wavefront OBJ: positions, UVs, normals and triangles (1-based `v/vt/vn` faces), no MTL.
+pub fn export_obj(
+    hf: &Heightfield,
+    extent_m: [f64; 2],
+    path: &Path,
+    step: u32,
+) -> JdResult<MeshExportReport> {
+    let mesh = GridMesh::build(hf, extent_m, step)?;
+    let mut out = String::with_capacity(mesh.positions.len() * 12);
+    out.push_str(&format!(
+        "# jenga-dunia {} — metres, +Y up, +Z south, centred\no terrain\n",
+        env!("CARGO_PKG_VERSION")
+    ));
+    for p in mesh.positions.as_chunks::<3>().0 {
+        out.push_str(&format!("v {} {} {}\n", p[0], p[1], p[2]));
+    }
+    for t in mesh.uvs.as_chunks::<2>().0 {
+        out.push_str(&format!("vt {} {}\n", t[0], t[1]));
+    }
+    for nr in mesh.normals.as_chunks::<3>().0 {
+        out.push_str(&format!("vn {} {} {}\n", nr[0], nr[1], nr[2]));
+    }
+    for f in mesh.indices.as_chunks::<3>().0 {
+        let (a, b, c) = (f[0] + 1, f[1] + 1, f[2] + 1);
+        out.push_str(&format!("f {a}/{a}/{a} {b}/{b}/{b} {c}/{c}/{c}\n"));
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, out)?;
+    report(path, "obj", &mesh, step, extent_m)
+}
+
+/// Binary STL: 80-byte header, triangle count, per-triangle face normal + 3 vertices.
+pub fn export_stl(
+    hf: &Heightfield,
+    extent_m: [f64; 2],
+    path: &Path,
+    step: u32,
+) -> JdResult<MeshExportReport> {
+    let mesh = GridMesh::build(hf, extent_m, step)?;
+    let mut out = Vec::with_capacity(84 + mesh.indices.len() / 3 * 50);
+    let mut header = format!(
+        "jenga-dunia {} binary STL, metres, +Y up",
+        env!("CARGO_PKG_VERSION")
+    )
+    .into_bytes();
+    header.resize(80, b' ');
+    out.extend_from_slice(&header);
+    out.extend_from_slice(&mesh.triangles().to_le_bytes());
+    let p = |i: u32| -> [f32; 3] {
+        let i = i as usize * 3;
+        [
+            mesh.positions[i],
+            mesh.positions[i + 1],
+            mesh.positions[i + 2],
+        ]
+    };
+    for f in mesh.indices.as_chunks::<3>().0 {
+        let (a, b, c) = (p(f[0]), p(f[1]), p(f[2]));
+        let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        let v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+        let n = [
+            u[1] * v[2] - u[2] * v[1],
+            u[2] * v[0] - u[0] * v[2],
+            u[0] * v[1] - u[1] * v[0],
+        ];
+        let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt().max(1e-12);
+        for x in n {
+            out.extend_from_slice(&(x / len).to_le_bytes());
+        }
+        for vtx in [a, b, c] {
+            for x in vtx {
+                out.extend_from_slice(&x.to_le_bytes());
+            }
+        }
+        out.extend_from_slice(&0u16.to_le_bytes());
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, &out)?;
+    report(path, "stl", &mesh, step, extent_m)
+}
+
+/// Binary little-endian PLY with per-vertex normals and hypsometric RGB colours.
+pub fn export_ply(
+    hf: &Heightfield,
+    extent_m: [f64; 2],
+    path: &Path,
+    step: u32,
+) -> JdResult<MeshExportReport> {
+    let mesh = GridMesh::build(hf, extent_m, step)?;
+    let header = format!(
+        "ply\nformat binary_little_endian 1.0\ncomment jenga-dunia {} — metres, +Y up, +Z south, centred\nelement vertex {}\nproperty float x\nproperty float y\nproperty float z\nproperty float nx\nproperty float ny\nproperty float nz\nproperty uchar red\nproperty uchar green\nproperty uchar blue\nelement face {}\nproperty list uchar uint vertex_indices\nend_header\n",
+        env!("CARGO_PKG_VERSION"),
+        mesh.vertices(),
+        mesh.triangles()
+    );
+    let mut out = header.into_bytes();
+    let range = (mesh.height_range[1] - mesh.height_range[0]).max(1e-6);
+    for (p, nr) in mesh
+        .positions
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .zip(mesh.normals.as_chunks::<3>().0)
+    {
+        for x in p.iter().chain(nr.iter()) {
+            out.extend_from_slice(&x.to_le_bytes());
+        }
+        let t = (p[1] - mesh.height_range[0]) / range;
+        let slope = ((1.0 - nr[1]) * 1.4).clamp(0.0, 1.0);
+        out.extend_from_slice(&hypsometric_rgb(t, slope));
+    }
+    for f in mesh.indices.as_chunks::<3>().0 {
+        out.push(3);
+        for i in f {
+            out.extend_from_slice(&i.to_le_bytes());
+        }
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, &out)?;
+    report(path, "ply", &mesh, step, extent_m)
+}
+
+/// Export by extension: `.glb` (default, with optional texture), `.obj`, `.stl`, `.ply`.
+pub fn export_mesh(
+    hf: &Heightfield,
+    extent_m: [f64; 2],
+    path: &Path,
+    step: u32,
+    texture: bool,
+) -> JdResult<MeshExportReport> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase());
+    match ext.as_deref() {
+        None | Some("glb") => export_glb(hf, extent_m, path, step, texture),
+        Some("obj") => export_obj(hf, extent_m, path, step),
+        Some("stl") => export_stl(hf, extent_m, path, step),
+        Some("ply") => export_ply(hf, extent_m, path, step),
+        Some(other) => Err(JdError::new(
+            jd_types::ErrorCode::E_FORMAT_UNSUPPORTED,
+            format!("unsupported mesh extension `{other}`"),
+        )
+        .next("Use .glb, .obj, .stl or .ply.")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -410,6 +685,60 @@ mod tests {
         let steep = hypsometric_rgb(0.5, 1.0);
         assert_ne!(flat, steep);
         assert_eq!(steep, [107, 102, 97]);
+    }
+
+    #[test]
+    fn obj_stl_ply_share_the_glb_grid_and_have_the_right_sizes() {
+        let mut hf = Heightfield::new(5, 4, 64, 0).expect("hf");
+        hf.fill_with(|x, y| x as f32 * 2.0 + y as f32);
+        let dir = tempfile::tempdir().expect("tmp");
+        let glb = export_glb(&hf, [50.0, 40.0], &dir.path().join("g.glb"), 1, false).expect("glb");
+        let obj = export_mesh(&hf, [50.0, 40.0], &dir.path().join("g.obj"), 1, false).expect("obj");
+        let stl = export_mesh(&hf, [50.0, 40.0], &dir.path().join("g.stl"), 1, false).expect("stl");
+        let ply = export_mesh(&hf, [50.0, 40.0], &dir.path().join("g.ply"), 1, false).expect("ply");
+        for r in [&obj, &stl, &ply] {
+            assert_eq!((r.vertices, r.triangles), (glb.vertices, glb.triangles));
+        }
+        assert_eq!(
+            (
+                obj.format.as_str(),
+                stl.format.as_str(),
+                ply.format.as_str()
+            ),
+            ("obj", "stl", "ply")
+        );
+        let text = std::fs::read_to_string(dir.path().join("g.obj")).expect("obj");
+        assert_eq!(text.lines().filter(|l| l.starts_with("v ")).count(), 20);
+        assert_eq!(text.lines().filter(|l| l.starts_with("f ")).count(), 24);
+        // First OBJ vertex is the GLB's first position (south-west corner, +Z/2 side).
+        let glb_bytes = std::fs::read(dir.path().join("g.glb")).expect("glb");
+        let (_, bin) = chunks(&glb_bytes);
+        let gx = f32::from_le_bytes([bin[0], bin[1], bin[2], bin[3]]);
+        let gz = f32::from_le_bytes([bin[8], bin[9], bin[10], bin[11]]);
+        let first = text.lines().find(|l| l.starts_with("v ")).expect("v");
+        let parts: Vec<f32> = first[2..]
+            .split(' ')
+            .map(|p| p.parse().expect("f32"))
+            .collect();
+        assert_eq!((parts[0], parts[2]), (gx, gz));
+        assert!(gz > 0.0, "south row is at +Z");
+        assert_eq!(stl.bytes, 84 + 24 * 50);
+        let ply_bytes = std::fs::read(dir.path().join("g.ply")).expect("ply");
+        let header_end = ply_bytes
+            .windows(11)
+            .position(|w| w == b"end_header\n")
+            .expect("header")
+            + 11;
+        assert!(
+            std::str::from_utf8(&ply_bytes[..header_end])
+                .expect("utf8")
+                .contains("element vertex 20\n")
+        );
+        assert_eq!(
+            ply_bytes.len() - header_end,
+            20 * (6 * 4 + 3) + 24 * (1 + 12)
+        );
+        assert!(export_mesh(&hf, [50.0, 40.0], &dir.path().join("g.fbx"), 1, false).is_err());
     }
 
     #[test]
