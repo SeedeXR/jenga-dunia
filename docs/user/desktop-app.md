@@ -89,7 +89,7 @@ Undo and redo are operations like everything else (`graph.undo` / `graph.redo`, 
 
 **Live target.** **Live target (ms)** (an app setting, kept in the browser store, 0 = off) is the time budget of one live-preview evaluation: while evaluations run over it the preview steps one LOD coarser (up to four steps above the project's preview LOD), and when they finish in under a quarter of it the preview steps finer again, never below the project default — the header's `preview lod N` shows where it settled. Evaluate and every export still run at full resolution.
 
-**Clouds.** The Sun panel's **Clouds** slider sets the cover of the sky dome (`cloud_cover` on `sky.preview`); the log names the cover each bake used, and `sky.bake` takes the same parameters for the HDRI.
+**Clouds.** The Sun panel's **Clouds** slider sets the cover of the sky dome (`cloud_cover` on `sky.preview`); the log names the cover each bake used, and `sky.bake` takes the same parameters for the HDRI. **Fog** is a viewport look setting next to it: 0 keeps the faint aerial perspective, 1 closes the view within the world's width (the header shows `fog N %`); bakes and exports are untouched.
 
 **Wind.** The Settings section also holds the world's shared wind — **Wind from (°)** and **Wind (m/s)** — the one setting dunes, yardangs, snow scour and the viewport's wind sea follow unless a node sets its own `wind_*` parameter; it is journaled through the same `project.set_settings` and saved in `project.json` under `world.wind` (UI-driven check: `apps/desktop/e2e/settings.spec.ts`).
 

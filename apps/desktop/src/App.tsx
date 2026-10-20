@@ -228,7 +228,7 @@ export default function App() {
           </label>
         )}
         <span className={`${s.lastEval && Object.keys(s.lastEval.layers).length > 1 ? "" : "ml-auto "}text-xs text-jd-fg-2`} data-testid="viewport-info">
-          viewport: {vp.backend} · {vp.triangles.toLocaleString()} tris{vp.seaM !== undefined ? ` · sea ${vp.seaM} m` : ""}{vp.waves ? ` · waves ${vp.waves.heightM.toFixed(1)} m / ${Math.round(vp.waves.lengthM)} m` : ""}{vp.sun ? ` · sun ${vp.sun.elevationDeg}°/${vp.sun.azimuthDeg}°` : ""}{s.colorLayer && s.colorPreview ? ` · colour ${s.colorLayer}` : ""}{vp.instances ? ` · ${vp.instances.toLocaleString()} instances` : ""}{vp.pbrPx ? ` · pbr ${vp.pbrPx[0]}×${vp.pbrPx[1]}` : ""}{vp.skyPx ? ` · sky ${vp.skyPx[0]}×${vp.skyPx[1]}` : ""}{vp.horizonPx ? ` · horizon ${vp.horizonPx}²` : ""}
+          viewport: {vp.backend} · {vp.triangles.toLocaleString()} tris{vp.seaM !== undefined ? ` · sea ${vp.seaM} m` : ""}{vp.waves ? ` · waves ${vp.waves.heightM.toFixed(1)} m / ${Math.round(vp.waves.lengthM)} m` : ""}{vp.fog ? ` · fog ${Math.round(vp.fog * 100)} %` : ""}{vp.sun ? ` · sun ${vp.sun.elevationDeg}°/${vp.sun.azimuthDeg}°` : ""}{s.colorLayer && s.colorPreview ? ` · colour ${s.colorLayer}` : ""}{vp.instances ? ` · ${vp.instances.toLocaleString()} instances` : ""}{vp.pbrPx ? ` · pbr ${vp.pbrPx[0]}×${vp.pbrPx[1]}` : ""}{vp.skyPx ? ` · sky ${vp.skyPx[0]}×${vp.skyPx[1]}` : ""}{vp.horizonPx ? ` · horizon ${vp.horizonPx}²` : ""}
           {s.previewStats ? ` · preview lod ${s.previewStats.lod}, ${(s.previewStats.bytes / 1048576).toFixed(2)} MB in ${s.previewStats.ms.toFixed(0)} ms` : ""}
         </span>
         {(s.busy || s.jobs.length > 0) &&
@@ -401,7 +401,7 @@ export default function App() {
         {/* Center: viewport (top) + node graph (bottom, toggle) */}
         <main className={`relative grid bg-jd-bg-0 ${showGraph ? "grid-rows-[1fr_auto]" : "grid-rows-[1fr]"}`}>
           <div className="relative min-h-0">
-            <TerrainView preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} sculpt={{ enabled: s.sculpting && (sculptNode !== undefined || s.drawing !== null), radiusM: s.drawing === "road" ? s.roadWidthM / 2 : s.brush.radius_m, onStroke: (pts) => void s.addStroke(pts) }} seaLevelM={seaLevelM} water={water} waves={s.waves} sky={s.sky} horizon={s.horizon} sun={{ azimuthDeg: s.sun.azimuth_deg, elevationDeg: s.sun.elevation_deg }} overlay={s.colorPreview} instances={s.scatter.points ? { points: s.scatter.points, sizeM: Math.max(s.scatter.spacing_m * 0.35, (s.project?.world.extent_m[0] ?? 0) * 0.012) } : null} maps={s.maps} />
+            <TerrainView fog={s.sun.fog} preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} sculpt={{ enabled: s.sculpting && (sculptNode !== undefined || s.drawing !== null), radiusM: s.drawing === "road" ? s.roadWidthM / 2 : s.brush.radius_m, onStroke: (pts) => void s.addStroke(pts) }} seaLevelM={seaLevelM} water={water} waves={s.waves} sky={s.sky} horizon={s.horizon} sun={{ azimuthDeg: s.sun.azimuth_deg, elevationDeg: s.sun.elevation_deg }} overlay={s.colorPreview} instances={s.scatter.points ? { points: s.scatter.points, sizeM: Math.max(s.scatter.spacing_m * 0.35, (s.project?.world.extent_m[0] ?? 0) * 0.012) } : null} maps={s.maps} />
             <button
               className={`btn absolute top-2 right-28 ${s.sculpting ? "text-jd-accent" : ""}`}
               title={s.sculpting ? "Sculpting: drag on the terrain to paint a stroke (click to stop)" : "Sculpt: adds a stroke node before the output and paints with the brush"}
@@ -492,6 +492,9 @@ export default function App() {
           </Field>
           <Field label={`Clouds ${Math.round(s.sun.clouds * 100)} %`}>
             <input className="w-28" type="range" min={0} max={1} step={0.05} value={s.sun.clouds} onChange={(e) => s.setSun({ clouds: Number(e.target.value) })} title="Cloud cover on the sky dome and in the HDRI bake: a seeded cumulus-like noise layer, brighter on the sun side" data-testid="sky-clouds" />
+          </Field>
+          <Field label={`Fog ${Math.round(s.sun.fog * 100)} %`}>
+            <input className="w-28" type="range" min={0} max={1} step={0.05} value={s.sun.fog} onChange={(e) => s.setSun({ fog: Number(e.target.value) })} title="Viewport fog: 0 keeps the faint aerial perspective, 1 closes the view within the world's width (a look setting — bakes and exports are untouched)" data-testid="sky-fog" />
           </Field>
           <h2 className="mt-4 mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Scatter</h2>
           <Field label="Mask">

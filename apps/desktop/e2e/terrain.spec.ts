@@ -65,6 +65,14 @@ test.describe("desktop UI against the real core", () => {
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
     await expect(page.getByTestId("log")).toContainText("clouds 60 %", { timeout: 30_000 });
+    // Fog: a viewport look setting; the header reports the amount.
+    await page.getByTestId("sky-fog").evaluate((el) => {
+      const input = el as HTMLInputElement;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(input, "0.5");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await expect(page.getByTestId("viewport-info")).toContainText("fog 50 %");
     await expect(page.getByTestId("sun-turbidity")).toHaveValue("3");
     // The horizon skirt: the noise continued 3× beyond the border, coarse, with a hole for the world.
     await page.getByTestId("horizon-toggle").click();

@@ -19,6 +19,8 @@ export interface ViewportInfo {
   pbrPx?: [number, number];
   /** Wind sea being animated: significant height and peak wavelength, metres. */
   waves?: { heightM: number; lengthM: number };
+  /** Fog amount 0..1 when above 0. */
+  fog?: number;
   /** Physical sky texture on the dome (equirectangular preview size), when one is applied. */
   skyPx?: [number, number];
   /** Horizon skirt resolution per side, when one is drawn. */
@@ -46,11 +48,21 @@ interface Props {
   horizon?: { preview: Preview; scale: number } | null;
   /** Sun direction: azimuth clockwise from north (0 = light from the north), elevation above the horizon. */
   sun?: { azimuthDeg: number; elevationDeg: number };
+  /** Fog 0..1: 0 keeps the faint aerial perspective, 1 closes the view within a world's width. */
+  fog?: number;
   /** Baked albedo/normal/roughness maps for the shown layer; textured when set and no overlay is active. */
   maps?: { albedo: ImageBitmap; normal: ImageBitmap; roughness: ImageBitmap; px: [number, number] } | null;
   /** Scatter instances (layer metres: u east, v north from the south edge, z height, r 0..1) drawn as
    *  `sizeM`-tall cones — a preview marker, the exported GLB carries 1 m proxies. */
   instances?: { points: { u: number; v: number; z: number; r: number; age?: number }[]; sizeM: number } | null;
+}
+
+/** Fog planes from the world size and the slider: 0 → a faint aerial perspective (2×…12× the world), 1 → the view closes within the world. */
+function applyFog(s: { scene: THREE.Scene; worldSize: number; fogAmount: number }): void {
+  if (!(s.scene.fog instanceof THREE.Fog)) return;
+  const f = Math.min(1, Math.max(0, s.fogAmount));
+  s.scene.fog.near = s.worldSize * (2 - 1.95 * f);
+  s.scene.fog.far = s.worldSize * (12 - 11.2 * f);
 }
 
 function isWebGPU(r: WebGPURenderer): boolean {
@@ -266,6 +278,8 @@ interface SceneState {
   pbrPx: [number, number] | null;
   /** Size of the sky texture on the dome, when one is applied. */
   skyPx: [number, number] | null;
+  worldSize: number;
+  fogAmount: number;
   /** Horizon skirt mesh, when drawn. */
   skirt: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | null;
 }
@@ -287,6 +301,7 @@ function infoOf(s: SceneState): ViewportInfo {
     ...(s.instances ? { instances: s.instances.count } : {}),
     ...(s.pbrPx ? { pbrPx: s.pbrPx } : {}),
     ...(s.skyPx ? { skyPx: s.skyPx } : {}),
+    ...(s.fogAmount > 0 ? { fog: s.fogAmount } : {}),
     ...(s.skirt ? { horizonPx: Math.round(Math.sqrt((s.skirt.geometry.attributes.position?.count ?? 0))) } : {}),
   };
 }
@@ -313,7 +328,7 @@ function animateSea(s: SceneState, tS: number): void {
   s.sea.geometry.computeVertexNormals();
 }
 
-export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevelM = null, water = null, waves = null, sky = null, horizon = null, sun, overlay = null, instances = null, maps = null }: Props) {
+export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevelM = null, water = null, waves = null, sky = null, horizon = null, sun, overlay = null, instances = null, maps = null, fog }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<SceneState | null>(null);
   // Latest sculpt props without re-creating the renderer effect.
@@ -392,6 +407,8 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
       instances: null,
       pbrPx: null,
       skyPx: null,
+      worldSize: 1,
+      fogAmount: 0,
       skirt: null,
     };
     sceneRef.current = state;
@@ -558,14 +575,21 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
     s.camera.near = Math.max(0.1, size * 0.001);
     s.camera.far = size * 50;
     s.sky.scale.setScalar(size * 40);
-    if (s.scene.fog instanceof THREE.Fog) {
-      s.scene.fog.near = size * 2;
-      s.scene.fog.far = size * 12;
-    }
+    s.worldSize = size;
+    applyFog(s);
     s.camera.updateProjectionMatrix();
     placeCamera(s);
     onInfo?.(infoOf(s));
   }, [preview, extentM, overlay, maps, onInfo]);
+
+  // Fog: the slider pulls the fog planes in from the faint aerial-perspective default.
+  useEffect(() => {
+    const s = sceneRef.current;
+    if (!s) return;
+    s.fogAmount = fog ?? 0;
+    applyFog(s);
+    onInfo?.(infoOf(s));
+  }, [fog, onInfo]);
 
   // Sun: direction from azimuth/elevation; low sun goes warm and dimmer, the sky light follows.
   useEffect(() => {

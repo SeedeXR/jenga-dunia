@@ -255,6 +255,17 @@ for (const file of ["terrain_lod0.glb", "terrain_lod1.glb", "terrain_lod2.glb", 
 const usdchecker = spawnSync("usdchecker", [path.join(exportsDir, "terrain.usda")], { encoding: "utf8" });
 if (usdchecker.error) mark(11, "PARTIAL", "usdchecker not on PATH: USD layers not validated here");
 else mark(11, /Success/.test(usdchecker.stdout) ? "VERIFIED" : "FAILED", `usdchecker terrain.usda: ${usdchecker.stdout.trim().split("\n").pop()}`);
+// FBX: our own writer read back by Unity's ModelImporter (the Autodesk FBX SDK) when a Unity editor is installed.
+if (existsSync("scripts/unity-import-check.sh") && (process.env.UNITY || existsSync("/Applications/Unity/Hub/Editor"))) {
+  try {
+    execFileSync("bash", ["scripts/unity-import-check.sh", "--fbx", path.join(exportsDir, "terrain.fbx")], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 900_000 });
+    const rep = JSON.parse(readFileSync(path.join(exportsDir, "terrain.fbx.jd-unity-import.json"), "utf8"));
+    const expectedTris = fbx.triangles;
+    mark(11, rep.ok && rep.triangles === expectedTris ? "VERIFIED" : "FAILED", `terrain.fbx through Unity ${rep.unity}'s FBX importer: ${rep.meshes} mesh, ${rep.vertices} vertices, ${rep.triangles} triangles (writer reported ${expectedTris}), bounds ${rep.bounds_size?.map((v) => v.toFixed(1)).join("×")} m`);
+  } catch (e) {
+    mark(11, "FAILED", `terrain.fbx: Unity import did not complete: ${String(e).slice(0, 200)}`);
+  }
+}
 // FBX: the only validator is a reader — our own round trip through the heightmap input node.
 const importAsset = op("project.import_asset", { path: path.join(exportsDir, "terrain.fbx"), name: "roundtrip.fbx" }, false);
 const rt = addNode("jd.input.heightmap@1", { path: importAsset.name, size_px: [res, res] });

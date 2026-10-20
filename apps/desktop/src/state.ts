@@ -84,8 +84,8 @@ interface State {
   setSculpting: (on: boolean) => void;
   brush: { radius_m: number; strength_m: number; mode: "raise" | "smooth" | "flatten"; amount: number };
   /** Viewport sun direction (not part of the project). */
-  sun: { azimuth_deg: number; elevation_deg: number; turbidity: number; clouds: number };
-  setSun: (patch: Partial<{ azimuth_deg: number; elevation_deg: number; turbidity: number; clouds: number }>) => void;
+  sun: { azimuth_deg: number; elevation_deg: number; turbidity: number; clouds: number; fog: number };
+  setSun: (patch: Partial<{ azimuth_deg: number; elevation_deg: number; turbidity: number; clouds: number; fog: number }>) => void;
   /** The noise continued beyond the border (`terrain.horizon`), drawn as a coarse skirt under the terrain. */
   horizon: { preview: Preview; scale: number } | null;
   showHorizon: boolean;
@@ -494,7 +494,7 @@ export const useStore = create<State>((set, get) => {
     sculpting: false,
     setSculpting: (on) => set({ sculpting: on, ...(on ? {} : { drawing: null }) }),
     brush: { radius_m: 150, strength_m: 40, mode: "raise", amount: 0.5 },
-    sun: { azimuth_deg: 140, elevation_deg: 35, turbidity: 3, clouds: 0 },
+    sun: { azimuth_deg: 140, elevation_deg: 35, turbidity: 3, clouds: 0, fog: 0 },
     setSun: (patch) => {
       set((s) => ({ sun: { ...s.sun, ...patch } }));
       clearTimeout(skyTimer);
