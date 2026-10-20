@@ -47,10 +47,80 @@ pub struct MeshExportReport {
     /// Baked normal + roughness map size in pixels (full field resolution, capped at 2048²).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub normal_px: Option<[u32; 2]>,
+    /// Topology of the written triangles (None for FBX, which writes quads).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub topology: Option<MeshTopology>,
     /// Coarser levels written beside this file (`<stem>_lod1.<ext>`, …), each with about a
     /// quarter of the previous level's triangles.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub lods: Vec<MeshExportReport>,
+}
+
+/// Topology summary of an indexed triangle list — the checks a mesh importer trips over.
+/// A closed-grid terrain has 0 degenerate, 0 non-manifold, 0 unreferenced and a perimeter of
+/// boundary edges; decimation must keep it that way.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
+pub struct MeshTopology {
+    /// Triangles that repeat a vertex (zero area by construction).
+    pub degenerate: u32,
+    /// Edges used by exactly one triangle (the outline; holes add to it).
+    pub boundary_edges: u32,
+    /// Edges shared by more than two triangles.
+    pub non_manifold_edges: u32,
+    /// Vertices no triangle references.
+    pub unreferenced_vertices: u32,
+    /// Indices past the vertex count (a broken file; always 0 from our writers).
+    pub out_of_range: u32,
+}
+
+/// Compute [`MeshTopology`] from a triangle iterator over `vertices` vertices.
+pub fn mesh_topology(triangles: impl Iterator<Item = [u32; 3]>, vertices: usize) -> MeshTopology {
+    let mut t = MeshTopology::default();
+    let mut edges: std::collections::HashMap<(u32, u32), u32> = std::collections::HashMap::new();
+    let mut used = vec![false; vertices];
+    for [a, b, c] in triangles {
+        if a == b || b == c || a == c {
+            t.degenerate += 1;
+        }
+        for v in [a, b, c] {
+            match used.get_mut(v as usize) {
+                Some(u) => *u = true,
+                None => t.out_of_range += 1,
+            }
+        }
+        for (u, v) in [(a, b), (b, c), (c, a)] {
+            if u != v {
+                *edges.entry((u.min(v), u.max(v))).or_insert(0) += 1;
+            }
+        }
+    }
+    for n in edges.values() {
+        if *n == 1 {
+            t.boundary_edges += 1;
+        } else if *n > 2 {
+            t.non_manifold_edges += 1;
+        }
+    }
+    t.unreferenced_vertices = used.iter().filter(|u| !**u).count() as u32;
+    t
+}
+
+/// Topology of the regular grid the GLB writer emits (two triangles per cell).
+fn grid_topology(gw: u32, gh: u32) -> MeshTopology {
+    let tris = (0..gh - 1).flat_map(move |gz| {
+        (0..gw - 1).flat_map(move |gx| {
+            let (a, b, c, d) = (
+                gz * gw + gx,
+                gz * gw + gx + 1,
+                (gz + 1) * gw + gx,
+                (gz + 1) * gw + gx + 1,
+            );
+            [[a, c, b], [b, c, d]]
+        })
+    });
+    mesh_topology(tris, (gw * gh) as usize)
 }
 
 /// Hypsometric ramp (normalised height → RGB): lowland green → ochre → bare rock → snow.
@@ -551,6 +621,7 @@ pub fn export_glb_with(
         extent_m,
         texture_px: texture.then_some([gw, gh]),
         normal_px,
+        topology: Some(grid_topology(gw, gh)),
     })
 }
 
@@ -596,6 +667,13 @@ pub struct GridMesh {
 }
 
 impl GridMesh {
+    /// Topology summary of this mesh's triangles.
+    pub fn topology(&self) -> MeshTopology {
+        mesh_topology(
+            self.indices.as_chunks::<3>().0.iter().copied(),
+            self.vertices() as usize,
+        )
+    }
     /// Sample the field every `step` pixels (always including the last row/column).
     pub fn build(hf: &Heightfield, extent_m: [f64; 2], step: u32) -> JdResult<Self> {
         hf.validate_finite()?;
@@ -694,6 +772,7 @@ fn report(
         extent_m,
         texture_px: None,
         normal_px: None,
+        topology: Some(mesh.topology()),
     })
 }
 
@@ -1112,6 +1191,7 @@ pub fn write_glb_mesh(
         extent_m,
         texture_px: normal_px,
         normal_px,
+        topology: Some(mesh.topology()),
     })
 }
 
@@ -1365,6 +1445,52 @@ pub fn export_mesh_lods_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn topology_counts_boundary_degenerate_and_non_manifold() {
+        let mut h = Heightfield::new(9, 7, 64, 0).expect("hf");
+        h.fill_with(|x, y| (x + y) as f32);
+        let grid = GridMesh::build(&h, [90.0, 70.0], 1).expect("grid");
+        let t = grid.topology();
+        assert_eq!(
+            (
+                t.degenerate,
+                t.non_manifold_edges,
+                t.unreferenced_vertices,
+                t.out_of_range
+            ),
+            (0, 0, 0, 0)
+        );
+        assert_eq!(t.boundary_edges, 2 * (9 - 1) + 2 * (7 - 1), "the perimeter");
+        assert_eq!(
+            grid_topology(9, 7),
+            t,
+            "the GLB writer's grid matches GridMesh"
+        );
+        let dec = crate::decimate::decimate(&grid, [90.0, 70.0], 40)
+            .expect("decimate")
+            .topology();
+        assert_eq!(
+            (dec.degenerate, dec.non_manifold_edges, dec.out_of_range),
+            (0, 0, 0),
+            "{dec:?}"
+        );
+        // A broken list: a degenerate face, a fan of three faces on one edge, an unused vertex, an index past the end.
+        let bad = mesh_topology(
+            [[0, 1, 1], [0, 1, 2], [0, 1, 3], [0, 1, 4], [0, 9, 2]].into_iter(),
+            6,
+        );
+        assert_eq!(
+            (
+                bad.degenerate,
+                bad.non_manifold_edges,
+                bad.unreferenced_vertices,
+                bad.out_of_range
+            ),
+            (1, 1, 1, 1),
+            "{bad:?}"
+        );
+    }
 
     #[test]
     fn material_layers_blend_albedo_and_roughness_by_their_masks() {

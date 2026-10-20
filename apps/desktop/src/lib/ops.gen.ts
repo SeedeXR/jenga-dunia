@@ -975,6 +975,19 @@ a quarter of the previous level's triangles; the report lists them under `lods`.
   "lods"?: number | null;
 };
 
+export type MeshTopology = {
+  /** Triangles that repeat a vertex (zero area by construction). */
+  "degenerate": number;
+  /** Edges used by exactly one triangle (the outline; holes add to it). */
+  "boundary_edges": number;
+  /** Edges shared by more than two triangles. */
+  "non_manifold_edges": number;
+  /** Vertices no triangle references. */
+  "unreferenced_vertices": number;
+  /** Indices past the vertex count (a broken file; always 0 from our writers). */
+  "out_of_range": number;
+};
+
 export type TerrainExportMeshResult = {
   /** Written file. */
   "path": string;
@@ -994,6 +1007,8 @@ export type TerrainExportMeshResult = {
   "texture_px"?: [number, number] | null;
   /** Baked normal + roughness map size in pixels (full field resolution, capped at 2048²). */
   "normal_px"?: [number, number] | null;
+  /** Topology of the written triangles (None for FBX, which writes quads). */
+  "topology"?: MeshTopology | null;
   /** Coarser levels written beside this file (`<stem>_lod1.<ext>`, …), each with about a
 quarter of the previous level's triangles. */
   "lods"?: unknown[];

@@ -5811,6 +5811,17 @@ expression: list
           "minItems": 2,
           "maxItems": 2
         },
+        "topology": {
+          "description": "Topology of the written triangles (None for FBX, which writes quads).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MeshTopology"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "lods": {
           "description": "Coarser levels written beside this file (`<stem>_lod1.<ext>`, …), each with about a\nquarter of the previous level's triangles.",
           "type": "array",
@@ -5827,7 +5838,52 @@ expression: list
         "step",
         "bytes",
         "extent_m"
-      ]
+      ],
+      "$defs": {
+        "MeshTopology": {
+          "description": "Topology summary of an indexed triangle list — the checks a mesh importer trips over.\nA closed-grid terrain has 0 degenerate, 0 non-manifold, 0 unreferenced and a perimeter of\nboundary edges; decimation must keep it that way.",
+          "type": "object",
+          "properties": {
+            "degenerate": {
+              "description": "Triangles that repeat a vertex (zero area by construction).",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "boundary_edges": {
+              "description": "Edges used by exactly one triangle (the outline; holes add to it).",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "non_manifold_edges": {
+              "description": "Edges shared by more than two triangles.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "unreferenced_vertices": {
+              "description": "Vertices no triangle references.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "out_of_range": {
+              "description": "Indices past the vertex count (a broken file; always 0 from our writers).",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "degenerate",
+            "boundary_edges",
+            "non_manifold_edges",
+            "unreferenced_vertices",
+            "out_of_range"
+          ]
+        }
+      }
     }
   },
   {

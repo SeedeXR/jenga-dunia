@@ -2,6 +2,12 @@
 # Runner labels verified 2026-10-19 (docs/research/stack.md §6).
 name: ci
 
+# One run per branch head: a newer push cancels the queued or running one (the hosted macOS
+# queue backed up under back-to-back pushes and reported "cancelled" jobs on stale heads).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [main]

@@ -558,6 +558,7 @@ pub fn export_fbx(
         format: "fbx".into(),
         vertices: n_vertices,
         triangles: n_quads * 2,
+        topology: None,
         step,
         bytes: out.len() as u64,
         extent_m,

@@ -180,6 +180,14 @@ $ jd --json export mesh --project Bio.jdproj --layer land --step 8 land-step8.gl
 
 Same 512² world at step 8: the flat file is 0.23 MB, the textured one 1.20 MB (normal 0.60 MB, roughness 0.29 MB, albedo 8 KB). Validator: 0 errors, 0 warnings (one `IMAGE_NPOT_DIMENSIONS` info for the 65² albedo). Blender 5.2 wires Base Color, Roughness, Metallic and Normal (through a Normal Map node) on import; Optima reads `hasTangents: true` and the three textures. Written for GLB only; the FBX export keeps the albedo alone.
 
+Every mesh export reports its **topology** — the checks an importer trips over — so a chain of decimated LODs can be trusted without opening each file:
+
+```
+topo_grid.glb   522 242 tris   {"degenerate":0,"boundary_edges":2044,"non_manifold_edges":0,"unreferenced_vertices":0,"out_of_range":0}   (2 044 = the 512² grid's perimeter)
+topo_dec.glb     59 999 tris   {"degenerate":0,"boundary_edges":2041,"non_manifold_edges":0,"unreferenced_vertices":0,"out_of_range":0}   (quadric collapse keeps it manifold)
+topo.obj        522 242 tris   same as the grid; FBX reports no topology (it writes quads)
+```
+
 
 ![The textured GLB rendered in an independent glTF viewer: iso and top views with green valleys, ochre mid-slopes, grey rock on steep faces and snow on the peaks](images/cli-glb-textured.png)
 
