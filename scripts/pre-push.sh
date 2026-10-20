@@ -13,4 +13,10 @@ node scripts/check-version.mjs
 node scripts/check-links.mjs
 ( cd apps/desktop && pnpm types:gen >/dev/null && git diff --exit-code -- src/lib/ops.gen.ts || { echo "ops.gen.ts regenerated — commit it"; exit 1; } )
 ( cd apps/desktop && pnpm lint && pnpm build && pnpm test && pnpm test:e2e )
+# Code knowledge graph (session-end checklist): deterministic AST build when graphify is installed; CI builds it too.
+if GP=$(head -1 "$(command -v graphify 2>/dev/null || echo /dev/null)" 2>/dev/null | sed 's/^#!//') && [ -x "$GP" ]; then
+  "$GP" scripts/graphify-code.py . --check
+else
+  echo "graphify not installed — skipped the knowledge graph (CI builds it)"
+fi
 echo "all gates green"
