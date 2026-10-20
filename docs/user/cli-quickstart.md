@@ -235,7 +235,7 @@ $ jd --json op terrain.export_heightmap --project G.jdproj --params '{"path":"he
   "range_m":[181.76539611816406,392.8346862792969],"quantisation_step_m":0.0, ...}}
 ```
 
-(512² world, debug build.) Deleting `cache/` never breaks a project; the next `graph.evaluate` recreates the layers.
+(512² world, debug build.) Deleting `cache/` never breaks a project; the next `graph.evaluate` recreates the layers. The cache also trims itself: every write evicts the oldest blobs (by last use) until the store fits `settings.cache_limit_bytes` in `project.json` (default 2 GB), and `jd op project.cache_gc --project X.jdproj` does the same on demand, reporting blobs/bytes kept and evicted. Verified with the limit set to three 256² layers: generating five kept exactly three blobs and index entries, the newest layer still read back, the oldest reported `no heightfield layer named h1`.
 
 The first simulation node is thermal erosion. Insert it between the starter noise and output (ids from `graph.list`):
 

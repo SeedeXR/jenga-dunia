@@ -69,13 +69,16 @@ impl Context {
             .next("Re-run the operation on the project that is open now.")
             .detail("layer", name));
         }
+        let limit = self.with_project(|p| Ok(p.doc.settings.cache_limit_bytes))?;
         // Lock order: project (above, briefly) → layers. Cache writes happen under the layers lock
         // so concurrent evaluations never interleave index writes.
         let mut g = self
             .layers
             .lock()
             .map_err(|_| JdError::new(ErrorCode::E_INTERNAL, "layer lock poisoned"))?;
-        jd_cache::LayerCache::open(root).put(name, &hf)?;
+        jd_cache::LayerCache::open(root)
+            .with_limit(limit)
+            .put(name, &hf)?;
         g.insert(name.to_owned(), hf);
         Ok(())
     }
@@ -635,6 +638,16 @@ pub mod builtin {
             "Request cancellation of a running job; it stops at the next node or kernel iteration with E_CANCELLED",
             Scope::None,
             |ctx, j| Ok((ctx.jobs.cancel(j.id), Vec::new())),
+        );
+        r.register::<NoParams, jd_cache::GcReport, _>(
+            "project.cache_gc",
+            "Evict the oldest cached layer blobs until the project's cache fits `settings.cache_limit_bytes` (the cache is disposable); reports what is left",
+            Scope::ProjectWrite,
+            |ctx, _| {
+                let (root, limit) = ctx.with_project(|p| Ok((p.root().to_path_buf(), p.doc.settings.cache_limit_bytes)))?;
+                let _g = ctx.layers.lock().map_err(|_| JdError::new(ErrorCode::E_INTERNAL, "layer lock poisoned"))?;
+                Ok((jd_cache::LayerCache::open(&root).with_limit(limit).gc()?, Vec::new()))
+            },
         );
         r.register::<NoParams, crate::diag::EnvInfo, _>(
             "diag.env",

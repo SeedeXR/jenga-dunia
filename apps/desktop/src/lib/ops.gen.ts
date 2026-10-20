@@ -360,6 +360,21 @@ export type JobInfo = {
 
 export type JobsListResult = JobInfo[];
 
+export type ProjectCacheGcRequest = Record<string, unknown>;
+
+export type ProjectCacheGcResult = {
+  /** Blobs kept. */
+  "blobs": number;
+  /** Bytes kept. */
+  "bytes": number;
+  /** Blobs removed. */
+  "evicted_blobs": number;
+  /** Bytes removed. */
+  "evicted_bytes": number;
+  /** The limit applied (None = report only). */
+  "limit_bytes"?: number | null;
+};
+
 export type ProjectCloseRequest = Record<string, unknown>;
 
 export type WorldSettings = {
@@ -904,6 +919,8 @@ export interface JdOps {
   "jobs.cancel": { request: JobsCancelRequest; result: JobsCancelResult };
   /** Running jobs with progress (steps done/total, current node) — poll while an evaluation runs */
   "jobs.list": { request: JobsListRequest; result: JobsListResult };
+  /** Evict the oldest cached layer blobs until the project's cache fits `settings.cache_limit_bytes` (the cache is disposable); reports what is left */
+  "project.cache_gc": { request: ProjectCacheGcRequest; result: ProjectCacheGcResult };
   /** Close the open project (unsaved changes stay in the journal) */
   "project.close": { request: ProjectCloseRequest; result: ProjectCloseResult };
   /** Create a new project directory and open it */

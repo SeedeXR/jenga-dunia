@@ -53,7 +53,7 @@ Design points:
 
 ## Cache (`jd-cache`)
 
-**Shipped (Phase 2, slice 1):** whole-layer blobs `<project>/cache/layers/<blake3>.jdl` (magic `JDL1`, width/height/tile/halo header, f32 LE rows) with a JSON index name → hash, written temp-file + rename; `Context::set_layer` writes through and `with_layer` falls back to it, so CLI invocations, MCP sessions and the desktop app share one persisted layer set per project. Target design below (tile-level, SQLite, LRU) replaces it when layers stop fitting in RAM.
+**Shipped (Phase 2, slice 1):** whole-layer blobs `<project>/cache/layers/<blake3>.jdl` (magic `JDL1`, width/height/tile/halo header, f32 LE rows) with a JSON index name → hash, written temp-file + rename; `Context::set_layer` writes through and `with_layer` falls back to it, so CLI invocations, MCP sessions and the desktop app share one persisted layer set per project. **Slice 2:** LRU eviction — the core applies `settings.cache_limit_bytes` (default 2 GB) on every write; `LayerCache::gc` drops blobs oldest-first by modification time (unreferenced blobs before indexed ones, the newest blob never) and prunes the index; a read touches the blob so recently used layers survive; `project.cache_gc` runs it on demand and reports blobs/bytes kept and evicted. Target design below (tile-level, SQLite index) replaces it when layers stop fitting in RAM.
 
 - Content-addressed by blake3 of (node hash, tile coord, lod). Stored under `<project>/cache/` as raw tile blobs (f32 LE) optionally zstd-compressed; index in SQLite (`rusqlite`, bundled) for atomic metadata and LRU accounting.
 - Memory-mapped reads; writes go to a temp file then atomic rename (interrupted-write safety).

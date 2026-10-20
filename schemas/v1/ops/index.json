@@ -80,6 +80,11 @@
     "scope": "none"
   },
   {
+    "id": "project.cache_gc",
+    "description": "Evict the oldest cached layer blobs until the project's cache fits `settings.cache_limit_bytes` (the cache is disposable); reports what is left",
+    "scope": "project-write"
+  },
+  {
     "id": "project.close",
     "description": "Close the open project (unsaved changes stay in the journal)",
     "scope": "project-read"

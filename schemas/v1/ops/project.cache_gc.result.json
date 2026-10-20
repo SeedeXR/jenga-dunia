@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GcReport",
+  "description": "What [`LayerCache::gc`] found and did.",
+  "type": "object",
+  "properties": {
+    "blobs": {
+      "description": "Blobs kept.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "bytes": {
+      "description": "Bytes kept.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "evicted_blobs": {
+      "description": "Blobs removed.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "evicted_bytes": {
+      "description": "Bytes removed.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "limit_bytes": {
+      "description": "The limit applied (None = report only).",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "blobs",
+    "bytes",
+    "evicted_blobs",
+    "evicted_bytes"
+  ]
+}

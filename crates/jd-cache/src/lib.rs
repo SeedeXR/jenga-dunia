@@ -7,9 +7,13 @@
 //! app reopen a project with its layers warm. The cache is disposable: deleting `cache/` never
 //! breaks a project (ADR-0011).
 //!
-//! ponytail: whole-layer blobs, JSON index, no eviction — tile-level blobs, SQLite index and
-//! LRU (06-jobs.md) when layers stop fitting in RAM or the cap in `settings.cache_limit_bytes`
-//! starts to matter.
+//! Eviction: with a byte limit (`settings.cache_limit_bytes`, applied by the core) every `put`
+//! runs [`LayerCache::gc`], which drops blobs oldest-first by modification time — unreferenced
+//! blobs before indexed ones — until the store fits; `get` touches a blob so recently read layers
+//! survive. The newest blob is never evicted, so a single oversized layer still round-trips.
+//!
+//! ponytail: whole-layer blobs, JSON index, mtime as the LRU clock — tile-level blobs and a
+//! SQLite index (06-jobs.md) when layers stop fitting in RAM.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -26,6 +30,24 @@ const HEADER: usize = 4 + 4 * 4; // magic + width, height, tile_size, halo (u32 
 #[derive(Debug, Clone)]
 pub struct LayerCache {
     dir: PathBuf,
+    limit_bytes: Option<u64>,
+}
+
+/// What [`LayerCache::gc`] found and did.
+#[derive(
+    Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct GcReport {
+    /// Blobs kept.
+    pub blobs: u64,
+    /// Bytes kept.
+    pub bytes: u64,
+    /// Blobs removed.
+    pub evicted_blobs: u64,
+    /// Bytes removed.
+    pub evicted_bytes: u64,
+    /// The limit applied (None = report only).
+    pub limit_bytes: Option<u64>,
 }
 
 impl LayerCache {
@@ -33,7 +55,85 @@ impl LayerCache {
     pub fn open(project_root: &Path) -> Self {
         Self {
             dir: project_root.join("cache").join("layers"),
+            limit_bytes: None,
         }
+    }
+
+    /// Evict oldest blobs after every `put` so the store stays within `bytes`.
+    pub fn with_limit(mut self, bytes: u64) -> Self {
+        self.limit_bytes = Some(bytes);
+        self
+    }
+
+    /// Evict blobs (oldest modification time first; unreferenced before indexed) until the store
+    /// fits the limit, dropping index entries of evicted blobs. Without a limit, only reports.
+    pub fn gc(&self) -> JdResult<GcReport> {
+        let mut blobs: Vec<(PathBuf, u64, std::time::SystemTime)> = Vec::new();
+        match fs::read_dir(&self.dir) {
+            Ok(rd) => {
+                for entry in rd {
+                    let entry = entry?;
+                    let path = entry.path();
+                    if path.extension().and_then(|e| e.to_str()) != Some("jdl") {
+                        continue;
+                    }
+                    let meta = entry.metadata()?;
+                    blobs.push((
+                        path,
+                        meta.len(),
+                        meta.modified().unwrap_or(std::time::UNIX_EPOCH),
+                    ));
+                }
+            }
+            Err(e) if e.kind() == ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+        let mut report = GcReport {
+            blobs: blobs.len() as u64,
+            bytes: blobs.iter().map(|b| b.1).sum(),
+            limit_bytes: self.limit_bytes,
+            ..GcReport::default()
+        };
+        let Some(limit) = self.limit_bytes else {
+            return Ok(report);
+        };
+        if report.bytes <= limit {
+            return Ok(report);
+        }
+        let mut index = self.read_index()?;
+        let referenced: std::collections::BTreeSet<String> = index.values().cloned().collect();
+        let newest = blobs.iter().map(|b| b.2).max();
+        let hash_of = |p: &Path| {
+            p.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_owned()
+        };
+        // Unreferenced first, then by age; the newest blob is never a candidate.
+        blobs.sort_by_key(|b| (referenced.contains(&hash_of(&b.0)), b.2));
+        for (path, len, modified) in blobs {
+            if report.bytes <= limit {
+                break;
+            }
+            if Some(modified) == newest {
+                continue;
+            }
+            if let Err(e) = fs::remove_file(&path)
+                && path.exists()
+            {
+                return Err(e.into());
+            }
+            let hash = hash_of(&path);
+            index.retain(|_, h| *h != hash);
+            report.bytes -= len;
+            report.blobs -= 1;
+            report.evicted_bytes += len;
+            report.evicted_blobs += 1;
+        }
+        if report.evicted_blobs > 0 {
+            write_atomic(&self.index_path(), &serde_json::to_vec_pretty(&index)?)?;
+        }
+        Ok(report)
     }
 
     /// Store `hf` under `name`; returns its content hash (hex). Identical fields share one blob.
@@ -55,6 +155,9 @@ impl LayerCache {
         let mut index = self.read_index()?;
         index.insert(name.to_owned(), hash.clone());
         write_atomic(&self.index_path(), &serde_json::to_vec_pretty(&index)?)?;
+        if self.limit_bytes.is_some() {
+            self.gc()?;
+        }
         Ok(hash)
     }
 
@@ -63,11 +166,16 @@ impl LayerCache {
         let Some(hash) = self.read_index()?.remove(name) else {
             return Ok(None);
         };
-        let bytes = match fs::read(self.blob_path(&hash)) {
+        let blob = self.blob_path(&hash);
+        let bytes = match fs::read(&blob) {
             Ok(b) => b,
             Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(e.into()),
         };
+        // LRU clock: a read counts as use (best effort — a read-only cache still works).
+        if let Ok(f) = fs::File::options().write(true).open(&blob) {
+            let _ = f.set_modified(std::time::SystemTime::now());
+        }
         let corrupt = || {
             JdError::new(ErrorCode::E_INTERNAL, format!("cache blob for layer `{name}` is corrupt"))
                 .next("Delete the project's cache/ directory — it is disposable — and re-run the operation.")
@@ -142,6 +250,53 @@ mod tests {
             (70, 50, 32, 4)
         );
         assert_eq!(back.get(69, 49), hf.get(69, 49));
+    }
+
+    #[test]
+    fn limit_evicts_oldest_blobs_first_and_reads_refresh_them() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let blob_bytes = (HEADER + 4 * 64 * 64) as u64; // one 64² layer
+        let cache = LayerCache::open(dir.path()).with_limit(blob_bytes * 3 + 10);
+        let age = |hash: &str, secs: u64| {
+            let f = fs::File::options()
+                .write(true)
+                .open(cache.blob_path(hash))
+                .expect("open");
+            f.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs))
+                .expect("mtime");
+        };
+        let h_a = cache.put("a", &field(1.0)).expect("put");
+        age(&h_a, 100);
+        let h_b = cache.put("b", &field(2.0)).expect("put");
+        age(&h_b, 200);
+        let h_c = cache.put("c", &field(3.0)).expect("put");
+        age(&h_c, 300);
+        // Reading `a` makes it the most recently used.
+        assert!(cache.get("a").expect("get").is_some());
+        // A fourth layer pushes the store over 3 blobs: `b` (oldest untouched) goes, `a` stays.
+        let _h_d = cache.put("d", &field(4.0)).expect("put");
+        assert!(cache.get("b").expect("get").is_none(), "b evicted");
+        assert!(
+            cache.get("a").expect("get").is_some(),
+            "a refreshed by the read"
+        );
+        assert!(cache.get("c").expect("get").is_some());
+        assert!(cache.get("d").expect("get").is_some());
+        let r = cache.gc().expect("gc");
+        assert_eq!((r.blobs, r.evicted_blobs), (3, 0));
+        assert!(r.bytes <= blob_bytes * 3 + 10);
+        // Unreferenced blobs go before indexed ones; an oversized single layer is still kept.
+        let tiny = LayerCache::open(dir.path()).with_limit(1);
+        let r = tiny.gc().expect("gc");
+        assert_eq!(
+            r.blobs, 1,
+            "the newest blob survives a limit it cannot meet"
+        );
+        assert!(tiny.get("d").expect("get").is_some());
+        assert_eq!(
+            LayerCache::open(dir.path()).gc().expect("gc").limit_bytes,
+            None
+        );
     }
 
     #[test]
