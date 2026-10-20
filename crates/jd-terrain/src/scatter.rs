@@ -22,6 +22,11 @@ pub struct ScatterParams {
     /// Seed for the jitter and the density test.
     #[serde(default)]
     pub seed: u64,
+    /// Timeline position 0..1: the population grows over the timeline — every instance has a
+    /// birth time spread across it and matures over the following half; unborn instances are
+    /// not placed, young ones carry `age` < 1 (writers scale by it). Omit for the full-grown population.
+    #[serde(default)]
+    pub time: Option<f32>,
 }
 fn one() -> f32 {
     1.0
@@ -38,6 +43,9 @@ pub struct ScatterPoint {
     pub z: f32,
     /// Deterministic 0..1 value per point for the caller's own variation (scale, rotation).
     pub r: f32,
+    /// Growth 0..1 at the scatter's `time` (1 = mature; always 1 without a timeline). Writers scale by it.
+    #[serde(default = "one")]
+    pub age: f32,
 }
 
 /// splitmix64 — small, fast, deterministic.
@@ -89,6 +97,11 @@ pub fn scatter_points(
     if !(0.0..=1.0).contains(&p.jitter) {
         return Err(JdError::invalid("jitter", "must be within 0..=1"));
     }
+    if let Some(t) = p.time
+        && !(0.0..=1.0).contains(&t)
+    {
+        return Err(JdError::invalid("time", "must be within 0..=1"));
+    }
     if let Some(h) = height
         && (h.width(), h.height()) != (mask.width(), mask.height())
     {
@@ -121,8 +134,16 @@ pub fn scatter_points(
             }
             let density = sample(mask, extent_m, u, v).clamp(0.0, 1.0);
             if keep < density {
+                // Born at `birth` along the timeline, mature half a timeline later.
+                let age = match p.time {
+                    Some(t) => ((t - unit(mix(h ^ 4))) / 0.5).clamp(0.0, 1.0),
+                    None => 1.0,
+                };
+                if age <= 0.0 {
+                    continue;
+                }
                 let z = height.map_or(0.0, |hf| sample(hf, extent_m, u, v));
-                out.push(ScatterPoint { u, v, z, r });
+                out.push(ScatterPoint { u, v, z, r, age });
             }
         }
     }
@@ -151,7 +172,7 @@ pub fn write_points_engine(
                     y_cm,
                     p.z * 100.0,
                     p.r * 360.0,
-                    0.8 + 0.4 * p.r
+                    (0.8 + 0.4 * p.r) * p.age
                 ));
             }
             s.into_bytes()
@@ -163,7 +184,7 @@ pub fn write_points_engine(
                     serde_json::json!({
                         "x": p.u, "y": p.z, "z": p.v,
                         "nx": p.u / extent_m[0] as f32, "nz": p.v / extent_m[1] as f32,
-                        "yaw_deg": p.r * 360.0, "scale": 0.8 + 0.4 * p.r,
+                        "yaw_deg": p.r * 360.0, "scale": (0.8 + 0.4 * p.r) * p.age, "age": p.age,
                     })
                 })
                 .collect();
@@ -271,9 +292,13 @@ pub fn write_points_with(
         .map(|e| e.to_ascii_lowercase());
     let bytes = match ext.as_deref() {
         Some("csv") => {
-            let mut s = String::from("u,v,z,r\n");
+            let mut s = String::from("u,v,z,r,age\n");
             for p in points {
-                s.push_str(&format!("{},{},{},{}\n", p.u, p.v, p.z, p.r));
+                s.push_str(&format!(
+                    "{},{},{},{},{}
+",
+                    p.u, p.v, p.z, p.r, p.age
+                ));
             }
             s.into_bytes()
         }
@@ -360,7 +385,7 @@ fn write_instances_glb(
     }
     let sc_off = bin.len();
     for p in points {
-        let s = 0.75 + 0.5 * (p.r * 7.31).fract();
+        let s = (0.75 + 0.5 * (p.r * 7.31).fract()) * p.age; // young instances are small
         f32s(&mut bin, &[s, s, s]);
     }
     let n = points.len();
@@ -415,12 +440,70 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_population_grows_over_the_timeline() {
+        let mut mask = Heightfield::new(32, 32, 64, 0).expect("mask");
+        mask.fill_with(|_, _| 1.0);
+        let at = |time: Option<f32>| {
+            scatter_points(
+                &mask,
+                None,
+                [320.0, 320.0],
+                &ScatterParams {
+                    spacing_m: 20.0,
+                    jitter: 1.0,
+                    seed: 3,
+                    time,
+                },
+            )
+            .expect("scatter")
+        };
+        let (full, t0, t_half, t1) = (at(None), at(Some(0.0)), at(Some(0.5)), at(Some(1.0)));
+        assert_eq!(full.len(), 256);
+        assert!(full.iter().all(|p| p.age == 1.0));
+        assert!(t0.len() < 4, "almost nobody is born at t = 0: {}", t0.len());
+        assert!(
+            t_half.len() > t0.len() && t_half.len() < t1.len(),
+            "{} {} {}",
+            t0.len(),
+            t_half.len(),
+            t1.len()
+        );
+        assert_eq!(t1.len(), full.len(), "everyone is born by t = 1");
+        assert!(
+            t1.iter().any(|p| p.age < 1.0) && t1.iter().any(|p| p.age == 1.0),
+            "young and mature at t = 1"
+        );
+        assert!(t1.iter().all(|p| p.age > 0.0 && p.age <= 1.0));
+        // Same positions as the full population, just filtered: growth never moves an instance.
+        assert!(
+            t1.iter()
+                .zip(&full)
+                .all(|(a, b)| (a.u, a.v, a.r) == (b.u, b.v, b.r))
+        );
+        assert!(
+            scatter_points(
+                &mask,
+                None,
+                [320.0, 320.0],
+                &ScatterParams {
+                    spacing_m: 20.0,
+                    jitter: 1.0,
+                    seed: 3,
+                    time: Some(1.5)
+                }
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn engine_formats_follow_the_profiles_conventions() {
         let pts = [ScatterPoint {
             u: 10.0,
             v: 30.0,
             z: 5.0,
             r: 0.25,
+            age: 1.0,
         }];
         let dir = tempfile::tempdir().expect("tmp");
         let ue = dir.path().join("ue.csv");
@@ -454,6 +537,7 @@ mod tests {
             v,
             z: 0.0,
             r: 0.5,
+            age: 1.0,
         };
         let mut h = 7u64;
         let mut rnd = || {
@@ -501,6 +585,7 @@ mod tests {
             spacing_m: 10.0,
             jitter: 1.0,
             seed: 7,
+            time: None,
         };
         let pts = scatter_points(&full, None, [640.0, 640.0], &p).expect("scatter");
         assert_eq!(pts.len(), 64 * 64, "density 1 keeps every candidate");
@@ -554,7 +639,7 @@ mod tests {
         let ext = [640.0, 640.0];
         let n = write_points(&dir.path().join("p.csv"), &g[..3], ext).expect("csv");
         let txt = std::fs::read_to_string(dir.path().join("p.csv")).expect("read");
-        assert!(txt.starts_with("u,v,z,r\n5,5,") && n as usize == txt.len());
+        assert!(txt.starts_with("u,v,z,r,age\n5,5,") && n as usize == txt.len());
         write_points(&dir.path().join("p.json"), &g[..3], ext).expect("json");
         assert!(write_points(&dir.path().join("p.txt"), &g[..3], ext).is_err());
         // GLB instances: valid container, one instancing node, translations in the mesh frame.

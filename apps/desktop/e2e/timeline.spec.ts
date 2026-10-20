@@ -72,6 +72,24 @@ test.describe("timeline against the real core", () => {
     // Undo takes the time back to 0 (journaled like any edit).
     await page.getByTestId("graph-undo").click();
     await expect(page.getByTestId("graph-time-value")).toHaveText("0.00");
+    // Ecosystem growth: scatter follows the timeline — nobody is born at t = 0, the population is in by t = 1.
+    await page.getByTestId("scatter-mask").selectOption("height");
+    await page.getByTestId("scatter-spacing").fill("40");
+    await page.getByTestId("scatter-grow").check();
+    await page.getByTestId("scatter-place").click();
+    await expect(page.getByTestId("log")).toContainText("terrain.scatter: ok");
+    await expect(page.getByTestId("scatter-count")).toHaveText("0 instances");
+    await page.getByTestId("graph-time").evaluate((el) => {
+      const input = el as HTMLInputElement;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(input, "1");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await expect(page.getByTestId("graph-time-value")).toHaveText("1.00");
+    await expect.poll(async () => Number((await page.getByTestId("scatter-count").textContent())?.replace(/\D/g, "") ?? 0), { timeout: 30_000 }).toBeGreaterThan(100);
+    await page.screenshot({ path: testInfo.outputPath("timeline-growth.png") }); // tutorial image source
+    await page.getByTestId("graph-undo").click();
+    await expect(page.getByTestId("graph-time-value")).toHaveText("0.00");
     // Export frames: four heightmaps from t = 0 to 1 through timeline.export, the project's time untouched.
     const frames = page.getByTestId("frames-count");
     await frames.fill("4");

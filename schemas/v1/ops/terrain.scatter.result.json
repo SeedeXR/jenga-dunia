@@ -75,6 +75,12 @@
           "description": "Deterministic 0..1 value per point for the caller's own variation (scale, rotation).",
           "type": "number",
           "format": "float"
+        },
+        "age": {
+          "description": "Growth 0..1 at the scatter's `time` (1 = mature; always 1 without a timeline). Writers scale by it.",
+          "type": "number",
+          "format": "float",
+          "default": 1.0
         }
       },
       "required": [

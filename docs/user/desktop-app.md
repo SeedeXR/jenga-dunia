@@ -193,6 +193,10 @@ Undo and redo are operations like everything else (`graph.undo` / `graph.redo`, 
 
 *Any parameter can be keyframed: type `t:v, t:v` in its inspector field — `0:1, 1:300` keys a thermal node from one step to three hundred over the timeline — and the node summary shows ⏱ with the key count (1). The slider in the graph toolbar (2) is the timeline position: moving it journals one `graph.set_time` per drag (undo takes it back), and the live preview re-evaluates with the parameters resolved at that time — numbers interpolate, choices step. Scrubbing back is instant because each time position caches on its own. The UI-driven test `apps/desktop/e2e/timeline.spec.ts` keys a thermal node, scrubs to 1.0 and checks the published height's hash changes.*
 
+![Timeline at 1.00 with a scattered population placed from the height layer: cones of many sizes on the terrain, the scatter count in the panel](images/desktop-timeline-growth.png)
+
+*Ecosystem growth: with **Grow with timeline** ticked, scatter instances follow the timeline — place a population with the slider at 0 and the count reads 0 (nobody born yet); scrub to 1 and the viewport fills with cones of mixed sizes, the young ones small (1). **Grow with timeline** is the opt-in (2) and the scatter panel's count follows the time (3). Each instance keeps its place; the timeline only decides whether it exists yet and how grown it is (`terrain.scatter {follow_time}`).*
+
 **Export frames.** The Export section's **Export frames** button (with a frame count beside it, default 24) writes `exports/frames/height_0000.png …` through `timeline.export`: one 16-bit heightmap per evenly spaced time from 0 to 1, every keyframed parameter animating, one shared height range so the sequence does not flicker, the project's own time untouched. `ffmpeg -framerate 8 -i height_%04d.png …` turns it into a clip (`videos/timeline-dunes.mp4` is one made this way from the CLI). UI-driven check: `apps/desktop/e2e/timeline.spec.ts`.
 
 ## Desert landscapes

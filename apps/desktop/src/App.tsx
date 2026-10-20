@@ -498,6 +498,9 @@ export default function App() {
           <Field label="Seed">
             <input className={inputCls} type="number" value={s.scatter.seed} onChange={(e) => s.setScatter({ seed: Number(e.target.value) })} data-testid="scatter-seed" />
           </Field>
+          <Field label="Grow with timeline">
+            <input type="checkbox" checked={s.scatter.grow} onChange={(e) => s.setScatter({ grow: e.target.checked })} title="The population follows the timeline: nobody at t = 0, saplings as it advances, full-grown by t = 1; off = always full-grown" data-testid="scatter-grow" />
+          </Field>
           <div className="flex items-center gap-2 py-1">
             <button className="btn" onClick={() => void s.placeScatter()} disabled={!s.scatter.mask || s.busy} title="Place instances from the mask (one jittered candidate per spacing cell, kept with probability = mask value)" data-testid="scatter-place">
               Place

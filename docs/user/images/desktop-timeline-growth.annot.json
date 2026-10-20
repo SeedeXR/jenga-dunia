@@ -1,0 +1,10 @@
+{
+  "src": "../../../apps/desktop/test-results/timeline-timeline-against--ba104-er-re-evaluates-the-terrain/timeline-growth.png",
+  "out": "desktop-timeline-growth.png",
+  "annotations": [
+    { "type": "box", "x": 626, "y": 446, "w": 128, "h": 24, "label": "1", "text": "timeline scrubbed to 1.00: the population has grown in", "tx": 290, "ty": 500 },
+    { "type": "box", "x": 1166, "y": 265, "w": 92, "h": 20, "label": "2", "text": "Grow with timeline: ticked", "tx": 1150, "ty": 283, "anchor": "end" },
+    { "type": "box", "x": 1356, "y": 291, "w": 76, "h": 28, "label": "3", "text": "count follows the time: 0 at t = 0", "tx": 1150, "ty": 322, "anchor": "end" },
+    { "type": "arrow", "x1": 760, "y1": 400, "x2": 600, "y2": 300, "text": "cones of mixed sizes: the young ones are small", "tx": 640, "ty": 425 }
+  ]
+}

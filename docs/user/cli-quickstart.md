@@ -331,6 +331,8 @@ $ jd --json op terrain.scatter --project Bio.jdproj --params '{"mask":"forest","
 
 ![Biome map with yellow tree points covering exactly the forest class](images/cli-scatter.png)
 
+**Growth over the timeline.** Give `terrain.scatter` a `time` (0..1) — or `follow_time: true` to use the project's own timeline position — and the population grows: every candidate has a birth time spread across the timeline and matures over the following half, so nothing stands at t = 0, saplings appear as the time advances (`age` < 1 in every output, and the GLB / engine scales shrink with it), and the full-grown population is in place by t = 1 — VUE's dynamic EcoSystems as a scatter parameter. Positions never move: growth only filters and scales the same deterministic set (unit test: 256 candidates → 0–3 at t = 0, all 256 at t = 1 with young and mature mixed). In the desktop, tick **Grow with timeline** in the Scatter panel and the preview follows the slider — scrubbing regrows the forest in the viewport (`apps/desktop/e2e/timeline.spec.ts`); untick it and the population is always full-grown.
+
 **Engine instance formats.** `engine` writes `path` in the engine's own conventions — the same axes and row order as `terrain.export_profile`, so instances land on the imported terrain:
 
 ```

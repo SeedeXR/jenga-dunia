@@ -50,7 +50,7 @@ interface Props {
   maps?: { albedo: ImageBitmap; normal: ImageBitmap; roughness: ImageBitmap; px: [number, number] } | null;
   /** Scatter instances (layer metres: u east, v north from the south edge, z height, r 0..1) drawn as
    *  `sizeM`-tall cones — a preview marker, the exported GLB carries 1 m proxies. */
-  instances?: { points: { u: number; v: number; z: number; r: number }[]; sizeM: number } | null;
+  instances?: { points: { u: number; v: number; z: number; r: number; age?: number }[]; sizeM: number } | null;
 }
 
 function isWebGPU(r: WebGPURenderer): boolean {
@@ -696,7 +696,7 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
       const scl = new THREE.Vector3();
       const up = new THREE.Vector3(0, 1, 0);
       instances.points.forEach((p, i) => {
-        const k = instances.sizeM * (0.75 + 0.5 * ((p.r * 7.31) % 1));
+        const k = instances.sizeM * (0.75 + 0.5 * ((p.r * 7.31) % 1)) * (p.age ?? 1); // young instances are small
         m.compose(pos.set(p.u - extentM[0] / 2, p.z, extentM[1] / 2 - p.v), q.setFromAxisAngle(up, 2 * Math.PI * p.r), scl.set(k, k, k));
         mesh.setMatrixAt(i, m);
       });

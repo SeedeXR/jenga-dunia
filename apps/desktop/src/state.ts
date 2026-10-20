@@ -91,8 +91,8 @@ interface State {
   sky: { bitmap: ImageBitmap; px: [number, number] } | null;
   refreshSky: () => Promise<void>;
   /** Scatter preview: instances placed from a 0..1 mask layer and drawn in the viewport; export writes a GLB. */
-  scatter: { mask: string | null; spacing_m: number; seed: number; points: ScatterPoint[] | null };
-  setScatter: (patch: Partial<{ mask: string | null; spacing_m: number; seed: number }>) => void;
+  scatter: { mask: string | null; spacing_m: number; seed: number; grow: boolean; points: ScatterPoint[] | null };
+  setScatter: (patch: Partial<{ mask: string | null; spacing_m: number; seed: number; grow: boolean }>) => void;
   placeScatter: () => Promise<void>;
   exportScatter: () => Promise<void>;
   setBrush: (patch: Partial<{ radius_m: number; strength_m: number; mode: "raise" | "smooth" | "flatten"; amount: number }>) => void;
@@ -283,7 +283,8 @@ export const useStore = create<State>((set, get) => {
   const scatterReq = () => {
     const { scatter, lastEval } = get();
     const names = Object.keys(lastEval?.layers ?? {});
-    return { mask: scatter.mask ?? "", height: names.includes("height") ? "height" : (names[0] ?? "height"), spacing_m: scatter.spacing_m, seed: scatter.seed };
+    // grow: the population follows the timeline (opt-in — at t = 0 nobody is born yet); scrubbing re-places it at the new time.
+    return { mask: scatter.mask ?? "", height: names.includes("height") ? "height" : (names[0] ?? "height"), spacing_m: scatter.spacing_m, seed: scatter.seed, follow_time: scatter.grow };
   };
   // Scatter instances follow the evaluation: re-placed while the mask is still published, dropped otherwise.
   const refreshScatter = async () => {
@@ -513,7 +514,7 @@ export const useStore = create<State>((set, get) => {
         logFailure("sky.preview", e);
       }
     },
-    scatter: { mask: null, spacing_m: 40, seed: 1, points: null },
+    scatter: { mask: null, spacing_m: 40, seed: 1, grow: false, points: null },
     setScatter: (patch) => set((s) => ({ scatter: { ...s.scatter, ...patch, points: null } })),
     placeScatter: async () => {
       if (!get().scatter.mask) return;

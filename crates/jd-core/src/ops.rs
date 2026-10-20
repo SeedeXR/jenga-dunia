@@ -3398,6 +3398,9 @@ pub mod terrain {
         /// Keep clear of an earlier scatter: no point within `radius_m` of any instance in that CSV (ecosystem layers that exclude each other).
         #[serde(default)]
         pub avoid: Option<ScatterAvoid>,
+        /// Use the project's timeline position as the scatter `time` when `time` is not given (the desktop's live preview: scrub the timeline and the population grows).
+        #[serde(default)]
+        pub follow_time: bool,
         /// Write `path` in an engine's own conventions instead of the plain formats: `unreal` → DataTable CSV in centimetres (X east, Y south, Z up, Yaw, Scale), `unity` → JSON in the Terrain's local metres (x east, y up, z north, nx/nz normalised).
         #[serde(default)]
         pub engine: Option<jd_terrain::EngineProfile>,
@@ -4014,9 +4017,13 @@ pub mod terrain {
                 })?;
                 // Two layers: clone the mask out first (the layer lock is not re-entrant).
                 let mask = ctx.with_layer(&p.mask, |hf| Ok(hf.clone()))?;
+                let mut scatter = p.scatter.clone();
+                if scatter.time.is_none() && p.follow_time {
+                    scatter.time = Some(ctx.with_project(|pr| Ok(pr.graph.time))?);
+                }
                 let points = match &p.height {
-                    Some(h) => ctx.with_layer(h, |hf| jd_terrain::scatter_points(&mask, Some(hf), extent, &p.scatter))?,
-                    None => jd_terrain::scatter_points(&mask, None, extent, &p.scatter)?,
+                    Some(h) => ctx.with_layer(h, |hf| jd_terrain::scatter_points(&mask, Some(hf), extent, &scatter))?,
+                    None => jd_terrain::scatter_points(&mask, None, extent, &scatter)?,
                 };
                 let placed = points.len() as u64;
                 let points = match (&p.avoid, avoid_csv) {

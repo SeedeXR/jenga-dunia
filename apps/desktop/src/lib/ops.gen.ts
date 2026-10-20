@@ -1198,6 +1198,8 @@ back in the result instead (viewport preview; at most 200 000). */
   "rock"?: RockParams | null;
   /** Keep clear of an earlier scatter: no point within `radius_m` of any instance in that CSV (ecosystem layers that exclude each other). */
   "avoid"?: ScatterAvoid | null;
+  /** Use the project's timeline position as the scatter `time` when `time` is not given (the desktop's live preview: scrub the timeline and the population grows). */
+  "follow_time"?: boolean;
   /** Write `path` in an engine's own conventions instead of the plain formats: `unreal` → DataTable CSV in centimetres (X east, Y south, Z up, Yaw, Scale), `unity` → JSON in the Terrain's local metres (x east, y up, z north, nx/nz normalised). */
   "engine"?: EngineProfile | null;
   /** Target spacing between points in metres (grid cell size); must be ≥ one sample spacing. */
@@ -1206,6 +1208,10 @@ back in the result instead (viewport preview; at most 200 000). */
   "jitter"?: number;
   /** Seed for the jitter and the density test. */
   "seed"?: number;
+  /** Timeline position 0..1: the population grows over the timeline — every instance has a
+birth time spread across it and matures over the following half; unborn instances are
+not placed, young ones carry `age` < 1 (writers scale by it). Omit for the full-grown population. */
+  "time"?: number | null;
 };
 
 export type ScatterPoint = {
@@ -1217,6 +1223,8 @@ export type ScatterPoint = {
   "z": number;
   /** Deterministic 0..1 value per point for the caller's own variation (scale, rotation). */
   "r": number;
+  /** Growth 0..1 at the scatter's `time` (1 = mature; always 1 without a timeline). Writers scale by it. */
+  "age"?: number;
 };
 
 export type TerrainScatterResult = {
