@@ -17,6 +17,13 @@
       "format": "uint64",
       "minimum": 0
     },
+    "excluded": {
+      "description": "Points dropped for `avoid` (within its radius of an earlier layer).",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0,
+      "default": 0
+    },
     "bytes": {
       "description": "Bytes written (0 inline).",
       "type": "integer",

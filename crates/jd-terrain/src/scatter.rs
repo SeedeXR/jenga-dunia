@@ -129,6 +129,66 @@ pub fn scatter_points(
     Ok(out)
 }
 
+/// Drop every point within `radius_m` of any of `others` — ecosystem layers that exclude each
+/// other (trees keep clear of the rocks placed before them). Hash grid of `radius_m` cells, so a
+/// point checks nine buckets. Returns the survivors in their original order.
+pub fn exclude_near(
+    points: Vec<ScatterPoint>,
+    others: &[[f32; 2]],
+    radius_m: f32,
+) -> JdResult<Vec<ScatterPoint>> {
+    if !(radius_m > 0.0 && radius_m.is_finite()) {
+        return Err(JdError::invalid("radius_m", "must be positive"));
+    }
+    if others.is_empty() {
+        return Ok(points);
+    }
+    let cell = |x: f32| (x / radius_m).floor() as i64;
+    let mut grid: std::collections::HashMap<(i64, i64), Vec<[f32; 2]>> =
+        std::collections::HashMap::new();
+    for q in others {
+        grid.entry((cell(q[0]), cell(q[1]))).or_default().push(*q);
+    }
+    let r2 = radius_m * radius_m;
+    Ok(points
+        .into_iter()
+        .filter(|p| {
+            let (cx, cy) = (cell(p.u), cell(p.v));
+            !(-1..=1).any(|dx| {
+                (-1..=1).any(|dy| {
+                    grid.get(&(cx + dx, cy + dy)).is_some_and(|b| {
+                        b.iter()
+                            .any(|q| (q[0] - p.u).powi(2) + (q[1] - p.v).powi(2) < r2)
+                    })
+                })
+            })
+        })
+        .collect())
+}
+
+/// Read the `u,v` columns of a scatter CSV (`u,v,z,r` header) back as positions.
+pub fn read_points_csv(path: &std::path::Path) -> JdResult<Vec<[f32; 2]>> {
+    let text = std::fs::read_to_string(path)?;
+    let mut out = Vec::new();
+    for (n, line) in text.lines().enumerate().skip(1) {
+        let mut cols = line.split(',');
+        let (u, v) = (
+            cols.next().and_then(|c| c.trim().parse::<f32>().ok()),
+            cols.next().and_then(|c| c.trim().parse::<f32>().ok()),
+        );
+        match (u, v) {
+            (Some(u), Some(v)) if u.is_finite() && v.is_finite() => out.push([u, v]),
+            _ => {
+                return Err(JdError::new(
+                    jd_types::ErrorCode::E_FORMAT_CORRUPT,
+                    format!("{}: line {} is not `u,v,…`", path.display(), n + 1),
+                ));
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// Write points as CSV (`u,v,z,r` header), JSON (array of objects) or GLB (one proxy mesh
 /// instanced with `EXT_mesh_gpu_instancing`), by extension. `extent_m` places GLB instances in
 /// the terrain mesh frame (+X east, +Y up, +Z south, world-centred).
@@ -297,6 +357,52 @@ fn write_instances_glb(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exclusion_matches_brute_force_and_csv_round_trips() {
+        let pt = |u: f32, v: f32| ScatterPoint {
+            u,
+            v,
+            z: 0.0,
+            r: 0.5,
+        };
+        let mut h = 7u64;
+        let mut rnd = || {
+            h = mix(h);
+            unit(h) * 1000.0
+        };
+        let points: Vec<ScatterPoint> = (0..2000).map(|_| pt(rnd(), rnd())).collect();
+        let others: Vec<[f32; 2]> = (0..300).map(|_| [rnd(), rnd()]).collect();
+        let kept = exclude_near(points.clone(), &others, 25.0).expect("exclude");
+        let brute: Vec<ScatterPoint> = points
+            .iter()
+            .copied()
+            .filter(|p| {
+                others
+                    .iter()
+                    .all(|q| (q[0] - p.u).powi(2) + (q[1] - p.v).powi(2) >= 625.0)
+            })
+            .collect();
+        assert_eq!(kept, brute);
+        assert!(
+            kept.len() < points.len() && !kept.is_empty(),
+            "{} of {}",
+            kept.len(),
+            points.len()
+        );
+        assert_eq!(
+            exclude_near(points.clone(), &[], 25.0).expect("none").len(),
+            points.len()
+        );
+        assert!(exclude_near(points.clone(), &others, 0.0).is_err());
+        let dir = tempfile::tempdir().expect("tmp");
+        let csv = dir.path().join("o.csv");
+        let as_points: Vec<ScatterPoint> = others.iter().map(|q| pt(q[0], q[1])).collect();
+        write_points_with(&csv, &as_points, [1000.0, 1000.0], None).expect("csv");
+        assert_eq!(read_points_csv(&csv).expect("read"), others);
+        std::fs::write(&csv, "u,v,z,r\n1,x,0,0\n").expect("write");
+        assert!(read_points_csv(&csv).is_err());
+    }
 
     #[test]
     fn density_controls_count_points_stay_inside_and_results_are_deterministic() {

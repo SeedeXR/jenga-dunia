@@ -3271,9 +3271,22 @@ pub mod terrain {
         /// Instance a generated rock (seeded from the scatter seed) instead of the 1 m cone proxy in `.glb` output.
         #[serde(default)]
         pub rock: Option<jd_terrain::RockParams>,
+        /// Keep clear of an earlier scatter: no point within `radius_m` of any instance in that CSV (ecosystem layers that exclude each other).
+        #[serde(default)]
+        pub avoid: Option<ScatterAvoid>,
         /// Spacing, jitter, seed.
         #[serde(flatten)]
         pub scatter: jd_terrain::ScatterParams,
+    }
+
+    /// An earlier scatter layer to keep clear of.
+    #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct ScatterAvoid {
+        /// Its `.csv` (`u,v,z,r`); relative paths resolve against the project's `exports/`.
+        pub csv: PathBuf,
+        /// Exclusion radius around each of its instances, metres (> 0).
+        pub radius_m: f32,
     }
 
     fn default_layer_opt() -> Option<String> {
@@ -3287,6 +3300,9 @@ pub mod terrain {
         pub path: Option<PathBuf>,
         /// Points placed.
         pub count: u64,
+        /// Points dropped for `avoid` (within its radius of an earlier layer).
+        #[serde(default)]
+        pub excluded: u64,
         /// Bytes written (0 inline).
         pub bytes: u64,
         /// Grid spacing used.
@@ -3856,9 +3872,9 @@ pub mod terrain {
             "Scatter instance points over the world from a 0..1 density mask layer (stratified jittered grid, deterministic by seed): write CSV / JSON / GLB instances to `path`, or return the points when `path` is omitted",
             Scope::Export,
             |ctx, p| {
-                let (path, extent) = ctx.with_project(|proj| {
-                    let path = p.path.as_ref().map(|f| if f.is_absolute() { f.clone() } else { proj.root().join("exports").join(f) });
-                    Ok((path, proj.doc.world.extent_m))
+                let (path, extent, avoid_csv) = ctx.with_project(|proj| {
+                    let under = |f: &PathBuf| if f.is_absolute() { f.clone() } else { proj.root().join("exports").join(f) };
+                    Ok((p.path.as_ref().map(under), proj.doc.world.extent_m, p.avoid.as_ref().map(|a| under(&a.csv))))
                 })?;
                 // Two layers: clone the mask out first (the layer lock is not re-entrant).
                 let mask = ctx.with_layer(&p.mask, |hf| Ok(hf.clone()))?;
@@ -3866,7 +3882,13 @@ pub mod terrain {
                     Some(h) => ctx.with_layer(h, |hf| jd_terrain::scatter_points(&mask, Some(hf), extent, &p.scatter))?,
                     None => jd_terrain::scatter_points(&mask, None, extent, &p.scatter)?,
                 };
+                let placed = points.len() as u64;
+                let points = match (&p.avoid, avoid_csv) {
+                    (Some(a), Some(csv)) => jd_terrain::exclude_near(points, &jd_terrain::read_points_csv(&csv)?, a.radius_m)?,
+                    _ => points,
+                };
                 let count = points.len() as u64;
+                let excluded = placed - count;
                 let (bytes, points) = match &path {
                     Some(f) => {
                         let rock = p.rock.as_ref().map(|r| jd_terrain::rock_mesh(&jd_terrain::RockParams { seed: r.seed ^ p.scatter.seed, ..r.clone() })).transpose()?;
@@ -3878,7 +3900,7 @@ pub mod terrain {
                     }
                     None => (0, Some(points)),
                 };
-                Ok((ScatterReport { path, count, bytes, spacing_m: p.scatter.spacing_m, points }, Vec::new()))
+                Ok((ScatterReport { path, count, excluded, bytes, spacing_m: p.scatter.spacing_m, points }, Vec::new()))
             },
         );
         r.register::<TerrainExport, ExportReport, _>(

@@ -331,6 +331,16 @@ $ jd --json op terrain.scatter --project Bio.jdproj --params '{"mask":"forest","
 
 ![Biome map with yellow tree points covering exactly the forest class](images/cli-scatter.png)
 
+**Layers that exclude each other.** A second scatter can keep clear of an earlier one — VUE's EcoSystem layers, where trees never grow through the rocks placed before them. `avoid` names the earlier layer's `.csv` and a radius; every candidate within it is dropped (hash-grid test, so thousands of rocks cost nothing):
+
+```
+$ jd --json op terrain.scatter --project Acceptance.jdproj --params '{"mask":"mask_rock","height":"height","spacing_m":60,"seed":3,"path":"rocks.csv"}'
+{"status":"ok","result":{"count":5907,…}}
+$ jd --json op terrain.scatter --project Acceptance.jdproj --params '{"mask":"mask_forest","height":"height","spacing_m":30,"seed":1,"path":"trees.csv","avoid":{"csv":"rocks.csv","radius_m":25}}'
+{"status":"ok","result":{"count":1523,"excluded":624,…}}
+trees without avoid: 2147, nearest rock 1.4 m   ·   with avoid: 1523 (624 dropped), nearest rock 25.0 m
+```
+
 **Instances as a GLB.** Give `terrain.scatter` a `.glb` path and it writes one 1 m proxy pyramid instanced with `EXT_mesh_gpu_instancing`: per instance a translation in the terrain-mesh frame (metres, +Y up, world-centred — drop it next to `jd export mesh` output and the points sit on the surface), a yaw from `r` and a 0.75..1.25 uniform scale. Engines and DCCs that read the extension (Blender, three.js, glTFast) swap the proxy for the real asset and keep the transforms.
 
 ```

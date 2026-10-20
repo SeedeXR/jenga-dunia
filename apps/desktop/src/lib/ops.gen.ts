@@ -1158,6 +1158,13 @@ export type RockParams = {
   "flatten"?: number;
 };
 
+export type ScatterAvoid = {
+  /** Its `.csv` (`u,v,z,r`); relative paths resolve against the project's `exports/`. */
+  "csv": string;
+  /** Exclusion radius around each of its instances, metres (> 0). */
+  "radius_m": number;
+};
+
 export type TerrainScatterRequest = {
   /** 0..1 density mask layer (a biome class mask, wetness, a painted mask…). */
   "mask": string;
@@ -1169,6 +1176,8 @@ back in the result instead (viewport preview; at most 200 000). */
   "path"?: string | null;
   /** Instance a generated rock (seeded from the scatter seed) instead of the 1 m cone proxy in `.glb` output. */
   "rock"?: RockParams | null;
+  /** Keep clear of an earlier scatter: no point within `radius_m` of any instance in that CSV (ecosystem layers that exclude each other). */
+  "avoid"?: ScatterAvoid | null;
   /** Target spacing between points in metres (grid cell size); must be ≥ one sample spacing. */
   "spacing_m": number;
   /** Random offset inside the cell, 0 (regular grid) .. 1 (anywhere in the cell). */
@@ -1193,6 +1202,8 @@ export type TerrainScatterResult = {
   "path"?: string | null;
   /** Points placed. */
   "count": number;
+  /** Points dropped for `avoid` (within its radius of an earlier layer). */
+  "excluded"?: number;
   /** Bytes written (0 inline). */
   "bytes": number;
   /** Grid spacing used. */

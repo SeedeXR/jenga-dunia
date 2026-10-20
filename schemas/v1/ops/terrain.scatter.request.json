@@ -36,6 +36,18 @@
       ],
       "default": null
     },
+    "avoid": {
+      "description": "Keep clear of an earlier scatter: no point within `radius_m` of any instance in that CSV (ecosystem layers that exclude each other).",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ScatterAvoid"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "spacing_m": {
       "description": "Target spacing between points in metres (grid cell size); must be ≥ one sample spacing.",
       "type": "number",
@@ -100,6 +112,26 @@
         }
       },
       "additionalProperties": false
+    },
+    "ScatterAvoid": {
+      "description": "An earlier scatter layer to keep clear of.",
+      "type": "object",
+      "properties": {
+        "csv": {
+          "description": "Its `.csv` (`u,v,z,r`); relative paths resolve against the project's `exports/`.",
+          "type": "string"
+        },
+        "radius_m": {
+          "description": "Exclusion radius around each of its instances, metres (> 0).",
+          "type": "number",
+          "format": "float"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "csv",
+        "radius_m"
+      ]
     }
   }
 }
