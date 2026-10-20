@@ -1412,6 +1412,12 @@ export type NodeParams_jd_erosion_aeolian_1 = {
   /** Compass direction the wind blows from, degrees clockwise from north (270 = westerly). In a
 graph, unset → the world's shared wind. */
   "wind_azimuth_deg"?: number;
+  /** Second wind direction, degrees clockwise from north, for a bimodal regime: linear (seif)
+dunes grow along the bisector of two winds, star dunes where they diverge further. Unset =
+one wind. */
+  "wind2_azimuth_deg"?: number | null;
+  /** Share of the steps blown by the second wind, 0..1 (a seeded sequence, so reproducible). */
+  "wind2_share"?: number;
   /** Saltation hop length in metres (≥ one cell). Default: 4 cells. */
   "hop_m"?: number | null;
   /** Slab thickness in metres (> 0). Default: a quarter of the cell size — thinner slabs never

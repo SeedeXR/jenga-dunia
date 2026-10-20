@@ -32,7 +32,7 @@ pub mod spline;
 pub mod strata;
 pub mod yardang;
 
-pub use aeolian::{AeolianParams, aeolian_transport};
+pub use aeolian::{AeolianParams, aeolian_transport, aeolian_transport_with};
 pub use bathymetry::{BathymetryParams, bathymetry};
 pub use climate::{SnowParams, snow_cover};
 pub use coastal::{CoastalParams, coastal_erode};

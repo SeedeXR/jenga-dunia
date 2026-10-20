@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "format": "png16",
+  "size_px": [
+    256,
+    256
+  ],
+  "range_m": [
+    -80.0,
+    95.0
+  ],
+  "flip_y": true,
+  "byte_order": "little-endian",
+  "units": "metres; pixel spacing per project world settings",
+  "generator": "jenga-dunia 0.0.1"
+}

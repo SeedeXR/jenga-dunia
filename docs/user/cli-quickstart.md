@@ -385,6 +385,19 @@ aeolian node 14.5 s for 256² × 200 steps (debug build; 10 m cells, default 2.5
 
 `jd.erosion.aeolian@1` is Werner's slab model (1995), the cellular automaton behind dune simulation: every step visits each cell in a seeded shuffle; a cell that holds sand and is not in a *wind shadow* (a lee slope steeper than `shadow_deg` seen along the wind) loses a slab of `slab_m`, which hops `hop_m` downwind and sticks with probability `deposit_on_sand` on sand, `deposit_on_bare` on bare ground, always in a shadow; after every move the angle of repose (`repose_deg`, 34° for dry sand) is enforced around the changed cell — down from it and down onto it from an uphill neighbour — which is where the slip faces come from. It is a *lattice* model: a slab has to be comparable to `cell × tan(shadow_deg)` for shadows to form at all (0.3 m slabs on 10 m cells only roughened the sheet into hummocks in the first run), so the defaults follow the sample spacing — slab = cell / 4, hop = 4 cells — and the unit test checks that the along-wind roughness ends up more than twice the across-wind roughness, i.e. ridges transverse to the wind. The optional `sand` input (0..1) scales erodibility and marks what counts as sand, so a mask from `jd.biome.classify@1` keeps rock in place. The field wraps around at its edges so the mass balance is exact (above: identical means). The result depends only on `seed`. One wind direction and one grain size for now; bimodal winds (seif dunes) and vegetation anchoring belong to the weather timeline.
 
+**Two winds, and vegetation.** A second wind (`wind2_azimuth_deg`, blowing `wind2_share` of the steps in a seeded sequence) turns the transverse ridges into the dune forms of a bimodal regime; a `vegetation` mask (0..1) on the node's third input holds the sand — a covered cell gives up slabs only in proportion to its bare fraction and catches every slab that lands on it:
+
+```
+$ jd op graph.set_param --project Dunes.jdproj --save --params '{"id":"<aeolian>","key":"wind2_azimuth_deg","value":0}'      # + wind2_share 0.5 (default)
+# a 0..1 fBm field (seed 9, 600 m features) → aeolian.vegetation for the third run
+westerly only          hash 12911047…  min −75.2  max  92.3  mean 19.96 m    transverse ridges across the wind
+westerly + northerly   hash c76db614…  min −91.3  max 100.4  mean 19.96 m    a reticulate network of ridges in both orientations
+westerly + vegetation  hash 69f62284…  min −80.7  max 151.8  mean 19.96 m    sand piles against the cover: anchored mounds, nothing lost
+256² × 300 steps: 24–25 s each (debug build); every run keeps the mean to the centimetre
+```
+
+![Westerly only: north–south transverse ridges](images/cli-wind-270.png) ![Westerly and northerly, half the steps each: a reticulate network of ridges in two orientations](images/cli-dunes-bimodal.png) ![Westerly with a vegetation field: bright anchored mounds where cover holds the sand](images/cli-dunes-vegetated.png)
+
 ### Coastal erosion
 
 ```

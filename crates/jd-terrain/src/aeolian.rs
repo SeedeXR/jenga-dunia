@@ -34,6 +34,14 @@ pub struct AeolianParams {
     /// graph, unset → the world's shared wind.
     #[serde(default = "d_wind")]
     pub wind_azimuth_deg: f32,
+    /// Second wind direction, degrees clockwise from north, for a bimodal regime: linear (seif)
+    /// dunes grow along the bisector of two winds, star dunes where they diverge further. Unset =
+    /// one wind.
+    #[serde(default)]
+    pub wind2_azimuth_deg: Option<f32>,
+    /// Share of the steps blown by the second wind, 0..1 (a seeded sequence, so reproducible).
+    #[serde(default = "d_share")]
+    pub wind2_share: f32,
     /// Saltation hop length in metres (≥ one cell). Default: 4 cells.
     #[serde(default)]
     pub hop_m: Option<f32>,
@@ -61,6 +69,9 @@ pub struct AeolianParams {
 fn d_iterations() -> u32 {
     20
 }
+fn d_share() -> f32 {
+    0.5
+}
 fn d_wind() -> f32 {
     270.0
 }
@@ -82,6 +93,8 @@ impl Default for AeolianParams {
         Self {
             iterations: d_iterations(),
             wind_azimuth_deg: d_wind(),
+            wind2_azimuth_deg: None,
+            wind2_share: d_share(),
             hop_m: None,
             slab_m: None,
             repose_deg: d_repose(),
@@ -176,6 +189,31 @@ pub fn aeolian_transport(
     p: &AeolianParams,
     cancel: Option<&AtomicBool>,
 ) -> JdResult<Heightfield> {
+    aeolian_transport_with(h, spacing_m, sand, None, p, cancel)
+}
+
+/// [`aeolian_transport`] with a `vegetation` mask (0..1): plants hold the sand — a vegetated cell
+/// loses slabs in proportion to its bare fraction and catches every slab that lands on it (cover
+/// ≥ 0.5), so dunes stall and anchor around cover (parabolic dunes, stabilised fields).
+pub fn aeolian_transport_with(
+    h: &Heightfield,
+    spacing_m: [f32; 2],
+    sand: Option<&Heightfield>,
+    vegetation: Option<&Heightfield>,
+    p: &AeolianParams,
+    cancel: Option<&AtomicBool>,
+) -> JdResult<Heightfield> {
+    if !(0.0..=1.0).contains(&p.wind2_share) {
+        return Err(JdError::invalid("wind2_share", "must be within 0..=1"));
+    }
+    if let Some(v) = vegetation
+        && (v.width(), v.height()) != (h.width(), h.height())
+    {
+        return Err(JdError::invalid(
+            "vegetation",
+            "mask and terrain sizes differ",
+        ));
+    }
     if !spacing_m.iter().all(|s| *s > 0.0 && s.is_finite()) {
         return Err(JdError::invalid(
             "spacing_m",
@@ -225,35 +263,66 @@ pub fn aeolian_transport(
         Some(m) => m.to_vec().iter().map(|v| v.clamp(0.0, 1.0)).collect(),
         None => vec![1.0; n],
     };
-    // Downwind hop in cells: the wind blows *towards* azimuth + 180°. x grows east, rows grow north.
-    let to = (p.wind_azimuth_deg + 180.0).to_radians();
-    let cells = hop_m / cell;
-    let hop = (
-        (cells * to.sin()).round() as i64,
-        (cells * to.cos()).round() as i64,
-    );
-    let hop = if hop == (0, 0) {
-        (to.sin().signum() as i64, to.cos().signum() as i64)
-    } else {
-        hop
+    let veg: Vec<f32> = match vegetation {
+        Some(v) => v.to_vec().iter().map(|v| v.clamp(0.0, 1.0)).collect(),
+        None => vec![0.0; n],
     };
-    let hop_len =
-        ((hop.0 as f32 * spacing_m[0]).powi(2) + (hop.1 as f32 * spacing_m[1]).powi(2)).sqrt();
-    // Upwind step (one cell against the wind) for the shadow test.
-    let up = (-(to.sin().round() as i64), -(to.cos().round() as i64));
-    let up_len = ((up.0 as f32 * spacing_m[0]).powi(2) + (up.1 as f32 * spacing_m[1]).powi(2))
-        .sqrt()
-        .max(1e-6);
+    struct Wind {
+        hop: (i64, i64),
+        up: (i64, i64),
+        up_len: f32,
+        shadow_reach: i64,
+    }
+    // Downwind hop in cells: the wind blows *towards* azimuth + 180°. x grows east, rows grow north.
+    let wind_for = |azimuth_deg: f32| -> Wind {
+        let to = (azimuth_deg + 180.0).to_radians();
+        let cells = hop_m / cell;
+        let hop = (
+            (cells * to.sin()).round() as i64,
+            (cells * to.cos()).round() as i64,
+        );
+        let hop = if hop == (0, 0) {
+            (to.sin().signum() as i64, to.cos().signum() as i64)
+        } else {
+            hop
+        };
+        let hop_len =
+            ((hop.0 as f32 * spacing_m[0]).powi(2) + (hop.1 as f32 * spacing_m[1]).powi(2)).sqrt();
+        // Upwind step (one cell against the wind) for the shadow test.
+        let up = (-(to.sin().round() as i64), -(to.cos().round() as i64));
+        let up_len = ((up.0 as f32 * spacing_m[0]).powi(2) + (up.1 as f32 * spacing_m[1]).powi(2))
+            .sqrt()
+            .max(1e-6);
+        let shadow_reach = (hop_len / up_len).ceil().clamp(1.0, 64.0) as i64;
+        Wind {
+            hop,
+            up,
+            up_len,
+            shadow_reach,
+        }
+    };
+    let winds = [
+        wind_for(p.wind_azimuth_deg),
+        wind_for(p.wind2_azimuth_deg.unwrap_or(p.wind_azimuth_deg)),
+    ];
     let tan_shadow = p.shadow_deg.to_radians().tan();
     let tan_repose = p.repose_deg.to_radians().tan();
-    let shadow_reach = (hop_len / up_len).ceil().clamp(1.0, 64.0) as i64;
-    let in_shadow = |f: &Field, x: i64, y: i64| -> bool {
+    let in_shadow = |f: &Field, wd: &Wind, x: i64, y: i64| -> bool {
         let here = f.get(x, y);
-        (1..=shadow_reach)
-            .any(|k| f.get(x + up.0 * k, y + up.1 * k) - here > tan_shadow * k as f32 * up_len)
+        (1..=wd.shadow_reach).any(|k| {
+            f.get(x + wd.up.0 * k, y + wd.up.1 * k) - here > tan_shadow * k as f32 * wd.up_len
+        })
     };
     for it in 0..p.iterations {
         check_cancel(cancel)?;
+        // Bimodal regime: a seeded share of the steps blow from the second direction.
+        let wd = if p.wind2_azimuth_deg.is_some()
+            && unit(mix(p.seed ^ 0xB1B1 ^ mix(it as u64))) < p.wind2_share
+        {
+            &winds[1]
+        } else {
+            &winds[0]
+        };
         // Seeded shuffle of the cell order: a different permutation every step, same for every run.
         let mut order: Vec<u32> = (0..n as u32).collect();
         for i in (1..n).rev() {
@@ -262,8 +331,8 @@ pub fn aeolian_transport(
         }
         for (k, &c) in order.iter().enumerate() {
             let (x, y) = ((c as i64) % w, (c as i64) / w);
-            let erodibility = mask[c as usize];
-            if erodibility <= 0.0 || in_shadow(&f, x, y) {
+            let erodibility = mask[c as usize] * (1.0 - veg[c as usize]);
+            if erodibility <= 0.0 || in_shadow(&f, wd, x, y) {
                 continue;
             }
             let slab = slab_m * erodibility;
@@ -274,11 +343,11 @@ pub fn aeolian_transport(
             let (mut lx, mut ly) = (x, y);
             let mut r = mix(p.seed ^ mix((it as u64) << 32 | k as u64));
             for _ in 0..16 {
-                lx += hop.0;
-                ly += hop.1;
+                lx += wd.hop.0;
+                ly += wd.hop.1;
                 let li = f.idx(lx, ly);
                 let on_sand = mask[li] >= 0.5;
-                let stick = if in_shadow(&f, lx, ly) {
+                let stick = if in_shadow(&f, wd, lx, ly) || veg[li] >= 0.5 {
                     1.0
                 } else if on_sand {
                     p.deposit_on_sand
@@ -303,6 +372,98 @@ pub fn aeolian_transport(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bimodal_winds_differ_and_vegetation_holds_the_sand() {
+        const N: u32 = 64;
+        let mut h = Heightfield::new(N, N, 64, 0).expect("hf");
+        h.fill_with(|x, y| {
+            100.0
+                + 0.5 * (x as f32 * 0.21).sin() * (y as f32 * 0.21).sin()
+                + 0.02 * unit(mix((x as u64) << 32 | y as u64))
+        });
+        let p = AeolianParams {
+            iterations: 60,
+            hop_m: Some(50.0),
+            slab_m: Some(3.0),
+            ..AeolianParams::default()
+        };
+        let sum = |f: &Heightfield| -> f64 { f.to_vec().iter().map(|v| *v as f64).sum() };
+        let one = aeolian_transport(&h, [10.0, 10.0], None, &p, None).expect("one wind");
+        let two = aeolian_transport(
+            &h,
+            [10.0, 10.0],
+            None,
+            &AeolianParams {
+                wind2_azimuth_deg: Some(0.0),
+                wind2_share: 0.5,
+                ..p.clone()
+            },
+            None,
+        )
+        .expect("two winds");
+        assert_ne!(
+            one.content_hash(),
+            two.content_hash(),
+            "a northerly half the time changes the field"
+        );
+        assert!(
+            (sum(&h) - sum(&two)).abs() < 1e-2,
+            "mass conserved under two winds"
+        );
+        assert!(
+            aeolian_transport(
+                &h,
+                [10.0, 10.0],
+                None,
+                &AeolianParams {
+                    wind2_azimuth_deg: Some(0.0),
+                    wind2_share: 1.5,
+                    ..p.clone()
+                },
+                None
+            )
+            .is_err()
+        );
+        // Full cover: nothing moves. Half cover (west half): the covered cells never lose height.
+        let mut veg = Heightfield::new(N, N, 64, 0).expect("veg");
+        veg.fill_with(|_, _| 1.0);
+        let held =
+            aeolian_transport_with(&h, [10.0, 10.0], None, Some(&veg), &p, None).expect("held");
+        assert_eq!(
+            held.content_hash(),
+            h.content_hash(),
+            "fully vegetated sand stays put"
+        );
+        veg.fill_with(|x, _| f32::from(x < N / 2));
+        let half =
+            aeolian_transport_with(&h, [10.0, 10.0], None, Some(&veg), &p, None).expect("half");
+        for y in 0..N {
+            for x in 0..N / 2 {
+                assert!(
+                    half.get(x, y) >= h.get(x, y) - 1e-4,
+                    "vegetated cell ({x},{y}) lost sand"
+                );
+            }
+        }
+        assert!((sum(&h) - sum(&half)).abs() < 1e-2);
+        assert_ne!(
+            half.content_hash(),
+            h.content_hash(),
+            "the bare half still moves"
+        );
+        assert!(
+            aeolian_transport_with(
+                &h,
+                [10.0, 10.0],
+                None,
+                Some(&Heightfield::new(4, 4, 64, 0).expect("s")),
+                &p,
+                None
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn slabs_are_conserved_dunes_grow_from_a_sheet_and_the_repose_angle_holds() {

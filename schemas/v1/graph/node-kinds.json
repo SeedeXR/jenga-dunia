@@ -400,7 +400,7 @@
   },
   {
     "kind": "jd.erosion.aeolian@1",
-    "description": "Wind (aeolian) transport after Werner's slab model: sand hops downwind, stops in wind shadows and on sand, and the angle of repose holds — dunes and ripples; optional `sand` mask (0..1) says what can move",
+    "description": "Wind (aeolian) transport after Werner's slab model: sand hops downwind, stops in wind shadows and on sand, and the angle of repose holds — dunes and ripples; optional `sand` mask (0..1) says what can move, optional `vegetation` mask (0..1) holds it (stabilised and parabolic dunes); a second wind (`wind2_azimuth_deg`, `wind2_share`) makes linear and star dunes",
     "inputs": [
       {
         "name": "in",
@@ -409,6 +409,11 @@
       },
       {
         "name": "sand",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "vegetation",
         "ty": "heightfield",
         "required": false
       }
@@ -438,6 +443,21 @@
           "type": "number",
           "format": "float",
           "default": 270.0
+        },
+        "wind2_azimuth_deg": {
+          "description": "Second wind direction, degrees clockwise from north, for a bimodal regime: linear (seif)\ndunes grow along the bisector of two winds, star dunes where they diverge further. Unset =\none wind.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float",
+          "default": null
+        },
+        "wind2_share": {
+          "description": "Share of the steps blown by the second wind, 0..1 (a seeded sequence, so reproducible).",
+          "type": "number",
+          "format": "float",
+          "default": 0.5
         },
         "hop_m": {
           "description": "Saltation hop length in metres (≥ one cell). Default: 4 cells.",

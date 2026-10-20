@@ -6,7 +6,7 @@ use std::sync::Arc;
 use jd_terrain::{
     AeolianParams, CoastalParams, DropletParams, FlowMethod, ForeignImport, Heightfield,
     HydraulicParams, NoiseParams, SeabedParams, SnowParams, StreamPowerParams, Stroke,
-    THERMAL_MAX_RATE, aeolian_transport, apply_strokes, carve_rivers_with, classify_seabed,
+    THERMAL_MAX_RATE, aeolian_transport_with, apply_strokes, carve_rivers_with, classify_seabed,
     coastal_erode, droplet_erode, fill_depressions_with, flow_accumulation_with, generate_noise,
     read_foreign, resample_to_world, sea_level, slope_mask, snow_cover, wetness_index_with,
 };
@@ -703,8 +703,8 @@ pub fn register_all(r: &mut Registry) {
     ));
     r.register(NodeDef::new::<AeolianParams, _>(
         "jd.erosion.aeolian@1",
-        "Wind (aeolian) transport after Werner's slab model: sand hops downwind, stops in wind shadows and on sand, and the angle of repose holds — dunes and ripples; optional `sand` mask (0..1) says what can move",
-        vec![port("in", PortType::Heightfield, true), port("sand", PortType::Heightfield, false)],
+        "Wind (aeolian) transport after Werner's slab model: sand hops downwind, stops in wind shadows and on sand, and the angle of repose holds — dunes and ripples; optional `sand` mask (0..1) says what can move, optional `vegetation` mask (0..1) holds it (stabilised and parabolic dunes); a second wind (`wind2_azimuth_deg`, `wind2_share`) makes linear and star dunes",
+        vec![port("in", PortType::Heightfield, true), port("sand", PortType::Heightfield, false), port("vegetation", PortType::Heightfield, false)],
         vec![port("out", PortType::Heightfield, false)],
         |ctx, p, i| {
             let ap: AeolianParams = params(&with_world_wind(ctx, p, &["wind_azimuth_deg"]))?;
@@ -712,7 +712,8 @@ pub fn register_all(r: &mut Registry) {
                 return Err(JdError::invalid("iterations", "must be within 1..=500"));
             }
             let sand = i.get("sand").map(|v| v.as_field());
-            Ok(out("out", aeolian_transport(field(i, "in")?, spacing_m(ctx), sand.map(|s| &**s), &ap, Some(&ctx.cancel))?))
+            let vegetation = i.get("vegetation").map(|v| v.as_field());
+            Ok(out("out", aeolian_transport_with(field(i, "in")?, spacing_m(ctx), sand.map(|s| &**s), vegetation.map(|v| &**v), &ap, Some(&ctx.cancel))?))
         },
     ).with_memory(12.0));
     r.register(NodeDef::new::<CoastalParams, _>(
