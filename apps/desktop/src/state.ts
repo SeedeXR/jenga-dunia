@@ -86,6 +86,12 @@ interface State {
   startSculpting: () => Promise<void>;
   /** Paint the scatter mask: a clamped (0..1) stroke node in front of the mask's output, brush strength 0.5, sculpt mode on. */
   paintDensity: () => Promise<void>;
+  /** What the next viewport drag draws: a road (a spline node in front of the height output), or nothing (brush strokes). */
+  drawing: "road" | null;
+  /** Arm the next drag to lay a road; the road's width in metres comes from `roadWidthM`. */
+  startRoad: () => void;
+  roadWidthM: number;
+  setRoadWidth: (m: number) => void;
   /** Append a stroke to the selected sculpt node (journaled: undo removes the whole stroke). */
   addStroke: (points: [number, number][]) => Promise<void>;
   setNoise: (patch: Partial<NoiseSettings>) => void;
@@ -322,6 +328,23 @@ export const useStore = create<State>((set, get) => {
   };
   // The stroke node feeding the output that publishes `layer` — spliced in when there is none
   // (clamped for masks). Returns its id, or null when nothing publishes that layer.
+  // Splice a new node of `kind` between whatever feeds the output publishing `layer` and that output.
+  const spliceBefore = async (layer: string, kind: string, params: Record<string, unknown> | null): Promise<string | null> => {
+    const g = get().graph;
+    const output = g.nodes.find((n) => n.kind.startsWith("jd.output.height@") && String(n.params?.layer ?? "height") === layer);
+    if (!output) return null;
+    const feed = g.edges.find((e) => e.to.node === output.id && e.to.port === "in");
+    const pos = output.ui?.position ?? [0, 0];
+    const below = g.nodes.filter((n) => Math.abs((n.ui?.position?.[0] ?? 0) - pos[0]) < 1).length; // stack spliced nodes under the output
+    graphGen++;
+    const r = await run("graph.add_node", { kind, position: [pos[0], pos[1] + 140 * below], ...(params ? { params } : {}) });
+    if (r.status !== "ok" || !r.result) return null;
+    const id = r.result.id;
+    if (feed) await get().connectNodes(feed.from.node, feed.from.port, id, "in");
+    await get().connectNodes(id, "out", output.id, "in");
+    await loadGraph();
+    return id;
+  };
   const strokesNodeFor = async (layer: string, clamp: [number, number] | null): Promise<string | null> => {
     const g = get().graph;
     const output = g.nodes.find((n) => n.kind.startsWith("jd.output.height@") && String(n.params?.layer ?? "height") === layer);
@@ -329,15 +352,7 @@ export const useStore = create<State>((set, get) => {
     const feed = g.edges.find((e) => e.to.node === output.id && e.to.port === "in");
     const existing = feed ? g.nodes.find((n) => n.id === feed.from.node && n.kind.startsWith("jd.sculpt.strokes@")) : undefined;
     if (existing) return existing.id;
-    const pos = output.ui?.position ?? [0, 0];
-    graphGen++;
-    const r = await run("graph.add_node", { kind: "jd.sculpt.strokes@1", position: [pos[0], pos[1] + 140], ...(clamp ? { params: { clamp } } : {}) });
-    if (r.status !== "ok" || !r.result) return null;
-    const id = r.result.id;
-    if (feed) await get().connectNodes(feed.from.node, feed.from.port, id, "in");
-    await get().connectNodes(id, "out", output.id, "in");
-    await loadGraph();
-    return id;
+    return spliceBefore(layer, "jd.sculpt.strokes@1", clamp ? { clamp } : null);
   };
   type GraphView = GraphListResult;
   // Autosave: a debounced project.save after any journaled edit, so `dirty` / `journal` return to
@@ -436,7 +451,7 @@ export const useStore = create<State>((set, get) => {
     selectedNode: null,
     setSelectedNode: (id) => set({ selectedNode: id }),
     sculpting: false,
-    setSculpting: (on) => set({ sculpting: on }),
+    setSculpting: (on) => set({ sculpting: on, ...(on ? {} : { drawing: null }) }),
     brush: { radius_m: 150, strength_m: 40, mode: "raise", amount: 0.5 },
     sun: { azimuth_deg: 140, elevation_deg: 35, turbidity: 3 },
     setSun: (patch) => {
@@ -480,7 +495,20 @@ export const useStore = create<State>((set, get) => {
       const id = await strokesNodeFor(mask, [0, 1]);
       if (id) set((s) => ({ selectedNode: id, sculpting: true, brush: { ...s.brush, mode: "raise", strength_m: 0.5 } }));
     },
+    drawing: null,
+    roadWidthM: 12,
+    setRoadWidth: (m) => set({ roadWidthM: m }),
+    startRoad: () => set({ drawing: "road", sculpting: true }),
     addStroke: async (points) => {
+      if (get().drawing === "road") {
+        // One drag = one road: a spline node spliced in front of the height output; back to orbiting after.
+        set({ drawing: null, sculpting: false });
+        if (points.length < 2) return;
+        const rounded = points.map(([u, v]) => [Math.round(u * 10) / 10, Math.round(v * 10) / 10]);
+        const id = await spliceBefore("height", "jd.terrain.spline@1", { points: rounded, width_m: get().roadWidthM });
+        if (id) set({ selectedNode: id });
+        return;
+      }
       const { selectedNode, graph, brush } = get();
       const node = graph.nodes.find((n) => n.id === selectedNode && n.kind.startsWith("jd.sculpt.strokes@"));
       if (!node || points.length === 0) return;

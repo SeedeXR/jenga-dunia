@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { Brush, FolderOpen, FolderPlus, FolderSearch, Mountain, Save, Upload, Workflow } from "lucide-react";
+import { Brush, FolderOpen, FolderPlus, FolderSearch, Mountain, Route, Save, Upload, Workflow } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import GraphPanel from "./graph/GraphPanel";
 import TerrainView, { type ViewportInfo } from "./viewport/TerrainView";
@@ -369,7 +369,7 @@ export default function App() {
         {/* Center: viewport (top) + node graph (bottom, toggle) */}
         <main className={`relative grid bg-jd-bg-0 ${showGraph ? "grid-rows-[1fr_300px]" : "grid-rows-[1fr]"}`}>
           <div className="relative min-h-0">
-            <TerrainView preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} sculpt={{ enabled: s.sculpting && sculptNode !== undefined, radiusM: s.brush.radius_m, onStroke: (pts) => void s.addStroke(pts) }} seaLevelM={seaLevelM} water={water} waves={s.waves} sky={s.sky} sun={{ azimuthDeg: s.sun.azimuth_deg, elevationDeg: s.sun.elevation_deg }} overlay={s.colorPreview} instances={s.scatter.points ? { points: s.scatter.points, sizeM: Math.max(s.scatter.spacing_m * 0.35, (s.project?.world.extent_m[0] ?? 0) * 0.012) } : null} maps={s.maps} />
+            <TerrainView preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} sculpt={{ enabled: s.sculpting && (sculptNode !== undefined || s.drawing !== null), radiusM: s.drawing === "road" ? s.roadWidthM / 2 : s.brush.radius_m, onStroke: (pts) => void s.addStroke(pts) }} seaLevelM={seaLevelM} water={water} waves={s.waves} sky={s.sky} sun={{ azimuthDeg: s.sun.azimuth_deg, elevationDeg: s.sun.elevation_deg }} overlay={s.colorPreview} instances={s.scatter.points ? { points: s.scatter.points, sizeM: Math.max(s.scatter.spacing_m * 0.35, (s.project?.world.extent_m[0] ?? 0) * 0.012) } : null} maps={s.maps} />
             <button
               className={`btn absolute top-2 right-28 ${s.sculpting ? "text-jd-accent" : ""}`}
               title={s.sculpting ? "Sculpting: drag on the terrain to paint a stroke (click to stop)" : "Sculpt: adds a stroke node before the output and paints with the brush"}
@@ -379,6 +379,16 @@ export default function App() {
               data-testid="sculpt-toggle"
             >
               <Brush size={14} /> {s.sculpting ? "Sculpting…" : "Sculpt"}
+            </button>
+            <button
+              className={`btn absolute top-2 right-52 ${s.drawing === "road" ? "text-jd-accent" : ""}`}
+              title={s.drawing === "road" ? "Drag on the terrain to lay the road (one drag = one road node)" : "Road: the next drag on the terrain becomes a spline node that flattens a road bed along it"}
+              onClick={() => (s.drawing === "road" ? s.setSculpting(false) : s.startRoad())}
+              disabled={!s.project || s.busy}
+              aria-pressed={s.drawing === "road"}
+              data-testid="road-draw"
+            >
+              <Route size={14} /> {s.drawing === "road" ? "Drawing road…" : "Road"}
             </button>
             <button className="btn absolute top-2 right-2" onClick={() => setShowGraph((v) => !v)} data-testid="toggle-graph">
               <Workflow size={14} /> {showGraph ? "Hide graph" : "Graph"}

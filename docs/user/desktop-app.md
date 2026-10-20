@@ -169,6 +169,12 @@ Undo and redo are operations like everything else (`graph.undo` / `graph.redo`, 
 
 *Waves: `wind_speed_mps`, `fetch_km` and `wind_azimuth_deg` on the same node raise a wind sea. The app asks the core for the spectrum (`ocean.waves`: JONSWAP fetch-limited growth capped at the fully developed Pierson–Moskowitz sea) and moves the water plane along a Gerstner sum of its three components every frame, so a 3 m/s breeze makes 0.2 m ripples and a 20 m/s gale 9.8 m swells 380 m long (3.2 m / 96 m if the fetch is only 100 km). Waves break where the water is shallower than Hs / 0.78, and the shoreline foam widens to that surf zone — 12.6 m of depth in the gale above. The header shows the significant height and peak wavelength being drawn; recording below. **Export water maps** (Export panel) writes `exports/water/` — depth, colour, foam and a tileable wave normal map for the node's clarity and wind (`ocean.bake`, see the CLI quickstart). Not yet: refraction and shadowing by headlands.*
 
+## Roads
+
+![Viewport after one drag with Road armed: a flattened road bed crosses the hills; the graph shows a jd.terrain.spline node spliced in front of the height output, selected in the inspector with its points and width](images/desktop-road.png)
+
+*Roads: click **Road** (1) and the next drag on the terrain becomes a `jd.terrain.spline@1` node (2) spliced in front of the height output — the corridor is flattened onto the line's smoothed grade with soft shoulders, exactly what the CLI node does (quickstart, "Roads, paths and canals") — and the button returns to orbiting, so each drag is one road. The node's width, falloff, mode (flatten, cut, raise) and the point list are ordinary parameters in the inspector (3); its `mask` output can be published and used for the road surface and the verges' scatter. The UI-driven test `apps/desktop/e2e/road.spec.ts` draws one road and checks the published height changes.*
+
 ## Timeline
 
 ![Graph toolbar with the timeline slider at 1.00 and a thermal node whose summary reads iterations=⏱2 keys, eroding the terrain with 300 steps](images/desktop-timeline.png)
