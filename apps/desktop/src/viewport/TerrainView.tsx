@@ -128,6 +128,50 @@ export function buildTerrainGeometry(p: Preview, extent: [number, number], overl
   return geo;
 }
 
+/** Water surface at `seaM`: a flat grid whose vertex colour and alpha follow the depth of the terrain
+ *  below it — turquoise and translucent in the shallows, navy and opaque out deep, a pale foam band
+ *  where the depth is within `foamM` of the shore, fully transparent over land. */
+export function buildSeaGeometry(p: Preview, extent: [number, number], seaM: number): THREE.BufferGeometry {
+  const { width, height, min, max, data } = p;
+  const geo = new THREE.PlaneGeometry(extent[0], extent[1], width - 1, height - 1);
+  geo.rotateX(-Math.PI / 2);
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  const colors = new Float32Array(pos.count * 4);
+  const range = max - min || 1;
+  const efold = Math.max(1, range * 0.12); // depth at which the water has gone ~63 % of the way to deep
+  const foamM = Math.max(0.5, range * 0.01);
+  const shallow = new THREE.Color(0x4fb8c8);
+  const deep = new THREE.Color(0x0e2f5c);
+  const foam = new THREE.Color(0xdff3f5);
+  const c = new THREE.Color();
+  for (let j = 0; j < height; j++) {
+    for (let i = 0; i < width; i++) {
+      const vi = j * width + i;
+      const q = data[(height - 1 - j) * width + i] ?? 0;
+      const depth = seaM - (min + (q / 65535) * range);
+      let alpha = 0;
+      if (depth > 0) {
+        const t = 1 - Math.exp(-depth / efold);
+        c.copy(shallow).lerp(deep, t);
+        alpha = 0.45 + 0.4 * t;
+        if (depth < foamM) {
+          const f = 1 - depth / foamM;
+          c.lerp(foam, f);
+          alpha = Math.max(alpha, 0.5 + 0.45 * f);
+        }
+      } else {
+        c.copy(shallow);
+      }
+      colors[vi * 4] = c.r;
+      colors[vi * 4 + 1] = c.g;
+      colors[vi * 4 + 2] = c.b;
+      colors[vi * 4 + 3] = alpha;
+    }
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(colors, 4));
+  return geo;
+}
+
 interface SceneState {
   renderer: WebGPURenderer;
   scene: THREE.Scene;
@@ -138,7 +182,7 @@ interface SceneState {
   frame: number;
   backend: ViewportInfo["backend"];
   triangles: number;
-  sea: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshStandardMaterial> | null;
+  sea: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | null;
   sun: THREE.DirectionalLight;
   hemi: THREE.HemisphereLight;
   /** Gradient sky dome (vertex colours, inside faces). */
@@ -412,7 +456,8 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
     onInfo?.(infoOf(s));
   }, [sun?.azimuthDeg, sun?.elevationDeg, onInfo]);
 
-  // Sea plane: follows the graph's sea-level node; a flat translucent quad over the whole world.
+  // Sea: follows the graph's sea-level node; a flat surface whose colour and opacity follow the
+  // depth of the terrain under it (shoreline foam, translucent shallows, opaque deep water).
   useEffect(() => {
     const s = sceneRef.current;
     if (!s) return;
@@ -423,9 +468,8 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
       s.sea = null;
     }
     if (seaLevelM !== null && extentM && preview) {
-      const geo = new THREE.PlaneGeometry(extentM[0], extentM[1]);
-      geo.rotateX(-Math.PI / 2);
-      const mat = new THREE.MeshStandardMaterial({ color: 0x2f6fd0, transparent: true, opacity: 0.6, roughness: 0.25, metalness: 0.1 });
+      const geo = buildSeaGeometry(preview, extentM, seaLevelM);
+      const mat = new THREE.MeshStandardMaterial({ vertexColors: true, transparent: true, roughness: 0.2, metalness: 0.05, depthWrite: false });
       s.sea = new THREE.Mesh(geo, mat);
       s.sea.position.y = seaLevelM;
       s.scene.add(s.sea);

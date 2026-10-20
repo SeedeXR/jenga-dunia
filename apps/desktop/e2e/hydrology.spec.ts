@@ -106,6 +106,9 @@ test.describe("hydrology nodes against the real core", () => {
     await level.blur();
     await expect(page.getByTestId("log")).toContainText("graph.set_param: ok");
     await expect(page.getByTestId("viewport-info")).toContainText("sea 250 m");
+    // Back out to the overview (undo the two zoom steps above) so the whole shoreline is in frame.
+    await page.getByTestId("viewport").hover();
+    for (let i = 0; i < 2; i++) await page.mouse.wheel(0, 300);
     await page.screenshot({ path: testInfo.outputPath("hydrology-sea.png") }); // tutorial image source
 
     // Autosave (interval overridden to 2 s here): after the last edit the project is saved — journal truncated, documents current.

@@ -198,11 +198,13 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `14:00:00` **Desktop import**: store `importAsset(path)` = `project.import_asset` + `graph.add_node(jd.input.heightmap@1, {path: name})`; Project panel **Import** row (typed path + Upload button, Browse → native dialog filtered to png/exr/tif/tiff/r16/r32/fbx); File ▸ Import Heightmap or Mesh… (⌘I). `wire()` moved to `e2e/bridge.ts`. Terrain e2e: export EXR → import → node `path=h.exr` → wire to height → evaluate → min/max/mean equal (time/hash lines excluded). Capture `desktop-import.png`.
 
-### Open / next (as of 2026-10-20 14:00, head after desktop-import commit)
+- `14:25:00` **Sea shading**: `buildSeaGeometry(preview, extent, seaM)` — flat grid at sea level, RGBA vertex colours from the depth of the terrain below (foam band < 1 % of range, shallow turquoise → deep navy with e-fold 12 % of range, alpha 0.45 → 0.85, land alpha 0), `MeshStandardMaterial{vertexColors, transparent, depthWrite:false}`. Vitest `sea.test.ts`; hydrology e2e zooms back out before the sea capture; `desktop-sea-level.png` re-captured.
+
+### Open / next (as of 2026-10-20 14:25, head after sea-shading commit)
 1. **CI**: green through `43fab8e` (normal maps); the only red run was `dad6256` (priorities; fixed by `d84eaa9`). FBX-reader commit next.
 2. **Figma**: connector unavailable this session; plugin OAuth pending on the owner's side → tutorial images stay in `docs/user/images/`; place them in file `fxyeV62hgLoNmG3dU1LX6G` when a connector works.
 3. **Native leftovers**: Edit-menu capture; native sculpt capture/recording (needs Accessibility); signed/notarised bundle (needs an Apple developer account).
-4. **Phase 3 follow-ups**: hydraulic concentration cap / layered materials / open drains; thermal + hydraulic WGSL twins (`jd-gpu`); particle hydraulic; D∞ ✔, MFD ✔ (`wetness` still D8-only); sea level ✔ (viewport water plane ✔; ocean shading/shoreline foam ☐); hydrology-first generation; smooth-brush blur done via summed-area table (whole-field blur is now O(N); tile-level dirty sets remain).
+4. **Phase 3 follow-ups**: hydraulic concentration cap / layered materials / open drains; thermal + hydraulic WGSL twins (`jd-gpu`); particle hydraulic; D∞ ✔, MFD ✔ (`wetness` still D8-only); sea level ✔ (viewport water depth-shaded + shoreline foam ✔); hydrology-first generation; smooth-brush blur done via summed-area table (whole-field blur is now O(N); tile-level dirty sets remain).
 5. **Phase 2 leftovers**: jobs scheduler complete (detached execution, queue slots, timeouts, memory budget, priorities ✔), CRS-aware GeoTIFF import (`jd-geo`; tags/nodata ✔), normal/roughness maps for GLB ✔, Windows/Linux measurements, tile-level `jd-cache` (LRU ✔).
 6. **Docs**: hydrology recipe ✔, `desktop-rivers.png` ✔; rivers inspector `method` capture ✔ (e2e); a *native* capture of the same needs the app rebuilt from this head.
 

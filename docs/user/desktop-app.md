@@ -125,13 +125,13 @@ Undo and redo are operations like everything else (`graph.undo` / `graph.redo`, 
 
 *Inside the app: pick `jd.hydrology.rivers@1` in the kinds dropdown and **Add** (1), click the node (2) and the schema-driven inspector shows its parameters; `method` is a select built from the node's schema — switch it from `d8` to `dinf` (3) and the node label updates (`method=dinf`) after the core journals `graph.set_param`. `jd.hydrology.sea_level@1` adds the same way and exposes two output handles, `ocean` and `depth`. Numbers that come from the core as 32-bit floats are shown rounded (`0.55`, not `0.550000011920929`). Captured by the UI-driven test `apps/desktop/e2e/hydrology.spec.ts`.*
 
-![Viewport with a translucent water plane at 250 m cutting through the terrain; sea_level node selected](images/desktop-sea-level.png)
+![Viewport with depth-shaded water at 250 m: pale foam along the shore, turquoise shallows, navy deep water; sea_level node selected](images/desktop-sea-level.png)
 
 ![Inspector with the biome rules table: one row named scree with a slope range, add-row button](images/desktop-biome-rules.png)
 
 *Rules as a table: for parameters that are lists of records (biome rules) the inspector shows a table — **+ row** adds a rule, each cell applies on blur (`min,max` for ranges, empty for "no constraint"), the bin removes a row. Every edit is one journaled `graph.set_param`; a value the core refuses (an inverted range) is reported in the log before anything is journaled and the table keeps the last good value. Recorded brush strokes stay a count — they are data, not something to type. UI-driven test: `apps/desktop/e2e/biomes.spec.ts`.*
 
-*Sea in the viewport: as soon as the graph contains a `jd.hydrology.sea_level@1` node (1) the viewport draws a translucent water plane at its `level_m` — edit the value (2) and the plane moves with it; the header's viewport line reports the height (boxed, top right). The plane is only drawn while the **height** layer is shown (masks like `ocean` or `rivers` are 0..1 and would hide under it). Same e2e test.*
+*Sea in the viewport: as soon as the graph contains a `jd.hydrology.sea_level@1` node (1) the viewport draws water at its `level_m` — edit the value (2) and it moves with it; the header's viewport line reports the height (boxed, top right). The surface is shaded by the depth of the terrain under each vertex: a pale foam band within ~1 % of the height range of the shore, translucent turquoise shallows darkening to opaque navy with an e-folding depth of 12 % of the height range, and nothing drawn over land (alpha 0), so the shoreline reads without a custom shader (`buildSeaGeometry`, unit-tested). Water is only drawn while the **height** layer is shown (masks like `ocean` or `rivers` are 0..1 and would hide under it). Same e2e test.*
 
 ## Tutorial: sculpting
 
