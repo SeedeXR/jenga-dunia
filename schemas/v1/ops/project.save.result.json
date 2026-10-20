@@ -33,6 +33,10 @@
       "type": "integer",
       "format": "uint",
       "minimum": 0
+    },
+    "settings": {
+      "description": "User-tunable settings (`project.json` → `settings`): autosave interval, cache limit, preview LOD.",
+      "$ref": "#/$defs/ProjectSettings"
     }
   },
   "required": [
@@ -42,7 +46,8 @@
     "world",
     "schema_version",
     "dirty",
-    "pending_journal"
+    "pending_journal",
+    "settings"
   ],
   "$defs": {
     "WorldSettings": {
@@ -120,6 +125,36 @@
       "type": "integer",
       "format": "uint32",
       "minimum": 0
+    },
+    "ProjectSettings": {
+      "description": "User-tunable project settings.",
+      "type": "object",
+      "properties": {
+        "autosave_interval_s": {
+          "description": "Autosave interval in seconds (0 disables).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "cache_limit_bytes": {
+          "description": "Cache size cap in bytes.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "preview_lod": {
+          "description": "Preview LOD (resolution divided by 2^lod).",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255
+        }
+      },
+      "required": [
+        "autosave_interval_s",
+        "cache_limit_bytes",
+        "preview_lod"
+      ]
     }
   }
 }

@@ -36,7 +36,7 @@ test.describe("hydrology nodes against the real core", () => {
     await installBridge(page, core);
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(String(e)));
-    await page.goto("/");
+    await page.goto("/?autosave=2000"); // the project default is 120 s; the test waits for the save
     await page.getByTestId("project-path").fill(path.join(ws, "Hydro.jdproj"));
     await page.getByLabel("Extent (m)").fill("1280");
     await page.getByLabel("Resolution (px)").fill("128");
@@ -90,7 +90,7 @@ test.describe("hydrology nodes against the real core", () => {
     await expect(page.getByTestId("viewport-info")).toContainText("sea 250 m");
     await page.screenshot({ path: testInfo.outputPath("hydrology-sea.png") }); // tutorial image source
 
-    // Autosave: ~2 s after the last edit the project is saved — journal truncated, documents on disk current.
+    // Autosave (interval overridden to 2 s here): after the last edit the project is saved — journal truncated, documents current.
     await expect(page.getByTestId("log")).toContainText("project.save: ok", { timeout: 10_000 });
     await expect(page.getByTestId("project-journal")).toHaveText("0");
     await expect(page.getByTestId("project-dirty")).toHaveText("false");

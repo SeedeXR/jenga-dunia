@@ -396,6 +396,15 @@ export type WorldSettings = {
 
 export type SchemaVersion = number;
 
+export type ProjectSettings = {
+  /** Autosave interval in seconds (0 disables). */
+  "autosave_interval_s": number;
+  /** Cache size cap in bytes. */
+  "cache_limit_bytes": number;
+  /** Preview LOD (resolution divided by 2^lod). */
+  "preview_lod": number;
+};
+
 export type ProjectCloseResult = {
   /** Project id. */
   "project_id": string;
@@ -411,6 +420,8 @@ export type ProjectCloseResult = {
   "dirty": boolean;
   /** Journal entries awaiting replay. */
   "pending_journal": number;
+  /** User-tunable settings (`project.json` → `settings`): autosave interval, cache limit, preview LOD. */
+  "settings": ProjectSettings;
 };
 
 export type ProjectCreateRequest = {
@@ -437,6 +448,8 @@ export type ProjectCreateResult = {
   "dirty": boolean;
   /** Journal entries awaiting replay. */
   "pending_journal": number;
+  /** User-tunable settings (`project.json` → `settings`): autosave interval, cache limit, preview LOD. */
+  "settings": ProjectSettings;
 };
 
 export type ProjectImportAssetRequest = {
@@ -481,6 +494,8 @@ export type ProjectInfoResult = {
   "dirty": boolean;
   /** Journal entries awaiting replay. */
   "pending_journal": number;
+  /** User-tunable settings (`project.json` → `settings`): autosave interval, cache limit, preview LOD. */
+  "settings": ProjectSettings;
 };
 
 export type ProjectOpenRequest = {
@@ -503,6 +518,8 @@ export type ProjectOpenResult = {
   "dirty": boolean;
   /** Journal entries awaiting replay. */
   "pending_journal": number;
+  /** User-tunable settings (`project.json` → `settings`): autosave interval, cache limit, preview LOD. */
+  "settings": ProjectSettings;
 };
 
 export type ProjectRecoverRequest = {
@@ -543,6 +560,8 @@ export type ProjectSaveResult = {
   "dirty": boolean;
   /** Journal entries awaiting replay. */
   "pending_journal": number;
+  /** User-tunable settings (`project.json` → `settings`): autosave interval, cache limit, preview LOD. */
+  "settings": ProjectSettings;
 };
 
 export type ProjectSetNameRequest = {
@@ -565,6 +584,8 @@ export type ProjectSetNameResult = {
   "dirty": boolean;
   /** Journal entries awaiting replay. */
   "pending_journal": number;
+  /** User-tunable settings (`project.json` → `settings`): autosave interval, cache limit, preview LOD. */
+  "settings": ProjectSettings;
 };
 
 export type HeightmapFormat = "exr" | "png16" | "raw_r16" | "raw_r32" | "tiff32";

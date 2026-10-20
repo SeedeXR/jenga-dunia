@@ -379,6 +379,8 @@ pub mod builtin {
         pub dirty: bool,
         /// Journal entries awaiting replay.
         pub pending_journal: usize,
+        /// User-tunable settings (`project.json` → `settings`): autosave interval, cache limit, preview LOD.
+        pub settings: crate::project::ProjectSettings,
     }
 
     /// `project.import_asset` params.
@@ -447,6 +449,7 @@ pub mod builtin {
             schema_version: p.doc.schema_version,
             dirty: p.is_dirty(),
             pending_journal: p.pending_journal.len(),
+            settings: p.doc.settings.clone(),
         }
     }
 

@@ -207,14 +207,17 @@ export const useStore = create<State>((set, get) => {
   type GraphView = GraphListResult;
   // Autosave: a debounced project.save after any journaled edit, so `dirty` / `journal` return to
   // false / 0 on their own (the WAL already survives crashes; this is about never losing work on
-  // quit). `?autosave=<ms>` overrides the delay; 0 disables it (tests that inspect the journal).
-  // ponytail: no preference UI; add one when someone asks for a longer interval.
-  const AUTOSAVE_MS = Number(new URLSearchParams(location.search).get("autosave") ?? 2000);
+  // quit). The delay is the project's `settings.autosave_interval_s` (project.json; 0 disables);
+  // `?autosave=<ms>` in the URL overrides it (tests that inspect the journal pass 0).
+  // ponytail: edit the interval in project.json; a settings panel comes with the preferences UI.
+  const autosaveOverride = new URLSearchParams(location.search).get("autosave");
+  const autosaveMs = () => (autosaveOverride !== null ? Number(autosaveOverride) : (get().project?.settings.autosave_interval_s ?? 0) * 1000);
   let autosaveTimer: ReturnType<typeof setTimeout> | undefined;
   const scheduleAutosave = () => {
-    if (!(AUTOSAVE_MS > 0)) return;
+    const ms = autosaveMs();
+    if (!(ms > 0)) return;
     clearTimeout(autosaveTimer);
-    autosaveTimer = setTimeout(() => void autosave(), AUTOSAVE_MS);
+    autosaveTimer = setTimeout(() => void autosave(), ms);
   };
   const autosave = async () => {
     if (get().busy || get().jobs.length > 0 || !get().project) return scheduleAutosave();
