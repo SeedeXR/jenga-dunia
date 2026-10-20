@@ -101,7 +101,11 @@ Undo and redo are operations like everything else (`graph.undo` / `graph.redo`, 
 
 ![Viewport with the gradient sky and a low warm sun; the Sun panel shows azimuth 140° and elevation 12°](images/desktop-sun.png)
 
-*The viewport draws a gradient sky dome (deep blue zenith → pale horizon, dark below) and lights the terrain with a sun you steer from the **Sun** panel (1): azimuth is the compass direction the light comes from, elevation its height above the horizon — below 20° the light turns warm and dimmer, like World Creator's time-of-day. The header reports the current direction (2). The sun is a view setting, not part of the project. UI-driven test: `apps/desktop/e2e/terrain.spec.ts` drags the elevation to 12° and checks the readout.*
+*The viewport lights the terrain with a sun you steer from the **Sun** panel (1): azimuth is the compass direction the light comes from, elevation its height above the horizon — below 20° the light turns warm and dimmer, like World Creator's time-of-day. The header reports the current direction (2). The sun is a view setting, not part of the project. UI-driven test: `apps/desktop/e2e/terrain.spec.ts` drags the elevation to 12° and checks the readout.*
+
+![Viewport orbited down to the horizon under a 12° sun: the dome above the rim is the physical sky, warm and hazy, the ground band fading below; the Sun panel shows a Turbidity slider and the header reads sky 512×256](images/desktop-sky-dome.png)
+
+*Physical sky: the dome is the same Preetham daylight model `sky.bake` writes for engines (CLI quickstart, "Physical sky as an HDRI"), baked by the core as a small equirectangular preview whenever the sun moves or **Turbidity** (1) changes — 2 is clear mountain air, 3 clear, 6 hazy, 10 thick haze — and reported in the header as `sky 512×256` (2). Orbit down to the horizon to see it: a deep blue zenith, a bright aureole around the sun, a warm horizon at low elevations, and a ground band that fades out below the rim. The dome is only what you see; the terrain's lighting still comes from the sun lamp, so the baked HDRI (sun included) is the file to light a scene with elsewhere.*
 
 ![Viewport textured with baked maps: green lowlands, ochre slopes, grey rock and snow with fine relief; the Sun panel's Textured (PBR) toggle is on and the header reads pbr 256×256](images/desktop-pbr.png)
 

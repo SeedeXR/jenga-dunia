@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SkyPreviewResult",
+  "description": "`sky.preview` result.",
+  "type": "object",
+  "properties": {
+    "width": {
+      "description": "Preview size in pixels.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "height": {
+      "description": "Preview height in pixels.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "png_base64": {
+      "description": "Tonemapped sRGB PNG (equirectangular, row 0 = zenith, column 0 = north), standard base64.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "width",
+    "height",
+    "png_base64"
+  ]
+}

@@ -8,7 +8,7 @@
 //! Output: linear-sRGB radiance for any direction, and an equirectangular HDRI (OpenEXR, RGB
 //! f32) plus a tonemapped PNG preview — VUE's "sky export as HDRI" (`docs/research/
 //! vue-features.md`) for engines and renderers. The sun is a disc of 0.27° at `sun_radiance`;
-//! below the horizon a flat ground takes a fifth of the horizon radiance.
+//! below the horizon the horizon colour fades to a fifth of itself within a few degrees.
 
 use jd_types::{JdError, JdResult};
 use serde::{Deserialize, Serialize};
@@ -194,7 +194,14 @@ impl Sky {
         } else {
             (0.0, 0.0)
         };
-        let scale = self.params.exposure * if horizon { 0.2 } else { 1.0 };
+        // Below the horizon: the horizon colour fades to a fifth over the first ~10° (aerial
+        // perspective on the ground), so a viewport looking down still sees a pale band at the rim.
+        let ground_fade = if horizon {
+            0.2 + 0.8 * (8.0 * cos_theta).exp()
+        } else {
+            1.0
+        };
+        let scale = self.params.exposure * ground_fade;
         [
             (3.2406 * big_x - 1.5372 * big_y - 0.4986 * big_z).max(0.0) * scale,
             (-0.9689 * big_x + 1.8758 * big_y + 0.0415 * big_z).max(0.0) * scale,

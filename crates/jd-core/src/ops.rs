@@ -2938,6 +2938,33 @@ pub mod terrain {
         PathBuf::from("sky.exr")
     }
 
+    /// `sky.preview` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct SkyPreview {
+        /// Sun and atmosphere.
+        #[serde(default, flatten)]
+        pub sky: jd_terrain::SkyParams,
+        /// Width of the equirectangular preview in pixels (even, 16..=2048); the height is half.
+        #[serde(default = "default_sky_preview_width")]
+        pub width: u32,
+    }
+
+    fn default_sky_preview_width() -> u32 {
+        512
+    }
+
+    /// `sky.preview` result.
+    #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct SkyPreviewResult {
+        /// Preview size in pixels.
+        pub width: u32,
+        /// Preview height in pixels.
+        pub height: u32,
+        /// Tonemapped sRGB PNG (equirectangular, row 0 = zenith, column 0 = north), standard base64.
+        pub png_base64: String,
+    }
+
     /// `sky.bake` result.
     #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
     pub struct SkyBakeResult {
@@ -3084,6 +3111,19 @@ pub mod terrain {
             "Wind sea for a wind speed and fetch (JONSWAP growth capped at the fully developed Pierson–Moskowitz sea): significant height, peak period and wavelength, breaking depth, and the Gerstner components the viewport animates",
             Scope::None,
             |_, p| Ok((jd_terrain::wave_spectrum(&p)?, Vec::new())),
+        );
+        r.register::<SkyPreview, SkyPreviewResult, _>(
+            "sky.preview",
+            "The physical sky (Preetham) as a small tonemapped equirectangular PNG for viewports — same model as `sky.bake`, no project needed",
+            Scope::None,
+            |_, p| {
+                if !(16..=2048).contains(&p.width) || !p.width.is_multiple_of(2) {
+                    return Err(JdError::invalid("width", "must be even and within 16..=2048"));
+                }
+                use base64::Engine as _;
+                let png = jd_terrain::sky_preview_png(&p.sky, p.width)?;
+                Ok((SkyPreviewResult { width: p.width, height: p.width / 2, png_base64: base64::engine::general_purpose::STANDARD.encode(png) }, Vec::new()))
+            },
         );
         r.register::<SkyBake, SkyBakeResult, _>(
             "sky.bake",

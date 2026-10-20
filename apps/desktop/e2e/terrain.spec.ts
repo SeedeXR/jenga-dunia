@@ -55,6 +55,20 @@ test.describe("desktop UI against the real core", () => {
       input.dispatchEvent(new Event("input", { bubbles: true }));
     });
     await expect(page.getByTestId("viewport-info")).toContainText("sun 12°/140°");
+    // The dome is the physical sky, re-baked for the new sun; haze is a slider too.
+    await expect(page.getByTestId("viewport-info")).toContainText("sky 512×256");
+    await expect(page.getByTestId("sun-turbidity")).toHaveValue("3");
+    // Orbit down to the horizon: the dome above the rim is the physical sky (tutorial image).
+    const vp = (await page.getByTestId("viewport").boundingBox())!;
+    await page.mouse.move(vp.x + vp.width / 2, vp.y + vp.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(vp.x + vp.width / 2 - 360, vp.y + vp.height / 2 - 400, { steps: 20 });
+    await page.mouse.up();
+    await page.screenshot({ path: testInfo.outputPath("terrain-horizon.png"), fullPage: false }); // tutorial image source
+    await page.mouse.move(vp.x + vp.width / 2, vp.y + vp.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(vp.x + vp.width / 2 + 360, vp.y + vp.height / 2 + 400, { steps: 20 });
+    await page.mouse.up();
     await page.screenshot({ path: testInfo.outputPath("terrain-low-sun.png"), fullPage: false }); // tutorial image source
 
     await page.getByTestId("export-path").fill("h.png");

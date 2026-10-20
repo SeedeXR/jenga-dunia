@@ -850,6 +850,33 @@ export type SkyBakeResult = {
   "horizon_rgb": [number, number, number];
 };
 
+export type SkyPreviewRequest = {
+  /** Sun azimuth, degrees clockwise from north. */
+  "sun_azimuth_deg"?: number;
+  /** Sun elevation above the horizon, degrees (0, 90]. */
+  "sun_elevation_deg"?: number;
+  /** Turbidity: 2 = clear mountain air, 3 = clear, 6 = hazy, 10 = thick haze (2..=10). */
+  "turbidity"?: number;
+  /** Scale from kcd/m² to the written radiance (> 0): 0.05 puts a clear zenith near 0.5. */
+  "exposure"?: number;
+  /** Radiance of the 0.27° sun disc after exposure (≥ 0; 0 hides the disc). The default is the
+real sun — ≈ 1.6·10⁹ cd/m², i.e. 1.6·10⁶ kcd/m² × the default exposure — so an HDRI lights a
+scene with the right sun-to-sky balance; in the map the disc's energy is spread over the
+pixel that holds it when the pixel is larger than the disc. */
+  "sun_radiance"?: number;
+  /** Width of the equirectangular preview in pixels (even, 16..=2048); the height is half. */
+  "width"?: number;
+};
+
+export type SkyPreviewResult = {
+  /** Preview size in pixels. */
+  "width": number;
+  /** Preview height in pixels. */
+  "height": number;
+  /** Tonemapped sRGB PNG (equirectangular, row 0 = zenith, column 0 = north), standard base64. */
+  "png_base64": string;
+};
+
 export type HeightmapFormat = "exr" | "png16" | "raw_r16" | "raw_r32" | "tiff32";
 
 export type TerrainExportHeightmapRequest = {
@@ -1583,6 +1610,8 @@ export interface JdOps {
   "project.set_settings": { request: ProjectSetSettingsRequest; result: ProjectSetSettingsResult };
   /** Bake a physical sky (Preetham daylight model: sun azimuth/elevation, turbidity) as an equirectangular HDRI — OpenEXR RGB f32 for engines and renderers, with a tonemapped PNG preview beside it */
   "sky.bake": { request: SkyBakeRequest; result: SkyBakeResult };
+  /** The physical sky (Preetham) as a small tonemapped equirectangular PNG for viewports — same model as `sky.bake`, no project needed */
+  "sky.preview": { request: SkyPreviewRequest; result: SkyPreviewResult };
   /** Write a layer as EXR (f32), PNG16, RAW r16 or r32 with a JSON sidecar */
   "terrain.export_heightmap": { request: TerrainExportHeightmapRequest; result: TerrainExportHeightmapResult };
   /** Write a layer as a grid mesh — .glb (normals, UVs, PBR material with baked base-colour texture), .fbx (binary 7.4 quads, Phong material with the baked texture embedded), .obj, binary .stl, binary .ply with vertex colours, .usda, or .usdz (needs usdzip) — metres, +Y up, centred on the world */

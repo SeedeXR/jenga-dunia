@@ -88,6 +88,15 @@ export interface LayerMaps {
   px: [number, number];
 }
 
+/** The physical sky for the viewport dome: a tonemapped equirectangular PNG decoded to a bitmap. */
+export async function skyPreview(sun: { sun_azimuth_deg: number; sun_elevation_deg: number; turbidity: number }, width = 512): Promise<{ bitmap: ImageBitmap; px: [number, number] } | null> {
+  // Three times the bake's default exposure: the dome is seen tonemapped, and a clear zenith near 0.5 reads grey.
+  const r = await op<{ width: number; height: number; png_base64: string }>("sky.preview", { ...sun, exposure: 0.15, width });
+  if (r.status !== "ok" || !r.result) return null;
+  const bitmap = await createImageBitmap(new Blob([Uint8Array.from(atob(r.result.png_base64), (c) => c.charCodeAt(0))], { type: "image/png" }));
+  return { bitmap, px: [r.result.width, r.result.height] };
+}
+
 export async function layerTextures(layer: string, maxPx = 1024): Promise<{ maps: LayerMaps; ms: number } | null> {
   const t0 = performance.now();
   const r = await op<{ width: number; height: number; albedo_png_base64: string; normal_png_base64: string; roughness_png_base64: string }>("terrain.textures", { layer, max_px: maxPx });

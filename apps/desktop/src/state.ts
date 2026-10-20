@@ -1,7 +1,7 @@
 // Frontend store: a mirror of what the core reports, never the source of truth (docs/architecture/12-ui-workspace.md).
 import { create } from "zustand";
 import type { Edge, GraphEvaluateResult, GraphListResult, HeightmapFormat, JdOps, JobInfo as JobInfoGen, NodeDefInfo, NodeView, NoiseParams, OceanWavesRequest, OceanWavesResult, OpId, ProjectOpenResult, ProjectSaveResult, ScatterPoint, TerrainStatsResult } from "./lib/ops.gen";
-import { layerPreview, layerTextures, op, type JdError, type LayerMaps, type Preview, type Response, type Warning } from "./lib/api";
+import { layerPreview, layerTextures, op, skyPreview, type JdError, type LayerMaps, type Preview, type Response, type Warning } from "./lib/api";
 
 export type ProjectSummary = ProjectOpenResult;
 
@@ -71,8 +71,11 @@ interface State {
   setSculpting: (on: boolean) => void;
   brush: { radius_m: number; strength_m: number; mode: "raise" | "smooth" | "flatten"; amount: number };
   /** Viewport sun direction (not part of the project). */
-  sun: { azimuth_deg: number; elevation_deg: number };
-  setSun: (patch: Partial<{ azimuth_deg: number; elevation_deg: number }>) => void;
+  sun: { azimuth_deg: number; elevation_deg: number; turbidity: number };
+  setSun: (patch: Partial<{ azimuth_deg: number; elevation_deg: number; turbidity: number }>) => void;
+  /** The physical sky (`sky.preview`) for the viewport dome, re-baked when the sun moves. */
+  sky: { bitmap: ImageBitmap; px: [number, number] } | null;
+  refreshSky: () => Promise<void>;
   /** Scatter preview: instances placed from a 0..1 mask layer and drawn in the viewport; export writes a GLB. */
   scatter: { mask: string | null; spacing_m: number; seed: number; points: ScatterPoint[] | null };
   setScatter: (patch: Partial<{ mask: string | null; spacing_m: number; seed: number }>) => void;
@@ -278,6 +281,7 @@ export const useStore = create<State>((set, get) => {
   };
   let liveTimer: ReturnType<typeof setTimeout> | undefined;
   let timeTimer: ReturnType<typeof setTimeout> | undefined;
+  let skyTimer: ReturnType<typeof setTimeout> | undefined;
   /** The live evaluation in flight, if any: Generate and Evaluate wait for it (see `settle`). */
   let liveInFlight: Promise<void> | null = null;
   const liveEvaluate = () => {
@@ -413,8 +417,24 @@ export const useStore = create<State>((set, get) => {
     sculpting: false,
     setSculpting: (on) => set({ sculpting: on }),
     brush: { radius_m: 150, strength_m: 40, mode: "raise", amount: 0.5 },
-    sun: { azimuth_deg: 140, elevation_deg: 35 },
-    setSun: (patch) => set((s) => ({ sun: { ...s.sun, ...patch } })),
+    sun: { azimuth_deg: 140, elevation_deg: 35, turbidity: 3 },
+    setSun: (patch) => {
+      set((s) => ({ sun: { ...s.sun, ...patch } }));
+      clearTimeout(skyTimer);
+      skyTimer = setTimeout(() => void get().refreshSky(), 150); // a slider drag re-bakes once it settles
+    },
+    sky: null,
+    refreshSky: async () => {
+      const { azimuth_deg, elevation_deg, turbidity } = get().sun;
+      try {
+        const r = await skyPreview({ sun_azimuth_deg: azimuth_deg, sun_elevation_deg: Math.max(1, elevation_deg), turbidity });
+        const old = get().sky;
+        set({ sky: r });
+        old?.bitmap.close();
+      } catch (e) {
+        logFailure("sky.preview", e);
+      }
+    },
     scatter: { mask: null, spacing_m: 40, seed: 1, points: null },
     setScatter: (patch) => set((s) => ({ scatter: { ...s.scatter, ...patch, points: null } })),
     placeScatter: async () => {

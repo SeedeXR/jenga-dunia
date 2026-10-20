@@ -165,6 +165,11 @@
     "scope": "export"
   },
   {
+    "id": "sky.preview",
+    "description": "The physical sky (Preetham) as a small tonemapped equirectangular PNG for viewports — same model as `sky.bake`, no project needed",
+    "scope": "none"
+  },
+  {
     "id": "terrain.export_heightmap",
     "description": "Write a layer as EXR (f32), PNG16, RAW r16 or r32 with a JSON sidecar",
     "scope": "export"

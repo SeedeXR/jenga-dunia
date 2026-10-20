@@ -19,6 +19,8 @@ export interface ViewportInfo {
   pbrPx?: [number, number];
   /** Wind sea being animated: significant height and peak wavelength, metres. */
   waves?: { heightM: number; lengthM: number };
+  /** Physical sky texture on the dome (equirectangular preview size), when one is applied. */
+  skyPx?: [number, number];
 }
 
 interface Props {
@@ -36,6 +38,8 @@ interface Props {
   water?: WaterLook | null;
   /** Wind sea (`ocean.waves` for the sea-level node's wind): the sea surface is animated as a Gerstner sum of its components. */
   waves?: OceanWavesResult | null;
+  /** Physical sky (`sky.preview`, equirectangular, row 0 = zenith, column 0 = north) drawn on the dome; null keeps the gradient. */
+  sky?: { bitmap: ImageBitmap; px: [number, number] } | null;
   /** Sun direction: azimuth clockwise from north (0 = light from the north), elevation above the horizon. */
   sun?: { azimuthDeg: number; elevationDeg: number };
   /** Baked albedo/normal/roughness maps for the shown layer; textured when set and no overlay is active. */
@@ -256,6 +260,8 @@ interface SceneState {
   instances: THREE.InstancedMesh<THREE.ConeGeometry, THREE.MeshStandardMaterial> | null;
   /** Size of the baked maps currently on the terrain material. */
   pbrPx: [number, number] | null;
+  /** Size of the sky texture on the dome, when one is applied. */
+  skyPx: [number, number] | null;
 }
 
 function placeCamera(s: SceneState) {
@@ -274,6 +280,7 @@ function infoOf(s: SceneState): ViewportInfo {
     sun: s.sunDeg,
     ...(s.instances ? { instances: s.instances.count } : {}),
     ...(s.pbrPx ? { pbrPx: s.pbrPx } : {}),
+    ...(s.skyPx ? { skyPx: s.skyPx } : {}),
   };
 }
 
@@ -299,7 +306,7 @@ function animateSea(s: SceneState, tS: number): void {
   s.sea.geometry.computeVertexNormals();
 }
 
-export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevelM = null, water = null, waves = null, sun, overlay = null, instances = null, maps = null }: Props) {
+export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevelM = null, water = null, waves = null, sky = null, sun, overlay = null, instances = null, maps = null }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<SceneState | null>(null);
   // Latest sculpt props without re-creating the renderer effect.
@@ -377,6 +384,7 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
       orbit: { theta: 0.6, phi: 1.0, radius: 5200, minR: 200, maxR: 100000 },
       instances: null,
       pbrPx: null,
+      skyPx: null,
     };
     sceneRef.current = state;
     placeCamera(state);
@@ -567,6 +575,35 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
     s.sunDeg = { azimuthDeg: sun?.azimuthDeg ?? 140, elevationDeg: sun?.elevationDeg ?? 35 };
     onInfo?.(infoOf(s));
   }, [sun?.azimuthDeg, sun?.elevationDeg, onInfo]);
+
+  // Sky dome: the physical sky preview as an equirectangular texture. three's sphere UVs run
+  // west → south → east → north around +Y and v = 1 at the zenith; the preview's columns run
+  // north → east → south → west and its first row is the zenith, so the lookup is mirrored and
+  // offset through the texture's repeat/offset instead of rewriting the geometry's UVs.
+  useEffect(() => {
+    const s = sceneRef.current;
+    if (!s) return;
+    const mat = s.sky.material;
+    mat.map?.dispose();
+    if (sky) {
+      const tex = new THREE.CanvasTexture(sky.bitmap);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.ClampToEdgeWrapping;
+      tex.repeat.set(-1, 1); // mirror the azimuth; v = 1 is the image's top row (zenith) after the default flip
+      tex.offset.set(0.75, 0);
+      tex.needsUpdate = true;
+      mat.map = tex;
+      mat.vertexColors = false;
+      s.skyPx = sky.px;
+    } else {
+      mat.map = null;
+      mat.vertexColors = true;
+      s.skyPx = null;
+    }
+    mat.needsUpdate = true;
+    onInfo?.(infoOf(s));
+  }, [sky, onInfo]);
 
   // Sea: follows the graph's sea-level node; a flat surface whose colour and opacity follow the
   // depth of the terrain under it (shoreline foam, translucent shallows, opaque deep water).
