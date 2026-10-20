@@ -265,6 +265,17 @@ if (!usdchecker.error && existsSync(path.join(exportsDir, "terrain.usdc"))) {
   const c = spawnSync("usdchecker", [path.join(exportsDir, "terrain.usdc")], { encoding: "utf8" });
   mark(11, /Success/.test(c.stdout) ? "VERIFIED" : "FAILED", `usdchecker terrain.usdc: ${c.stdout.trim().split("\n").pop()}`);
 }
+// FBX: our own writer read back by Maya's FBX plugin (the Autodesk FBX SDK itself) when a mayapy exists.
+if (existsSync("scripts/maya-fbx-check.sh") && (process.env.MAYAPY || existsSync("/Applications/Autodesk"))) {
+  try {
+    const line = execFileSync("bash", ["scripts/maya-fbx-check.sh", path.join(exportsDir, "terrain.fbx")], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 600_000 }).trim();
+    const rep = JSON.parse(line);
+    const m = rep.meshes?.[0] ?? {};
+    mark(11, rep.ok && m.triangles === fbx.triangles ? "VERIFIED" : "FAILED", `terrain.fbx through Maya ${rep.maya}'s FBX plugin ${rep.fbx_plugin} (Autodesk FBX SDK): ${rep.meshes?.length} mesh, ${m.vertices} vertices, ${m.faces} quads, ${m.triangles} triangles (writer ${fbx.triangles}), UV ${m.uv_sets?.join("/")}, bounds ${m.bbox_size?.map((v) => (v / 100).toFixed(1)).join("×")} m (${rep.units}, up ${rep.up_axis})`);
+  } catch (e) {
+    mark(11, "FAILED", `terrain.fbx: Maya import did not complete: ${String(e).slice(0, 200)}`);
+  }
+}
 // FBX: our own writer read back by Unity's ModelImporter (the Autodesk FBX SDK) when a Unity editor is installed.
 if (existsSync("scripts/unity-import-check.sh") && (process.env.UNITY || existsSync("/Applications/Unity/Hub/Editor"))) {
   try {

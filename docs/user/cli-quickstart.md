@@ -210,6 +210,7 @@ $ jd --json export mesh --project Bio.jdproj --layer land land.fbx
 |---|---|
 | Blender 5.2 `import_scene.fbx` | 1 object `terrain`, 262 144 vertices, 261 121 polygons all quads, 5 110 × 5 110 m footprint, 1 033 m height range, UV layer `map1` in 0..1, material `terrain` with one image-texture node, embedded `terrain-albedo.png` 512² unpacked |
 | Unity 6000.4.8f1 `ModelImporter` (Autodesk FBX SDK) — `scripts/unity-import-check.sh --fbx terrain.fbx` | 1 mesh `terrain`, 262 144 vertices, 522 242 triangles (the 261 121 quads triangulated), bounds 5 110 × 1 232.5 × 5 110 m with the minimum at y = 32.54 m (absolute heights kept), scale 1 in file units; report `terrain.fbx.jd-unity-import.json` |
+| Maya 2027, FBX plugin 2020.3.9 (the Autodesk FBX SDK itself) — `scripts/maya-fbx-check.sh terrain.fbx` (headless `mayapy`) | 1 mesh `terrain`, 262 144 vertices, 261 121 faces (quads), 522 242 triangles, UV set `map1`, world bounds 5 110 × 1 232.5 × 5 110 m (Maya converts the metre file to its centimetres: 511 000 × 123 253 × 511 000), minimum at y = 32.54 m, up axis Y; 2.1 s; report `terrain.fbx.jd-maya-import.json` |
 | Optima (independent Rust parser) | 262 144 vertices, 261 121 authored quads, 0 degenerate / flipped / non-manifold, bounding box ±2 555 m × 52..1 085 m, `hasUvs: true`, `textured: true`, PNG 512² |
 
 ![Textured FBX terrain rendered by Optima after reading our file](images/cli-fbx.png)
