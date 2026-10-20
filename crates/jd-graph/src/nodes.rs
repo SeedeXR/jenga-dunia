@@ -9,7 +9,7 @@ use jd_terrain::{
     THERMAL_MAX_RATE, aeolian_transport, apply_strokes, carve_rivers, classify_seabed,
     coastal_erode, droplet_erode, fill_depressions, flow_accumulation_with, generate_noise,
     hydraulic_erode, read_foreign, resample_to_world, sea_level, slope_mask, snow_cover,
-    stream_power_erode, thermal_erode, wetness_index_with,
+    wetness_index_with,
 };
 use jd_types::{JdError, JdResult};
 use rayon::prelude::*;
@@ -585,17 +585,18 @@ pub fn register_all(r: &mut Registry) {
     ));
     r.register(NodeDef::new::<ThermalParams, _>(
         "jd.erosion.thermal@1",
-        "Thermal erosion: material steeper than the talus angle slides downhill (mass-conserving Jacobi steps)",
-        vec![port("in", PortType::Heightfield, true)],
+        "Thermal erosion: material steeper than the talus angle slides downhill (mass-conserving Jacobi steps); an optional `hardness` field (0..1, e.g. from `jd.terrain.strata@1`) lets hard rock hold near-vertical faces and shed at a tenth of the rate",
+        vec![port("in", PortType::Heightfield, true), port("hardness", PortType::Heightfield, false)],
         vec![port("out", PortType::Heightfield, false)],
         |ctx, p, i| {
             let tp: ThermalParams = params(p)?;
             if !(1..=1000).contains(&tp.iterations) {
                 return Err(JdError::invalid("iterations", "must be within 1..=1000"));
             }
-            Ok(out("out", thermal_erode(
+            let hardness = i.get("hardness").map(|v| v.as_field());
+            Ok(out("out", jd_terrain::thermal_erode_with(
                     field(i, "in")?,
-                    spacing_m(ctx), tp.talus_deg, tp.iterations, tp.rate, Some(&ctx.cancel))?))
+                    spacing_m(ctx), tp.talus_deg, tp.iterations, tp.rate, hardness.map(|k| &**k), Some(&ctx.cancel))?))
         },
     ).with_memory(8.0));
     r.register(NodeDef::new::<DropletParams, _>(
@@ -611,13 +612,14 @@ pub fn register_all(r: &mut Registry) {
     ).with_memory(8.0));
     r.register(NodeDef::new::<StreamPowerParams, _>(
         "jd.erosion.stream_power@1",
-        "Fluvial (stream-power) erosion: channels incise in proportion to drainage area^m × slope, implicit and unconditionally stable; outputs the eroded terrain and an `incision` depth map",
-        vec![port("in", PortType::Heightfield, true)],
+        "Fluvial (stream-power) erosion: channels incise in proportion to drainage area^m × slope, implicit and unconditionally stable; outputs the eroded terrain and an `incision` depth map; an optional `hardness` field (0..1) drops the erodibility to a tenth on hard rock",
+        vec![port("in", PortType::Heightfield, true), port("hardness", PortType::Heightfield, false)],
         vec![port("out", PortType::Heightfield, false), port("incision", PortType::Heightfield, false)],
         |ctx, p, i| {
             let sp: StreamPowerParams = params(p)?;
             let input = field(i, "in")?;
-            let eroded = stream_power_erode(input, spacing_m(ctx), &sp, Some(&ctx.cancel))?;
+            let hardness = i.get("hardness").map(|v| v.as_field());
+            let eroded = jd_terrain::stream_power_erode_with(input, spacing_m(ctx), &sp, hardness.map(|k| &**k), Some(&ctx.cancel))?;
             let mut incision = eroded.clone();
             incision.fill_with(|x, y| (input.get(x, y) - eroded.get(x, y)).max(0.0));
             Ok(BTreeMap::from([("out".to_owned(), Value::field(eroded)), ("incision".to_owned(), Value::field(incision))]))
@@ -880,6 +882,16 @@ pub fn register_all(r: &mut Registry) {
             Ok(out("seabed", classify_seabed(field(i, "in")?, spacing_m(ctx), rivers.map(|r| &**r), shore.map(|s| &**s), &sp)?))
         },
     ).with_memory(8.0));
+    r.register(NodeDef::new::<jd_terrain::StrataParams, _>(
+        "jd.terrain.strata@1",
+        "Layered rock hardness (0..1): repeating hard-cap / soft-bed cycles of `layer_m`, tilted by `dip_deg` towards `dip_azimuth_deg`, bed surfaces undulating by `warp_m` — feed it to the `hardness` input of thermal and stream-power erosion for mesas, buttes and stepped canyon walls; re-evaluate after the surface moves",
+        vec![port("in", PortType::Heightfield, true)],
+        vec![port("hardness", PortType::Heightfield, false)],
+        |ctx, p, i| {
+            let sp: jd_terrain::StrataParams = params(p)?;
+            Ok(out("hardness", jd_terrain::strata_hardness(field(i, "in")?, spacing_m(ctx), &sp)?))
+        },
+    ).with_memory(4.0));
     r.register(NodeDef::new::<jd_terrain::KarstParams, _>(
         "jd.erosion.karst@1",
         "Karst sinkholes (dolines): seeded bowl or collapse depressions on flat, soluble ground — `density_per_km2`, radius and depth ranges, `max_slope_deg`, `min_spacing_m`; optional `soluble` mask (0..1); outputs the carved terrain and a `sinkholes` floor mask",

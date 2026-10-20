@@ -831,12 +831,17 @@
   },
   {
     "kind": "jd.erosion.stream_power@1",
-    "description": "Fluvial (stream-power) erosion: channels incise in proportion to drainage area^m × slope, implicit and unconditionally stable; outputs the eroded terrain and an `incision` depth map",
+    "description": "Fluvial (stream-power) erosion: channels incise in proportion to drainage area^m × slope, implicit and unconditionally stable; outputs the eroded terrain and an `incision` depth map; an optional `hardness` field (0..1) drops the erodibility to a tenth on hard rock",
     "inputs": [
       {
         "name": "in",
         "ty": "heightfield",
         "required": true
+      },
+      {
+        "name": "hardness",
+        "ty": "heightfield",
+        "required": false
       }
     ],
     "outputs": [
@@ -915,12 +920,17 @@
   },
   {
     "kind": "jd.erosion.thermal@1",
-    "description": "Thermal erosion: material steeper than the talus angle slides downhill (mass-conserving Jacobi steps)",
+    "description": "Thermal erosion: material steeper than the talus angle slides downhill (mass-conserving Jacobi steps); an optional `hardness` field (0..1, e.g. from `jd.terrain.strata@1`) lets hard rock hold near-vertical faces and shed at a tenth of the rate",
     "inputs": [
       {
         "name": "in",
         "ty": "heightfield",
         "required": true
+      },
+      {
+        "name": "hardness",
+        "ty": "heightfield",
+        "required": false
       }
     ],
     "outputs": [
@@ -1877,6 +1887,88 @@
           ]
         }
       }
+    }
+  },
+  {
+    "kind": "jd.terrain.strata@1",
+    "description": "Layered rock hardness (0..1): repeating hard-cap / soft-bed cycles of `layer_m`, tilted by `dip_deg` towards `dip_azimuth_deg`, bed surfaces undulating by `warp_m` — feed it to the `hardness` input of thermal and stream-power erosion for mesas, buttes and stepped canyon walls; re-evaluate after the surface moves",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "hardness",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "StrataParams",
+      "description": "Strata settings.",
+      "type": "object",
+      "properties": {
+        "layer_m": {
+          "description": "Thickness of one hard+soft cycle, metres (> 0).",
+          "type": "number",
+          "format": "float",
+          "default": 25.0
+        },
+        "hard_fraction": {
+          "description": "Share of each cycle that is hard caprock, 0..1 (the rest is soft).",
+          "type": "number",
+          "format": "float",
+          "default": 0.3499999940395355
+        },
+        "hard": {
+          "description": "Hardness of the cap, 0..1 (1 = holds vertical cliffs, erodes at a tenth of the rate).",
+          "type": "number",
+          "format": "float",
+          "default": 1.0
+        },
+        "soft": {
+          "description": "Hardness of the soft bed, 0..1.",
+          "type": "number",
+          "format": "float",
+          "default": 0.15000000596046448
+        },
+        "transition": {
+          "description": "Width of the hard↔soft transition as a fraction of the cycle, 0..0.5.",
+          "type": "number",
+          "format": "float",
+          "default": 0.07999999821186066
+        },
+        "dip_deg": {
+          "description": "Dip of the beds, degrees from horizontal, [0, 60].",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        },
+        "dip_azimuth_deg": {
+          "description": "Direction the beds dip towards, degrees clockwise from north.",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        },
+        "warp_m": {
+          "description": "Undulation of the bed surfaces, metres (≥ 0): 0 for flat beds.",
+          "type": "number",
+          "format": "float",
+          "default": 3.0
+        },
+        "seed": {
+          "description": "Undulation seed.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        }
+      },
+      "additionalProperties": false
     }
   }
 ]

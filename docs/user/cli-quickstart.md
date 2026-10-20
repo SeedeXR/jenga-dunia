@@ -425,6 +425,24 @@ after   min 42.548  max 412.711  mean 230.109      (+0.74 m averaged over the wo
 
 `jd.ocean.bathymetry@1` takes the terrain and a `seabed` class map and raises every **sand** (1) or **mud** (3) cell towards the local mean height over `smooth_m` (a summed-area box filter, O(N)), never lowering a cell, never by more than `max_fill_m`, and never above `level_m` — sediment settles into hollows and levels the shelf, it does not build above the water. Rock (2), reef (4) and land keep the shape erosion gave them, so the chain coastal → seabed → bathymetry turns a noisy flooded landscape into a floor with smooth sediment plains between rock outcrops. `strength` (0..1) scales the fill. Not modelled: transport along the slope, sorting by grain size, a sediment budget.
 
+### Strata: mesas, buttes and stepped canyon walls
+
+```
+$ jd --json new Mesa.jdproj --extent 2048 --resolution 256 --seed 11            # noise 0..300 m, feature 1000 m, 3 octaves
+$ jd op graph.add_node --project Mesa.jdproj --save --params '{"kind":"jd.filter.terrace@1","params":{"step_m":60,"softness":0.05}}'
+$ jd op graph.add_node --project Mesa.jdproj --save --params '{"kind":"jd.terrain.strata@1","params":{"layer_m":60,"hard_fraction":0.3,"warp_m":2}}'
+$ jd op graph.add_node --project Mesa.jdproj --save --params '{"kind":"jd.erosion.thermal@1","params":{"talus_deg":34,"iterations":200,"rate":0.2}}'
+$ jd op graph.add_node --project Mesa.jdproj --save --params '{"kind":"jd.erosion.stream_power@1","params":{"k":0.0008,"m":0.5,"iterations":40}}'
+# noise → terrace → strata.in; terrace → thermal.in, strata.hardness → thermal.hardness; thermal → stream_power.in, strata.hardness → stream_power.hardness
+strata 47 ms · thermal 771 ms · stream power 1 751 ms (256²)
+faces steeper than 30° / 45° / 60°:  terraced input 10.1 / 9.5 / 8.7 %   with strata 24.6 / 14.6 / 9.1 %   same erosion without strata 54.3 / 0.05 / 0.0 %
+```
+
+![Blender render of the strata result: flat-topped mesas with caprock cliffs and fluted talus aprons below each step](images/cli-mesa-strata.png)
+![The same terrace and erosion without the hardness input: every riser slumped to the 34° talus angle](images/cli-mesa-plain.png)
+
+`jd.terrain.strata@1` writes a 0..1 hardness field from the height: beds of `layer_m` alternate a hard cap (`hard_fraction` of each cycle, hardness `hard`) and a soft bed (`soft`), with `transition` wide edges, tilted by `dip_deg` towards `dip_azimuth_deg` and undulating by `warp_m` (seeded). The thermal and stream-power nodes take it on their new optional `hardness` input: hard rock holds an 88° face and sheds at a tenth of the rate, and its erodibility `k` drops to a tenth, so the cap keeps the cliff while the shale below it slumps into talus — mesas, buttes, stepped canyon walls, the VUE "strata" filter done as a simulation input. The field is a property of the rock at the *current* surface, so for deep cuts re-evaluate it between erosion passes (strata → erode → strata → erode). Rendered in Blender 5.2 from the GLB exports with `scripts/blender/render_glb.py`; slope shares from `scripts/blender/slope_stats.py` (face normals).
+
 ### Karst sinkholes (desert and limestone plains)
 
 ```

@@ -75,7 +75,37 @@ impl Grid<'_> {
 /// Pass 1 of a thermal step (Olsen 2004 talus rule): per cell, the material it sheds this step
 /// (`amount = rate · dmax / 2`) and `amount / total_excess`, the factor that turns a neighbour's
 /// excess into its share. Both are 0 when nothing is steeper than the talus.
-fn shed_factors(g: &Grid, tan_t: f32, dist: &[f32; 8], rate: f32) -> Vec<[f32; 2]> {
+/// Per-cell talus tangent and rate: hard rock (hardness → 1) holds an 88° face and sheds at a
+/// tenth of the rate; soft rock keeps the node's values.
+struct Rock<'a> {
+    tan_t: f32,
+    rate: f32,
+    hardness: Option<&'a [f32]>,
+}
+
+impl Rock<'_> {
+    #[inline]
+    fn tan_at(&self, i: usize) -> f32 {
+        match self.hardness {
+            Some(h) => {
+                let k = h[i].clamp(0.0, 1.0);
+                // Interpolate the angle, not the tangent, so a 50 % rock reads as a mid slope.
+                let deg = self.tan_t.atan().to_degrees();
+                (deg + k * (88.0 - deg)).to_radians().tan()
+            }
+            None => self.tan_t,
+        }
+    }
+    #[inline]
+    fn rate_at(&self, i: usize) -> f32 {
+        match self.hardness {
+            Some(h) => self.rate * (1.0 - 0.9 * h[i].clamp(0.0, 1.0)),
+            None => self.rate,
+        }
+    }
+}
+
+fn shed_factors(g: &Grid, rock: &Rock, dist: &[f32; 8]) -> Vec<[f32; 2]> {
     let mut out = vec![[0.0f32; 2]; (g.w * g.hh) as usize];
     out.par_chunks_mut(g.w as usize)
         .enumerate()
@@ -83,6 +113,8 @@ fn shed_factors(g: &Grid, tan_t: f32, dist: &[f32; 8], rate: f32) -> Vec<[f32; 2
             for (x, cell) in row.iter_mut().enumerate() {
                 let (xi, yi) = (x as i64, y as i64);
                 let hc = g.at(xi, yi);
+                let tan_t = rock.tan_at((yi * g.w + xi) as usize);
+                let rate = rock.rate_at((yi * g.w + xi) as usize);
                 let (mut total, mut dmax) = (0.0f32, 0.0f32);
                 for (k, (dx, dy)) in NEIGHBOURS.iter().enumerate() {
                     let (nx, ny) = (xi + dx, yi + dy);
@@ -105,7 +137,7 @@ fn shed_factors(g: &Grid, tan_t: f32, dist: &[f32; 8], rate: f32) -> Vec<[f32; 2
 }
 
 /// Pass 2: every cell loses what it sheds and gains each neighbour's share directed at it.
-fn gather(g: &Grid, shed: &[[f32; 2]], tan_t: f32, dist: &[f32; 8]) -> Vec<f32> {
+fn gather(g: &Grid, shed: &[[f32; 2]], rock: &Rock, dist: &[f32; 8]) -> Vec<f32> {
     let mut out = vec![0.0f32; (g.w * g.hh) as usize];
     out.par_chunks_mut(g.w as usize)
         .enumerate()
@@ -121,7 +153,9 @@ fn gather(g: &Grid, shed: &[[f32; 2]], tan_t: f32, dist: &[f32; 8]) -> Vec<f32> 
                     }
                     let factor = shed[(ny * g.w + nx) as usize][1];
                     if factor > 0.0 {
-                        let excess = g.at(nx, ny) - hc - tan_t * dist[k];
+                        // The shedding neighbour's own talus decides what it lets go of.
+                        let excess =
+                            g.at(nx, ny) - hc - rock.tan_at((ny * g.w + nx) as usize) * dist[k];
                         if excess > 0.0 {
                             gained += factor * excess;
                         }
@@ -145,6 +179,26 @@ pub fn thermal_erode(
     rate: f32,
     cancel: Option<&AtomicBool>,
 ) -> JdResult<Heightfield> {
+    thermal_erode_with(h, spacing_m, talus_deg, iterations, rate, None, cancel)
+}
+
+/// [`thermal_erode`] with an optional per-cell `hardness` field (0..1, e.g. from
+/// [`crate::strata_hardness`]): hard rock holds a near-vertical face and sheds at a tenth of
+/// the rate, so caprock makes cliffs and shale makes talus — mesas, buttes, stepped walls.
+pub fn thermal_erode_with(
+    h: &Heightfield,
+    spacing_m: [f32; 2],
+    talus_deg: f32,
+    iterations: u32,
+    rate: f32,
+    hardness: Option<&Heightfield>,
+    cancel: Option<&AtomicBool>,
+) -> JdResult<Heightfield> {
+    if let Some(k) = hardness
+        && (k.width(), k.height()) != (h.width(), h.height())
+    {
+        return Err(JdError::invalid("hardness", "field size differs from `in`"));
+    }
     if !(0.0..90.0).contains(&talus_deg) {
         return Err(JdError::invalid("talus_deg", "must be within 0..90"));
     }
@@ -158,12 +212,18 @@ pub fn thermal_erode(
     let dist = neighbour_dist(spacing_m);
     let tan_t = talus_deg.to_radians().tan();
     let (w, hh) = (h.width() as i64, h.height() as i64);
+    let hard_vec = hardness.map(|k| k.to_vec());
+    let rock = Rock {
+        tan_t,
+        rate,
+        hardness: hard_vec.as_deref(),
+    };
     let mut cur = h.to_vec();
     for _ in 0..iterations {
         check_cancel(cancel)?;
         let g = Grid { h: &cur, w, hh };
-        let shed = shed_factors(&g, tan_t, &dist, rate);
-        cur = gather(&g, &shed, tan_t, &dist);
+        let shed = shed_factors(&g, &rock, &dist);
+        cur = gather(&g, &shed, &rock, &dist);
     }
     let mut out = Heightfield::new(h.width(), h.height(), h.tile_size(), h.halo())?;
     out.fill_with(|x, y| cur[(y as usize) * (w as usize) + x as usize]);
@@ -441,6 +501,71 @@ pub fn slope_mask(h: &Heightfield, spacing_m: [f32; 2], max_deg: f32) -> JdResul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hard_rock_keeps_its_cliff_while_soft_rock_slumps_to_talus() {
+        // A 40 m step in the middle of the field; the whole field is one rock type per run.
+        let mut h = Heightfield::new(64, 16, 64, 0).expect("hf");
+        h.fill_with(|x, _| if x < 32 { 140.0 } else { 100.0 });
+        let steepest = |f: &Heightfield| {
+            (1..64)
+                .map(|x| {
+                    ((f.get(x - 1, 8) - f.get(x, 8)).abs() / 10.0)
+                        .atan()
+                        .to_degrees()
+                })
+                .fold(0.0f32, f32::max)
+        };
+        let soft = thermal_erode(&h, [10.0, 10.0], 35.0, 60, 0.2, None).expect("soft");
+        let mut cap = Heightfield::new(64, 16, 64, 0).expect("k");
+        cap.fill_with(|_, _| 1.0);
+        let hard =
+            thermal_erode_with(&h, [10.0, 10.0], 35.0, 60, 0.2, Some(&cap), None).expect("hard");
+        assert!(
+            steepest(&soft) < 40.0,
+            "soft step slumped to the 35° talus: {}",
+            steepest(&soft)
+        );
+        assert!(
+            steepest(&hard) > 70.0,
+            "hard step still a cliff: {}",
+            steepest(&hard)
+        );
+        // Mass is conserved either way, and a zero-hardness field equals the plain kernel.
+        let sum = |f: &Heightfield| f.to_vec().iter().map(|v| *v as f64).sum::<f64>();
+        assert!((sum(&soft) - sum(&h)).abs() < 1e-2 && (sum(&hard) - sum(&h)).abs() < 1e-2);
+        let mut zero = Heightfield::new(64, 16, 64, 0).expect("z");
+        zero.fill_with(|_, _| 0.0);
+        let same =
+            thermal_erode_with(&h, [10.0, 10.0], 35.0, 60, 0.2, Some(&zero), None).expect("zero");
+        assert_eq!(same.to_vec(), soft.to_vec());
+        // Stream power: a hard bed cuts a tenth as deep as a soft one.
+        let mut valley = Heightfield::new(48, 32, 64, 0).expect("v");
+        valley.fill_with(|x, y| 200.0 + y as f32 * 2.0 + (x as f32 - 24.0).abs() * 1.5);
+        let sp = StreamPowerParams {
+            k: 5e-4,
+            m: 0.5,
+            uplift_m: 0.0,
+            iterations: 20,
+            method: crate::flow::FlowMethod::D8,
+        };
+        let cut_soft = stream_power_erode(&valley, [10.0, 10.0], &sp, None).expect("sp");
+        let mut cap2 = Heightfield::new(48, 32, 64, 0).expect("k");
+        cap2.fill_with(|_, _| 1.0);
+        let cut_hard = stream_power_erode_with(&valley, [10.0, 10.0], &sp, Some(&cap2), None)
+            .expect("sp hard");
+        let depth = |f: &Heightfield| {
+            (0..32)
+                .map(|y| valley.get(24, y) - f.get(24, y))
+                .fold(0.0f32, f32::max)
+        };
+        assert!(
+            depth(&cut_hard) < depth(&cut_soft) * 0.5,
+            "hard {} vs soft {}",
+            depth(&cut_hard),
+            depth(&cut_soft)
+        );
+    }
 
     #[test]
     fn stream_power_incises_channels_keeps_slopes_non_negative_and_uplifts_uniformly() {
@@ -766,6 +891,23 @@ pub fn stream_power_erode(
     p: &StreamPowerParams,
     cancel: Option<&AtomicBool>,
 ) -> JdResult<Heightfield> {
+    stream_power_erode_with(h, spacing_m, p, None, cancel)
+}
+
+/// [`stream_power_erode`] with an optional per-cell `hardness` field (0..1): the erodibility
+/// `k` of a cell drops to a tenth where the rock is hard, so channels cut shale and step over cap.
+pub fn stream_power_erode_with(
+    h: &Heightfield,
+    spacing_m: [f32; 2],
+    p: &StreamPowerParams,
+    hardness: Option<&Heightfield>,
+    cancel: Option<&AtomicBool>,
+) -> JdResult<Heightfield> {
+    if let Some(k) = hardness
+        && (k.width(), k.height()) != (h.width(), h.height())
+    {
+        return Err(JdError::invalid("hardness", "field size differs from `in`"));
+    }
     if !(p.k >= 0.0 && p.k.is_finite()) {
         return Err(JdError::invalid("k", "must be finite and ≥ 0"));
     }
@@ -788,6 +930,11 @@ pub fn stream_power_erode(
     let (w, hh) = (h.width() as usize, h.height() as usize);
     let cell_area = spacing_m[0] * spacing_m[1];
     let dist = neighbour_dist(spacing_m);
+    let hard_vec = hardness.map(|k| k.to_vec());
+    let k_at = |i: usize| match &hard_vec {
+        Some(k) => p.k * (1.0 - 0.9 * k[i].clamp(0.0, 1.0)),
+        None => p.k,
+    };
     let mut cur = h.clone();
     let mut order: Vec<u32> = (0..(w * hh) as u32).collect();
     for _ in 0..p.iterations {
@@ -810,7 +957,7 @@ pub fn stream_power_erode(
                         .iter()
                         .position(|(dx, dy)| xi + dx == xj && yi + dy == yj)
                         .unwrap_or(4);
-                    let f = p.k * (acc[i] * cell_area).powf(p.m) / dist[k];
+                    let f = k_at(i) * (acc[i] * cell_area).powf(p.m) / dist[k];
                     next[i] = (v[i] + p.uplift_m + f * next[j]) / (1.0 + f);
                 }
             }

@@ -1408,6 +1408,27 @@ export type NodeParams_jd_sculpt_strokes_1 = {
   "strokes"?: Stroke[];
 };
 
+export type NodeParams_jd_terrain_strata_1 = {
+  /** Thickness of one hard+soft cycle, metres (> 0). */
+  "layer_m"?: number;
+  /** Share of each cycle that is hard caprock, 0..1 (the rest is soft). */
+  "hard_fraction"?: number;
+  /** Hardness of the cap, 0..1 (1 = holds vertical cliffs, erodes at a tenth of the rate). */
+  "hard"?: number;
+  /** Hardness of the soft bed, 0..1. */
+  "soft"?: number;
+  /** Width of the hard↔soft transition as a fraction of the cycle, 0..0.5. */
+  "transition"?: number;
+  /** Dip of the beds, degrees from horizontal, [0, 60]. */
+  "dip_deg"?: number;
+  /** Direction the beds dip towards, degrees clockwise from north. */
+  "dip_azimuth_deg"?: number;
+  /** Undulation of the bed surfaces, metres (≥ 0): 0 for flat beds. */
+  "warp_m"?: number;
+  /** Undulation seed. */
+  "seed"?: number;
+};
+
 /** Request and result types of every core operation, keyed by op id. */
 export interface JdOps {
   /** Run a benchmark scene (S1: fBm + ridged + add + thermal×50) with the real kernels; per-stage wall time, peak RSS, content hash */
@@ -1523,4 +1544,5 @@ export interface NodeKinds {
   "jd.ocean.bathymetry@1": NodeParams_jd_ocean_bathymetry_1;
   "jd.output.height@1": NodeParams_jd_output_height_1;
   "jd.sculpt.strokes@1": NodeParams_jd_sculpt_strokes_1;
+  "jd.terrain.strata@1": NodeParams_jd_terrain_strata_1;
 }

@@ -26,6 +26,7 @@ pub mod scatter;
 pub mod sculpt;
 pub mod seabed;
 pub mod sim;
+pub mod strata;
 
 pub use aeolian::{AeolianParams, aeolian_transport};
 pub use bathymetry::{BathymetryParams, bathymetry};
@@ -58,5 +59,6 @@ pub use sculpt::{Stroke, StrokeMode, apply_strokes};
 pub use seabed::{SeabedParams, classify_seabed};
 pub use sim::{
     HydraulicParams, HydraulicResult, StreamPowerParams, THERMAL_MAX_RATE, hydraulic_erode,
-    slope_mask, stream_power_erode, thermal_erode,
+    slope_mask, stream_power_erode, stream_power_erode_with, thermal_erode, thermal_erode_with,
 };
+pub use strata::{StrataParams, strata_hardness};
