@@ -1018,6 +1018,28 @@ export type NodeParams_jd_climate_snow_1 = {
   "wind_strength"?: number;
 };
 
+export type NodeParams_jd_erosion_aeolian_1 = {
+  /** Steps; every step moves up to one slab per sandy cell. */
+  "iterations"?: number;
+  /** Compass direction the wind blows from, degrees clockwise from north (270 = westerly). */
+  "wind_azimuth_deg"?: number;
+  /** Saltation hop length in metres (≥ one cell). Default: 4 cells. */
+  "hop_m"?: number | null;
+  /** Slab thickness in metres (> 0). Default: a quarter of the cell size — thinner slabs never
+cast wind shadows and only roughen the surface. */
+  "slab_m"?: number | null;
+  /** Angle of repose, degrees (dry sand ≈ 34°). */
+  "repose_deg"?: number;
+  /** Lee slopes steeper than this, seen along the wind, are wind shadows (Werner: 15°). */
+  "shadow_deg"?: number;
+  /** Probability a hopping slab stops on sand. */
+  "deposit_on_sand"?: number;
+  /** Probability a hopping slab stops on bare ground (mask < 0.5). */
+  "deposit_on_bare"?: number;
+  /** Seed. */
+  "seed"?: number;
+};
+
 export type NodeParams_jd_erosion_droplet_1 = {
   /** Number of droplets (1..=5 000 000). Aim for 1–2 per cell: 512² wants ~400 000; fewer gives
 diffuse, unstructured lowering, more deepens the same gullies. */
@@ -1294,6 +1316,7 @@ export interface NodeKinds {
   "jd.analysis.slope@1": NodeParams_jd_analysis_slope_1;
   "jd.biome.classify@1": NodeParams_jd_biome_classify_1;
   "jd.climate.snow@1": NodeParams_jd_climate_snow_1;
+  "jd.erosion.aeolian@1": NodeParams_jd_erosion_aeolian_1;
   "jd.erosion.droplet@1": NodeParams_jd_erosion_droplet_1;
   "jd.erosion.hydraulic@1": NodeParams_jd_erosion_hydraulic_1;
   "jd.erosion.stream_power@1": NodeParams_jd_erosion_stream_power_1;

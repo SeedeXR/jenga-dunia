@@ -5,6 +5,7 @@
 //! for a given seed and independent of tiling or thread count (ADR-0007).
 //! Export writes the formats engines actually consume (`docs/architecture/08-io-formats.md`).
 
+pub mod aeolian;
 pub mod climate;
 pub mod droplet;
 pub mod export;
@@ -20,6 +21,7 @@ pub mod scatter;
 pub mod sculpt;
 pub mod sim;
 
+pub use aeolian::{AeolianParams, aeolian_transport};
 pub use climate::{SnowParams, snow_cover};
 pub use droplet::{DropletParams, DropletResult, droplet_erode};
 pub use export::{

@@ -206,7 +206,9 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `16:20:00` **Snow cover node**: `jd_terrain::climate::snow_cover` + `jd.climate.snow@1` (port `snow`): smoothstep band at `snow_line_m ± transition_m`, retention 1 − slope/`max_slope_deg`, sun-facing melt and windward scour from the downslope aspect (fade in with gradient). Unit test (crest/flanks/cliff/wind), CLI on the 512² biome world (3.8 % → 4.1 % cover, 67 ms), biomes e2e wires it, publishes `snow`, colours by it (capture `desktop-snow.png`); quickstart recipe + desktop paragraph.
 
-### Open / next (as of 2026-10-20 16:20, head after snow-node commit)
+- `17:30:00` **Aeolian node**: `jd_terrain::aeolian::aeolian_transport` (Werner slabs: seeded per-step shuffle, wind-shadow test along the upwind ray, hop + stick probabilities, repose relaxation that also pulls from uphill neighbours, periodic edges, optional `sand` mask) + `jd.erosion.aeolian@1`. First run with 0.3 m slabs only produced hummocks — it is a lattice model, so slab/hop defaults now follow the cell (cell/4, 4 cells) and the unit test asserts transverse ridges (along-wind roughness > 2× across) on a 96² rolling sheet, mass to 1e-2, nothing over repose, determinism, mask freeze. CLI: 256² × 200 steps 14.5 s debug, mean identical 102.9949, relief 5 → 45 m; Blender renders sheet vs dunes → `cli-dunes.png`. Quickstart recipe.
+
+### Open / next (as of 2026-10-20 17:00, head after aeolian commit)
 1. **CI**: green through `3b3ee2c` except `a4f7150` (vitest menu-test timing flake, fixed in `f976369`) and `dad6256` (priorities; fixed by `d84eaa9`); `f976369` polling.
 2. **Figma**: connector unavailable this session; plugin OAuth pending on the owner's side → tutorial images stay in `docs/user/images/`; place them in file `fxyeV62hgLoNmG3dU1LX6G` when a connector works.
 3. **Native leftovers**: Edit-menu capture; native sculpt capture/recording (needs Accessibility); signed/notarised bundle (needs an Apple developer account).

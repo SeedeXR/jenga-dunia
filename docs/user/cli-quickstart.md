@@ -313,6 +313,22 @@ Verified by importing `trees.glb` and `land.glb` into Blender 5.2 headless: 10 9
 
 On the 5 120 m world above the 40 m grid has 128² = 16 384 candidates and the forest mask covers 66.8 % of the area — 10 966 points, i.e. the expected share, in 30 ms including the file write. A spacing finer than the layer's sample spacing is refused (`spacing_m … must be ≥ the sample spacing (10 m)`). On the 512² world shown (heights −50..1200 m): rock 21.6 %, snow 4.4 %, grassland 7.2 %, forest 66.8 %; classify took 61 ms (debug). In the desktop the rules are a table in the inspector (add a row, type `min,max` ranges; see the desktop guide).
 
+### Wind: dunes from a sand sheet
+
+```
+$ jd new Dunes.jdproj --extent 2560 --resolution 256
+$ jd op graph.set_param --project Dunes.jdproj --save --params '{"id":"<noise>","key":"height_range_m","value":[100,106]}'
+$ jd op graph.add_node --project Dunes.jdproj --save --params '{"kind":"jd.erosion.aeolian@1","params":{"iterations":200,"wind_azimuth_deg":270,"seed":3}}'
+# noise.out → aeolian.in; aeolian.out → height output (and noise.out → a second output `sheet` to compare)
+sheet   min 100.587  max 105.473  mean 102.9949
+height  min  74.124  max 119.114  mean 102.9949      ← same mean to four decimals: every slab is moved, none made or lost
+aeolian node 14.5 s for 256² × 200 steps (debug build; 10 m cells, default 2.5 m slabs and 40 m hops)
+```
+
+![Blender render: left the gently rolling sand sheet, right the same field after 200 wind steps with transverse dune ridges and slip faces](images/cli-dunes.png)
+
+`jd.erosion.aeolian@1` is Werner's slab model (1995), the cellular automaton behind dune simulation: every step visits each cell in a seeded shuffle; a cell that holds sand and is not in a *wind shadow* (a lee slope steeper than `shadow_deg` seen along the wind) loses a slab of `slab_m`, which hops `hop_m` downwind and sticks with probability `deposit_on_sand` on sand, `deposit_on_bare` on bare ground, always in a shadow; after every move the angle of repose (`repose_deg`, 34° for dry sand) is enforced around the changed cell — down from it and down onto it from an uphill neighbour — which is where the slip faces come from. It is a *lattice* model: a slab has to be comparable to `cell × tan(shadow_deg)` for shadows to form at all (0.3 m slabs on 10 m cells only roughened the sheet into hummocks in the first run), so the defaults follow the sample spacing — slab = cell / 4, hop = 4 cells — and the unit test checks that the along-wind roughness ends up more than twice the across-wind roughness, i.e. ridges transverse to the wind. The optional `sand` input (0..1) scales erodibility and marks what counts as sand, so a mask from `jd.biome.classify@1` keeps rock in place. The field wraps around at its edges so the mass balance is exact (above: identical means). The result depends only on `seed`. One wind direction and one grain size for now; bimodal winds (seif dunes) and vegetation anchoring belong to the weather timeline.
+
 ### Snow cover
 
 ```

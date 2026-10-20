@@ -4,11 +4,11 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use jd_terrain::{
-    DropletParams, FlowMethod, ForeignImport, Heightfield, HydraulicParams, NoiseParams,
-    SnowParams, StreamPowerParams, Stroke, THERMAL_MAX_RATE, apply_strokes, carve_rivers,
-    droplet_erode, fill_depressions, flow_accumulation_with, generate_noise, hydraulic_erode,
-    read_foreign, resample_to_world, sea_level, slope_mask, snow_cover, stream_power_erode,
-    thermal_erode, wetness_index,
+    AeolianParams, DropletParams, FlowMethod, ForeignImport, Heightfield, HydraulicParams,
+    NoiseParams, SnowParams, StreamPowerParams, Stroke, THERMAL_MAX_RATE, aeolian_transport,
+    apply_strokes, carve_rivers, droplet_erode, fill_depressions, flow_accumulation_with,
+    generate_noise, hydraulic_erode, read_foreign, resample_to_world, sea_level, slope_mask,
+    snow_cover, stream_power_erode, thermal_erode, wetness_index,
 };
 use jd_types::{JdError, JdResult};
 use rayon::prelude::*;
@@ -633,6 +633,20 @@ pub fn register_all(r: &mut Registry) {
             Ok(out("out", o))
         },
     ));
+    r.register(NodeDef::new::<AeolianParams, _>(
+        "jd.erosion.aeolian@1",
+        "Wind (aeolian) transport after Werner's slab model: sand hops downwind, stops in wind shadows and on sand, and the angle of repose holds — dunes and ripples; optional `sand` mask (0..1) says what can move",
+        vec![port("in", PortType::Heightfield, true), port("sand", PortType::Heightfield, false)],
+        vec![port("out", PortType::Heightfield, false)],
+        |ctx, p, i| {
+            let ap: AeolianParams = params(p)?;
+            if !(1..=500).contains(&ap.iterations) {
+                return Err(JdError::invalid("iterations", "must be within 1..=500"));
+            }
+            let sand = i.get("sand").map(|v| v.as_field());
+            Ok(out("out", aeolian_transport(field(i, "in")?, spacing_m(ctx), sand.map(|s| &**s), &ap, Some(&ctx.cancel))?))
+        },
+    ).with_memory(12.0));
     r.register(NodeDef::new::<SnowParams, _>(
         "jd.climate.snow@1",
         "Snow cover 0..1 from height alone: a soft snow line, retention that falls with slope, sun-facing slopes melt, windward slopes scour — for biome rules, scatter and colour overlays",

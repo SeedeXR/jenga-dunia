@@ -299,6 +299,100 @@
     }
   },
   {
+    "kind": "jd.erosion.aeolian@1",
+    "description": "Wind (aeolian) transport after Werner's slab model: sand hops downwind, stops in wind shadows and on sand, and the angle of repose holds — dunes and ripples; optional `sand` mask (0..1) says what can move",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      },
+      {
+        "name": "sand",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "AeolianParams",
+      "description": "Wind transport settings.",
+      "type": "object",
+      "properties": {
+        "iterations": {
+          "description": "Steps; every step moves up to one slab per sandy cell.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 20
+        },
+        "wind_azimuth_deg": {
+          "description": "Compass direction the wind blows from, degrees clockwise from north (270 = westerly).",
+          "type": "number",
+          "format": "float",
+          "default": 270.0
+        },
+        "hop_m": {
+          "description": "Saltation hop length in metres (≥ one cell). Default: 4 cells.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float",
+          "default": null
+        },
+        "slab_m": {
+          "description": "Slab thickness in metres (> 0). Default: a quarter of the cell size — thinner slabs never\ncast wind shadows and only roughen the surface.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float",
+          "default": null
+        },
+        "repose_deg": {
+          "description": "Angle of repose, degrees (dry sand ≈ 34°).",
+          "type": "number",
+          "format": "float",
+          "default": 34.0
+        },
+        "shadow_deg": {
+          "description": "Lee slopes steeper than this, seen along the wind, are wind shadows (Werner: 15°).",
+          "type": "number",
+          "format": "float",
+          "default": 15.0
+        },
+        "deposit_on_sand": {
+          "description": "Probability a hopping slab stops on sand.",
+          "type": "number",
+          "format": "float",
+          "default": 0.6000000238418579
+        },
+        "deposit_on_bare": {
+          "description": "Probability a hopping slab stops on bare ground (mask < 0.5).",
+          "type": "number",
+          "format": "float",
+          "default": 0.4000000059604645
+        },
+        "seed": {
+          "description": "Seed.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
     "kind": "jd.erosion.droplet@1",
     "description": "Particle (droplet) hydraulic erosion after Beyer: seeded droplets follow the slope with inertia, erode through a brush and deposit as they slow — gullies and fans; outputs the terrain and the signed `delta`",
     "inputs": [
