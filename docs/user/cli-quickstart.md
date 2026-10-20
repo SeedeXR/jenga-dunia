@@ -85,7 +85,14 @@ graph.evaluate_async (hydraulic × 2000) → job_id 2; jobs.list: 2:graph.evalua
 jobs.cancel 2        → true; jobs.result 2 → done: status error, E_CANCELLED, details.job_id 2
 ```
 
-Detached jobs run on a bounded pool (half the cores) in submission order; extra ones wait with `state: queued` in `jobs.list`, and cancelling a queued job ends it without running. Pass `timeout_s` to `graph.evaluate_async` to have the job cancelled at a deadline — `jobs.result` then reports `E_TIMEOUT` with the job id.
+Detached jobs run on a bounded pool (half the cores) in submission order; extra ones wait with `state: queued` in `jobs.list`, and cancelling a queued job ends it without running. Pass `timeout_s` to `graph.evaluate_async` to have the job cancelled at a deadline — `jobs.result` then reports `E_TIMEOUT` with the job id. `priority: "high"` (or `"low"`; default `normal`) moves a job ahead of (or behind) the other queued jobs — it never interrupts one that is already running; `jobs.list` shows each job's `priority`. Driven through the real MCP server on a 10-core Mac (5 slots), 512² hydraulic × 4000 per job:
+
+```text
+submitted 7 jobs in 59 ms: running 1,2,3,4,5, queued normal 6, queued high 7
+jobs.list: 1:rn 2:rn 3:rn 4:rn 5:rn 6:qn 7:qh        (id:state priority)
+after cancelling 1 → 2:rn 3:rn 4:rn 5:rn 6:qn 7:rh   (high took the freed slot; normal still queued)
+priority=urgent → E_INPUT_INVALID must be one of low, normal, high
+```
 
 (One CLI invocation is one process, so `jd op graph.evaluate_async` alone is not useful — the job dies with the process; use `jd op graph.evaluate`.)
 

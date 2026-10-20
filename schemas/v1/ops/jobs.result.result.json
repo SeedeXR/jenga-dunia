@@ -77,6 +77,10 @@
         "state": {
           "description": "`running`, or `queued` for a detached job waiting for a worker slot.",
           "type": "string"
+        },
+        "priority": {
+          "description": "Queue priority: `low`, `normal` or `high`.",
+          "type": "string"
         }
       },
       "required": [
@@ -87,7 +91,8 @@
         "total",
         "current",
         "cancelling",
-        "state"
+        "state",
+        "priority"
       ]
     }
   }

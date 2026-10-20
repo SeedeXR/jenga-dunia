@@ -869,6 +869,10 @@ pub mod graph {
         /// Detached jobs only: give up after this many seconds (`E_TIMEOUT` in the result).
         #[serde(default)]
         pub timeout_s: Option<f32>,
+        /// Detached jobs only: queue priority `low` | `normal` (default) | `high`; a higher
+        /// priority starts before older queued jobs, never pre-empts a running one.
+        #[serde(default)]
+        pub priority: Option<String>,
     }
 
     /// Node as reported by `graph.list`.
@@ -1331,9 +1335,17 @@ pub mod graph {
                 {
                     return Err(JdError::invalid("timeout_s", "must be a positive number of seconds"));
                 }
-                let guard = ctx.jobs.start_owned("graph.evaluate");
+                let priority = match e.priority.as_deref() {
+                    None => 1,
+                    Some(p) => crate::jobs::PRIORITIES
+                        .iter()
+                        .position(|k| *k == p)
+                        .ok_or_else(|| JdError::invalid("priority", "must be one of low, normal, high"))?
+                        as u8,
+                };
+                let guard = ctx.jobs.start_owned("graph.evaluate", priority);
                 let id = guard.id;
-                let ticket = ctx.jobs.ticket(); // submission order, taken before the thread exists
+                let ticket = ctx.jobs.ticket(priority); // queue position, taken before the thread exists
                 let ctx2 = ctx.clone();
                 std::thread::Builder::new()
                     .name(format!("jd-job-{id}"))
@@ -1494,7 +1506,69 @@ pub mod graph {
                 std::thread::sleep(std::time::Duration::from_millis(5));
             }
             assert_eq!(states, ("running".to_owned(), "queued".to_owned()));
-            // Cancelling the queued job ends it without running; cancelling the running one frees the slot.
+            // Priorities: a `high` job submitted after `b` takes the slot first when `a` ends;
+            // `low` goes last. Running jobs are never pre-empted.
+            let bad = call(
+                &reg,
+                &ctx,
+                "graph.evaluate_async",
+                serde_json::json!({ "priority": "urgent" }),
+            );
+            assert_eq!(bad.error.map(|e| e.code), Some(ErrorCode::E_INPUT_INVALID));
+            let c = call(
+                &reg,
+                &ctx,
+                "graph.evaluate_async",
+                serde_json::json!({ "priority": "high" }),
+            )
+            .job_id
+            .expect("c");
+            let d = call(
+                &reg,
+                &ctx,
+                "graph.evaluate_async",
+                serde_json::json!({ "priority": "low" }),
+            )
+            .job_id
+            .expect("d");
+            let states_of = |ids: &[u64]| -> Vec<(String, String)> {
+                let listed = call(&reg, &ctx, "jobs.list", serde_json::json!({}))
+                    .result
+                    .expect("list");
+                let arr = listed.as_array().expect("arr");
+                ids.iter()
+                    .map(|id| {
+                        let j = arr.iter().find(|j| j["id"] == *id);
+                        let f = |k: &str| j.and_then(|j| j[k].as_str()).unwrap_or("").to_owned();
+                        (f("state"), f("priority"))
+                    })
+                    .collect()
+            };
+            assert_eq!(states_of(&[a, c])[0].0, "running");
+            assert_eq!(
+                states_of(&[b, c, d]),
+                vec![
+                    ("queued".to_owned(), "normal".to_owned()),
+                    ("queued".to_owned(), "high".to_owned()),
+                    ("queued".to_owned(), "low".to_owned())
+                ]
+            );
+            call(&reg, &ctx, "jobs.cancel", serde_json::json!({ "id": a }));
+            assert_eq!(wait_done(&reg, &ctx, a)["error"]["code"], "E_CANCELLED");
+            let mut st = Vec::new();
+            for _ in 0..200 {
+                st = states_of(&[b, c, d]);
+                if st[1].0 == "running" {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            assert_eq!(
+                st.iter().map(|s| s.0.as_str()).collect::<Vec<_>>(),
+                ["queued", "running", "queued"],
+                "high overtakes the queue: {st:?}"
+            );
+            // Cancelling a queued job ends it without running; cancelling the running one frees the slot.
             assert_eq!(
                 call(&reg, &ctx, "jobs.cancel", serde_json::json!({ "id": b })).result,
                 Some(serde_json::json!(true))
@@ -1502,8 +1576,13 @@ pub mod graph {
             let env_b = wait_done(&reg, &ctx, b);
             assert_eq!(env_b["error"]["code"], "E_CANCELLED", "{env_b}");
             assert_eq!(env_b["error"]["message"], "cancelled while queued");
-            call(&reg, &ctx, "jobs.cancel", serde_json::json!({ "id": a }));
-            assert_eq!(wait_done(&reg, &ctx, a)["error"]["code"], "E_CANCELLED");
+            call(&reg, &ctx, "jobs.cancel", serde_json::json!({ "id": d }));
+            assert_eq!(
+                wait_done(&reg, &ctx, d)["error"]["message"],
+                "cancelled while queued"
+            );
+            call(&reg, &ctx, "jobs.cancel", serde_json::json!({ "id": c }));
+            assert_eq!(wait_done(&reg, &ctx, c)["error"]["code"], "E_CANCELLED");
             // Timeout: the watchdog cancels and the envelope says E_TIMEOUT.
             let bad = call(
                 &reg,

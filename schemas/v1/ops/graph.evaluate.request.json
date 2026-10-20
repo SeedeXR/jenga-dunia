@@ -20,6 +20,14 @@
       ],
       "format": "float",
       "default": null
+    },
+    "priority": {
+      "description": "Detached jobs only: queue priority `low` | `normal` (default) | `high`; a higher\npriority starts before older queued jobs, never pre-empts a running one.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
     }
   },
   "additionalProperties": false

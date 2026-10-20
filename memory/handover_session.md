@@ -178,12 +178,14 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `04:40:00` FIFO queue pushed as `97bb0f7`. **Colour by layer** (viewport overlay): state `colorLayer`/`colorPreview` (+ `setColorLayer`, refreshed at the shown layer's LOD after every preview; drops to the ramp when the layer disappears from the last evaluation); `buildTerrainGeometry(p, extent, overlay)` samples the overlay preview by normalised position (sizes may differ), class maps (integer max ≤ 32) → golden-angle HSL palette, masks → dark→blue gradient; slope-to-rock tint skipped under an overlay. Header `colour` select + `· colour <layer>` readout. Hydrology e2e extended: second output `rivers` wired from the rivers port, evaluate, colour by rivers → readout, back to ramp. Capture `desktop-colour-by-layer.png`.
 
-### Open / next (as of 2026-10-21 04:45, head after colour-by-layer commit)
-1. **CI**: green through `c0cc8ae`; `02571d2` failed on the queue-order race, fixed in `97bb0f7` (polling); colour-by-layer commit next.
+- `09:20:00` **Job priorities (jobs slice 5)**: `graph.evaluate_async {priority: low|normal|high}`; the FIFO counter + skipped-ticket set became one `BTreeSet<(Reverse<u8>, seq)>` wait queue whose first entry takes the next slot (less code than the FIFO it replaces); `JobInfo.priority`; Tasks list shows non-normal priority. Unit test (1 slot: a running, b queued, c high + d low submitted after → cancel a starts c), MCP probe on 5 slots (7 jobs, cancel one → high overtook normal), schemas + ops.gen.ts regenerated, 06-jobs.md slice 5, quickstart transcript.
+
+### Open / next (as of 2026-10-20 09:20, head after job-priorities commit)
+1. **CI**: green through `c0cc8ae`; `02571d2` failed on the queue-order race, fixed in `97bb0f7`; `2c6840f` (colour-by-layer) and the priorities commit polling.
 2. **Figma**: connector unavailable this session; plugin OAuth pending on the owner's side → tutorial images stay in `docs/user/images/`; place them in file `fxyeV62hgLoNmG3dU1LX6G` when a connector works.
 3. **Native leftovers**: Edit-menu capture; native sculpt capture/recording (needs Accessibility); signed/notarised bundle (needs an Apple developer account).
 4. **Phase 3 follow-ups**: hydraulic concentration cap / layered materials / open drains; thermal + hydraulic WGSL twins (`jd-gpu`); particle hydraulic; D∞ ✔, MFD ✔ (`wetness` still D8-only); sea level ✔ (viewport water plane ✔; ocean shading/shoreline foam ☐); hydrology-first generation; smooth-brush blur done via summed-area table (whole-field blur is now O(N); tile-level dirty sets remain).
-5. **Phase 2 leftovers**: job priorities (detached execution, queue slots, timeouts, memory budget ✔), CRS-aware GeoTIFF import (`jd-geo`; tags/nodata ✔), normal/roughness maps for GLB (albedo ✔), Windows/Linux measurements, tile-level `jd-cache` (LRU ✔).
+5. **Phase 2 leftovers**: jobs scheduler complete (detached execution, queue slots, timeouts, memory budget, priorities ✔), CRS-aware GeoTIFF import (`jd-geo`; tags/nodata ✔), normal/roughness maps for GLB (albedo ✔), Windows/Linux measurements, tile-level `jd-cache` (LRU ✔).
 6. **Docs**: hydrology recipe ✔, `desktop-rivers.png` ✔; rivers inspector `method` capture ✔ (e2e); a *native* capture of the same needs the app rebuilt from this head.
 
 ---

@@ -909,6 +909,14 @@ expression: list
           ],
           "format": "float",
           "default": null
+        },
+        "priority": {
+          "description": "Detached jobs only: queue priority `low` | `normal` (default) | `high`; a higher\npriority starts before older queued jobs, never pre-empts a running one.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         }
       },
       "additionalProperties": false
@@ -1021,6 +1029,14 @@ expression: list
             "null"
           ],
           "format": "float",
+          "default": null
+        },
+        "priority": {
+          "description": "Detached jobs only: queue priority `low` | `normal` (default) | `high`; a higher\npriority starts before older queued jobs, never pre-empts a running one.",
+          "type": [
+            "string",
+            "null"
+          ],
           "default": null
         }
       },
@@ -2475,6 +2491,10 @@ expression: list
             "state": {
               "description": "`running`, or `queued` for a detached job waiting for a worker slot.",
               "type": "string"
+            },
+            "priority": {
+              "description": "Queue priority: `low`, `normal` or `high`.",
+              "type": "string"
             }
           },
           "required": [
@@ -2485,7 +2505,8 @@ expression: list
             "total",
             "current",
             "cancelling",
-            "state"
+            "state",
+            "priority"
           ]
         }
       }
@@ -2592,6 +2613,10 @@ expression: list
             "state": {
               "description": "`running`, or `queued` for a detached job waiting for a worker slot.",
               "type": "string"
+            },
+            "priority": {
+              "description": "Queue priority: `low`, `normal` or `high`.",
+              "type": "string"
             }
           },
           "required": [
@@ -2602,7 +2627,8 @@ expression: list
             "total",
             "current",
             "cancelling",
-            "state"
+            "state",
+            "priority"
           ]
         }
       }

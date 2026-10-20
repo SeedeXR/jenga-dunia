@@ -187,6 +187,9 @@ export type GraphEvaluateRequest = {
   "lod"?: number;
   /** Detached jobs only: give up after this many seconds (`E_TIMEOUT` in the result). */
   "timeout_s"?: number | null;
+  /** Detached jobs only: queue priority `low` | `normal` (default) | `high`; a higher
+priority starts before older queued jobs, never pre-empts a running one. */
+  "priority"?: string | null;
 };
 
 export type NodeReport = {
@@ -218,6 +221,9 @@ export type GraphEvaluateAsyncRequest = {
   "lod"?: number;
   /** Detached jobs only: give up after this many seconds (`E_TIMEOUT` in the result). */
   "timeout_s"?: number | null;
+  /** Detached jobs only: queue priority `low` | `normal` (default) | `high`; a higher
+priority starts before older queued jobs, never pre-empts a running one. */
+  "priority"?: string | null;
 };
 
 export type GraphEvaluateAsyncResult = {
@@ -392,6 +398,8 @@ export type JobInfo = {
   "cancelling": boolean;
   /** `running`, or `queued` for a detached job waiting for a worker slot. */
   "state": string;
+  /** Queue priority: `low`, `normal` or `high`. */
+  "priority": string;
 };
 
 export type JobsListResult = JobInfo[];

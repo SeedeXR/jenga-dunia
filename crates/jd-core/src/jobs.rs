@@ -4,10 +4,11 @@
 //! the caller gets `status: accepted` + `job_id`, polls `jobs.list` for progress and collects the
 //! envelope with `jobs.result {id}` (kept for the last 64 finished jobs).
 //!
-//! ponytail: one thread per detached job, no queue/budget/timeout — the scheduler (06-jobs.md)
-//! comes when agents submit more work than cores.
+//! Scheduler (slices 3–5): detached jobs wait for one of `max` worker slots in priority order,
+//! then submission order; a running job is never pre-empted.
 
-use std::collections::BTreeMap;
+use std::cmp::Reverse;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Instant;
@@ -22,7 +23,14 @@ struct Entry {
     cancel: Arc<AtomicBool>,
     /// Detached jobs wait here for a worker slot; synchronous ops are always running.
     running_now: Arc<AtomicBool>,
+    priority: u8,
 }
+
+/// Queue priorities, in scheduling order.
+pub const PRIORITIES: [&str; 3] = ["low", "normal", "high"];
+
+/// Queue key of a detached job: higher priority first, then submission order.
+pub type Ticket = (Reverse<u8>, u64);
 
 /// A running job as reported by `jobs.list`.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -43,6 +51,8 @@ pub struct JobInfo {
     pub cancelling: bool,
     /// `running`, or `queued` for a detached job waiting for a worker slot.
     pub state: String,
+    /// Queue priority: `low`, `normal` or `high`.
+    pub priority: String,
 }
 
 /// Process-wide job table.
@@ -53,8 +63,8 @@ pub struct Jobs {
     finished: Mutex<BTreeMap<u64, serde_json::Value>>,
     /// Worker slots for detached jobs: (in use, max) + a condvar to wait on.
     slots: (Mutex<(usize, usize)>, Condvar),
-    /// FIFO tickets: jobs start in submission order (next to serve, last issued, cancelled while queued).
-    tickets: Mutex<(u64, u64, std::collections::BTreeSet<u64>)>,
+    /// Waiting queue: (last sequence number issued, tickets still waiting); the first ticket starts next.
+    tickets: Mutex<(u64, BTreeSet<Ticket>)>,
 }
 
 impl Default for Jobs {
@@ -66,7 +76,7 @@ impl Default for Jobs {
             running: Mutex::new(BTreeMap::new()),
             finished: Mutex::new(BTreeMap::new()),
             slots: (Mutex::new((0, max)), Condvar::new()),
-            tickets: Mutex::new((1, 0, std::collections::BTreeSet::new())),
+            tickets: Mutex::new((0, BTreeSet::new())),
         }
     }
 }
@@ -133,6 +143,7 @@ impl Jobs {
                     progress: progress.clone(),
                     cancel: cancel.clone(),
                     running_now: Arc::new(AtomicBool::new(true)),
+                    priority: 1,
                 },
             );
         }
@@ -152,11 +163,17 @@ impl Jobs {
         }
     }
 
-    /// Register a detached job; the guard is owned so a worker thread can carry it.
-    pub fn start_owned(self: &Arc<Self>, op: &str) -> OwnedJobGuard {
+    /// Register a detached job with a queue priority (index into [`PRIORITIES`]); the guard is
+    /// owned so a worker thread can carry it.
+    pub fn start_owned(self: &Arc<Self>, op: &str, priority: u8) -> OwnedJobGuard {
         let g = self.start(op);
         let (id, ctl) = (g.id, g.ctl.clone());
         std::mem::forget(g); // the owned guard below removes the entry instead
+        if let Ok(mut r) = self.running.lock()
+            && let Some(e) = r.get_mut(&id)
+        {
+            e.priority = priority;
+        }
         OwnedJobGuard {
             jobs: Arc::clone(self),
             id,
@@ -173,26 +190,20 @@ impl Jobs {
     }
 
     /// Take a queue ticket at submission time (before the worker thread exists) so detached jobs
-    /// start in the order they were requested.
-    pub fn ticket(&self) -> u64 {
+    /// start by priority, then in the order they were requested.
+    pub fn ticket(&self, priority: u8) -> Ticket {
         let Ok(mut t) = self.tickets.lock() else {
-            return 0;
+            return (Reverse(priority), u64::MAX);
         };
-        t.1 += 1;
-        t.1
-    }
-
-    /// Is `ticket` the next one to serve? Skips tickets that were cancelled while queued.
-    fn at_head(t: &mut (u64, u64, std::collections::BTreeSet<u64>), ticket: u64) -> bool {
-        while t.2.remove(&t.0) {
-            t.0 += 1;
-        }
-        t.0 == ticket
+        t.0 += 1;
+        let ticket = (Reverse(priority), t.0);
+        t.1.insert(ticket);
+        ticket
     }
 
     /// Mark a detached job as waiting for a slot, then block until it is at the head of the queue
     /// and a slot is free. Returns false when the job was cancelled while queued.
-    pub fn acquire_slot(&self, id: u64, ticket: u64, cancel: &AtomicBool) -> bool {
+    pub fn acquire_slot(&self, id: u64, ticket: Ticket, cancel: &AtomicBool) -> bool {
         let running_now = self
             .running
             .lock()
@@ -201,10 +212,13 @@ impl Jobs {
         if let Some(flag) = &running_now {
             flag.store(false, Ordering::Relaxed);
         }
-        let give_up = |this: &Self| {
+        let leave_queue = |this: &Self| {
             if let Ok(mut t) = this.tickets.lock() {
-                t.2.insert(ticket);
+                t.1.remove(&ticket);
             }
+        };
+        let give_up = |this: &Self| {
+            leave_queue(this);
             this.slots.1.notify_all();
             false
         };
@@ -215,7 +229,7 @@ impl Jobs {
             let head = self
                 .tickets
                 .lock()
-                .map(|mut t| Self::at_head(&mut t, ticket))
+                .map(|t| t.1.first() == Some(&ticket))
                 .unwrap_or(false);
             if head && s.0 < s.1 {
                 break;
@@ -239,9 +253,7 @@ impl Jobs {
             return give_up(self);
         }
         s.0 += 1;
-        if let Ok(mut t) = self.tickets.lock() {
-            t.0 += 1; // this ticket is served; the next one may start
-        }
+        leave_queue(self); // served; the next ticket may start
         drop(s);
         self.slots.1.notify_all();
         if let Some(flag) = running_now {
@@ -318,6 +330,7 @@ impl Jobs {
                         "queued"
                     }
                     .into(),
+                    priority: PRIORITIES[usize::from(e.priority).min(2)].into(),
                 }
             })
             .collect()

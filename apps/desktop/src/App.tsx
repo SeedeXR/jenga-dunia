@@ -287,7 +287,8 @@ export default function App() {
               <li key={j.id} className="mb-1 flex items-center justify-between gap-2" data-testid={`task-${j.id}`}>
                 <span className="truncate">
                   #{j.id} {j.op}
-                  {j.state === "queued" ? " · queued" : j.total > 0 ? ` · ${Math.min(j.done + 1, j.total)}/${j.total}` : ""} · {(j.elapsed_ms / 1000).toFixed(1)} s
+                  {j.state === "queued" ? " · queued" : j.total > 0 ? ` · ${Math.min(j.done + 1, j.total)}/${j.total}` : ""}
+                  {j.priority !== "normal" ? ` · ${j.priority}` : ""} · {(j.elapsed_ms / 1000).toFixed(1)} s
                 </span>
                 <button className="btn px-1.5 py-0" onClick={() => void s.cancelJob(j.id)} disabled={j.cancelling}>
                   {j.cancelling ? "…" : "Cancel"}
