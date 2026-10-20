@@ -4,8 +4,8 @@
 //! materials-geomorphology.md` B8). `jd.climate.snow@1` is a static snapshot; this one evolves,
 //! and a keyed `temperature_c` over the timeline melts it season by season.
 //!
-//! ponytail: one downwind neighbour for drift, no avalanching (steep cells simply hold less), no
-//! albedo or density feedback; a step is "a day" only in the sense that the rates say so.
+//! ponytail: one downwind neighbour for drift, one downhill neighbour for avalanches, no albedo or
+//! density feedback; a step is "a day" only in the sense that the rates say so.
 
 use jd_types::{JdError, JdResult};
 use serde::{Deserialize, Serialize};
@@ -50,6 +50,19 @@ pub struct SnowpackParams {
     /// Depth that counts as full cover in the `cover` output, metres (> 0).
     #[serde(default = "d_cover")]
     pub cover_depth_m: f32,
+    /// Slope above which snow avalanches each step, degrees (0, 90].
+    #[serde(default = "d_avalanche_slope")]
+    pub avalanche_slope_deg: f32,
+    /// Share of a steep cell's snow that slides to its lowest neighbour each step (0..1; 0 = off).
+    #[serde(default = "d_avalanche")]
+    pub avalanche_strength: f32,
+}
+
+fn d_avalanche_slope() -> f32 {
+    38.0
+}
+fn d_avalanche() -> f32 {
+    0.5
 }
 
 fn d_steps() -> u32 {
@@ -100,6 +113,8 @@ impl Default for SnowpackParams {
             wind_azimuth_deg: d_west(),
             wind_strength: d_drift(),
             cover_depth_m: d_cover(),
+            avalanche_slope_deg: d_avalanche_slope(),
+            avalanche_strength: d_avalanche(),
         }
     }
 }
@@ -131,13 +146,19 @@ pub fn snowpack(
     for (name, v) in [
         ("sun_strength", p.sun_strength),
         ("wind_strength", p.wind_strength),
+        ("avalanche_strength", p.avalanche_strength),
     ] {
         if !(0.0..=1.0).contains(&v) {
             return Err(JdError::invalid(name, "must be within 0..=1"));
         }
     }
-    if !(0.0 < p.max_slope_deg && p.max_slope_deg <= 90.0) {
-        return Err(JdError::invalid("max_slope_deg", "must be within (0, 90]"));
+    for (name, v) in [
+        ("max_slope_deg", p.max_slope_deg),
+        ("avalanche_slope_deg", p.avalanche_slope_deg),
+    ] {
+        if !(0.0 < v && v <= 90.0) {
+            return Err(JdError::invalid(name, "must be within (0, 90]"));
+        }
     }
     if !(p.cover_depth_m > 0.0 && p.cover_depth_m.is_finite()) {
         return Err(JdError::invalid("cover_depth_m", "must be positive"));
@@ -167,6 +188,7 @@ pub fn snowpack(
     let mut retention = vec![0.0f32; n];
     let mut t_local = vec![0.0f32; n];
     let mut windward = vec![0.0f32; n];
+    let mut steep = vec![false; n];
     for y in 0..hh {
         for x in 0..w {
             let (x0, x1) = (x.saturating_sub(1), (x + 1).min(w - 1));
@@ -178,7 +200,9 @@ pub fn snowpack(
             let facing = (grad * 20.0).min(1.0);
             let sunlit = 0.5 * (1.0 + (aspect - sun).cos()) * facing;
             let i = (y * w + x) as usize;
-            retention[i] = (1.0 - grad.atan().to_degrees() / p.max_slope_deg).clamp(0.0, 1.0);
+            let slope_deg = grad.atan().to_degrees();
+            retention[i] = (1.0 - slope_deg / p.max_slope_deg).clamp(0.0, 1.0);
+            steep[i] = p.avalanche_strength > 0.0 && slope_deg > p.avalanche_slope_deg;
             windward[i] = 0.5 * (1.0 + (aspect - wind).cos()) * facing;
             t_local[i] = p.temperature_c - p.lapse_c_per_km * h.get(x, y) / 1000.0
                 + p.sun_strength * 5.0 * sunlit;
@@ -190,6 +214,7 @@ pub fn snowpack(
         to.to_radians().sin().round() as i64,
         to.to_radians().cos().round() as i64,
     );
+    let hv = h.to_vec();
     let mut depth = vec![0.0f32; n];
     let mut next = vec![0.0f32; n];
     for _ in 0..p.steps {
@@ -199,6 +224,44 @@ pub fn snowpack(
             }
             *d = (*d - p.melt_m_per_c * t_local[i].max(0.0)).max(0.0);
         }
+        // Avalanche: a steep cell sends a share of its snow to the lowest neighbouring snow surface.
+        next.copy_from_slice(&depth);
+        for y in 0..hh as i64 {
+            for x in 0..w as i64 {
+                let i = (y * w as i64 + x) as usize;
+                if !steep[i] || depth[i] <= 0.0 {
+                    continue;
+                }
+                let surface = |x: i64, y: i64| {
+                    let j = (y * w as i64 + x) as usize;
+                    (hv[j] + depth[j], j)
+                };
+                let (mut low, mut target) = surface(x, y);
+                for (nx, ny) in [
+                    (x - 1, y - 1),
+                    (x, y - 1),
+                    (x + 1, y - 1),
+                    (x - 1, y),
+                    (x + 1, y),
+                    (x - 1, y + 1),
+                    (x, y + 1),
+                    (x + 1, y + 1),
+                ] {
+                    if nx >= 0 && ny >= 0 && nx < w as i64 && ny < hh as i64 {
+                        let (s, j) = surface(nx, ny);
+                        if s < low {
+                            (low, target) = (s, j);
+                        }
+                    }
+                }
+                if target != i {
+                    let moved = p.avalanche_strength * depth[i];
+                    next[i] -= moved;
+                    next[target] += moved;
+                }
+            }
+        }
+        std::mem::swap(&mut depth, &mut next);
         // Drift: a share of each windward face's snow moves one cell downwind (stays put at the edge).
         next.copy_from_slice(&depth);
         for y in 0..hh as i64 {
@@ -301,6 +364,46 @@ mod tests {
         );
         let total = d.to_vec().iter().sum::<f32>();
         assert!(total > 0.0);
+        // Avalanche: a 45° face from 1 000 m down to a plain at 0 m — the slides empty the face
+        // and pile up at its foot; nothing melts (cold everywhere), so the mass is the same.
+        let mut face = Heightfield::new(32, 8, 64, 0).expect("face");
+        face.fill_with(|x, _| (10.0 - x as f32).max(0.0) * 100.0);
+        let run = |strength: f32| {
+            snowpack(
+                &face,
+                [100.0, 100.0],
+                &SnowpackParams {
+                    wind_strength: 0.0,
+                    avalanche_strength: strength,
+                    ..SnowpackParams::default()
+                },
+            )
+            .expect("face")
+            .0
+        };
+        let (still, slid) = (run(0.0), run(0.5));
+        let row = |f: &Heightfield, x0: u32, x1: u32| {
+            (x0..x1).map(|x| f.get(x, 4)).sum::<f32>() / (x1 - x0) as f32
+        };
+        assert!(
+            row(&slid, 1, 9) < 0.3 * row(&still, 1, 9),
+            "the face empties: {} → {}",
+            row(&still, 1, 9),
+            row(&slid, 1, 9)
+        );
+        assert!(
+            slid.get(10, 4) > 1.5 * slid.get(20, 4),
+            "a cone at the foot: {} vs plain {}",
+            slid.get(10, 4),
+            slid.get(20, 4)
+        );
+        let mass = |f: &Heightfield| f.to_vec().iter().sum::<f32>();
+        assert!(
+            (mass(&slid) - mass(&still)).abs() < 1e-3 * mass(&still),
+            "mass {} vs {}",
+            mass(&slid),
+            mass(&still)
+        );
         assert!(
             snowpack(
                 &h,

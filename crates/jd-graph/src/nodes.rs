@@ -742,7 +742,7 @@ pub fn register_all(r: &mut Registry) {
     ));
     r.register(NodeDef::new::<jd_terrain::SnowpackParams, _>(
         "jd.climate.snowpack@1",
-        "Snowpack over `steps`: snow falls where it is cold enough and holds on gentle ground, a degree-day melt follows the lapse rate and the sun, wind drifts it to the lee — `depth` in metres of snow and `cover` 0..1; key `temperature_c` over the timeline for a season",
+        "Snowpack over `steps`: snow falls where it is cold enough and holds on gentle ground, a degree-day melt follows the lapse rate and the sun, wind drifts it to the lee, slopes above `avalanche_slope_deg` slide a share downhill each step — `depth` in metres of snow and `cover` 0..1; key `temperature_c` over the timeline for a season",
         vec![port("in", PortType::Heightfield, true)],
         vec![port("depth", PortType::Heightfield, false), port("cover", PortType::Heightfield, false)],
         |ctx, p, i| {

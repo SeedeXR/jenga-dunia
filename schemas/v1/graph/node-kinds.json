@@ -456,7 +456,7 @@
   },
   {
     "kind": "jd.climate.snowpack@1",
-    "description": "Snowpack over `steps`: snow falls where it is cold enough and holds on gentle ground, a degree-day melt follows the lapse rate and the sun, wind drifts it to the lee — `depth` in metres of snow and `cover` 0..1; key `temperature_c` over the timeline for a season",
+    "description": "Snowpack over `steps`: snow falls where it is cold enough and holds on gentle ground, a degree-day melt follows the lapse rate and the sun, wind drifts it to the lee, slopes above `avalanche_slope_deg` slide a share downhill each step — `depth` in metres of snow and `cover` 0..1; key `temperature_c` over the timeline for a season",
     "inputs": [
       {
         "name": "in",
@@ -548,6 +548,18 @@
           "type": "number",
           "format": "float",
           "default": 0.20000000298023224
+        },
+        "avalanche_slope_deg": {
+          "description": "Slope above which snow avalanches each step, degrees (0, 90].",
+          "type": "number",
+          "format": "float",
+          "default": 38.0
+        },
+        "avalanche_strength": {
+          "description": "Share of a steep cell's snow that slides to its lowest neighbour each step (0..1; 0 = off).",
+          "type": "number",
+          "format": "float",
+          "default": 0.5
         }
       },
       "additionalProperties": false

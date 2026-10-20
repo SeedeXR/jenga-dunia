@@ -786,9 +786,18 @@ snowpack 180–210 ms per evaluation (256² × 60 steps)
 $ jd --json op timeline.export --project Alps.jdproj --params '{"layer":"snowcover","frames":24,"dir":"snow","format":"png16","range_m":[0,1]}'
 ```
 
+**Avalanches.** Two snowpack nodes on one 20 km fbm world (200–2800 m, 80 m cells, 60 steps, −5 °C), one with `avalanche_strength: 0`:
+
+```
+depth_still  min 0  max 3.50 m   mean 0.520 m     298 ms
+depth_slid   min 0  max 14.85 m  mean 0.520 m     692 ms   (the default: slopes > 38° slide half their snow per step)
+```
+
+![Three panels: the height field; the still snow depth, thinner on steep ground; the avalanched depth with the steep flanks bare and the hollows below them bright](images/cli-snow-avalanche.png)
+
 **Video:** [`videos/snowpack-melt.mp4`](videos/snowpack-melt.mp4) (3 s, 24 frames, 768²) — the cover frames as a greyscale clip: the keyed `temperature_c` warms the season from −8 °C to +14 °C and the pack retreats to the summits.
 
-`jd.climate.snowpack@1` is the time-stepped sibling of the static cover mask: every step snow falls (`accumulation_m`) where the local air is colder than +1 °C and holds in proportion to the slope (nothing above `max_slope_deg`), a degree-day melt (`melt_m_per_c` per degree above freezing) follows the lapse rate (`lapse_c_per_km`) and the sun (`sun_strength` × 5 °C on sun-facing slopes), and the wind drifts a share (`wind_strength`) of every windward face's snow one cell downwind — so lee slopes end up deeper (unit test: a north–south ridge under a westerly). `depth` is metres of snow, `cover` is 0..1 at `cover_depth_m`. The wind is the world's unless the node sets its own. Not modelled: avalanching, albedo feedback, snow density (ponytail).
+`jd.climate.snowpack@1` is the time-stepped sibling of the static cover mask: every step snow falls (`accumulation_m`) where the local air is colder than +1 °C and holds in proportion to the slope (nothing above `max_slope_deg`), a degree-day melt (`melt_m_per_c` per degree above freezing) follows the lapse rate (`lapse_c_per_km`) and the sun (`sun_strength` × 5 °C on sun-facing slopes), and the wind drifts a share (`wind_strength`) of every windward face's snow one cell downwind — so lee slopes end up deeper (unit test: a north–south ridge under a westerly); slopes steeper than `avalanche_slope_deg` (38°) slide `avalanche_strength` (0.5) of their snow to the lowest neighbouring snow surface each step, so steep faces stay thin and cones build at their foot (unit test: a 45° face empties to under a third of its still depth, the foot holds 1.5× the plain, mass unchanged). `depth` is metres of snow, `cover` is 0..1 at `cover_depth_m`. The wind is the world's unless the node sets its own. Not modelled: albedo feedback, snow density (ponytail).
 
 ### Export for Unity or Unreal
 

@@ -1489,6 +1489,10 @@ the world's shared wind. */
   "wind_strength"?: number;
   /** Depth that counts as full cover in the `cover` output, metres (> 0). */
   "cover_depth_m"?: number;
+  /** Slope above which snow avalanches each step, degrees (0, 90]. */
+  "avalanche_slope_deg"?: number;
+  /** Share of a steep cell's snow that slides to its lowest neighbour each step (0..1; 0 = off). */
+  "avalanche_strength"?: number;
 };
 
 export type NodeParams_jd_erosion_aeolian_1 = {

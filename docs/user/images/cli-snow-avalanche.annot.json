@@ -1,0 +1,36 @@
+{
+  "src": "../../../target/scratch/cli-snow-avalanche-raw.png",
+  "out": "cli-snow-avalanche.png",
+  "annotations": [
+    {
+      "type": "circle",
+      "cx": 420,
+      "cy": 120,
+      "r": 34,
+      "label": "1",
+      "text": "1  still: snow stays where it fell, thinner on the steep ground",
+      "tx": 16,
+      "ty": 318
+    },
+    {
+      "type": "circle",
+      "cx": 688,
+      "cy": 120,
+      "r": 34,
+      "label": "2",
+      "text": "2  avalanches: the same slopes are bare, the hollows and feet below them fill",
+      "tx": 16,
+      "ty": 342
+    },
+    {
+      "type": "arrow",
+      "x1": 760,
+      "y1": 296,
+      "x2": 740,
+      "y2": 236,
+      "text": "3  same total snow, max 3.5 \u2192 14.9 m at the feet",
+      "tx": 16,
+      "ty": 366
+    }
+  ]
+}
