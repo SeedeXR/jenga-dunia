@@ -275,25 +275,41 @@ export const useStore = create<State>((set, get) => {
     return Math.max(0, Math.ceil(Math.log2(Math.max(res[0], res[1]) / 512)));
   };
   let liveTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The live evaluation in flight, if any: Generate and Evaluate wait for it (see `settle`). */
+  let liveInFlight: Promise<void> | null = null;
   const liveEvaluate = () => {
     clearTimeout(liveTimer);
-    liveTimer = setTimeout(async () => {
+    liveTimer = setTimeout(() => {
       const { project, live } = get();
       if (!project || !live) return;
-      startPolling(); // live evaluations show up in the header and can be cancelled too
-      try {
-        const r = await op<EvalReport>("graph.evaluate", { lod: previewLod() });
-        if (r.status === "ok" && r.result) await adopt(r.result);
-        else if (r.error?.code === "E_GRAPH_MISSING_INPUT") {
-          // Half-wired graphs are normal while editing: say what is missing, without an error entry.
-          set((s) => ({ log: [...s.log.slice(-199), { ts: Date.now(), level: "info", text: `live preview waiting: ${r.error?.message ?? ""}` }] }));
-        } else log(r);
-      } catch (e) {
-        logFailure("graph.evaluate (live)", e);
-      } finally {
-        stopPolling();
-      }
+      liveInFlight = (async () => {
+        startPolling(); // live evaluations show up in the header and can be cancelled too
+        const gen = graphGen;
+        try {
+          const r = await op<EvalReport>("graph.evaluate", { lod: previewLod() });
+          // The graph moved on while this ran (Generate's edits, a quick second edit): the result
+          // is of an older graph and would overwrite the newer layer — drop it, the next one is queued.
+          if (gen !== graphGen) return;
+          if (r.status === "ok" && r.result) await adopt(r.result);
+          else if (r.error?.code === "E_GRAPH_MISSING_INPUT") {
+            // Half-wired graphs are normal while editing: say what is missing, without an error entry.
+            set((s) => ({ log: [...s.log.slice(-199), { ts: Date.now(), level: "info", text: `live preview waiting: ${r.error?.message ?? ""}` }] }));
+          } else log(r);
+        } catch (e) {
+          logFailure("graph.evaluate (live)", e);
+        } finally {
+          stopPolling();
+          liveInFlight = null;
+        }
+      })();
     }, 150);
+  };
+  // Before a full evaluation: cancel a queued preview and wait for a running one. Two evaluations
+  // of one project overlapping in the core each snapshot the graph at their start, and the slower
+  // one publishes a stale `height` last (seen under the parallel e2e gate).
+  const settle = async () => {
+    clearTimeout(liveTimer);
+    if (liveInFlight) await liveInFlight;
   };
   type GraphView = GraphListResult;
   // Autosave: a debounced project.save after any journaled edit, so `dirty` / `journal` return to
@@ -464,6 +480,7 @@ export const useStore = create<State>((set, get) => {
     disconnectNodes: async (from, fromPort, to, toPort) => mutate("graph.disconnect", { from, from_port: fromPort, to, to_port: toPort }),
     setParam: async (id, key, value) => mutate("graph.set_param", { id, key, value }),
     evaluateGraph: async (lod = 0) => {
+      await settle();
       const r = await run("graph.evaluate", { lod });
       if (r.status === "ok" && r.result) await adopt(r.result);
     },
@@ -508,7 +525,7 @@ export const useStore = create<State>((set, get) => {
         for (const [key, value] of Object.entries(noise)) {
           if (JSON.stringify(node.params?.[key]) !== JSON.stringify(value)) await mutate("graph.set_param", { id: node.id, key, value });
         }
-        clearTimeout(liveTimer); // the full evaluation below supersedes the preview those edits queued
+        await settle(); // the full evaluation below supersedes the preview those edits queued
         const r = await run("graph.evaluate", { lod: 0 });
         if (r.status === "ok" && r.result) await adopt(r.result);
         return;

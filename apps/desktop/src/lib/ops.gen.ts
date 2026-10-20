@@ -1259,6 +1259,21 @@ export type NodeParams_jd_erosion_thermal_1 = {
   "rate"?: number;
 };
 
+export type NodeParams_jd_erosion_yardang_1 = {
+  /** Abrasion steps (1..=2000). */
+  "iterations"?: number;
+  /** Compass direction the wind blows from, degrees clockwise from north (270 = westerly). */
+  "wind_azimuth_deg"?: number;
+  /** Depth removed per step from a fully exposed, unsheltered face, metres (> 0). */
+  "rate_m"?: number;
+  /** Windward slope at which exposure saturates, degrees (0, 90). */
+  "ref_slope_deg"?: number;
+  /** How far upwind a higher cell can shelter this one, metres (≥ 0). */
+  "shelter_m"?: number;
+  /** A shelter line steeper than this (seen along the wind) is a wind shadow, degrees (0, 90). */
+  "shadow_deg"?: number;
+};
+
 export type NodeParams_jd_filter_blur_1 = {
   /** Box-blur radius in pixels (1..=4; must not exceed the world's tile halo). */
   "radius"?: number;
@@ -1528,6 +1543,7 @@ export interface NodeKinds {
   "jd.erosion.karst@1": NodeParams_jd_erosion_karst_1;
   "jd.erosion.stream_power@1": NodeParams_jd_erosion_stream_power_1;
   "jd.erosion.thermal@1": NodeParams_jd_erosion_thermal_1;
+  "jd.erosion.yardang@1": NodeParams_jd_erosion_yardang_1;
   "jd.filter.blur@1": NodeParams_jd_filter_blur_1;
   "jd.filter.terrace@1": NodeParams_jd_filter_terrace_1;
   "jd.hydrology.fill@1": NodeParams_jd_hydrology_fill_1;

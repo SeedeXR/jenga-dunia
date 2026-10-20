@@ -27,6 +27,7 @@ pub mod sculpt;
 pub mod seabed;
 pub mod sim;
 pub mod strata;
+pub mod yardang;
 
 pub use aeolian::{AeolianParams, aeolian_transport};
 pub use bathymetry::{BathymetryParams, bathymetry};
@@ -62,3 +63,4 @@ pub use sim::{
     slope_mask, stream_power_erode, stream_power_erode_with, thermal_erode, thermal_erode_with,
 };
 pub use strata::{StrataParams, strata_hardness};
+pub use yardang::{YardangParams, wind_abrasion};

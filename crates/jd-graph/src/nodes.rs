@@ -892,6 +892,17 @@ pub fn register_all(r: &mut Registry) {
             Ok(out("hardness", jd_terrain::strata_hardness(field(i, "in")?, spacing_m(ctx), &sp)?))
         },
     ).with_memory(4.0));
+    r.register(NodeDef::new::<jd_terrain::YardangParams, _>(
+        "jd.erosion.yardang@1",
+        "Wind abrasion: sand-laden wind from `wind_azimuth_deg` sandblasts the faces that meet it and spares the sheltered lee, streamlining ridges into keels along the wind — yardangs; optional `hardness` lets caprock keels survive; mass leaves the field as dust",
+        vec![port("in", PortType::Heightfield, true), port("hardness", PortType::Heightfield, false)],
+        vec![port("out", PortType::Heightfield, false)],
+        |ctx, p, i| {
+            let yp: jd_terrain::YardangParams = params(p)?;
+            let hardness = i.get("hardness").map(|v| v.as_field());
+            Ok(out("out", jd_terrain::wind_abrasion(field(i, "in")?, spacing_m(ctx), hardness.map(|k| &**k), &yp, Some(&ctx.cancel))?))
+        },
+    ).with_memory(8.0));
     r.register(NodeDef::new::<jd_terrain::KarstParams, _>(
         "jd.erosion.karst@1",
         "Karst sinkholes (dolines): seeded bowl or collapse depressions on flat, soluble ground — `density_per_km2`, radius and depth ranges, `max_slope_deg`, `min_spacing_m`; optional `soluble` mask (0..1); outputs the carved terrain and a `sinkholes` floor mask",

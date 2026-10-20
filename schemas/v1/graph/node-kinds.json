@@ -969,6 +969,75 @@
     }
   },
   {
+    "kind": "jd.erosion.yardang@1",
+    "description": "Wind abrasion: sand-laden wind from `wind_azimuth_deg` sandblasts the faces that meet it and spares the sheltered lee, streamlining ridges into keels along the wind — yardangs; optional `hardness` lets caprock keels survive; mass leaves the field as dust",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      },
+      {
+        "name": "hardness",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "YardangParams",
+      "description": "Yardang settings.",
+      "type": "object",
+      "properties": {
+        "iterations": {
+          "description": "Abrasion steps (1..=2000).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 100
+        },
+        "wind_azimuth_deg": {
+          "description": "Compass direction the wind blows from, degrees clockwise from north (270 = westerly).",
+          "type": "number",
+          "format": "float",
+          "default": 270.0
+        },
+        "rate_m": {
+          "description": "Depth removed per step from a fully exposed, unsheltered face, metres (> 0).",
+          "type": "number",
+          "format": "float",
+          "default": 0.05000000074505806
+        },
+        "ref_slope_deg": {
+          "description": "Windward slope at which exposure saturates, degrees (0, 90).",
+          "type": "number",
+          "format": "float",
+          "default": 20.0
+        },
+        "shelter_m": {
+          "description": "How far upwind a higher cell can shelter this one, metres (≥ 0).",
+          "type": "number",
+          "format": "float",
+          "default": 60.0
+        },
+        "shadow_deg": {
+          "description": "A shelter line steeper than this (seen along the wind) is a wind shadow, degrees (0, 90).",
+          "type": "number",
+          "format": "float",
+          "default": 15.0
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
     "kind": "jd.filter.blur@1",
     "description": "Box blur (tile-local, reads through the halo; radius ≤ world.halo)",
     "inputs": [

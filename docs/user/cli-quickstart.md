@@ -458,6 +458,37 @@ karst node 102 ms (256²)   height min −7.9 (a pit floor)  max 55.9  mean 29.3
 
 `jd.erosion.karst@1` places dolines where soluble rock dissolves: a seeded stream proposes cells, each accepted when the ground is gentler than `max_slope_deg`, the optional `soluble` mask (0..1) allows it, and it keeps `min_spacing_m` from every accepted centre; `density_per_km2` is counted against the *eligible* area, so steep ground never dilutes it. Each sinkhole draws its radius and depth from the given ranges and is carved as a smooth subsidence `bowl` (raised cosine) or a steep-rimmed `collapse` pit with a flat floor; overlapping pits take the deeper cut. The `sinkholes` output is 1 at the floors and fades to 0 at the rims — colour by it, scatter rubble from it, or mask a material. Same seed, same holes. Not modelled: underground drainage (a sinkhole is a closed basin to `jd.hydrology.fill@1`), caves, doline chains along joints.
 
+### Yardangs: wind abrasion
+
+```
+$ jd --json new Yardang.jdproj --extent 2048 --resolution 256 --seed 5        # ridged noise 0..80 m, feature 600 m, 4 octaves
+$ jd op graph.add_node --project Yardang.jdproj --save --params '{"kind":"jd.erosion.yardang@1","params":{"iterations":300,"wind_azimuth_deg":270,"rate_m":0.05}}'
+# noise.out → yardang.in; yardang.out → height output (noise.out → a `before` output to compare)
+yardang node 1 650 ms (256² × 300 steps)      mean height 41.4 → 37.5 m (the dust leaves the field)
+sloping faces that face west (into the wind) / east:  before 17.5 % / 17.5 %   after 7.5 % / 11.9 %   (faces > 30°: 25.4 % → 14.0 %)
+```
+
+![Blender render before abrasion: symmetric ridged noise](images/cli-yardang-before.png)
+![Blender render after 300 steps of westerly abrasion: the spiky ridges smoothed and drawn out west → east along the wind, seen from the south-east](images/cli-yardang-after.png)
+
+`jd.erosion.yardang@1` is the rock-cutting counterpart of the sand-moving aeolian node: each step a cell that meets the wind (higher than its upwind neighbour, normalised by `ref_slope_deg`) loses up to `rate_m`, unless a higher cell upwind within `shelter_m` shadows it (line of sight steeper than `shadow_deg`, Werner's 15°); the lee never erodes, so ridges streamline along the wind. The optional `hardness` input (strata) lets caprock keels survive at a tenth of the rate. The west-facing share of sloping faces halving while the east-facing share falls less is the asymmetry a yardang field has; mass is not conserved (dust). Not modelled: lateral undercutting, fractional wind directions (the azimuth snaps to 45°), sand supply feedback.
+
+### Playas and wadis from the nodes you have
+
+```
+$ jd op graph.add_node --project Desert.jdproj --save --params '{"kind":"jd.hydrology.fill@1","params":{"epsilon_m":0.01}}'          # karst.out → fill.in
+$ jd op graph.add_node --project Desert.jdproj --save --params '{"kind":"jd.hydrology.rivers@1","params":{"threshold":0.4,"depth_m":3,"method":"dinf"}}'   # karst.out → rivers.in
+# fill.out → `playa_floor`, fill.lakes → `playa`; rivers.rivers → `wadi`, rivers.out → `wadi_floor`
+fill 106 ms · rivers 158 ms (256²)
+playa        depth of standing water 0..24.7 m, mean 0.68 m   (the sinkholes and every closed hollow of the plain, filled level)
+playa_floor  min 11.1 m (the plain's lowest floor is now a flat pan), max 55.9
+wadi         0..0.92, mean 0.011   (1 % of the plain is an ephemeral channel at this threshold; `depth_m` 3 cuts the bed)
+```
+
+![Playa mask: every closed basin of the desert plain filled level — the sinkholes read as bright discs, the broad hollows as soft blobs](images/cli-desert-playa.png) ![Wadi mask: a sparse dendritic network of ephemeral channels across the plain](images/cli-desert-wadi.png)
+
+Two desert landforms need no new node. A **playa** (salt pan) is a closed basin whose floods evaporate: `jd.hydrology.fill@1` levels every closed hollow — on this plain that is each sinkhole and the broad low ground between the dunes — and its `lakes` output is the depth of water that would stand there, so `lakes > 0` is the evaporite floor and `out` the flat pan surface; give it a bright, rough salt material through a biome rule on that mask. A **wadi** (arroyo) is a channel that only runs in flash floods: `jd.hydrology.rivers@1` with a low `threshold` and a shallow `depth_m` on the plain cuts the braided, sparse network above, and `method: dinf` keeps it from locking to the grid. Both are static: no flood timing, no salt crust growth.
+
 ### Snow cover
 
 ```
