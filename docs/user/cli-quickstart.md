@@ -763,6 +763,24 @@ $ jd --json op terrain.export_profile --project Bio.jdproj --params '{"profile":
 $ jd op terrain.export_profile --project Bio.jdproj --params '{"profile":"unity","dir":"unity","layer":"land","masks":["forest"]}'
 ```
 
+**Materials across the bridge.** Give the profile the material stack and the translation layer does what it can and says what it could not:
+
+```
+$ jd --json op terrain.export_profile --project Acceptance.jdproj --params '{"profile":"unity","dir":"unity","materials":[
+    {"mask":"mask_forest","albedo":[0.13,0.30,0.12],"roughness":0.95}, {"mask":"mask_rock","albedo":[0.45,0.43,0.40],"roughness":0.7},
+    {"mask":"snow","albedo":[0.95,0.96,0.98],"roughness":0.45},        {"albedo":[0.42,0.52,0.20],"roughness":0.9}]}'
+files: heightmap.r16 + sidecar, weight_mask_forest.png, weight_mask_rock.png, weight_snow.png, materials.json, README.md
+materials.json → {"name":"snow","weightmap":"weight_snow.png","albedo_srgb":[0.95,0.96,0.98],"roughness":0.45,"smoothness":0.55}, …
+loss:
+ - layer `material_3` has no mask (it applies everywhere): no weightmap — treat it as the base layer
+ - flat colours: both engines paint terrain layers with textures, not colours — assign a texture per layer and use `albedo_srgb` as its tint
+ - blend order: the stack lerps layers in order; engine weightmaps blend by normalised weight, so overlapping masks mix instead of the later one winning
+ - weights are 8-bit (256 steps) at the heightmap's resolution
+ - roughness: a Unity Terrain Layer takes smoothness (= 1 − roughness, listed) through its mask map's alpha, not a scalar   (Unreal: the Landscape material must expose a roughness input per layer)
+```
+
+Every masked layer becomes a weightmap in the engine's row order, `materials.json` carries the look per layer, and the README repeats the loss list under *Lost in translation* — the same facts in the result for an agent and on disk for a person. Nothing is silently dropped.
+
 `terrain.export_profile` writes one folder an engine importer can take as-is: **Unreal** gets a 16-bit PNG heightmap with row 0 = north, one 8-bit grayscale weightmap per mask layer at the same resolution, and a README with the Landscape numbers computed from the data — Z scale = (max − min) × 100 / 512 (201.771 here for 52…1085 m) and the Z location that puts mid-grey at the mid height; **Unity** gets `heightmap.r16` (16-bit little-endian, row 0 = south, so *Flip Vertically: off*, Byte Order *Windows*), the weightmaps, and the Terrain Height (1033.07 m) plus the y offset (51.98 m). Sizes an engine does not like are reported as `W_ENGINE_SIZE` (Unity wants 2ⁿ+1 squares, Unreal 1009/2017/4033/8129 — use the world presets). The engine-side steps follow the Unity 6 manual and the Unreal 5 Landscape guide but are **UNVERIFIED** until someone imports once; the README says so.
 
 ### Bring in a real DEM or engine heightmap

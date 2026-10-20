@@ -40,6 +40,14 @@
       "items": {
         "type": "string"
       }
+    },
+    "loss": {
+      "description": "What the engine's material model cannot take from the material stack (empty without `materials`).",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
     }
   },
   "required": [

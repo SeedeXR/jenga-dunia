@@ -56,12 +56,28 @@ pub struct ProfileReport {
     pub settings: ProfileSettings,
     /// Non-fatal notes (e.g. a size Unreal does not recommend).
     pub notes: Vec<String>,
+    /// What the engine's material model cannot take from the material stack (empty without `materials`).
+    #[serde(default)]
+    pub loss: Vec<String>,
 }
 
 const UNREAL_SIZES: [u32; 7] = [127, 253, 505, 1009, 2017, 4033, 8129];
 
 fn is_pow2_plus_1(n: u32) -> bool {
     n >= 33 && (n - 1).is_power_of_two()
+}
+
+/// A material layer to translate for an engine: a named weight (its mask) plus the look.
+#[derive(Debug, Clone)]
+pub struct ProfileMaterial<'a> {
+    /// Layer name (file-safe); the weightmap is `weight_<name>.png`.
+    pub name: String,
+    /// 0..1 weight field at the heightmap's resolution; None = everywhere (cannot be a weightmap).
+    pub mask: Option<&'a Heightfield>,
+    /// Base colour, sRGB 0..1.
+    pub albedo: [f32; 3],
+    /// Roughness 0..1.
+    pub roughness: f32,
 }
 
 /// Write the profile for `height` with `masks` (name, 0..1 field) as weightmaps.
@@ -72,7 +88,43 @@ pub fn export_profile(
     dir: &Path,
     range_m: Option<[f32; 2]>,
 ) -> JdResult<ProfileReport> {
+    export_profile_with(profile, height, masks, &[], dir, range_m)
+}
+
+/// [`export_profile`] with the material stack translated for the engine: every masked layer
+/// becomes a weightmap, `materials.json` carries the look per layer, and `loss` says what the
+/// engine's own material model cannot take from the stack (the translation layer's report).
+pub fn export_profile_with(
+    profile: EngineProfile,
+    height: &Heightfield,
+    masks: &[(String, &Heightfield)],
+    materials: &[ProfileMaterial<'_>],
+    dir: &Path,
+    range_m: Option<[f32; 2]>,
+) -> JdResult<ProfileReport> {
     height.validate_finite()?;
+    let safe = |name: &str| {
+        !name.is_empty()
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    };
+    for m in materials {
+        if !safe(&m.name) {
+            return Err(JdError::invalid(
+                "materials",
+                format!("layer `{}` is not a safe file name", m.name),
+            ));
+        }
+        if let Some(f) = m.mask
+            && (f.width(), f.height()) != (height.width(), height.height())
+        {
+            return Err(JdError::invalid(
+                "materials",
+                format!("layer `{}`: mask size differs from the heightmap", m.name),
+            ));
+        }
+    }
     for (name, m) in masks {
         if (m.width(), m.height()) != (height.width(), height.height()) {
             return Err(JdError::invalid("masks", format!("mask `{name}` size differs from the heightmap"))
@@ -128,7 +180,7 @@ pub fn export_profile(
             .to_owned(),
     ];
     // Weightmaps: 8-bit grayscale PNG (Unreal's format; Unity reads them through the script).
-    for (name, m) in masks {
+    let write_weight = |name: &str, m: &Heightfield, files: &mut Vec<String>| -> JdResult<String> {
         let mut img = image::GrayImage::new(w, h);
         for y in 0..h {
             for x in 0..w {
@@ -144,7 +196,42 @@ pub fn export_profile(
                 format!("PNG write failed: {e}"),
             )
         })?;
-        files.push(file);
+        files.push(file.clone());
+        Ok(file)
+    };
+    for (name, m) in masks {
+        write_weight(name, m, &mut files)?;
+    }
+    // Material translation: masked layers → weightmaps + a manifest; what does not fit → `loss`.
+    let mut loss = Vec::new();
+    if !materials.is_empty() {
+        let mut layers = Vec::new();
+        for m in materials {
+            let weightmap = match m.mask {
+                Some(f) => Some(write_weight(&m.name, f, &mut files)?),
+                None => {
+                    loss.push(format!("layer `{}` has no mask (it applies everywhere): no weightmap — treat it as the base layer", m.name));
+                    None
+                }
+            };
+            layers.push(serde_json::json!({
+                "name": m.name, "weightmap": weightmap, "albedo_srgb": m.albedo, "roughness": m.roughness,
+                "smoothness": 1.0 - m.roughness,
+            }));
+        }
+        loss.push("flat colours: both engines paint terrain layers with textures, not colours — assign a texture per layer and use `albedo_srgb` as its tint".to_owned());
+        loss.push("blend order: the stack lerps layers in order; engine weightmaps blend by normalised weight, so overlapping masks mix instead of the later one winning — order your masks to overlap little or pre-multiply them in the graph".to_owned());
+        loss.push("weights are 8-bit (256 steps) at the heightmap's resolution".to_owned());
+        match profile {
+            EngineProfile::Unity => loss.push("roughness: a Unity Terrain Layer takes smoothness (= 1 − roughness, listed) through its mask map's alpha, not a scalar".to_owned()),
+            EngineProfile::Unreal => loss.push("roughness: the Landscape material must expose a roughness input per layer; the scalar is listed, not applied".to_owned()),
+        }
+        let manifest = serde_json::json!({ "engine": match profile { EngineProfile::Unity => "unity", EngineProfile::Unreal => "unreal" }, "layers": layers, "loss": loss });
+        std::fs::write(
+            dir.join("materials.json"),
+            serde_json::to_vec_pretty(&manifest)?,
+        )?;
+        files.push("materials.json".to_owned());
     }
     let settings = match profile {
         EngineProfile::Unity => ProfileSettings {
@@ -162,7 +249,13 @@ pub fn export_profile(
             unreal_location_z_cm: Some((min_m + max_m) * 0.5 * 100.0),
         },
     };
-    let readme = readme(profile, w, h, &settings, masks, &notes);
+    let mut readme = readme(profile, w, h, &settings, masks, &notes);
+    if !materials.is_empty() {
+        readme.push_str("\nMaterials: `materials.json` lists one entry per layer of the material stack (weightmap, albedo_srgb, roughness/smoothness). Lost in translation:\n");
+        for l in &loss {
+            readme.push_str(&format!("- {l}\n"));
+        }
+    }
     std::fs::write(dir.join("README.md"), readme)?;
     files.push("README.md".to_owned());
     Ok(ProfileReport {
@@ -172,6 +265,7 @@ pub fn export_profile(
         size_px: [w, h],
         settings,
         notes,
+        loss,
     })
 }
 
@@ -223,6 +317,78 @@ fn readme(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn materials_translate_to_weightmaps_a_manifest_and_a_loss_list() {
+        let mut h = Heightfield::new(33, 33, 64, 0).expect("hf");
+        h.fill_with(|x, y| 100.0 + x as f32 * 10.0 + y as f32);
+        let mut m = h.clone();
+        m.fill_with(|x, _| if x < 16 { 1.0 } else { 0.0 });
+        let stack = [
+            ProfileMaterial {
+                name: "base".into(),
+                mask: None,
+                albedo: [0.5, 0.5, 0.5],
+                roughness: 0.9,
+            },
+            ProfileMaterial {
+                name: "snow".into(),
+                mask: Some(&m),
+                albedo: [0.95, 0.96, 0.98],
+                roughness: 0.45,
+            },
+        ];
+        let dir = tempfile::tempdir().expect("tmp");
+        let r = export_profile_with(
+            EngineProfile::Unity,
+            &h,
+            &[],
+            &stack,
+            &dir.path().join("u"),
+            None,
+        )
+        .expect("unity");
+        assert!(
+            r.files.contains(&"weight_snow.png".to_owned())
+                && r.files.contains(&"materials.json".to_owned())
+        );
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(dir.path().join("u/materials.json")).expect("read"),
+        )
+        .expect("json");
+        assert_eq!(manifest["engine"], "unity");
+        assert_eq!(manifest["layers"][1]["weightmap"], "weight_snow.png");
+        assert!(manifest["layers"][0]["weightmap"].is_null());
+        assert!((manifest["layers"][1]["smoothness"].as_f64().expect("s") - 0.55).abs() < 1e-6);
+        assert!(
+            r.loss.iter().any(|l| l.contains("base layer"))
+                && r.loss.iter().any(|l| l.contains("smoothness")),
+            "{:?}",
+            r.loss
+        );
+        let readme = std::fs::read_to_string(dir.path().join("u/README.md")).expect("readme");
+        assert!(readme.contains("Lost in translation"));
+        let plain = export_profile(EngineProfile::Unreal, &h, &[], &dir.path().join("p"), None)
+            .expect("plain");
+        assert!(plain.loss.is_empty() && !plain.files.contains(&"materials.json".to_owned()));
+        let bad = [ProfileMaterial {
+            name: "no/slash".into(),
+            mask: None,
+            albedo: [0.0; 3],
+            roughness: 0.5,
+        }];
+        assert!(
+            export_profile_with(
+                EngineProfile::Unity,
+                &h,
+                &[],
+                &bad,
+                &dir.path().join("b"),
+                None
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn profiles_write_heightmap_weightmaps_and_import_numbers() {

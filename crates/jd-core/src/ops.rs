@@ -3376,6 +3376,9 @@ pub mod terrain {
         /// Height range to encode (default: the layer's min/max).
         #[serde(default)]
         pub range_m: Option<[f32; 2]>,
+        /// The material stack to translate: masked layers become weightmaps, `materials.json` carries the look, and the report's `loss` lists what the engine cannot take.
+        #[serde(default)]
+        pub materials: Vec<MaterialSpec>,
     }
 
     /// `terrain.scatter` params.
@@ -4049,7 +4052,15 @@ pub mod terrain {
                     masks.push((name.clone(), ctx.with_layer(name, |hf| Ok(hf.clone()))?));
                 }
                 let refs: Vec<(String, &jd_terrain::Heightfield)> = masks.iter().map(|(n, hf)| (n.clone(), hf)).collect();
-                let report = jd_terrain::export_profile(p.profile, &height, &refs, &dir, p.range_m)?;
+                let mat_fields: Vec<Option<jd_terrain::Heightfield>> = p.materials.iter().map(|m| m.mask.as_ref().map(|n| ctx.with_layer(n, |hf| Ok(hf.clone()))).transpose()).collect::<JdResult<_>>()?;
+                let stack: Vec<jd_terrain::ProfileMaterial<'_>> = p
+                    .materials
+                    .iter()
+                    .zip(&mat_fields)
+                    .enumerate()
+                    .map(|(i, (m, f))| jd_terrain::ProfileMaterial { name: m.mask.clone().unwrap_or_else(|| format!("material_{i}")), mask: f.as_ref(), albedo: m.albedo, roughness: m.roughness })
+                    .collect();
+                let report = jd_terrain::export_profile_with(p.profile, &height, &refs, &stack, &dir, p.range_m)?;
                 let warnings = report.notes.iter().map(|n| Warning::new("W_ENGINE_SIZE", n.clone())).collect();
                 Ok((report, warnings))
             },

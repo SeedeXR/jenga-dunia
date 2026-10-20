@@ -60,7 +60,10 @@ pub use ocean::{
     WaterLook, WaterMaps, WaveComponent, WaveParams, WaveSpectrum, bake_water, bake_water_with,
     bake_wave_displacement, bake_wave_normal, water_colour, wave_spectrum,
 };
-pub use profiles::{EngineProfile, ProfileReport, ProfileSettings, export_profile};
+pub use profiles::{
+    EngineProfile, ProfileMaterial, ProfileReport, ProfileSettings, export_profile,
+    export_profile_with,
+};
 pub use rocks::{RockParams, rock_mesh};
 pub use scatter::{
     ScatterParams, ScatterPoint, exclude_near, parse_points_csv, read_points_csv, scatter_points,

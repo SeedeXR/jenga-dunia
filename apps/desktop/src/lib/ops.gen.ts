@@ -1027,6 +1027,8 @@ export type TerrainExportProfileRequest = {
   "masks"?: string[];
   /** Height range to encode (default: the layer's min/max). */
   "range_m"?: [number, number] | null;
+  /** The material stack to translate: masked layers become weightmaps, `materials.json` carries the look, and the report's `loss` lists what the engine cannot take. */
+  "materials"?: MaterialSpec[];
 };
 
 export type ProfileSettings = {
@@ -1055,6 +1057,8 @@ export type TerrainExportProfileResult = {
   "settings": ProfileSettings;
   /** Non-fatal notes (e.g. a size Unreal does not recommend). */
   "notes": string[];
+  /** What the engine's material model cannot take from the material stack (empty without `materials`). */
+  "loss"?: string[];
 };
 
 export type NoiseKind = "open_simplex2" | "open_simplex2_s" | "perlin" | "value" | "value_cubic" | "cellular";

@@ -38,6 +38,14 @@
       "minItems": 2,
       "maxItems": 2,
       "default": null
+    },
+    "materials": {
+      "description": "The material stack to translate: masked layers become weightmaps, `materials.json` carries the look, and the report's `loss` lists what the engine cannot take.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/MaterialSpec"
+      },
+      "default": []
     }
   },
   "additionalProperties": false,
@@ -59,6 +67,40 @@
           "type": "string",
           "const": "unreal"
         }
+      ]
+    },
+    "MaterialSpec": {
+      "description": "One material layer of the stack.",
+      "type": "object",
+      "properties": {
+        "mask": {
+          "description": "0..1 mask layer that weights this material (omit for everywhere).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "albedo": {
+          "description": "Base colour, sRGB 0..1.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "roughness": {
+          "description": "Roughness 0..1.",
+          "type": "number",
+          "format": "float",
+          "default": 0.8999999761581421
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "albedo"
       ]
     }
   }
