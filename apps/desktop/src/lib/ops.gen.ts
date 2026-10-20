@@ -942,6 +942,26 @@ export type TerrainStatsResult = {
   "duration_ms": number;
 };
 
+export type TerrainTexturesRequest = {
+  /** Layer name. */
+  "layer"?: string;
+  /** Largest texture side in pixels (the field is sampled every ⌈size / max_px⌉ cells). */
+  "max_px"?: number;
+};
+
+export type TerrainTexturesResult = {
+  /** Texture width in pixels. */
+  "width": number;
+  /** Texture height in pixels. */
+  "height": number;
+  /** Base colour (hypsometric ramp blended to rock on slopes), row 0 = south. */
+  "albedo_png_base64": string;
+  /** Tangent-space normal map (+X east, +Y north, +Z out). */
+  "normal_png_base64": string;
+  /** Roughness in G (0.92 flat → 0.62 steep rock, 0.6 above the snow line), metallic 0 in B. */
+  "roughness_png_base64": string;
+};
+
 export type NodeParams_jd_analysis_curvature_1 = {
   /** Curvature (1/m) that maps to ±1; smaller values exaggerate. */
   "scale"?: number;
@@ -1244,6 +1264,8 @@ export interface JdOps {
   "terrain.scatter": { request: TerrainScatterRequest; result: TerrainScatterResult };
   /** Statistics and content hash of a layer */
   "terrain.stats": { request: TerrainStatsRequest; result: TerrainStatsResult };
+  /** Bake the material maps of a layer — albedo, tangent-space normal, roughness — as PNGs (base64) for viewers and engines */
+  "terrain.textures": { request: TerrainTexturesRequest; result: TerrainTexturesResult };
 }
 
 export type OpId = keyof JdOps;

@@ -38,6 +38,14 @@ test.describe("desktop UI against the real core", () => {
     await expect(page.getByTestId("viewport-info")).toContainText(/viewport: (webgpu|webgl2)/);
     await expect(page.getByTestId("viewport-info")).toContainText(/ [1-9][\d,]* tris/);
     await expect(page.getByTestId("viewport-info")).toContainText(/preview lod \d, [\d.]+ MB in \d+ ms/);
+    // PBR texturing: the viewport shades the terrain with baked maps (one texel per sample on a
+    // 256² world); the toggle falls back to the height-ramp vertex colours.
+    await expect(page.getByTestId("viewport-info")).toContainText("pbr 256×256");
+    await page.screenshot({ path: testInfo.outputPath("terrain-pbr.png"), fullPage: false }); // tutorial image source
+    await page.getByTestId("pbr-toggle").uncheck();
+    await expect(page.getByTestId("viewport-info")).not.toContainText("pbr ");
+    await page.getByTestId("pbr-toggle").check();
+    await expect(page.getByTestId("viewport-info")).toContainText("pbr 256×256");
     // Sun controls: the default direction is reported; dragging the elevation slider re-lights the scene.
     await expect(page.getByTestId("viewport-info")).toContainText("sun 35°/140°");
     await page.getByTestId("sun-elevation").evaluate((el) => {

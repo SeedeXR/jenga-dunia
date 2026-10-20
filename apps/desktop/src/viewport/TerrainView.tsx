@@ -14,6 +14,8 @@ export interface ViewportInfo {
   sun?: { azimuthDeg: number; elevationDeg: number };
   /** Scatter instances drawn, when any. */
   instances?: number;
+  /** Baked material maps applied (texture size), when any. */
+  pbrPx?: [number, number];
 }
 
 interface Props {
@@ -29,6 +31,8 @@ interface Props {
   seaLevelM?: number | null;
   /** Sun direction: azimuth clockwise from north (0 = light from the north), elevation above the horizon. */
   sun?: { azimuthDeg: number; elevationDeg: number };
+  /** Baked albedo/normal/roughness maps for the shown layer; textured when set and no overlay is active. */
+  maps?: { albedo: ImageBitmap; normal: ImageBitmap; roughness: ImageBitmap; px: [number, number] } | null;
   /** Scatter instances (layer metres: u east, v north from the south edge, z height, r 0..1) drawn as
    *  `sizeM`-tall cones — a preview marker, the exported GLB carries 1 m proxies. */
   instances?: { points: { u: number; v: number; z: number; r: number }[]; sizeM: number } | null;
@@ -190,6 +194,8 @@ interface SceneState {
   sunDeg: { azimuthDeg: number; elevationDeg: number };
   orbit: { theta: number; phi: number; radius: number; minR: number; maxR: number };
   instances: THREE.InstancedMesh<THREE.ConeGeometry, THREE.MeshStandardMaterial> | null;
+  /** Size of the baked maps currently on the terrain material. */
+  pbrPx: [number, number] | null;
 }
 
 function placeCamera(s: SceneState) {
@@ -200,10 +206,17 @@ function placeCamera(s: SceneState) {
 
 /** One report shape for every effect, so a later report never drops a field an earlier one set. */
 function infoOf(s: SceneState): ViewportInfo {
-  return { backend: s.backend, triangles: s.triangles, ...(s.sea ? { seaM: s.sea.position.y } : {}), sun: s.sunDeg, ...(s.instances ? { instances: s.instances.count } : {}) };
+  return {
+    backend: s.backend,
+    triangles: s.triangles,
+    ...(s.sea ? { seaM: s.sea.position.y } : {}),
+    sun: s.sunDeg,
+    ...(s.instances ? { instances: s.instances.count } : {}),
+    ...(s.pbrPx ? { pbrPx: s.pbrPx } : {}),
+  };
 }
 
-export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevelM = null, sun, overlay = null, instances = null }: Props) {
+export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevelM = null, sun, overlay = null, instances = null, maps = null }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<SceneState | null>(null);
   // Latest sculpt props without re-creating the renderer effect.
@@ -279,6 +292,7 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
       sunDeg: { azimuthDeg: 140, elevationDeg: 35 },
       orbit: { theta: 0.6, phi: 1.0, radius: 5200, minR: 200, maxR: 100000 },
       instances: null,
+      pbrPx: null,
     };
     sceneRef.current = state;
     placeCamera(state);
@@ -412,13 +426,26 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
     if (s.mesh) {
       s.scene.remove(s.mesh);
       s.mesh.geometry.dispose();
+      for (const t of [s.mesh.material.map, s.mesh.material.normalMap, s.mesh.material.roughnessMap]) t?.dispose();
       s.mesh.material.dispose();
       s.mesh = null;
       s.triangles = 0;
     }
     if (!preview || !extentM) return;
     const geo = buildTerrainGeometry(preview, extentM, overlay);
-    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
+    // Baked maps texture the terrain like the exports (full-field relief at any preview LOD);
+    // a colour overlay wins, and without maps the hypsometric vertex colours show.
+    const textured = maps && !overlay;
+    const tex = (img: ImageBitmap, color: boolean) => {
+      const t = new THREE.Texture(img);
+      if (color) t.colorSpace = THREE.SRGBColorSpace;
+      t.needsUpdate = true;
+      return t;
+    };
+    const mat = textured
+      ? new THREE.MeshStandardMaterial({ map: tex(maps.albedo, true), normalMap: tex(maps.normal, false), roughnessMap: tex(maps.roughness, false), roughness: 1, metalness: 0 })
+      : new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
+    s.pbrPx = textured ? maps.px : null;
     s.mesh = new THREE.Mesh(geo, mat);
     s.scene.add(s.mesh);
     s.triangles = (preview.width - 1) * (preview.height - 1) * 2;
@@ -437,7 +464,7 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
     s.camera.updateProjectionMatrix();
     placeCamera(s);
     onInfo?.(infoOf(s));
-  }, [preview, extentM, overlay, onInfo]);
+  }, [preview, extentM, overlay, maps, onInfo]);
 
   // Sun: direction from azimuth/elevation; low sun goes warm and dimmer, the sky light follows.
   useEffect(() => {

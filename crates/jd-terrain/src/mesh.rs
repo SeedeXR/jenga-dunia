@@ -116,19 +116,65 @@ pub(crate) fn bake_albedo(
     Ok(out.into_inner())
 }
 
-/// Largest texture side for the baked normal / roughness maps.
-const NORMAL_MAP_CAP: u32 = 2048;
+/// Largest texture side for the baked normal / roughness maps in mesh exports.
+pub const NORMAL_MAP_CAP: u32 = 2048;
+
+/// Full-field material maps as PNG bytes: albedo (hypsometric ramp + slope), tangent-space
+/// normal, roughness; all `px` wide/high, row 0 = south.
+pub struct BakedMaps {
+    /// Base colour PNG.
+    pub albedo: Vec<u8>,
+    /// Tangent-space normal map PNG.
+    pub normal: Vec<u8>,
+    /// Roughness (G) / metallic (B = 0) PNG.
+    pub roughness: Vec<u8>,
+    /// Texture size in pixels.
+    pub px: [u32; 2],
+}
+
+/// Bake albedo, normal and roughness maps from the full field, sampled every `ts` cells so no
+/// side exceeds `max_px` (see [`bake_normal_roughness`] for the conventions).
+pub fn bake_maps(hf: &Heightfield, extent_m: [f64; 2], max_px: u32) -> JdResult<BakedMaps> {
+    let (w, h) = (hf.width(), hf.height());
+    let ts = w.max(h).div_ceil(max_px.max(16)).max(1);
+    let (tw, th) = (w.div_ceil(ts), h.div_ceil(ts));
+    let (sx, sz) = (extent_m[0] / w as f64, extent_m[1] / h as f64);
+    let stats = hf.stats();
+    let at = |x: u32, z: u32| hf.get((x * ts).min(w - 1), (z * ts).min(h - 1));
+    let normal_y = |x: u32, z: u32| {
+        let (xi, zi) = (((x * ts).min(w - 1)) as i64, ((z * ts).min(h - 1)) as i64);
+        let d = ts as i64;
+        let g = |xx: i64, zz: i64| {
+            hf.get(
+                xx.clamp(0, w as i64 - 1) as u32,
+                zz.clamp(0, h as i64 - 1) as u32,
+            ) as f64
+        };
+        let dx = (g(xi + d, zi) - g(xi - d, zi)) / (2.0 * d as f64 * sx);
+        let dz = (g(xi, zi - d) - g(xi, zi + d)) / (2.0 * d as f64 * sz);
+        (1.0 / (dx * dx + 1.0 + dz * dz).sqrt()) as f32
+    };
+    let albedo = bake_albedo(&at, &normal_y, tw, th, stats.min, stats.max)?;
+    let (normal, roughness, px) = bake_normal_roughness(hf, extent_m, max_px)?;
+    Ok(BakedMaps {
+        albedo,
+        normal,
+        roughness,
+        px,
+    })
+}
 
 /// Bake a tangent-space normal map (glTF convention: +X = +U east, +Y = +V north, +Z out of
 /// the surface) and a roughness map (G channel; B metallic = 0) from the full field, sampled
-/// every `ts` cells so no side exceeds [`NORMAL_MAP_CAP`]. Row 0 = south, like the albedo.
+/// every `ts` cells so no side exceeds `max_px`. Row 0 = south, like the albedo.
 /// Roughness: 0.92 on flat ground, down to 0.62 on steep rock, 0.6 above the snow line.
 pub(crate) fn bake_normal_roughness(
     hf: &Heightfield,
     extent_m: [f64; 2],
+    max_px: u32,
 ) -> JdResult<(Vec<u8>, Vec<u8>, [u32; 2])> {
     let (w, h) = (hf.width(), hf.height());
-    let ts = w.max(h).div_ceil(NORMAL_MAP_CAP).max(1);
+    let ts = w.max(h).div_ceil(max_px.max(16)).max(1);
     let (tw, th) = (w.div_ceil(ts), h.div_ceil(ts));
     let (sx, sz) = (extent_m[0] / w as f64, extent_m[1] / h as f64);
     let stats = hf.stats();
@@ -324,7 +370,7 @@ pub fn export_glb(
             min[1],
             max[1],
         )?;
-        let (normal_png, rough_png, px) = bake_normal_roughness(hf, extent_m)?;
+        let (normal_png, rough_png, px) = bake_normal_roughness(hf, extent_m, NORMAL_MAP_CAP)?;
         normal_px = Some(px);
         for png in [albedo, normal_png, rough_png] {
             let off = bin.len();

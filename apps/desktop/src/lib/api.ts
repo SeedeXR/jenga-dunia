@@ -79,3 +79,20 @@ export async function layerPreview(layer: string, lod: number): Promise<{ previe
   const ms = performance.now() - t0;
   return { preview: decodePreview(buf), bytes: buf.byteLength, ms };
 }
+
+/** Material maps of a layer as decoded bitmaps (albedo, tangent-space normal, roughness). */
+export interface LayerMaps {
+  albedo: ImageBitmap;
+  normal: ImageBitmap;
+  roughness: ImageBitmap;
+  px: [number, number];
+}
+
+export async function layerTextures(layer: string, maxPx = 1024): Promise<{ maps: LayerMaps; ms: number } | null> {
+  const t0 = performance.now();
+  const r = await op<{ width: number; height: number; albedo_png_base64: string; normal_png_base64: string; roughness_png_base64: string }>("terrain.textures", { layer, max_px: maxPx });
+  if (r.status !== "ok" || !r.result) return null;
+  const decode = (b64: string) => createImageBitmap(new Blob([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], { type: "image/png" }));
+  const [albedo, normal, roughness] = await Promise.all([decode(r.result.albedo_png_base64), decode(r.result.normal_png_base64), decode(r.result.roughness_png_base64)]);
+  return { maps: { albedo, normal, roughness, px: [r.result.width, r.result.height] }, ms: performance.now() - t0 };
+}

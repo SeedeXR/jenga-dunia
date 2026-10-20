@@ -2762,6 +2762,37 @@ pub mod terrain {
         }
     }
 
+    /// `terrain.textures` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct TerrainTextures {
+        /// Layer name.
+        #[serde(default = "default_layer")]
+        pub layer: String,
+        /// Largest texture side in pixels (the field is sampled every ⌈size / max_px⌉ cells).
+        #[serde(default = "default_max_px")]
+        pub max_px: u32,
+    }
+
+    fn default_max_px() -> u32 {
+        1024
+    }
+
+    /// `terrain.textures` result: PNGs, standard base64.
+    #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct TexturesResult {
+        /// Texture width in pixels.
+        pub width: u32,
+        /// Texture height in pixels.
+        pub height: u32,
+        /// Base colour (hypsometric ramp blended to rock on slopes), row 0 = south.
+        pub albedo_png_base64: String,
+        /// Tangent-space normal map (+X east, +Y north, +Z out).
+        pub normal_png_base64: String,
+        /// Roughness in G (0.92 flat → 0.62 steep rock, 0.6 above the snow line), metallic 0 in B.
+        pub roughness_png_base64: String,
+    }
+
     /// `terrain.preview` params.
     #[derive(Debug, Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
@@ -2799,6 +2830,32 @@ pub mod terrain {
 
     /// Register terrain ops.
     pub fn register_all(r: &mut Registry) {
+        r.register::<TerrainTextures, TexturesResult, _>(
+            "terrain.textures",
+            "Bake the material maps of a layer — albedo, tangent-space normal, roughness — as PNGs (base64) for viewers and engines",
+            Scope::ProjectRead,
+            |ctx, p| {
+                if !(16..=8192).contains(&p.max_px) {
+                    return Err(JdError::invalid("max_px", "must be within 16..=8192"));
+                }
+                let extent = ctx.with_project(|proj| Ok(proj.doc.world.extent_m))?;
+                ctx.with_layer(&p.layer, |hf| {
+                    use base64::Engine as _;
+                    let b64 = |b: &[u8]| base64::engine::general_purpose::STANDARD.encode(b);
+                    let maps = jd_terrain::bake_maps(hf, extent, p.max_px)?;
+                    Ok((
+                        TexturesResult {
+                            width: maps.px[0],
+                            height: maps.px[1],
+                            albedo_png_base64: b64(&maps.albedo),
+                            normal_png_base64: b64(&maps.normal),
+                            roughness_png_base64: b64(&maps.roughness),
+                        },
+                        Vec::new(),
+                    ))
+                })
+            },
+        );
         r.register::<TerrainPreview, PreviewResult, _>(
             "terrain.preview",
             "Downsampled u16 preview of a layer (base64) for agents and viewers",
@@ -2974,6 +3031,31 @@ pub mod terrain {
             let pv = jd_terrain::preview::Preview::from_bytes(&bytes).expect("wire format");
             assert_eq!((pv.width, pv.height), (32, 24));
             assert_eq!(pv.data.len(), 32 * 24);
+            // Material maps: capped at max_px, three PNGs of the same size.
+            let r = reg.invoke(
+                &ctx,
+                Request::new("terrain.textures", serde_json::json!({ "max_px": 32 })),
+            );
+            let res = r.result.expect("textures");
+            assert_eq!(
+                (&res["width"], &res["height"]),
+                (&serde_json::json!(32), &serde_json::json!(24))
+            );
+            for key in [
+                "albedo_png_base64",
+                "normal_png_base64",
+                "roughness_png_base64",
+            ] {
+                let png = base64::engine::general_purpose::STANDARD
+                    .decode(res[key].as_str().expect("b64"))
+                    .expect("decodes");
+                assert_eq!(&png[1..4], b"PNG", "{key}");
+            }
+            let bad = reg.invoke(
+                &ctx,
+                Request::new("terrain.textures", serde_json::json!({ "max_px": 4 })),
+            );
+            assert_eq!(bad.error.map(|e| e.code), Some(ErrorCode::E_INPUT_INVALID));
         }
 
         #[test]

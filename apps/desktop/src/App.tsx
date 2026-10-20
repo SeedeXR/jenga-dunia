@@ -194,7 +194,7 @@ export default function App() {
           </label>
         )}
         <span className={`${s.lastEval && Object.keys(s.lastEval.layers).length > 1 ? "" : "ml-auto "}text-xs text-jd-fg-2`} data-testid="viewport-info">
-          viewport: {vp.backend} · {vp.triangles.toLocaleString()} tris{vp.seaM !== undefined ? ` · sea ${vp.seaM} m` : ""}{vp.sun ? ` · sun ${vp.sun.elevationDeg}°/${vp.sun.azimuthDeg}°` : ""}{s.colorLayer && s.colorPreview ? ` · colour ${s.colorLayer}` : ""}{vp.instances ? ` · ${vp.instances.toLocaleString()} instances` : ""}
+          viewport: {vp.backend} · {vp.triangles.toLocaleString()} tris{vp.seaM !== undefined ? ` · sea ${vp.seaM} m` : ""}{vp.sun ? ` · sun ${vp.sun.elevationDeg}°/${vp.sun.azimuthDeg}°` : ""}{s.colorLayer && s.colorPreview ? ` · colour ${s.colorLayer}` : ""}{vp.instances ? ` · ${vp.instances.toLocaleString()} instances` : ""}{vp.pbrPx ? ` · pbr ${vp.pbrPx[0]}×${vp.pbrPx[1]}` : ""}
           {s.previewStats ? ` · preview lod ${s.previewStats.lod}, ${(s.previewStats.bytes / 1048576).toFixed(2)} MB in ${s.previewStats.ms.toFixed(0)} ms` : ""}
         </span>
         {(s.busy || s.jobs.length > 0) &&
@@ -355,7 +355,7 @@ export default function App() {
         {/* Center: viewport (top) + node graph (bottom, toggle) */}
         <main className={`relative grid bg-jd-bg-0 ${showGraph ? "grid-rows-[1fr_300px]" : "grid-rows-[1fr]"}`}>
           <div className="relative min-h-0">
-            <TerrainView preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} sculpt={{ enabled: s.sculpting && sculptNode !== undefined, radiusM: s.brush.radius_m, onStroke: (pts) => void s.addStroke(pts) }} seaLevelM={seaLevelM} sun={{ azimuthDeg: s.sun.azimuth_deg, elevationDeg: s.sun.elevation_deg }} overlay={s.colorPreview} instances={s.scatter.points ? { points: s.scatter.points, sizeM: Math.max(s.scatter.spacing_m * 0.35, (s.project?.world.extent_m[0] ?? 0) * 0.012) } : null} />
+            <TerrainView preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} sculpt={{ enabled: s.sculpting && sculptNode !== undefined, radiusM: s.brush.radius_m, onStroke: (pts) => void s.addStroke(pts) }} seaLevelM={seaLevelM} sun={{ azimuthDeg: s.sun.azimuth_deg, elevationDeg: s.sun.elevation_deg }} overlay={s.colorPreview} instances={s.scatter.points ? { points: s.scatter.points, sizeM: Math.max(s.scatter.spacing_m * 0.35, (s.project?.world.extent_m[0] ?? 0) * 0.012) } : null} maps={s.maps} />
             <button
               className={`btn absolute top-2 right-28 ${s.sculpting ? "text-jd-accent" : ""}`}
               title={s.sculpting ? "Sculpting: drag on the terrain to paint a stroke (click to stop)" : "Sculpt: adds a stroke node before the output and paints with the brush"}
@@ -412,6 +412,9 @@ export default function App() {
             </>
           )}
           <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Sun</h2>
+          <Field label="Textured (PBR)">
+            <input type="checkbox" checked={s.pbr} onChange={(e) => s.setPbr(e.target.checked)} title="Shade the terrain with baked albedo, normal and roughness maps (full-field relief at any preview LOD); off = height-ramp vertex colours" data-testid="pbr-toggle" />
+          </Field>
           <Field label={`Azimuth ${s.sun.azimuth_deg}°`}>
             <input className="w-28" type="range" min={0} max={359} value={s.sun.azimuth_deg} onChange={(e) => s.setSun({ azimuth_deg: Number(e.target.value) })} title="Direction the light comes from, clockwise from north" data-testid="sun-azimuth" />
           </Field>

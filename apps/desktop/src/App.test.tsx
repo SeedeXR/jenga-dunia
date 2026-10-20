@@ -160,10 +160,20 @@ describe("App", () => {
     dialog.open = "/tmp/Other.jdproj";
     menuListeners.forEach((cb) => cb({ payload: "open" }));
     await waitFor(() => expect(calls.some((c) => (c.args as { request?: { op: string; params: { path?: string } } }).request?.params?.path === "/tmp/Other.jdproj")).toBe(true));
+    // Let the open sequence (kinds, list, stats, preview, textures…) finish before counting, or a
+    // slow runner's trailing calls land inside the window and look like the cancelled dialog's.
+    const settle = async () => {
+      let n = -1;
+      while (n !== calls.length) {
+        n = calls.length;
+        await new Promise((r) => setTimeout(r, 40));
+      }
+    };
+    await settle();
     const before = calls.length;
     dialog.open = null;
     menuListeners.forEach((cb) => cb({ payload: "open" }));
-    await new Promise((r) => setTimeout(r, 20));
+    await new Promise((r) => setTimeout(r, 40));
     expect(calls.length).toBe(before);
     menuListeners.forEach((cb) => cb({ payload: "evaluate" }));
     await waitFor(() => expect(screen.getByTestId("log")).toHaveTextContent("graph.evaluate"));

@@ -30,8 +30,8 @@ pub use flow::{
 pub use heightfield::{Heightfield, HeightfieldStats, Tile, TileCoord};
 pub use import::{ForeignImport, GeoTags, geotiff_tags, read_foreign, resample_to_world};
 pub use mesh::{
-    GridMesh, MeshExportReport, auto_step, export_glb, export_mesh, export_obj, export_ply,
-    export_stl, export_usda, export_usdz,
+    BakedMaps, GridMesh, MeshExportReport, auto_step, bake_maps, export_glb, export_mesh,
+    export_obj, export_ply, export_stl, export_usda, export_usdz,
 };
 pub use noise::{FractalKind, NoiseKind, NoiseParams, generate_noise};
 pub use profiles::{EngineProfile, ProfileReport, ProfileSettings, export_profile};

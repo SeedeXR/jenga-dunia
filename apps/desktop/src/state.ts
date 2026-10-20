@@ -1,7 +1,7 @@
 // Frontend store: a mirror of what the core reports, never the source of truth (docs/architecture/12-ui-workspace.md).
 import { create } from "zustand";
 import type { Edge, GraphEvaluateResult, GraphListResult, HeightmapFormat, JdOps, JobInfo as JobInfoGen, NodeDefInfo, NodeView, NoiseParams, OpId, ProjectOpenResult, ProjectSaveResult, ScatterPoint, TerrainStatsResult } from "./lib/ops.gen";
-import { layerPreview, op, type JdError, type Preview, type Response, type Warning } from "./lib/api";
+import { layerPreview, layerTextures, op, type JdError, type LayerMaps, type Preview, type Response, type Warning } from "./lib/api";
 
 export type ProjectSummary = ProjectOpenResult;
 
@@ -35,6 +35,12 @@ interface State {
   colorPreview: Preview | null;
   setColorLayer: (name: string | null) => Promise<void>;
   previewStats: { bytes: number; ms: number; lod: number } | null;
+  /** Baked material maps of the shown height layer (full-field albedo/normal/roughness), or null. */
+  maps: LayerMaps | null;
+  mapsMs: number;
+  /** Texture the viewport with the baked maps (off = height ramp vertex colours). */
+  pbr: boolean;
+  setPbr: (on: boolean) => void;
   noise: NoiseSettings;
   busy: boolean;
   log: LogEntry[];
@@ -174,8 +180,39 @@ export const useStore = create<State>((set, get) => {
       const { preview, bytes, ms } = await layerPreview(layer.layer, lod);
       set({ preview, previewStats: { bytes, ms, lod } });
       await refreshColor(lod);
+      await refreshMaps();
     } catch (e) {
       logFailure("layer_preview", e);
+    }
+  };
+  // Material maps are baked from the full field — only for height-like layers (masks have no
+  // relief to shade) and only when PBR texturing is on; a failure just leaves the ramp colours.
+  // Live previews (lod > 0) and sculpt strokes keep the previous maps: a full-field bake per
+  // brush stroke would cost more than the stroke itself on large worlds.
+  const dropMaps = () => {
+    const old = get().maps;
+    if (old) for (const b of [old.albedo, old.normal, old.roughness]) b.close();
+  };
+  const refreshMaps = async () => {
+    const { layer, pbr, lastEval, sculpting } = get();
+    if (!layer || !pbr || !layer.layer.split("#")[0]?.startsWith("height")) {
+      dropMaps();
+      return set({ maps: null });
+    }
+    if ((lastEval?.lod ?? 0) > 0 || sculpting) return;
+    try {
+      const r = await layerTextures(layer.layer);
+      // Toggled off or moved to another layer while baking: this result is stale.
+      if (!get().pbr || get().layer?.layer !== layer.layer) {
+        if (r) for (const b of [r.maps.albedo, r.maps.normal, r.maps.roughness]) b.close();
+        return;
+      }
+      dropMaps();
+      set({ maps: r?.maps ?? null, mapsMs: r?.ms ?? 0 });
+    } catch (e) {
+      logFailure("terrain.textures", e);
+      dropMaps();
+      set({ maps: null });
     }
   };
   // The colour layer is fetched at the same LOD as the shown layer; a layer that vanished from
@@ -301,6 +338,13 @@ export const useStore = create<State>((set, get) => {
     project: null,
     layer: null,
     preview: null,
+    maps: null,
+    mapsMs: 0,
+    pbr: true,
+    setPbr: (on) => {
+      set({ pbr: on });
+      void refreshMaps();
+    },
     colorLayer: null,
     colorPreview: null,
     setColorLayer: async (name) => {

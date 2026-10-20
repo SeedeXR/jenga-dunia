@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TexturesResult",
+  "description": "`terrain.textures` result: PNGs, standard base64.",
+  "type": "object",
+  "properties": {
+    "width": {
+      "description": "Texture width in pixels.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "height": {
+      "description": "Texture height in pixels.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "albedo_png_base64": {
+      "description": "Base colour (hypsometric ramp blended to rock on slopes), row 0 = south.",
+      "type": "string"
+    },
+    "normal_png_base64": {
+      "description": "Tangent-space normal map (+X east, +Y north, +Z out).",
+      "type": "string"
+    },
+    "roughness_png_base64": {
+      "description": "Roughness in G (0.92 flat → 0.62 steep rock, 0.6 above the snow line), metallic 0 in B.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "width",
+    "height",
+    "albedo_png_base64",
+    "normal_png_base64",
+    "roughness_png_base64"
+  ]
+}

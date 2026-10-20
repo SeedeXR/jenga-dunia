@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TerrainTextures",
+  "description": "`terrain.textures` params.",
+  "type": "object",
+  "properties": {
+    "layer": {
+      "description": "Layer name.",
+      "type": "string",
+      "default": "height"
+    },
+    "max_px": {
+      "description": "Largest texture side in pixels (the field is sampled every ⌈size / max_px⌉ cells).",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0,
+      "default": 1024
+    }
+  },
+  "additionalProperties": false
+}

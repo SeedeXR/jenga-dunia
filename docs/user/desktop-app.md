@@ -103,6 +103,10 @@ Undo and redo are operations like everything else (`graph.undo` / `graph.redo`, 
 
 *The viewport draws a gradient sky dome (deep blue zenith → pale horizon, dark below) and lights the terrain with a sun you steer from the **Sun** panel (1): azimuth is the compass direction the light comes from, elevation its height above the horizon — below 20° the light turns warm and dimmer, like World Creator's time-of-day. The header reports the current direction (2). The sun is a view setting, not part of the project. UI-driven test: `apps/desktop/e2e/terrain.spec.ts` drags the elevation to 12° and checks the readout.*
 
+![Viewport textured with baked maps: green lowlands, ochre slopes, grey rock and snow with fine relief; the Sun panel's Textured (PBR) toggle is on and the header reads pbr 256×256](images/desktop-pbr.png)
+
+*Textured terrain: with **Textured (PBR)** on (1, default) the viewport shades the height layer with the same maps the GLB export carries — albedo, tangent-space normal and roughness baked from the full-resolution field by `terrain.textures` (one texel per sample, capped at 1024 per side for the viewport). The normal map restores the relief that the preview LOD drops on large worlds, so a 4096² world previewed at 1024² still shows its fine ridges; the header reports the map size (2). Off, the terrain falls back to the height-ramp vertex colours; a **colour** overlay always wins over the maps. Maps are re-baked after each evaluation of a height-like layer, not for masks. UI-driven test: the terrain spec checks the readout and the toggle both ways.*
+
 ## Hydrology layers in the viewport
 
 ![Rivers project: carved terrain with the layer picker showing height, rivers and wetness](images/desktop-rivers.png)

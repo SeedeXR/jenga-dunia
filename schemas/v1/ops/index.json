@@ -178,5 +178,10 @@
     "id": "terrain.stats",
     "description": "Statistics and content hash of a layer",
     "scope": "project-read"
+  },
+  {
+    "id": "terrain.textures",
+    "description": "Bake the material maps of a layer — albedo, tangent-space normal, roughness — as PNGs (base64) for viewers and engines",
+    "scope": "project-read"
   }
 ]
