@@ -492,6 +492,24 @@ time 1     thermal 1142 ms  (300 steps)  height hash c3b5eeec…
 
 Any node parameter can be written as `{"keys": [[t, value], …]}` with `t` in 0..1: the graph carries a `time` (journaled by `graph.set_time`, so it is undoable and saved with the project) and every keyed parameter resolves there before the node runs — numbers interpolate linearly between the neighbouring keys (integers stay integral, values clamp beyond the first and last key), strings and other values step to the last key at or before `time`. The content hash sees the resolved values, so each time position caches on its own and scrubbing back is free. Keyframes are validated at every key when they are set (`graph.set_param` refuses `{"keys": [[0, 10], [1, "many"]]}` with `E_INPUT_INVALID`), and `time` outside 0..1 is refused. This is VUE's animated heightfield terrains as a graph feature (`docs/research/vue-features.md`): erosion steps, sea level, wind speed or snow line can all be keyed, and a sequence of `set_time` + evaluate + export renders the frames. The desktop has the slider and the `t:v, t:v` field syntax (desktop guide, "Timeline"). Not yet: easing curves, exporting a frame sequence in one call.
 
+**Frame sequences.** `timeline.export` evaluates the graph at evenly spaced times and writes one heightmap per frame without touching the project's own `time` or journal — the input for a video, a flipbook, or an engine that streams terrain states:
+
+```
+$ jd --json new Dunes.jdproj --extent 2560 --resolution 256 --seed 3                     # desert plain: feature 1200 m, 3 octaves, 0..40 m
+$ jd op graph.add_node --project Dunes.jdproj --save --params '{"kind":"jd.erosion.aeolian@1","params":{"iterations":{"keys":[[0,1],[1,300]]}}}'
+# noise → aeolian → height
+$ jd --json op timeline.export --project Dunes.jdproj --params '{"frames":24,"dir":"dunes","format":"png16"}'
+{"status":"ok","result":{"dir":".../exports/dunes","range_m":[-75.18,92.25],"duration_ms":286819,"frames":[
+  {"time":0.0,  "file":"height_0000.png","min":0.35,  "max":41.5, "mean":19.96},
+  {"time":0.522,"file":"height_0012.png","min":-63.81,"max":76.96,"mean":19.96}, …
+  {"time":1.0,  "file":"height_0023.png","min":-75.18,"max":92.25,"mean":19.96}]}}
+$ ffmpeg -framerate 8 -i Dunes.jdproj/exports/dunes/height_%04d.png -vf format=gray -pix_fmt yuv420p timeline-dunes.mp4
+```
+
+**Video:** [`videos/timeline-dunes.mp4`](videos/timeline-dunes.mp4) (3 s, 24 frames, 768²) — the 16-bit frames above as a greyscale clip: a flat plain at `t = 0` grows transverse dunes across the westerly wind as the keyed `iterations` climb to 300.
+
+Quantised formats share one `range_m` over the whole sequence (the report's `range_m`; pass your own to pin it), so frames do not flicker as each one's min/max moves — the mean stays at 19.96 m because Werner's slabs only move sand. The frames carry the usual `.jd-height.json` sidecars. The 24 frames took 287 s at 256²: every frame is a fresh evaluation at its own time (the cache keys on time), and a 300-step aeolian run is the cost of the last ones — export at a higher `lod` while composing, full resolution once. Memory: the frames are held until the shared range is known, so `frames × field` must fit the project's memory budget (`E_RESOURCE_MEMORY` otherwise).
+
 ### Strata: mesas, buttes and stepped canyon walls
 
 ```

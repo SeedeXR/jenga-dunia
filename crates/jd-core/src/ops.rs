@@ -910,6 +910,66 @@ pub mod graph {
         pub time: f32,
     }
 
+    /// `timeline.export` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct TimelineExport {
+        /// The output node's layer to write, one file per frame.
+        #[serde(default = "height_layer")]
+        pub layer: String,
+        /// Number of frames (2..=10000), spread evenly from `from` to `to` inclusive.
+        pub frames: u32,
+        /// First frame's timeline position (0..1).
+        #[serde(default)]
+        pub from: f32,
+        /// Last frame's timeline position (0..1).
+        #[serde(default = "one")]
+        pub to: f32,
+        /// Output directory; relative paths resolve against the project's `exports/`. Files are `<layer>_<frame>.<ext>`.
+        pub dir: PathBuf,
+        /// Level of detail (0 = full resolution).
+        #[serde(default)]
+        pub lod: u8,
+        /// Encoding and conventions; without `range_m` the sequence shares the min/max over all frames so quantised frames do not flicker.
+        #[serde(flatten)]
+        pub options: jd_terrain::ExportOptions,
+    }
+
+    fn height_layer() -> String {
+        "height".to_owned()
+    }
+    fn one() -> f32 {
+        1.0
+    }
+
+    /// One exported frame.
+    #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct TimelineFrame {
+        /// Timeline position.
+        pub time: f32,
+        /// File written.
+        pub file: String,
+        /// Height statistics of the frame, metres.
+        pub min: f32,
+        /// Maximum.
+        pub max: f32,
+        /// Mean.
+        pub mean: f32,
+    }
+
+    /// `timeline.export` result.
+    #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct TimelineExportReport {
+        /// Directory the frames went to.
+        pub dir: PathBuf,
+        /// The frames in order.
+        pub frames: Vec<TimelineFrame>,
+        /// Height range the quantised frames share, metres.
+        pub range_m: [f32; 2],
+        /// Wall time, milliseconds.
+        pub duration_ms: u64,
+    }
+
     /// `graph.evaluate` result.
     #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
     pub struct EvaluateResult {
@@ -1446,11 +1506,163 @@ pub mod graph {
                 Ok(id)
             },
         );
+        r.register::<TimelineExport, TimelineExportReport, _>(
+            "timeline.export",
+            "Evaluate the graph at evenly spaced timeline positions and write one heightmap per frame (keyframed parameters animate; the project's own time is untouched)",
+            Scope::Export,
+            |ctx, p| {
+                if !(2..=10_000).contains(&p.frames) {
+                    return Err(JdError::invalid("frames", "must be within 2..=10000"));
+                }
+                for (name, t) in [("from", p.from), ("to", p.to)] {
+                    if !(0.0..=1.0).contains(&t) {
+                        return Err(JdError::invalid(name, "must be within 0..=1"));
+                    }
+                }
+                let started = std::time::Instant::now();
+                let (mut graph, world, root, budget) = ctx.with_project(|pr| Ok((pr.graph.clone(), pr.doc.world.clone(), pr.root().to_path_buf(), pr.doc.settings.memory_budget_bytes)))?;
+                let out = graph
+                    .nodes
+                    .iter()
+                    .find(|(_, n)| n.kind.0.starts_with("jd.output.height@") && jd_graph::nodes::output_layer_name(&n.params) == p.layer)
+                    .map(|(id, _)| id.clone())
+                    .ok_or_else(|| JdError::invalid("layer", format!("no jd.output.height node publishes `{}`", p.layer)))?;
+                let dir = if p.dir.is_absolute() { p.dir.clone() } else { root.join("exports").join(&p.dir) };
+                std::fs::create_dir_all(&dir)?;
+                let job = ctx.jobs.start("timeline.export");
+                // Every frame is kept until the shared range is known: frames × field must fit the budget.
+                let mut fields: Vec<(f32, std::sync::Arc<jd_terrain::Heightfield>)> = Vec::with_capacity(p.frames as usize);
+                for k in 0..p.frames {
+                    graph.time = p.from + (p.to - p.from) * k as f32 / (p.frames - 1) as f32;
+                    let (outputs, _) = Evaluator::new(registry(), cache()).evaluate_job(&graph, &world, p.lod, Some(&root.join("assets")), &job.ctl)?;
+                    let hf = outputs.get(&(out.clone(), "out".to_owned())).map(|v| v.as_field().clone()).ok_or_else(|| JdError::new(ErrorCode::E_INTERNAL, "output node produced nothing"))?;
+                    if (hf.width() as u64 * hf.height() as u64 * 4).saturating_mul(p.frames as u64) > budget {
+                        return Err(JdError::new(ErrorCode::E_RESOURCE_MEMORY, "the frame sequence does not fit the project's memory budget")
+                            .next("Export fewer frames per call, a higher lod, or raise settings.memory_budget_bytes."));
+                    }
+                    fields.push((graph.time, hf));
+                }
+                let stats = |hf: &jd_terrain::Heightfield| {
+                    let v = hf.to_vec();
+                    let (mut lo, mut hi, mut sum) = (f32::MAX, f32::MIN, 0.0f64);
+                    for x in &v {
+                        lo = lo.min(*x);
+                        hi = hi.max(*x);
+                        sum += f64::from(*x);
+                    }
+                    (lo, hi, (sum / v.len().max(1) as f64) as f32)
+                };
+                let per: Vec<(f32, f32, f32)> = fields.iter().map(|(_, hf)| stats(hf)).collect();
+                let range_m = p.options.range_m.unwrap_or_else(|| {
+                    let lo = per.iter().map(|s| s.0).fold(f32::MAX, f32::min);
+                    let hi = per.iter().map(|s| s.1).fold(f32::MIN, f32::max);
+                    [lo, if hi > lo { hi } else { lo + 1.0 }]
+                });
+                let opts = jd_terrain::ExportOptions { range_m: Some(range_m), ..p.options.clone() };
+                let geo = jd_terrain::GeoRef { origin: world.origin, spacing: world.spacing_m(), crs: world.crs.clone() };
+                let ext = match p.options.format {
+                    jd_terrain::HeightmapFormat::Exr => "exr",
+                    jd_terrain::HeightmapFormat::Png16 => "png",
+                    jd_terrain::HeightmapFormat::RawR16 => "r16",
+                    jd_terrain::HeightmapFormat::RawR32 => "r32",
+                    jd_terrain::HeightmapFormat::Tiff32 => "tif",
+                };
+                let width = (p.frames - 1).to_string().len().max(4);
+                let mut frames = Vec::with_capacity(fields.len());
+                for (k, ((time, hf), (min, max, mean))) in fields.iter().zip(&per).enumerate() {
+                    let file = format!("{}_{k:0width$}.{ext}", p.layer);
+                    jd_terrain::export_heightmap_geo(hf, &dir.join(&file), &opts, Some(&geo))?;
+                    frames.push(TimelineFrame { time: *time, file, min: *min, max: *max, mean: *mean });
+                }
+                Ok((TimelineExportReport { dir, frames, range_m, duration_ms: started.elapsed().as_millis() as u64 }, Vec::new()))
+            },
+        );
     }
 
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn timeline_export_writes_one_frame_per_time_with_a_shared_range() {
+            use crate::envelope::Status;
+            let reg = Registry::with_builtins();
+            let dir = tempfile::tempdir().expect("tmp");
+            let ctx = Context::default();
+            let world = WorldSettings {
+                resolution_px: [64, 48],
+                extent_m: [64.0, 48.0],
+                tile_size: 64,
+                halo: 0,
+                ..Default::default()
+            };
+            reg.invoke(&ctx, Request::new("project.create", serde_json::json!({ "path": dir.path().join("t.jdproj"), "name": "T", "world": world })));
+            let noise = call(&reg, &ctx, "graph.list", serde_json::json!({}))
+                .result
+                .expect("list")["nodes"]
+                .as_array()
+                .expect("nodes")
+                .iter()
+                .find(|n| n["kind"] == "jd.noise.fbm@1")
+                .expect("noise")["id"]
+                .clone();
+            // The terrain doubles in height over the timeline.
+            let r = call(
+                &reg,
+                &ctx,
+                "graph.set_param",
+                serde_json::json!({ "id": noise, "key": "height_range_m", "value": { "keys": [[0.0, [0.0, 100.0]], [1.0, [0.0, 200.0]]] } }),
+            );
+            assert_eq!(r.status, Status::Ok, "{:?}", r.error);
+            let r = call(
+                &reg,
+                &ctx,
+                "timeline.export",
+                serde_json::json!({ "frames": 3, "dir": "seq", "format": "png16" }),
+            );
+            assert_eq!(r.status, Status::Ok, "{:?}", r.error);
+            let rep: TimelineExportReport =
+                serde_json::from_value(r.result.expect("report")).expect("shape");
+            assert_eq!(rep.frames.len(), 3);
+            assert_eq!(
+                rep.frames
+                    .iter()
+                    .map(|f| f.file.as_str())
+                    .collect::<Vec<_>>(),
+                ["height_0000.png", "height_0001.png", "height_0002.png"]
+            );
+            assert!(
+                rep.frames.iter().all(|f| rep.dir.join(&f.file).exists()),
+                "every frame on disk"
+            );
+            assert!(
+                (rep.frames[0].time, rep.frames[1].time, rep.frames[2].time) == (0.0, 0.5, 1.0)
+            );
+            assert!(
+                rep.frames[2].max > rep.frames[0].max * 1.5,
+                "keyed range animates: {:?}",
+                rep.frames
+            );
+            assert_eq!(
+                rep.range_m[1], rep.frames[2].max,
+                "the quantised frames share the sequence's range"
+            );
+            // The project's own time is untouched and nothing was journaled.
+            let g = call(&reg, &ctx, "graph.list", serde_json::json!({}))
+                .result
+                .expect("list");
+            assert_eq!(g["time"], 0.0);
+            assert_eq!(
+                call(
+                    &reg,
+                    &ctx,
+                    "timeline.export",
+                    serde_json::json!({ "frames": 1, "dir": "seq", "format": "png16" })
+                )
+                .status,
+                Status::Error
+            );
+        }
 
         fn call(reg: &Registry, ctx: &Context, op: &str, params: Value) -> Response {
             reg.invoke(ctx, Request::new(op, params))

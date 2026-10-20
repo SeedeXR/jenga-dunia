@@ -6512,5 +6512,202 @@ expression: list
         "roughness_png_base64"
       ]
     }
+  },
+  {
+    "id": "timeline.export",
+    "description": "Evaluate the graph at evenly spaced timeline positions and write one heightmap per frame (keyframed parameters animate; the project's own time is untouched)",
+    "scope": "export",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TimelineExport",
+      "description": "`timeline.export` params.",
+      "type": "object",
+      "properties": {
+        "layer": {
+          "description": "The output node's layer to write, one file per frame.",
+          "type": "string",
+          "default": "height"
+        },
+        "frames": {
+          "description": "Number of frames (2..=10000), spread evenly from `from` to `to` inclusive.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "from": {
+          "description": "First frame's timeline position (0..1).",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        },
+        "to": {
+          "description": "Last frame's timeline position (0..1).",
+          "type": "number",
+          "format": "float",
+          "default": 1.0
+        },
+        "dir": {
+          "description": "Output directory; relative paths resolve against the project's `exports/`. Files are `<layer>_<frame>.<ext>`.",
+          "type": "string"
+        },
+        "lod": {
+          "description": "Level of detail (0 = full resolution).",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 0
+        },
+        "format": {
+          "description": "Encoding.",
+          "$ref": "#/$defs/HeightmapFormat"
+        },
+        "flip_y": {
+          "description": "Flip rows so row 0 is north (image convention). Default true for images, false for RAW.",
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "default": null
+        },
+        "range_m": {
+          "description": "Height range mapped to [0, 65535] for quantised formats; defaults to the field's min/max.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "default": null
+        },
+        "georeference": {
+          "description": "For `tiff32`: write GeoTIFF tags (pixel scale, tie point, EPSG GeoKeys) when the caller\nsupplies a [`GeoRef`]. Default true; the file is then always north-up.",
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "frames",
+        "dir",
+        "format"
+      ],
+      "$defs": {
+        "HeightmapFormat": {
+          "description": "Supported heightmap encodings.",
+          "oneOf": [
+            {
+              "description": "OpenEXR, single `Y` channel, 32-bit float, lossless (ZIP). Exact.",
+              "type": "string",
+              "const": "exr"
+            },
+            {
+              "description": "16-bit grayscale PNG, normalised to the export range.",
+              "type": "string",
+              "const": "png16"
+            },
+            {
+              "description": "Headerless little-endian u16, normalised to the export range (Unity / Unreal).",
+              "type": "string",
+              "const": "raw_r16"
+            },
+            {
+              "description": "Headerless little-endian f32. Exact.",
+              "type": "string",
+              "const": "raw_r32"
+            },
+            {
+              "description": "TIFF, single 32-bit float sample per pixel (GIS and DCC tools read it directly). Exact.",
+              "type": "string",
+              "const": "tiff32"
+            }
+          ]
+        }
+      }
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TimelineExportReport",
+      "description": "`timeline.export` result.",
+      "type": "object",
+      "properties": {
+        "dir": {
+          "description": "Directory the frames went to.",
+          "type": "string"
+        },
+        "frames": {
+          "description": "The frames in order.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TimelineFrame"
+          }
+        },
+        "range_m": {
+          "description": "Height range the quantised frames share, metres.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "duration_ms": {
+          "description": "Wall time, milliseconds.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "dir",
+        "frames",
+        "range_m",
+        "duration_ms"
+      ],
+      "$defs": {
+        "TimelineFrame": {
+          "description": "One exported frame.",
+          "type": "object",
+          "properties": {
+            "time": {
+              "description": "Timeline position.",
+              "type": "number",
+              "format": "float"
+            },
+            "file": {
+              "description": "File written.",
+              "type": "string"
+            },
+            "min": {
+              "description": "Height statistics of the frame, metres.",
+              "type": "number",
+              "format": "float"
+            },
+            "max": {
+              "description": "Maximum.",
+              "type": "number",
+              "format": "float"
+            },
+            "mean": {
+              "description": "Mean.",
+              "type": "number",
+              "format": "float"
+            }
+          },
+          "required": [
+            "time",
+            "file",
+            "min",
+            "max",
+            "mean"
+          ]
+        }
+      }
+    }
   }
 ]

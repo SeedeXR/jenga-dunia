@@ -1232,6 +1232,54 @@ export type TerrainTexturesResult = {
   "roughness_png_base64": string;
 };
 
+export type TimelineExportRequest = {
+  /** The output node's layer to write, one file per frame. */
+  "layer"?: string;
+  /** Number of frames (2..=10000), spread evenly from `from` to `to` inclusive. */
+  "frames": number;
+  /** First frame's timeline position (0..1). */
+  "from"?: number;
+  /** Last frame's timeline position (0..1). */
+  "to"?: number;
+  /** Output directory; relative paths resolve against the project's `exports/`. Files are `<layer>_<frame>.<ext>`. */
+  "dir": string;
+  /** Level of detail (0 = full resolution). */
+  "lod"?: number;
+  /** Encoding. */
+  "format": HeightmapFormat;
+  /** Flip rows so row 0 is north (image convention). Default true for images, false for RAW. */
+  "flip_y"?: boolean | null;
+  /** Height range mapped to [0, 65535] for quantised formats; defaults to the field's min/max. */
+  "range_m"?: [number, number] | null;
+  /** For `tiff32`: write GeoTIFF tags (pixel scale, tie point, EPSG GeoKeys) when the caller
+supplies a [`GeoRef`]. Default true; the file is then always north-up. */
+  "georeference"?: boolean;
+};
+
+export type TimelineFrame = {
+  /** Timeline position. */
+  "time": number;
+  /** File written. */
+  "file": string;
+  /** Height statistics of the frame, metres. */
+  "min": number;
+  /** Maximum. */
+  "max": number;
+  /** Mean. */
+  "mean": number;
+};
+
+export type TimelineExportResult = {
+  /** Directory the frames went to. */
+  "dir": string;
+  /** The frames in order. */
+  "frames": TimelineFrame[];
+  /** Height range the quantised frames share, metres. */
+  "range_m": [number, number];
+  /** Wall time, milliseconds. */
+  "duration_ms": number;
+};
+
 export type NodeParams_jd_analysis_curvature_1 = {
   /** Curvature (1/m) that maps to ±1; smaller values exaggerate. */
   "scale"?: number;
@@ -1721,6 +1769,8 @@ export interface JdOps {
   "terrain.stats": { request: TerrainStatsRequest; result: TerrainStatsResult };
   /** Bake the material maps of a layer — albedo, tangent-space normal, roughness — as PNGs (base64) for viewers and engines */
   "terrain.textures": { request: TerrainTexturesRequest; result: TerrainTexturesResult };
+  /** Evaluate the graph at evenly spaced timeline positions and write one heightmap per frame (keyframed parameters animate; the project's own time is untouched) */
+  "timeline.export": { request: TimelineExportRequest; result: TimelineExportResult };
 }
 
 export type OpId = keyof JdOps;
