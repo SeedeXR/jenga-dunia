@@ -480,7 +480,19 @@ $ jd --json op terrain.export_mesh --project Acceptance.jdproj --params '{"path"
 
 ![Blender render of the acceptance world with the four-layer material stack: grey rock over most of this steep world, dark forest and lighter grassland in the hollows and on the gentler ground, white snow along the summits](images/cli-materials.png)
 
-`materials` is the material graph's layer stack as data: each layer is a colour and a roughness weighted by a 0..1 mask layer — a biome class mask from `jd.mask.class@1`, the snow cover, a wetness index, a painted mask, or no mask for "everywhere" — and the layers apply in order over the hypsometric base, lerping albedo and roughness by the mask at every texel. The same stack goes into `terrain.export_mesh`, so the GLB's albedo and roughness textures carry it (every LOD of a chain too; FBX keeps the base ramp). The desktop viewport still shades with the base maps — a materials panel is the follow-up; node-based blending (height/slope/curvature masks without a classify node) comes with the full material graph.
+`materials` is the material graph's layer stack as data: each layer is a colour and a roughness weighted by a 0..1 mask layer — a biome class mask from `jd.mask.class@1`, the snow cover, a wetness index, a painted mask, or no mask for "everywhere" — and the layers apply in order over the hypsometric base, lerping albedo and roughness by the mask at every texel. The same stack goes into `terrain.export_mesh`, so the GLB's albedo and roughness textures carry it (every LOD of a chain too; FBX keeps the base ramp). The desktop's Materials panel edits the same stack and re-bakes the viewport as you type.
+
+**Masks from nodes.** Any 0..1 layer works, so the graph's analysis and math nodes are the mask builders — no classify node needed:
+
+```
+$ jd op graph.add_node --project Acceptance.jdproj --save --params '{"kind":"jd.analysis.slope@1","params":{"max_deg":45}}'           # terrain → slope.in; slope.out → `steep`
+$ jd op graph.add_node --project Acceptance.jdproj --save --params '{"kind":"jd.math.remap@1","params":{"from":[700,1000],"to":[0,1],"clamp":true}}'   # terrain → remap.in; remap.out → `high`
+steep  min 0.00 max 1.00 mean 0.958      (slope / 45°, clamped — this world is steep nearly everywhere)
+high   min 0.00 max 1.00 mean 0.239      (an altitude band: 0 below 700 m, 1 above 1 000 m)
+$ jd --json op terrain.textures --project Acceptance.jdproj --params '{"materials":[{"mask":"steep","albedo":[0.45,0.43,0.40],"roughness":0.7},{"mask":"high","albedo":[0.95,0.96,0.98],"roughness":0.45}]}'
+```
+
+Curvature (`jd.analysis.curvature@1`), wetness, a painted mask or a product of several (`jd.math.multiply@1`) slot in the same way; the stack is the blend, the graph is where the masks come from.
 
 ### Water textures for engines
 
