@@ -2,8 +2,8 @@
 //! Rust on a headless device; the viewport only receives tiles). First kernel: thermal erosion,
 //! a line-for-line port of `jd_terrain::sim::thermal_erode` to WGSL, parity-tested against it.
 //!
-//! ponytail: one device per call site, buffers re-created per call, no hardness field yet; the
-//! upgrade path is a shared `Gpu` in `EvalCtx` and a per-kernel buffer pool.
+//! ponytail: one process-wide device (`Gpu::shared`), buffers re-created per call; the upgrade
+//! path is a per-kernel buffer pool and cached pipelines.
 
 use jd_terrain::Heightfield;
 use jd_types::{ErrorCode, JdError, JdResult};
@@ -23,10 +23,18 @@ struct Params {
     h: u32,
     tan_t: f32,
     rate: f32,
+    has_hardness: u32,
+    _pad: [u32; 3],
     dist: [f32; 8],
 }
 
 impl Gpu {
+    /// The process-wide device, opened on first use; `None` when the machine has no adapter.
+    pub fn shared() -> Option<&'static Gpu> {
+        static GPU: std::sync::OnceLock<Option<Gpu>> = std::sync::OnceLock::new();
+        GPU.get_or_init(Gpu::new).as_ref()
+    }
+
     /// Open the first available adapter headlessly.
     pub fn new() -> Option<Gpu> {
         let instance = wgpu::Instance::default();
@@ -45,8 +53,8 @@ impl Gpu {
         })
     }
 
-    /// Thermal erosion on the GPU: the same talus rule, neighbour order and distances as
-    /// [`jd_terrain::thermal_erode`], `iterations` ping-pong steps on the device.
+    /// Thermal erosion on the GPU: the same talus rule, neighbour order, distances and hardness
+    /// rule as [`jd_terrain::thermal_erode_with`], `iterations` ping-pong steps on the device.
     pub fn thermal_erode(
         &self,
         h: &Heightfield,
@@ -54,7 +62,13 @@ impl Gpu {
         talus_deg: f32,
         iterations: u32,
         rate: f32,
+        hardness: Option<&Heightfield>,
     ) -> JdResult<Heightfield> {
+        if let Some(k) = hardness
+            && (k.width(), k.height()) != (h.width(), h.height())
+        {
+            return Err(JdError::invalid("hardness", "field size differs from `in`"));
+        }
         if !(0.0..90.0).contains(&talus_deg) {
             return Err(JdError::invalid("talus_deg", "must be within 0..90"));
         }
@@ -85,6 +99,8 @@ impl Gpu {
             h: hh,
             tan_t: talus_deg.to_radians().tan(),
             rate,
+            has_hardness: hardness.is_some() as u32,
+            _pad: [0; 3],
             dist: offsets.map(|(dx, dy)| (dx * spacing_m[0]).hypot(dy * spacing_m[1])),
         };
         let dev = &self.device;
@@ -108,6 +124,11 @@ impl Gpu {
             storage("height b", f32_bytes),
         ];
         let shed = storage("shed", f32_bytes * 2);
+        let hard = storage("hardness", if hardness.is_some() { f32_bytes } else { 4 });
+        if let Some(k) = hardness {
+            self.queue
+                .write_buffer(&hard, 0, bytemuck::cast_slice(&k.to_vec()));
+        }
         let uniform = dev.create_buffer(&wgpu::BufferDescriptor {
             label: Some("params"),
             size: std::mem::size_of::<Params>() as u64,
@@ -131,6 +152,7 @@ impl Gpu {
                 binding(1, wgpu::BufferBindingType::Storage { read_only: true }),
                 binding(2, wgpu::BufferBindingType::Storage { read_only: false }),
                 binding(3, wgpu::BufferBindingType::Storage { read_only: false }),
+                binding(4, wgpu::BufferBindingType::Storage { read_only: true }),
             ],
         });
         let pipeline_layout = dev.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -171,6 +193,11 @@ impl Gpu {
                         wgpu::BindGroupEntry {
                             binding: 3,
                             resource: bufs[dst].as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 4,
+
+                            resource: hard.as_entire_binding(),
                         },
                     ],
                 })
@@ -251,7 +278,7 @@ mod tests {
         });
         let cpu = jd_terrain::thermal_erode(&h, [10.0, 10.0], 35.0, 40, 0.2, None).expect("cpu");
         let gpu_out = gpu
-            .thermal_erode(&h, [10.0, 10.0], 35.0, 40, 0.2)
+            .thermal_erode(&h, [10.0, 10.0], 35.0, 40, 0.2, None)
             .expect("gpu");
         let (a, b) = (cpu.to_vec(), gpu_out.to_vec());
         let scale = a.iter().cloned().fold(0.0f32, f32::max).max(1.0);
@@ -281,7 +308,42 @@ mod tests {
             "the spike slumped: {}",
             gpu_out.get(40, 30)
         );
-        assert!(gpu.thermal_erode(&h, [10.0, 10.0], 95.0, 1, 0.2).is_err());
+        assert!(
+            gpu.thermal_erode(&h, [10.0, 10.0], 95.0, 1, 0.2, None)
+                .is_err()
+        );
+        // Hardness: the east half is hard rock; the CPU and GPU agree there too.
+        let mut k = Heightfield::new(96, 80, 32, 4).expect("k");
+        k.fill_with(|x, _| if x >= 48 { 0.8 } else { 0.0 });
+        let cpu_k = jd_terrain::thermal_erode_with(&h, [10.0, 10.0], 35.0, 40, 0.2, Some(&k), None)
+            .expect("cpu k");
+        let gpu_k = gpu
+            .thermal_erode(&h, [10.0, 10.0], 35.0, 40, 0.2, Some(&k))
+            .expect("gpu k");
+        let (a, b) = (cpu_k.to_vec(), gpu_k.to_vec());
+        let worst_k = a
+            .iter()
+            .zip(&b)
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0f32, f32::max)
+            / scale;
+        eprintln!("parity with hardness: {worst_k:e}");
+        assert!(worst_k <= 1e-4, "GPU/CPU parity with hardness: {worst_k}");
+        assert!(
+            gpu_k.get(70, 10) != gpu_out.get(70, 10) || a == b,
+            "hardness changes the hard half"
+        );
+        assert!(
+            gpu.thermal_erode(
+                &h,
+                [10.0, 10.0],
+                35.0,
+                1,
+                0.2,
+                Some(&Heightfield::new(8, 8, 8, 0).expect("s"))
+            )
+            .is_err()
+        );
     }
 
     /// `cargo test -p jd-gpu --release -- --ignored --nocapture bench`: GPU vs CPU wall time,
@@ -302,7 +364,7 @@ mod tests {
         let cpu_ms = t.elapsed().as_millis();
         let t = std::time::Instant::now();
         let g = gpu
-            .thermal_erode(&h, [5.0, 5.0], 35.0, 50, 0.2)
+            .thermal_erode(&h, [5.0, 5.0], 35.0, 50, 0.2, None)
             .expect("gpu");
         let gpu_ms = t.elapsed().as_millis();
         let (a, b) = (cpu.to_vec(), g.to_vec());

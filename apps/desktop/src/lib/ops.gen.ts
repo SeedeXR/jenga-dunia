@@ -1621,9 +1621,14 @@ in 20 steps; 1e-4 is subtle, 1e-2 is a badlands. */
   "method"?: FlowMethod;
 };
 
+export type Engine = "cpu" | "gpu";
+
 export type NodeParams_jd_erosion_thermal_1 = {
   /** Angle of repose in degrees (sand ≈ 30–35, scree ≈ 35–40). */
   "talus_deg"?: number;
+  /** Where the steps run: `cpu` (default, bit-reproducible) or `gpu` (`jd-gpu`, the same kernel in
+WGSL; ≈ 1e-7 relative to the CPU; fails with E_DEPENDENCY_MISSING when no adapter exists). */
+  "engine"?: Engine;
   /** Jacobi steps (1..=1000); more steps move material further. */
   "iterations"?: number;
   /** Fraction of the excess that moves per step, (0, 0.25]; 0.25 is the stable maximum. */

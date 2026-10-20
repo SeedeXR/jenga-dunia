@@ -92,6 +92,10 @@ struct ThermalParams {
     /// Angle of repose in degrees (sand ≈ 30–35, scree ≈ 35–40).
     #[serde(default = "talus_default")]
     talus_deg: f32,
+    /// Where the steps run: `cpu` (default, bit-reproducible) or `gpu` (`jd-gpu`, the same kernel in
+    /// WGSL; ≈ 1e-7 relative to the CPU; fails with E_DEPENDENCY_MISSING when no adapter exists).
+    #[serde(default)]
+    engine: Engine,
     /// Jacobi steps (1..=1000); more steps move material further.
     #[serde(default = "iterations_default")]
     iterations: u32,
@@ -101,6 +105,27 @@ struct ThermalParams {
 }
 fn talus_default() -> f32 {
     35.0
+}
+
+/// Which processor runs a kernel that exists in both forms.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+enum Engine {
+    /// The rayon CPU kernel: deterministic bit for bit across machines.
+    #[default]
+    Cpu,
+    /// The WGSL kernel on the headless wgpu device (`jd-gpu`); results agree with the CPU to ~1e-7.
+    Gpu,
 }
 fn iterations_default() -> u32 {
     50
@@ -610,7 +635,7 @@ pub fn register_all(r: &mut Registry) {
     ));
     r.register(NodeDef::new::<ThermalParams, _>(
         "jd.erosion.thermal@1",
-        "Thermal erosion: material steeper than the talus angle slides downhill (mass-conserving Jacobi steps); an optional `hardness` field (0..1, e.g. from `jd.terrain.strata@1`) lets hard rock hold near-vertical faces and shed at a tenth of the rate",
+        "Thermal erosion: material steeper than the talus angle slides downhill (mass-conserving Jacobi steps); an optional `hardness` field (0..1, e.g. from `jd.terrain.strata@1`) lets hard rock hold near-vertical faces and shed at a tenth of the rate; `engine: gpu` runs the same kernel on the headless GPU",
         vec![port("in", PortType::Heightfield, true), port("hardness", PortType::Heightfield, false)],
         vec![port("out", PortType::Heightfield, false)],
         |ctx, p, i| {
@@ -619,9 +644,22 @@ pub fn register_all(r: &mut Registry) {
                 return Err(JdError::invalid("iterations", "must be within 1..=1000"));
             }
             let hardness = i.get("hardness").map(|v| v.as_field());
-            Ok(out("out", jd_terrain::thermal_erode_with(
+            let eroded = match tp.engine {
+                Engine::Cpu => jd_terrain::thermal_erode_with(
                     field(i, "in")?,
-                    spacing_m(ctx), tp.talus_deg, tp.iterations, tp.rate, hardness.map(|k| &**k), Some(&ctx.cancel))?))
+                    spacing_m(ctx), tp.talus_deg, tp.iterations, tp.rate, hardness.map(|k| &**k), Some(&ctx.cancel))?,
+                Engine::Gpu => {
+                    if !(1..=1000).contains(&tp.iterations) {
+                        return Err(JdError::invalid("iterations", "must be within 1..=1000"));
+                    }
+                    let gpu = jd_gpu::Gpu::shared().ok_or_else(|| {
+                        JdError::new(jd_types::ErrorCode::E_DEPENDENCY_MISSING, "no GPU adapter on this machine")
+                            .next("Set `engine: \"cpu\"` on the node.")
+                    })?;
+                    gpu.thermal_erode(field(i, "in")?, spacing_m(ctx), tp.talus_deg, tp.iterations, tp.rate, hardness.map(|k| &**k))?
+                }
+            };
+            Ok(out("out", eroded))
         },
     ).with_memory(8.0));
     r.register(NodeDef::new::<DropletParams, _>(
@@ -1514,6 +1552,50 @@ mod tests {
             .evaluate(&g, &world(), 2)
             .expect("starter evaluates");
         assert_eq!(outs.len(), 2);
+    }
+
+    #[test]
+    fn thermal_gpu_engine_matches_the_cpu_engine_or_names_the_missing_adapter() {
+        let reg = Registry::with_builtins();
+        let cache = Cache::default();
+        let mut g = Graph::default();
+        let n = add(
+            &mut g,
+            "jd.noise.fbm@1",
+            serde_json::json!({ "seed": 4, "feature_size_m": 64.0, "height_range_m": [0.0, 400.0] }),
+        );
+        let cpu = add(
+            &mut g,
+            "jd.erosion.thermal@1",
+            serde_json::json!({ "iterations": 10 }),
+        );
+        let gpu = add(
+            &mut g,
+            "jd.erosion.thermal@1",
+            serde_json::json!({ "iterations": 10, "engine": "gpu" }),
+        );
+        connect(&mut g, &n, "out", &cpu, "in");
+        connect(&mut g, &n, "out", &gpu, "in");
+        let r = Evaluator::new(&reg, &cache).evaluate(&g, &world(), 0);
+        match (jd_gpu::Gpu::shared(), r) {
+            (Some(_), Ok((outs, _))) => {
+                let (a, b) = (
+                    outs[&(cpu, "out".into())].as_field().to_vec(),
+                    outs[&(gpu, "out".into())].as_field().to_vec(),
+                );
+                let worst = a
+                    .iter()
+                    .zip(&b)
+                    .map(|(x, y)| (x - y).abs())
+                    .fold(0.0f32, f32::max);
+                assert!(
+                    worst <= 400.0 * 1e-4,
+                    "gpu engine agrees with cpu: {worst} m"
+                );
+            }
+            (None, Err(e)) => assert_eq!(e.code, ErrorCode::E_DEPENDENCY_MISSING),
+            (gpu, r) => panic!("adapter {:?} but {:?}", gpu.is_some(), r.map(|_| ())),
+        }
     }
 
     #[test]

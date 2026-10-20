@@ -2234,6 +2234,7 @@ version = "0.0.1"
 dependencies = [
  "blake3",
  "image",
+ "jd-gpu",
  "jd-terrain",
  "jd-types",
  "proptest",

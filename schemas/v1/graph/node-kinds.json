@@ -1151,7 +1151,7 @@
   },
   {
     "kind": "jd.erosion.thermal@1",
-    "description": "Thermal erosion: material steeper than the talus angle slides downhill (mass-conserving Jacobi steps); an optional `hardness` field (0..1, e.g. from `jd.terrain.strata@1`) lets hard rock hold near-vertical faces and shed at a tenth of the rate",
+    "description": "Thermal erosion: material steeper than the talus angle slides downhill (mass-conserving Jacobi steps); an optional `hardness` field (0..1, e.g. from `jd.terrain.strata@1`) lets hard rock hold near-vertical faces and shed at a tenth of the rate; `engine: gpu` runs the same kernel on the headless GPU",
     "inputs": [
       {
         "name": "in",
@@ -1182,6 +1182,11 @@
           "format": "float",
           "default": 35.0
         },
+        "engine": {
+          "description": "Where the steps run: `cpu` (default, bit-reproducible) or `gpu` (`jd-gpu`, the same kernel in\nWGSL; ≈ 1e-7 relative to the CPU; fails with E_DEPENDENCY_MISSING when no adapter exists).",
+          "$ref": "#/$defs/Engine",
+          "default": "cpu"
+        },
         "iterations": {
           "description": "Jacobi steps (1..=1000); more steps move material further.",
           "type": "integer",
@@ -1196,7 +1201,24 @@
           "default": 0.25
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "$defs": {
+        "Engine": {
+          "description": "Which processor runs a kernel that exists in both forms.",
+          "oneOf": [
+            {
+              "description": "The rayon CPU kernel: deterministic bit for bit across machines.",
+              "type": "string",
+              "const": "cpu"
+            },
+            {
+              "description": "The WGSL kernel on the headless wgpu device (`jd-gpu`); results agree with the CPU to ~1e-7.",
+              "type": "string",
+              "const": "gpu"
+            }
+          ]
+        }
+      }
     }
   },
   {

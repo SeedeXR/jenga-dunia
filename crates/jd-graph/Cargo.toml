@@ -11,6 +11,7 @@ publish.workspace = true
 [dependencies]
 jd-types.workspace = true
 jd-terrain.workspace = true
+jd-gpu.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 schemars.workspace = true
