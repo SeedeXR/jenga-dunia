@@ -160,6 +160,11 @@
     "scope": "project-write"
   },
   {
+    "id": "sky.bake",
+    "description": "Bake a physical sky (Preetham daylight model: sun azimuth/elevation, turbidity) as an equirectangular HDRI — OpenEXR RGB f32 for engines and renderers, with a tonemapped PNG preview beside it",
+    "scope": "export"
+  },
+  {
     "id": "terrain.export_heightmap",
     "description": "Write a layer as EXR (f32), PNG16, RAW r16 or r32 with a JSON sidecar",
     "scope": "export"

@@ -425,6 +425,20 @@ after   min 42.548  max 412.711  mean 230.109      (+0.74 m averaged over the wo
 
 `jd.ocean.bathymetry@1` takes the terrain and a `seabed` class map and raises every **sand** (1) or **mud** (3) cell towards the local mean height over `smooth_m` (a summed-area box filter, O(N)), never lowering a cell, never by more than `max_fill_m`, and never above `level_m` — sediment settles into hollows and levels the shelf, it does not build above the water. Rock (2), reef (4) and land keep the shape erosion gave them, so the chain coastal → seabed → bathymetry turns a noisy flooded landscape into a floor with smooth sediment plains between rock outcrops. `strength` (0..1) scales the fill. Not modelled: transport along the slope, sorting by grain size, a sediment budget.
 
+### Physical sky as an HDRI
+
+```
+$ jd op sky.bake --project Mesa.jdproj --params '{"sun_elevation_deg":25,"sun_azimuth_deg":140,"turbidity":2,"width":1024,"path":"sky_t2.exr"}'
+exports/sky_t2.exr (OpenEXR RGB f32, 1024×512, 6.3 MB) + exports/sky_t2.png (tonemapped preview)
+zenith_rgb [0.030, 0.063, 0.146]   horizon_rgb [0.297, 0.288, 0.379]        (turbidity 2, after the default exposure 0.05)
+turbidity 6:  zenith [0.180, 0.396, 0.759]   horizon [0.271, 0.255, 0.307]  (haze whitens and brightens the zenith)
+```
+
+![Tonemapped preview of the baked sky: deep blue zenith, a bright aureole around the low sun at 140°, a warm horizon and a flat dark ground below it](images/cli-sky-hdri-preview.png)
+![The mesa world rendered in Blender under the EXR alone — crisp shadows from the 25° sun, blue sky fill in the shade](images/cli-mesa-under-hdri.png)
+
+`sky.bake` writes the Preetham–Shirley–Smits (1999) analytic daylight model as an equirectangular HDRI: the sky's luminance and chromaticity are Perez distributions whose coefficients are linear in `turbidity` (2 clear mountain air … 10 thick haze), scaled by a zenith fitted to the sun's zenith angle, converted xyY → linear sRGB and multiplied by `exposure`. The sun is a 0.27° disc at `sun_radiance` (default the real sun, ≈ 1.6·10⁹ cd/m² after exposure); because the disc is smaller than any map pixel, the pixel that holds it receives the disc's energy (radiance × Ω_disc / Ω_pixel), which is what makes the render above cast sharp shadows from the HDRI alone. Row 0 is the zenith, column 0 looks north, longitude runs clockwise. Rendered in Blender 5.2 with `scripts/blender/render_glb.py … sky_t2.exr` (world environment, sun lamp off). Hošek–Wilkie 2012 is the better model but ships as coefficient tables under their own licence; the viewport still draws its gradient dome — texturing it with this bake is the next step.
+
 ### Timeline: keyframed parameters
 
 ```

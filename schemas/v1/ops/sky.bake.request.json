@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SkyBake",
+  "description": "`sky.bake` params.",
+  "type": "object",
+  "properties": {
+    "sun_azimuth_deg": {
+      "description": "Sun azimuth, degrees clockwise from north.",
+      "type": "number",
+      "format": "float",
+      "default": 140.0
+    },
+    "sun_elevation_deg": {
+      "description": "Sun elevation above the horizon, degrees (0, 90].",
+      "type": "number",
+      "format": "float",
+      "default": 35.0
+    },
+    "turbidity": {
+      "description": "Turbidity: 2 = clear mountain air, 3 = clear, 6 = hazy, 10 = thick haze (2..=10).",
+      "type": "number",
+      "format": "float",
+      "default": 3.0
+    },
+    "exposure": {
+      "description": "Scale from kcd/m² to the written radiance (> 0): 0.05 puts a clear zenith near 0.5.",
+      "type": "number",
+      "format": "float",
+      "default": 0.05000000074505806
+    },
+    "sun_radiance": {
+      "description": "Radiance of the 0.27° sun disc after exposure (≥ 0; 0 hides the disc). The default is the\nreal sun — ≈ 1.6·10⁹ cd/m², i.e. 1.6·10⁶ kcd/m² × the default exposure — so an HDRI lights a\nscene with the right sun-to-sky balance; in the map the disc's energy is spread over the\npixel that holds it when the pixel is larger than the disc.",
+      "type": "number",
+      "format": "float",
+      "default": 80000.0
+    },
+    "width": {
+      "description": "Width of the equirectangular map in pixels (even, 16..=8192); the height is half.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0,
+      "default": 2048
+    },
+    "path": {
+      "description": "Output `.exr`; relative paths resolve against the project's `exports/`. A `.png` preview is written beside it.",
+      "type": "string",
+      "default": "sky.exr"
+    }
+  },
+  "additionalProperties": false
+}

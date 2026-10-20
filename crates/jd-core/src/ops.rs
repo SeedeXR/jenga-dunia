@@ -2916,6 +2916,43 @@ pub mod terrain {
         }
     }
 
+    /// `sky.bake` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct SkyBake {
+        /// Sun and atmosphere.
+        #[serde(default, flatten)]
+        pub sky: jd_terrain::SkyParams,
+        /// Width of the equirectangular map in pixels (even, 16..=8192); the height is half.
+        #[serde(default = "default_sky_width")]
+        pub width: u32,
+        /// Output `.exr`; relative paths resolve against the project's `exports/`. A `.png` preview is written beside it.
+        #[serde(default = "default_sky_path")]
+        pub path: PathBuf,
+    }
+
+    fn default_sky_width() -> u32 {
+        2048
+    }
+    fn default_sky_path() -> PathBuf {
+        PathBuf::from("sky.exr")
+    }
+
+    /// `sky.bake` result.
+    #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct SkyBakeResult {
+        /// The HDRI written (OpenEXR, RGB f32, equirectangular, row 0 = zenith, column 0 = north).
+        pub path: PathBuf,
+        /// Tonemapped preview written beside it.
+        pub preview: PathBuf,
+        /// Map size in pixels.
+        pub px: [u32; 2],
+        /// Linear radiance straight up and just above the horizon (north), after exposure.
+        pub zenith_rgb: [f32; 3],
+        /// Linear radiance just above the horizon (north), after exposure.
+        pub horizon_rgb: [f32; 3],
+    }
+
     /// `ocean.bake` params.
     #[derive(Debug, Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
@@ -3047,6 +3084,21 @@ pub mod terrain {
             "Wind sea for a wind speed and fetch (JONSWAP growth capped at the fully developed Pierson–Moskowitz sea): significant height, peak period and wavelength, breaking depth, and the Gerstner components the viewport animates",
             Scope::None,
             |_, p| Ok((jd_terrain::wave_spectrum(&p)?, Vec::new())),
+        );
+        r.register::<SkyBake, SkyBakeResult, _>(
+            "sky.bake",
+            "Bake a physical sky (Preetham daylight model: sun azimuth/elevation, turbidity) as an equirectangular HDRI — OpenEXR RGB f32 for engines and renderers, with a tonemapped PNG preview beside it",
+            Scope::Export,
+            |ctx, p| {
+                let path = ctx.with_project(|proj| Ok(if p.path.is_absolute() { p.path.clone() } else { proj.root().join("exports").join(&p.path) }))?;
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                let (w, h, zenith_rgb, horizon_rgb) = jd_terrain::bake_sky_hdri(&p.sky, p.width, &path)?;
+                let preview = path.with_extension("png");
+                std::fs::write(&preview, jd_terrain::sky_preview_png(&p.sky, p.width.min(1024))?)?;
+                Ok((SkyBakeResult { path, preview, px: [w, h], zenith_rgb, horizon_rgb }, Vec::new()))
+            },
         );
         r.register::<OceanBake, OceanBakeResult, _>(
             "ocean.bake",

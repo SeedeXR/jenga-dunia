@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SkyBakeResult",
+  "description": "`sky.bake` result.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "The HDRI written (OpenEXR, RGB f32, equirectangular, row 0 = zenith, column 0 = north).",
+      "type": "string"
+    },
+    "preview": {
+      "description": "Tonemapped preview written beside it.",
+      "type": "string"
+    },
+    "px": {
+      "description": "Map size in pixels.",
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint32",
+        "minimum": 0
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "zenith_rgb": {
+      "description": "Linear radiance straight up and just above the horizon (north), after exposure.",
+      "type": "array",
+      "items": {
+        "type": "number",
+        "format": "float"
+      },
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "horizon_rgb": {
+      "description": "Linear radiance just above the horizon (north), after exposure.",
+      "type": "array",
+      "items": {
+        "type": "number",
+        "format": "float"
+      },
+      "minItems": 3,
+      "maxItems": 3
+    }
+  },
+  "required": [
+    "path",
+    "preview",
+    "px",
+    "zenith_rgb",
+    "horizon_rgb"
+  ]
+}
