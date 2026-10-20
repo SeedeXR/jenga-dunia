@@ -3464,6 +3464,9 @@ pub mod terrain {
         /// flat ground collapses, ridges keep their detail. Not for `.fbx`.
         #[serde(default)]
         pub target_triangles: Option<u32>,
+        /// Material layers baked into the GLB's albedo and roughness textures (see `terrain.textures`).
+        #[serde(default)]
+        pub materials: Vec<MaterialSpec>,
         /// Also write this many coarser levels beside the file (`<stem>_lod1.<ext>`, …), each with
         /// a quarter of the previous level's triangles; the report lists them under `lods`. 1..=8, not for `.fbx`.
         #[serde(default)]
@@ -3700,6 +3703,49 @@ pub mod terrain {
         /// Largest texture side in pixels (the field is sampled every ⌈size / max_px⌉ cells).
         #[serde(default = "default_max_px")]
         pub max_px: u32,
+        /// Material layers blended over the hypsometric base in order, each by its 0..1 mask layer (biome class masks, snow, wetness, painted) — the material graph's layer stack.
+        #[serde(default)]
+        pub materials: Vec<MaterialSpec>,
+    }
+
+    /// One material layer of the stack.
+    #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct MaterialSpec {
+        /// 0..1 mask layer that weights this material (omit for everywhere).
+        #[serde(default)]
+        pub mask: Option<String>,
+        /// Base colour, sRGB 0..1.
+        pub albedo: [f32; 3],
+        /// Roughness 0..1.
+        #[serde(default = "default_roughness")]
+        pub roughness: f32,
+    }
+
+    fn default_roughness() -> f32 {
+        0.9
+    }
+
+    /// Resolve the stack's mask layers into fields (cloned out: the layer lock is not re-entrant).
+    fn material_layers(
+        ctx: &Context,
+        specs: &[MaterialSpec],
+    ) -> JdResult<Vec<jd_terrain::MaterialLayer>> {
+        specs
+            .iter()
+            .map(|m| {
+                let mask = m
+                    .mask
+                    .as_ref()
+                    .map(|name| ctx.with_layer(name, |hf| Ok(hf.clone())))
+                    .transpose()?;
+                Ok(jd_terrain::MaterialLayer {
+                    mask,
+                    albedo: m.albedo,
+                    roughness: m.roughness,
+                })
+            })
+            .collect()
     }
 
     fn default_max_px() -> u32 {
@@ -3904,10 +3950,11 @@ pub mod terrain {
                     return Err(JdError::invalid("max_px", "must be within 16..=8192"));
                 }
                 let extent = ctx.with_project(|proj| Ok(proj.doc.world.extent_m))?;
+                let layers = material_layers(ctx, &p.materials)?;
                 ctx.with_layer(&p.layer, |hf| {
                     use base64::Engine as _;
                     let b64 = |b: &[u8]| base64::engine::general_purpose::STANDARD.encode(b);
-                    let maps = jd_terrain::bake_maps(hf, extent, p.max_px)?;
+                    let maps = jd_terrain::bake_maps_with(hf, extent, p.max_px, &layers)?;
                     Ok((
                         TexturesResult {
                             width: maps.px[0],
@@ -3973,6 +4020,7 @@ pub mod terrain {
                     Ok((path, proj.doc.world.extent_m))
                 })?;
                 let mut warnings = Vec::new();
+                let materials = material_layers(ctx, &p.materials)?;
                 let report = ctx.with_layer(&p.layer, |hf| {
                     let step = p.step.unwrap_or_else(|| jd_terrain::auto_step(hf.width(), hf.height(), p.max_vertices));
                     if p.step.is_none() && step > 1 {
@@ -3982,8 +4030,8 @@ pub mod terrain {
                         ));
                     }
                     match p.lods {
-                        Some(n) if n > 0 => jd_terrain::export_mesh_lods(hf, extent, &path, step, p.texture, p.target_triangles, n),
-                        _ => jd_terrain::export_mesh(hf, extent, &path, step, p.texture, p.target_triangles),
+                        Some(n) if n > 0 => jd_terrain::export_mesh_lods_with(hf, extent, &path, step, p.texture, p.target_triangles, n, &materials),
+                        _ => jd_terrain::export_mesh_with(hf, extent, &path, step, p.texture, p.target_triangles, &materials),
                     }
                 })?;
                 Ok((report, warnings))

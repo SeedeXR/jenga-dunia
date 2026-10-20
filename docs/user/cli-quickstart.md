@@ -465,6 +465,23 @@ at rock_slope_deg 20 the same floor reads                    sand 27.6 %  rock 6
 
 `jd.biome.seabed@1` classifies every ocean cell (below `level_m` and connected to the border, like the sea-level node) by depth and slope with the rules coastal geomorphology gives: submarine slopes steeper than `rock_slope_deg` hold no sediment and read **rock** (2); the floor deeper than `mud_min_depth_m` is still enough for fines to settle, **mud** (3); the shelf above the wave base `sand_max_depth_m` is wave-sorted **sand** (1); and a gentle shelf inside `reef_depth_m` that is more than `river_reach_m` from any cell of the optional `rivers` or `shore` masks becomes **reef** (4) — reefs need clear, sediment-free water, so on the steep coastal world above, whose shallow shelves are all within reach of wave-worked cliffs, no reef forms. Land is 0. The class map works with `jd.mask.class@1` exactly like the land biomes, so each bed gets its own material, scatter (kelp, boulders) and colour overlay. No sediment transport or currents yet.
 
+### Materials: layers blended by masks
+
+```
+$ jd --json op terrain.textures --project Acceptance.jdproj --params '{"max_px":512,"materials":[
+    {"mask":"mask_forest",    "albedo":[0.13,0.30,0.12], "roughness":0.95},
+    {"mask":"mask_grassland", "albedo":[0.42,0.52,0.20], "roughness":0.9},
+    {"mask":"mask_rock",      "albedo":[0.45,0.43,0.40], "roughness":0.7},
+    {"mask":"snow",           "albedo":[0.95,0.96,0.98], "roughness":0.45}]}'
+{"status":"ok","result":{"width":512,"height":512,"albedo_png_base64":"…","normal_png_base64":"…","roughness_png_base64":"…"}}
+$ jd --json op terrain.export_mesh --project Acceptance.jdproj --params '{"path":"terrain_materials.glb","texture":true,"materials":[…same stack…]}'
+{"status":"ok","result":{"triangles":522242,"bytes":20034364,…}}     # Khronos validator: 0 errors, 0 warnings
+```
+
+![Blender render of the acceptance world with the four-layer material stack: grey rock over most of this steep world, dark forest and lighter grassland in the hollows and on the gentler ground, white snow along the summits](images/cli-materials.png)
+
+`materials` is the material graph's layer stack as data: each layer is a colour and a roughness weighted by a 0..1 mask layer — a biome class mask from `jd.mask.class@1`, the snow cover, a wetness index, a painted mask, or no mask for "everywhere" — and the layers apply in order over the hypsometric base, lerping albedo and roughness by the mask at every texel. The same stack goes into `terrain.export_mesh`, so the GLB's albedo and roughness textures carry it (every LOD of a chain too; FBX keeps the base ramp). The desktop viewport still shades with the base maps — a materials panel is the follow-up; node-based blending (height/slope/curvature masks without a classify node) comes with the full material graph.
+
 ### Water textures for engines
 
 ```

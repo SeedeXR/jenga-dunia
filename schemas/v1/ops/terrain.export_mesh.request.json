@@ -45,6 +45,14 @@
       "minimum": 0,
       "default": null
     },
+    "materials": {
+      "description": "Material layers baked into the GLB's albedo and roughness textures (see `terrain.textures`).",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/MaterialSpec"
+      },
+      "default": []
+    },
     "lods": {
       "description": "Also write this many coarser levels beside the file (`<stem>_lod1.<ext>`, …), each with\na quarter of the previous level's triangles; the report lists them under `lods`. 1..=8, not for `.fbx`.",
       "type": [
@@ -59,5 +67,41 @@
   "additionalProperties": false,
   "required": [
     "path"
-  ]
+  ],
+  "$defs": {
+    "MaterialSpec": {
+      "description": "One material layer of the stack.",
+      "type": "object",
+      "properties": {
+        "mask": {
+          "description": "0..1 mask layer that weights this material (omit for everywhere).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "albedo": {
+          "description": "Base colour, sRGB 0..1.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "roughness": {
+          "description": "Roughness 0..1.",
+          "type": "number",
+          "format": "float",
+          "default": 0.8999999761581421
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "albedo"
+      ]
+    }
+  }
 }

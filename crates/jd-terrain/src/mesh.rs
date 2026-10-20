@@ -85,6 +85,7 @@ pub fn hypsometric_rgb(t: f32, slope: f32) -> [u8; 3] {
 
 /// Bake the base-colour texture for the exported grid (`gw`×`gh`, row 0 = south, matching the
 /// mesh UVs where v = 0 on the south edge) as PNG bytes.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn bake_albedo(
     sample: &dyn Fn(u32, u32) -> f32,
     normal_y: &dyn Fn(u32, u32) -> f32,
@@ -92,6 +93,8 @@ pub(crate) fn bake_albedo(
     gh: u32,
     min_h: f32,
     max_h: f32,
+    layers: &[MaterialLayer],
+    cell: &dyn Fn(u32, u32) -> (u32, u32),
 ) -> JdResult<Vec<u8>> {
     let range = (max_h - min_h).max(1e-6);
     let mut px = Vec::with_capacity((gw * gh * 3) as usize);
@@ -99,7 +102,31 @@ pub(crate) fn bake_albedo(
         for gx in 0..gw {
             let t = (sample(gx, gz) - min_h) / range;
             let slope = ((1.0 - normal_y(gx, gz)) * 1.4).clamp(0.0, 1.0);
-            px.extend_from_slice(&hypsometric_rgb(t, slope));
+            let base = hypsometric_rgb(t, slope);
+            if layers.is_empty() {
+                px.extend_from_slice(&base);
+                continue;
+            }
+            // The material stack: every layer lerps towards its colour by its mask at this texel's cell.
+            let (cx, cz) = cell(gx, gz);
+            let mut c = [
+                base[0] as f32 / 255.0,
+                base[1] as f32 / 255.0,
+                base[2] as f32 / 255.0,
+            ];
+            for l in layers {
+                let wgt = l
+                    .mask
+                    .as_ref()
+                    .map_or(1.0, |m| m.get(cx, cz).clamp(0.0, 1.0));
+                for (ck, lk) in c.iter_mut().zip(&l.albedo) {
+                    *ck += (lk - *ck) * wgt;
+                }
+            }
+            px.extend(
+                c.iter()
+                    .map(|v| (v * 255.0).round().clamp(0.0, 255.0) as u8),
+            );
         }
     }
     let mut out = std::io::Cursor::new(Vec::new());
@@ -136,9 +163,50 @@ pub struct BakedMaps {
     pub px: [u32; 2],
 }
 
+/// A material layer blended over the base maps by a 0..1 mask (the material graph's layer
+/// stack: biome class masks, snow, wetness, painted masks). Layers apply in order; a missing
+/// mask means "everywhere".
+#[derive(Debug, Clone)]
+pub struct MaterialLayer {
+    /// Weight field at the terrain's resolution (None = 1 everywhere).
+    pub mask: Option<Heightfield>,
+    /// Base colour, sRGB 0..1.
+    pub albedo: [f32; 3],
+    /// Roughness 0..1.
+    pub roughness: f32,
+}
+
 /// Bake albedo, normal and roughness maps from the full field, sampled every `ts` cells so no
-/// side exceeds `max_px` (see [`bake_normal_roughness`] for the conventions).
+/// side exceeds `max_px` (see [`bake_normal_roughness_with`] for the conventions).
 pub fn bake_maps(hf: &Heightfield, extent_m: [f64; 2], max_px: u32) -> JdResult<BakedMaps> {
+    bake_maps_with(hf, extent_m, max_px, &[])
+}
+
+/// [`bake_maps`] with material layers: each layer lerps the albedo and roughness towards its own
+/// by its mask's weight at every texel, on top of the hypsometric base.
+pub fn bake_maps_with(
+    hf: &Heightfield,
+    extent_m: [f64; 2],
+    max_px: u32,
+    layers: &[MaterialLayer],
+) -> JdResult<BakedMaps> {
+    for (k, l) in layers.iter().enumerate() {
+        if let Some(m) = &l.mask
+            && (m.width(), m.height()) != (hf.width(), hf.height())
+        {
+            return Err(JdError::invalid(
+                "materials",
+                format!("layer {k}: mask size differs from the terrain"),
+            ));
+        }
+        if l.albedo.iter().any(|c| !(0.0..=1.0).contains(c)) || !(0.0..=1.0).contains(&l.roughness)
+        {
+            return Err(JdError::invalid(
+                "materials",
+                format!("layer {k}: albedo and roughness must be within 0..=1"),
+            ));
+        }
+    }
     let (w, h) = (hf.width(), hf.height());
     let ts = w.max(h).div_ceil(max_px.max(16)).max(1);
     let (tw, th) = (w.div_ceil(ts), h.div_ceil(ts));
@@ -158,8 +226,17 @@ pub fn bake_maps(hf: &Heightfield, extent_m: [f64; 2], max_px: u32) -> JdResult<
         let dz = (g(xi, zi - d) - g(xi, zi + d)) / (2.0 * d as f64 * sz);
         (1.0 / (dx * dx + 1.0 + dz * dz).sqrt()) as f32
     };
-    let albedo = bake_albedo(&at, &normal_y, tw, th, stats.min, stats.max)?;
-    let (normal, roughness, px) = bake_normal_roughness(hf, extent_m, max_px)?;
+    let albedo = bake_albedo(
+        &at,
+        &normal_y,
+        tw,
+        th,
+        stats.min,
+        stats.max,
+        layers,
+        &|gx, gz| ((gx * ts).min(w - 1), (gz * ts).min(h - 1)),
+    )?;
+    let (normal, roughness, px) = bake_normal_roughness_with(hf, extent_m, max_px, layers)?;
     Ok(BakedMaps {
         albedo,
         normal,
@@ -172,10 +249,11 @@ pub fn bake_maps(hf: &Heightfield, extent_m: [f64; 2], max_px: u32) -> JdResult<
 /// the surface) and a roughness map (G channel; B metallic = 0) from the full field, sampled
 /// every `ts` cells so no side exceeds `max_px`. Row 0 = south, like the albedo.
 /// Roughness: 0.92 on flat ground, down to 0.62 on steep rock, 0.6 above the snow line.
-pub(crate) fn bake_normal_roughness(
+pub(crate) fn bake_normal_roughness_with(
     hf: &Heightfield,
     extent_m: [f64; 2],
     max_px: u32,
+    layers: &[MaterialLayer],
 ) -> JdResult<(Vec<u8>, Vec<u8>, [u32; 2])> {
     let (w, h) = (hf.width(), hf.height());
     let ts = w.max(h).div_ceil(max_px.max(16)).max(1);
@@ -206,7 +284,14 @@ pub(crate) fn bake_normal_roughness(
             }
             let slope = ((1.0 - ny) * 1.4).clamp(0.0, 1.0);
             let t = (at(x, z) - stats.min as f64) / range as f64;
-            let r = if t > 0.85 { 0.6 } else { 0.92 - 0.3 * slope };
+            let mut r = if t > 0.85 { 0.6 } else { 0.92 - 0.3 * slope };
+            for l in layers {
+                let wgt = l
+                    .mask
+                    .as_ref()
+                    .map_or(1.0, |m| m.get(x as u32, z as u32).clamp(0.0, 1.0));
+                r += (f64::from(l.roughness) - r) * f64::from(wgt);
+            }
             rough.extend_from_slice(&[0, (r * 255.0).round() as u8, 0]);
         }
     }
@@ -255,6 +340,18 @@ pub fn export_glb(
     path: &Path,
     step: u32,
     texture: bool,
+) -> JdResult<MeshExportReport> {
+    export_glb_with(hf, extent_m, path, step, texture, &[])
+}
+
+/// [`export_glb`] with material layers baked into the albedo and roughness textures.
+pub fn export_glb_with(
+    hf: &Heightfield,
+    extent_m: [f64; 2],
+    path: &Path,
+    step: u32,
+    texture: bool,
+    materials: &[MaterialLayer],
 ) -> JdResult<MeshExportReport> {
     hf.validate_finite()?;
     if step == 0 {
@@ -368,6 +465,7 @@ pub fn export_glb(
     let mut image_views = Vec::new();
     let mut normal_px = None;
     if texture {
+        let (fw, fh) = (hf.width(), hf.height());
         let albedo = bake_albedo(
             &sample,
             &|gx, gz| normal_y[(gz * gw + gx) as usize],
@@ -375,8 +473,11 @@ pub fn export_glb(
             gh,
             min[1],
             max[1],
+            materials,
+            &|gx, gz| ((gx * step).min(fw - 1), (gz * step).min(fh - 1)),
         )?;
-        let (normal_png, rough_png, px) = bake_normal_roughness(hf, extent_m, NORMAL_MAP_CAP)?;
+        let (normal_png, rough_png, px) =
+            bake_normal_roughness_with(hf, extent_m, NORMAL_MAP_CAP, materials)?;
         normal_px = Some(px);
         for png in [albedo, normal_png, rough_png] {
             let off = bin.len();
@@ -1025,6 +1126,20 @@ pub fn export_mesh(
     texture: bool,
     target_triangles: Option<u32>,
 ) -> JdResult<MeshExportReport> {
+    export_mesh_with(hf, extent_m, path, step, texture, target_triangles, &[])
+}
+
+/// [`export_mesh`] with material layers baked into the GLB's textures.
+#[allow(clippy::too_many_arguments)]
+pub fn export_mesh_with(
+    hf: &Heightfield,
+    extent_m: [f64; 2],
+    path: &Path,
+    step: u32,
+    texture: bool,
+    target_triangles: Option<u32>,
+    materials: &[MaterialLayer],
+) -> JdResult<MeshExportReport> {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
@@ -1033,12 +1148,12 @@ pub fn export_mesh(
         let grid = GridMesh::build(hf, extent_m, step)?;
         let mesh = crate::decimate::decimate(&grid, extent_m, target)?;
         let maps = (texture && matches!(ext.as_deref(), None | Some("glb")))
-            .then(|| bake_maps(hf, extent_m, NORMAL_MAP_CAP))
+            .then(|| bake_maps_with(hf, extent_m, NORMAL_MAP_CAP, materials))
             .transpose()?;
         return write_decimated(&mesh, ext.as_deref(), extent_m, path, step, maps.as_ref());
     }
     match ext.as_deref() {
-        None | Some("glb") => export_glb(hf, extent_m, path, step, texture),
+        None | Some("glb") => export_glb_with(hf, extent_m, path, step, texture, materials),
         Some("obj") => export_obj(hf, extent_m, path, step),
         Some("stl") => export_stl(hf, extent_m, path, step),
         Some("ply") => export_ply(hf, extent_m, path, step),
@@ -1172,6 +1287,30 @@ pub fn export_mesh_lods(
     target_triangles: Option<u32>,
     lods: u32,
 ) -> JdResult<MeshExportReport> {
+    export_mesh_lods_with(
+        hf,
+        extent_m,
+        path,
+        step,
+        texture,
+        target_triangles,
+        lods,
+        &[],
+    )
+}
+
+/// [`export_mesh_lods`] with material layers baked into every level's textures.
+#[allow(clippy::too_many_arguments)]
+pub fn export_mesh_lods_with(
+    hf: &Heightfield,
+    extent_m: [f64; 2],
+    path: &Path,
+    step: u32,
+    texture: bool,
+    target_triangles: Option<u32>,
+    lods: u32,
+    materials: &[MaterialLayer],
+) -> JdResult<MeshExportReport> {
     if !(1..=8).contains(&lods) {
         return Err(JdError::invalid("lods", "must be within 1..=8"));
     }
@@ -1185,10 +1324,18 @@ pub fn export_mesh_lods(
                 .next("Export the LOD chain as .glb/.obj/.ply/.usda, or write FBX without `lods`."),
         );
     }
-    let mut report = export_mesh(hf, extent_m, path, step, texture, target_triangles)?;
+    let mut report = export_mesh_with(
+        hf,
+        extent_m,
+        path,
+        step,
+        texture,
+        target_triangles,
+        materials,
+    )?;
     let grid = GridMesh::build(hf, extent_m, step)?;
     let maps = (texture && matches!(ext.as_deref(), None | Some("glb")))
-        .then(|| bake_maps(hf, extent_m, NORMAL_MAP_CAP))
+        .then(|| bake_maps_with(hf, extent_m, NORMAL_MAP_CAP, materials))
         .transpose()?;
     let stem = path
         .file_stem()
@@ -1218,6 +1365,43 @@ pub fn export_mesh_lods(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn material_layers_blend_albedo_and_roughness_by_their_masks() {
+        let mut h = Heightfield::new(32, 16, 64, 0).expect("hf");
+        h.fill_with(|x, _| x as f32 * 10.0);
+        let mut west = Heightfield::new(32, 16, 64, 0).expect("mask");
+        west.fill_with(|x, _| f32::from(x < 16));
+        let red = MaterialLayer {
+            mask: Some(west),
+            albedo: [1.0, 0.0, 0.0],
+            roughness: 0.3,
+        };
+        let plain = bake_maps(&h, [320.0, 160.0], 64).expect("plain");
+        let layered =
+            bake_maps_with(&h, [320.0, 160.0], 64, std::slice::from_ref(&red)).expect("layered");
+        let rgb = |png: &[u8]| image::load_from_memory(png).expect("png").to_rgb8();
+        let (a, b) = (rgb(&plain.albedo), rgb(&layered.albedo));
+        assert_eq!(b.get_pixel(4, 8).0, [255, 0, 0], "west is the layer's red");
+        assert_eq!(
+            b.get_pixel(28, 8).0,
+            a.get_pixel(28, 8).0,
+            "east keeps the base ramp"
+        );
+        let (ra, rb) = (rgb(&plain.roughness), rgb(&layered.roughness));
+        assert_eq!(
+            rb.get_pixel(4, 8)[1],
+            (0.3f32 * 255.0).round() as u8,
+            "west roughness is the layer's"
+        );
+        assert_eq!(rb.get_pixel(28, 8)[1], ra.get_pixel(28, 8)[1]);
+        let bad = MaterialLayer {
+            mask: None,
+            albedo: [2.0, 0.0, 0.0],
+            roughness: 0.5,
+        };
+        assert!(bake_maps_with(&h, [320.0, 160.0], 64, &[bad]).is_err());
+    }
 
     #[test]
     fn tangent_follows_the_u_direction_and_stays_in_the_tangent_plane() {

@@ -945,6 +945,15 @@ export type TerrainExportHeightmapResult = {
   "bytes": number;
 };
 
+export type MaterialSpec = {
+  /** 0..1 mask layer that weights this material (omit for everywhere). */
+  "mask"?: string | null;
+  /** Base colour, sRGB 0..1. */
+  "albedo": [number, number, number];
+  /** Roughness 0..1. */
+  "roughness"?: number;
+};
+
 export type TerrainExportMeshRequest = {
   /** Layer name. */
   "layer"?: string;
@@ -959,6 +968,8 @@ export type TerrainExportMeshRequest = {
   /** Decimate the sampled grid to at most this many triangles (quadric edge collapse):
 flat ground collapses, ridges keep their detail. Not for `.fbx`. */
   "target_triangles"?: number | null;
+  /** Material layers baked into the GLB's albedo and roughness textures (see `terrain.textures`). */
+  "materials"?: MaterialSpec[];
   /** Also write this many coarser levels beside the file (`<stem>_lod1.<ext>`, …), each with
 a quarter of the previous level's triangles; the report lists them under `lods`. 1..=8, not for `.fbx`. */
   "lods"?: number | null;
@@ -1269,6 +1280,8 @@ export type TerrainTexturesRequest = {
   "layer"?: string;
   /** Largest texture side in pixels (the field is sampled every ⌈size / max_px⌉ cells). */
   "max_px"?: number;
+  /** Material layers blended over the hypsometric base in order, each by its 0..1 mask layer (biome class masks, snow, wetness, painted) — the material graph's layer stack. */
+  "materials"?: MaterialSpec[];
 };
 
 export type TerrainTexturesResult = {

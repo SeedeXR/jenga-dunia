@@ -51,8 +51,9 @@ pub use heightfield::{Heightfield, HeightfieldStats, Tile, TileCoord};
 pub use import::{ForeignImport, GeoTags, geotiff_tags, read_foreign, resample_to_world};
 pub use karst::{KarstParams, Sinkhole, SinkholeProfile, karst_sinkholes};
 pub use mesh::{
-    BakedMaps, GridMesh, MeshExportReport, auto_step, bake_maps, export_glb, export_mesh,
-    export_mesh_lods, export_obj, export_ply, export_stl, export_usda, export_usdz,
+    BakedMaps, GridMesh, MaterialLayer, MeshExportReport, auto_step, bake_maps, bake_maps_with,
+    export_glb, export_mesh, export_mesh_lods, export_mesh_lods_with, export_mesh_with, export_obj,
+    export_ply, export_stl, export_usda, export_usdz,
 };
 pub use noise::{FractalKind, NoiseKind, NoiseParams, generate_noise};
 pub use ocean::{
