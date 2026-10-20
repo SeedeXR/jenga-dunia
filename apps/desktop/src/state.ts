@@ -47,7 +47,9 @@ interface State {
   noise: NoiseSettings;
   busy: boolean;
   log: LogEntry[];
-  graph: { nodes: GraphNode[]; edges: GraphEdge[]; undo_depth?: number; redo_depth?: number };
+  graph: { nodes: GraphNode[]; edges: GraphEdge[]; undo_depth?: number; redo_depth?: number; time?: number };
+  /** Move the timeline (journaled `graph.set_time`); keyed parameters resolve there. Coalesces a drag. */
+  setTime: (time: number) => void;
   graphKinds: GraphKind[];
   lastEval: EvalReport | null;
   /** Re-evaluate at preview LOD after every graph change (World Creator-style live preview). */
@@ -275,6 +277,7 @@ export const useStore = create<State>((set, get) => {
     return Math.max(0, Math.ceil(Math.log2(Math.max(res[0], res[1]) / 512)));
   };
   let liveTimer: ReturnType<typeof setTimeout> | undefined;
+  let timeTimer: ReturnType<typeof setTimeout> | undefined;
   /** The live evaluation in flight, if any: Generate and Evaluate wait for it (see `settle`). */
   let liveInFlight: Promise<void> | null = null;
   const liveEvaluate = () => {
@@ -479,6 +482,11 @@ export const useStore = create<State>((set, get) => {
     connectNodes: async (from, fromPort, to, toPort) => mutate("graph.connect", { from, from_port: fromPort, to, to_port: toPort }),
     disconnectNodes: async (from, fromPort, to, toPort) => mutate("graph.disconnect", { from, from_port: fromPort, to, to_port: toPort }),
     setParam: async (id, key, value) => mutate("graph.set_param", { id, key, value }),
+    setTime: (time) => {
+      set((s) => ({ graph: { ...s.graph, time } })); // the slider follows the pointer; the journal gets the settled value
+      clearTimeout(timeTimer);
+      timeTimer = setTimeout(() => void mutate("graph.set_time", { time }), 200);
+    },
     evaluateGraph: async (lod = 0) => {
       await settle();
       const r = await run("graph.evaluate", { lod });

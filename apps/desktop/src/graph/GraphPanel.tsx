@@ -16,16 +16,36 @@ import {
   useNodesState,
   useReactFlow,
 } from "@xyflow/react";
-import { Play, Plus, Redo2, Trash2, Undo2, Zap, ZapOff } from "lucide-react";
+import { Clock, Play, Plus, Redo2, Trash2, Undo2, Zap, ZapOff } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { type GraphNode, useStore } from "../state";
 
 type JdNodeData = { kind: string; label: string; params: Record<string, unknown>; inputs: string[]; outputs: string[]; selected?: boolean };
 
+/** The keyframes of a parameter written as `{ keys: [[t, v], …] }`, or null for a plain value. */
+function keysOf(v: unknown): [number, unknown][] | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const o = v as { keys?: unknown };
+  return Array.isArray(o.keys) && Object.keys(o).length === 1 ? (o.keys as [number, unknown][]) : null;
+}
+
+/** Keyframes as the inspector shows and accepts them: `t:v, t:v` (`0:1, 1:300`). */
+function keysText(keys: [number, unknown][]): string {
+  return keys.map(([t, v]) => `${t}:${typeof v === "number" ? String(Number(v.toPrecision(7))) : String(v)}`).join(", ");
+}
+function parseKeys(raw: string, isNum: boolean): { keys: [number, unknown][] } | null {
+  if (!raw.includes(":")) return null;
+  const keys = raw.split(",").map((part) => {
+    const [t, v] = part.split(":").map((x) => x.trim());
+    return [Number(t), isNum ? Number(v) : v] as [number, unknown];
+  });
+  return keys.every(([t, v]) => Number.isFinite(t) && (!isNum || Number.isFinite(v as number))) ? { keys } : null;
+}
+
 function JdNode({ data }: NodeProps<FlowNode<JdNodeData>>) {
   const summary = Object.entries(data.params)
     .slice(0, 3)
-    .map(([k, v]) => `${k}=${Array.isArray(v) ? (v.some((x) => typeof x === "object" && x !== null) ? `${v.length} recorded` : v.join("…")) : String(v)}`)
+    .map(([k, v]) => `${k}=${Array.isArray(v) ? (v.some((x) => typeof x === "object" && x !== null) ? `${v.length} recorded` : v.join("…")) : keysOf(v) ? `⏱${keysOf(v)!.length} keys` : String(v)}`)
     .join(" · ");
   return (
     <div className="min-w-40 rounded border border-jd-line bg-jd-bg-2 text-xs text-jd-fg-0 shadow">
@@ -261,6 +281,11 @@ function Inner() {
           <button className="btn" title="Evaluate at full resolution" onClick={() => void s.evaluateGraph()} disabled={!s.project || s.busy} data-testid="graph-evaluate">
             <Play size={12} /> Evaluate
           </button>
+          <label className="ml-2 flex items-center gap-1 text-xs text-jd-fg-1" title="Timeline: keyframed parameters (t:v, t:v in the inspector) resolve here; journaled, undoable">
+            <Clock size={12} />
+            <input type="range" min={0} max={1} step={0.01} value={s.graph.time ?? 0} onChange={(e) => s.setTime(Number(e.target.value))} disabled={!s.project} className="w-24" data-testid="graph-time" />
+            <span className="w-8 font-mono" data-testid="graph-time-value">{(s.graph.time ?? 0).toFixed(2)}</span>
+          </label>
         </div>
       </div>
       <aside className="overflow-y-auto border-l border-jd-line bg-jd-bg-1 p-2 text-xs" data-testid="graph-inspector">
@@ -296,13 +321,15 @@ function Inner() {
                     </select>
                   ) : (
                     <input
-                      className="w-28 rounded border border-jd-line bg-jd-bg-2 px-1 text-right text-xs"
-                      defaultValue={current === undefined ? "" : show(current)}
+                      className={`w-28 rounded border border-jd-line bg-jd-bg-2 px-1 text-right text-xs ${keysOf(current) ? "text-jd-accent" : ""}`}
+                      defaultValue={current === undefined ? "" : keysOf(current) ? keysText(keysOf(current)!) : show(current)}
                       placeholder={prop.default === undefined ? "" : show(prop.default)}
+                      title={`${prop.description ?? ""}\nKeyframes: t:v, t:v (0:1, 1:300) resolve at the timeline position`.trim()}
                       onBlur={(e) => {
                         const raw = e.target.value.trim();
                         if (raw === "") return void s.setParam(sel.id, key, null);
-                        const value: unknown = raw.includes(",") ? raw.split(",").map(Number) : isNum ? Number(raw) : raw === "true" ? true : raw === "false" ? false : raw;
+                        const keyed = parseKeys(raw, isNum);
+                        const value: unknown = keyed ?? (raw.includes(",") ? raw.split(",").map(Number) : isNum ? Number(raw) : raw === "true" ? true : raw === "false" ? false : raw);
                         void s.setParam(sel.id, key, value);
                       }}
                     />

@@ -161,6 +161,12 @@ Undo and redo are operations like everything else (`graph.undo` / `graph.redo`, 
 
 *Waves: `wind_speed_mps`, `fetch_km` and `wind_azimuth_deg` on the same node raise a wind sea. The app asks the core for the spectrum (`ocean.waves`: JONSWAP fetch-limited growth capped at the fully developed Pierson–Moskowitz sea) and moves the water plane along a Gerstner sum of its three components every frame, so a 3 m/s breeze makes 0.2 m ripples and a 20 m/s gale 9.8 m swells 380 m long (3.2 m / 96 m if the fetch is only 100 km). Waves break where the water is shallower than Hs / 0.78, and the shoreline foam widens to that surf zone — 12.6 m of depth in the gale above. The header shows the significant height and peak wavelength being drawn; recording below. **Export water maps** (Export panel) writes `exports/water/` — depth, colour, foam and a tileable wave normal map for the node's clarity and wind (`ocean.bake`, see the CLI quickstart). Not yet: refraction and shadowing by headlands.*
 
+## Timeline
+
+![Graph toolbar with the timeline slider at 1.00 and a thermal node whose summary reads iterations=⏱2 keys, eroding the terrain with 300 steps](images/desktop-timeline.png)
+
+*Any parameter can be keyframed: type `t:v, t:v` in its inspector field — `0:1, 1:300` keys a thermal node from one step to three hundred over the timeline — and the node summary shows ⏱ with the key count (1). The slider in the graph toolbar (2) is the timeline position: moving it journals one `graph.set_time` per drag (undo takes it back), and the live preview re-evaluates with the parameters resolved at that time — numbers interpolate, choices step. Scrubbing back is instant because each time position caches on its own. The UI-driven test `apps/desktop/e2e/timeline.spec.ts` keys a thermal node, scrubs to 1.0 and checks the published height's hash changes.*
+
 ## Desert landscapes
 
 ![Desert project: a 0..40 m plain generated from the panel, an aeolian node and a karst node in the graph, the viewport zoomed onto dune ripples with a red sinkhole floor](images/desktop-desert.png)
