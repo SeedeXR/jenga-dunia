@@ -250,7 +250,7 @@
   },
   {
     "kind": "jd.biome.seabed@1",
-    "description": "Classify the sea floor below `level_m`: 1 sand on the shelf above the wave base, 2 rock on steep slopes, 3 mud in deep still water, 4 reef on a shallow gentle shelf away from river sediment (optional `rivers` and `shore` masks); 0 = land",
+    "description": "Classify the sea floor below `level_m`: 1 sand on the shelf above the wave base, 2 rock on steep slopes, 3 mud in deep still water, 4 reef on a shallow gentle shelf away from river sediment (optional `rivers` and `shore` masks); 0 = land; an optional `exposure` field (the sea-level node's wave exposure) lets mud settle sooner in sheltered water",
     "inputs": [
       {
         "name": "in",
@@ -264,6 +264,11 @@
       },
       {
         "name": "shore",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "exposure",
         "ty": "heightfield",
         "required": false
       }

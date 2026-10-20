@@ -78,7 +78,7 @@ pub use scatter::{
     write_points, write_points_engine, write_points_with,
 };
 pub use sculpt::{Stroke, StrokeMode, apply_strokes};
-pub use seabed::{SeabedParams, classify_seabed};
+pub use seabed::{SeabedParams, classify_seabed, classify_seabed_with};
 pub use sim::{
     HydraulicParams, HydraulicResult, StreamPowerParams, THERMAL_MAX_RATE, hydraulic_erode,
     hydraulic_erode_with, slope_mask, stream_power_erode, stream_power_erode_with, thermal_erode,

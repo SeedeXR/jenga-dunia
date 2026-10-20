@@ -80,6 +80,21 @@ pub fn classify_seabed(
     shore: Option<&Heightfield>,
     p: &SeabedParams,
 ) -> JdResult<Heightfield> {
+    classify_seabed_with(h, spacing_m, rivers, shore, None, p)
+}
+
+/// [`classify_seabed`] with an optional wave `exposure` field (0..1, the sea-level node's):
+/// sheltered water is as calm as deeper water, so mud settles in a bay at depths where an
+/// open coast would still be sand — the effective depth for the mud rule is
+/// `depth + (1 − exposure) × mud_min_depth_m`.
+pub fn classify_seabed_with(
+    h: &Heightfield,
+    spacing_m: [f32; 2],
+    rivers: Option<&Heightfield>,
+    shore: Option<&Heightfield>,
+    exposure: Option<&Heightfield>,
+    p: &SeabedParams,
+) -> JdResult<Heightfield> {
     if !(p.sand_max_depth_m > 0.0 && p.sand_max_depth_m.is_finite()) {
         return Err(JdError::invalid("sand_max_depth_m", "must be positive"));
     }
@@ -107,7 +122,7 @@ pub fn classify_seabed(
             "sample spacing must be positive",
         ));
     }
-    for (name, f) in [("rivers", rivers), ("shore", shore)] {
+    for (name, f) in [("rivers", rivers), ("shore", shore), ("exposure", exposure)] {
         if let Some(f) = f
             && (f.width(), f.height()) != (h.width(), h.height())
         {
@@ -157,7 +172,11 @@ pub fn classify_seabed(
         if (dx * dx + dy * dy).sqrt() > tan_rock {
             return 2.0;
         }
-        if depth >= p.mud_min_depth_m {
+        // Sheltered water is as still as deeper water: mud settles there sooner.
+        let calm = exposure.map_or(0.0, |e| {
+            (1.0 - e.get(x, y).clamp(0.0, 1.0)) * p.mud_min_depth_m
+        });
+        if depth + calm >= p.mud_min_depth_m {
             return 3.0;
         }
         if reefs
@@ -175,6 +194,42 @@ pub fn classify_seabed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_sheltered_shelf_turns_to_mud_where_an_open_one_stays_sand() {
+        // A flat 6 m shelf under a 0 m sea; mud normally needs 20 m.
+        let mut h = Heightfield::new(32, 16, 64, 0).expect("h");
+        h.fill_with(|_, _| -6.0);
+        let p = SeabedParams {
+            level_m: 0.0,
+            mud_min_depth_m: 20.0,
+            sand_max_depth_m: 10.0,
+            reef_depth_m: [0.0, 0.0], // no reefs: the question is sand vs mud
+            ..SeabedParams::default()
+        };
+        let open = classify_seabed_with(&h, [10.0, 10.0], None, None, None, &p).expect("open");
+        assert!(
+            open.to_vec().iter().all(|c| *c == 1.0),
+            "an open shelf is sand"
+        );
+        // West half sheltered (exposure 0.1), east half open (1.0).
+        let mut e = Heightfield::new(32, 16, 64, 0).expect("e");
+        e.fill_with(|x, _| if x < 16 { 0.1 } else { 1.0 });
+        let bay = classify_seabed_with(&h, [10.0, 10.0], None, None, Some(&e), &p).expect("bay");
+        assert_eq!(bay.get(4, 8), 3.0, "mud in the sheltered bay");
+        assert_eq!(bay.get(28, 8), 1.0, "sand on the open shelf");
+        assert!(
+            classify_seabed_with(
+                &h,
+                [10.0, 10.0],
+                None,
+                None,
+                Some(&Heightfield::new(4, 4, 64, 0).expect("s")),
+                &p
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn shelf_wall_basin_and_river_mouth_classify_as_expected() {

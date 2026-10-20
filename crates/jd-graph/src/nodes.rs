@@ -6,9 +6,9 @@ use std::sync::Arc;
 use jd_terrain::{
     AeolianParams, CoastalParams, DropletParams, FlowMethod, ForeignImport, Heightfield,
     HydraulicParams, NoiseParams, SeabedParams, SnowParams, StreamPowerParams, Stroke,
-    THERMAL_MAX_RATE, aeolian_transport_with, apply_strokes, carve_rivers_with, classify_seabed,
-    droplet_erode, fill_depressions_with, flow_accumulation_with, generate_noise,
-    resample_to_world, sea_level, slope_mask, snow_cover, wetness_index_with,
+    THERMAL_MAX_RATE, aeolian_transport_with, apply_strokes, carve_rivers_with, droplet_erode,
+    fill_depressions_with, flow_accumulation_with, generate_noise, resample_to_world, sea_level,
+    slope_mask, snow_cover, wetness_index_with,
 };
 use jd_types::{JdError, JdResult};
 use rayon::prelude::*;
@@ -1000,18 +1000,20 @@ pub fn register_all(r: &mut Registry) {
     ).with_check(validate_biome_rules));
     r.register(NodeDef::new::<SeabedParams, _>(
         "jd.biome.seabed@1",
-        "Classify the sea floor below `level_m`: 1 sand on the shelf above the wave base, 2 rock on steep slopes, 3 mud in deep still water, 4 reef on a shallow gentle shelf away from river sediment (optional `rivers` and `shore` masks); 0 = land",
+        "Classify the sea floor below `level_m`: 1 sand on the shelf above the wave base, 2 rock on steep slopes, 3 mud in deep still water, 4 reef on a shallow gentle shelf away from river sediment (optional `rivers` and `shore` masks); 0 = land; an optional `exposure` field (the sea-level node's wave exposure) lets mud settle sooner in sheltered water",
         vec![
             port("in", PortType::Heightfield, true),
             port("rivers", PortType::Heightfield, false),
             port("shore", PortType::Heightfield, false),
+            port("exposure", PortType::Heightfield, false),
         ],
         vec![port("seabed", PortType::Heightfield, false)],
         |ctx, p, i| {
             let sp: SeabedParams = params(p)?;
             let rivers = i.get("rivers").map(|v| v.as_field());
             let shore = i.get("shore").map(|v| v.as_field());
-            Ok(out("seabed", classify_seabed(field(i, "in")?, spacing_m(ctx), rivers.map(|r| &**r), shore.map(|s| &**s), &sp)?))
+            let exposure = i.get("exposure").map(|v| v.as_field());
+            Ok(out("seabed", jd_terrain::classify_seabed_with(field(i, "in")?, spacing_m(ctx), rivers.map(|r| &**r), shore.map(|s| &**s), exposure.map(|e| &**e), &sp)?))
         },
     ).with_memory(8.0));
     r.register(NodeDef::new::<jd_terrain::StrataParams, _>(
