@@ -1509,6 +1509,11 @@ pub mod graph {
             }
             let job = listed.expect("job listed while running");
             assert_eq!(job.op, "graph.evaluate");
+            assert!(
+                job.total >= 3 && job.done <= job.total,
+                "progress is reported: {job:?}"
+            );
+            assert!(!job.current.is_empty(), "current node kind is reported");
             let r = call(
                 &reg,
                 &ctx,
@@ -1521,6 +1526,18 @@ pub mod graph {
             assert_eq!(err.code, ErrorCode::E_CANCELLED, "{err:?}");
             assert_eq!(err.details["job_id"], serde_json::json!(job.id));
             assert!(ctx.jobs.list().is_empty(), "finished jobs leave the table");
+            // Cancelled ⇒ nothing published: the starter output never produced a `height` layer.
+            let r = call(
+                &reg,
+                &ctx,
+                "terrain.stats",
+                serde_json::json!({ "layer": "height" }),
+            );
+            assert_eq!(
+                r.error.as_ref().map(|e| e.code),
+                Some(ErrorCode::E_INPUT_INVALID),
+                "{r:?}"
+            );
             assert_eq!(
                 call(&reg, &ctx, "jobs.cancel", serde_json::json!({ "id": 999 })).result,
                 Some(serde_json::json!(false))

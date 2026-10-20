@@ -49,12 +49,12 @@ fn half() -> f32 {
 }
 
 /// Box-filtered copy of `h` (radius in pixels, edge-clamped) for smooth strokes.
-fn box_mean(h: &Heightfield, r: u32) -> Heightfield {
+fn box_mean(h: &Heightfield, rx: u32, ry: u32) -> Heightfield {
     let (w, hh) = (h.width(), h.height());
     let mut out = h.clone();
     out.fill_with(|x, y| {
-        let (x0, x1) = (x.saturating_sub(r), (x + r).min(w - 1));
-        let (y0, y1) = (y.saturating_sub(r), (y + r).min(hh - 1));
+        let (x0, x1) = (x.saturating_sub(rx), (x + rx).min(w - 1));
+        let (y0, y1) = (y.saturating_sub(ry), (y + ry).min(hh - 1));
         let mut sum = 0.0f32;
         for yy in y0..=y1 {
             for xx in x0..=x1 {
@@ -126,10 +126,9 @@ pub fn apply_strokes(
         .map(|s| s.radius_m)
         .fold(None, |m: Option<f32>, r| Some(m.map_or(r, |x| x.max(r))))
         .map(|r| {
-            let px = ((r / spacing_m[0].min(spacing_m[1])) / 4.0)
-                .round()
-                .max(1.0) as u32;
-            box_mean(h, px)
+            // Radius/4 in metres along each axis, so the box is round in metres, not in pixels.
+            let r4 = |sp: f32| ((r / sp) / 4.0).round().max(1.0) as u32;
+            box_mean(h, r4(spacing_m[0]), r4(spacing_m[1]))
         });
     let sample = |p: [f32; 2]| -> f32 {
         let x = ((p[0] / spacing_m[0]) as i64).clamp(0, h.width() as i64 - 1) as u32;
@@ -243,6 +242,39 @@ mod tests {
                 }]
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn smooth_box_is_round_in_metres_under_anisotropic_spacing() {
+        // 2 m × 0.5 m pixels: a 16 m brush smooths over ±2 px in x and ±8 px in y.
+        let mut h = Heightfield::new(64, 64, 32, 4).expect("hf");
+        h.fill_with(|x, y| if (x, y) == (32, 32) { 100.0 } else { 0.0 }); // single spike
+        let s = Stroke {
+            points: vec![[65.0, 16.25]],
+            radius_m: 16.0,
+            strength_m: 0.0,
+            mode: StrokeMode::Smooth,
+            amount: 1.0,
+        };
+        let out = apply_strokes(&h, [2.0, 0.5], &[s]).expect("smooth");
+        // The spike's mass spreads over a (2·2+1)×(2·8+1) = 85-cell box: ~1.18 m each at the centre.
+        assert!(
+            (out.get(32, 32) - 100.0 / 85.0).abs() < 0.5,
+            "centre after smoothing: {}",
+            out.get(32, 32)
+        );
+        assert!(
+            out.get(34, 32) > 0.5 && out.get(35, 32) == 0.0,
+            "x reach is 2 px: {} / {}",
+            out.get(34, 32),
+            out.get(35, 32)
+        );
+        assert!(
+            out.get(32, 40) > 0.5 && out.get(32, 41) == 0.0,
+            "y reach is 8 px: {} / {}",
+            out.get(32, 40),
+            out.get(32, 41)
         );
     }
 

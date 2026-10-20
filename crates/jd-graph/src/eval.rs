@@ -387,6 +387,12 @@ impl<'a> Evaluator<'a> {
             });
             produced.insert(id.clone(), outs);
         }
+        // A cancel that lands during the last node must still mean "nothing published".
+        if job.cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(JdError::new(ErrorCode::E_CANCELLED, "evaluation cancelled")
+                .why("The job's cancel flag was set while the last node ran.")
+                .next("Nothing was published; re-run when ready."));
+        }
         let mut outputs = Outputs::new();
         for (id, outs) in produced {
             for (port, v) in outs {

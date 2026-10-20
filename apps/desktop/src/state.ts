@@ -158,18 +158,23 @@ export const useStore = create<State>((set, get) => {
   // While an op is in flight, poll the core's job table so long evaluations show progress and
   // can be cancelled; the poll uses `op` directly so it never appears in the log.
   let pollers = 0;
+  let generation = 0; // bumped on stop so a late jobs.list response cannot resurrect a finished job
   let pollTimer: ReturnType<typeof setInterval> | undefined;
   const startPolling = () => {
     if (pollers++ > 0) return;
+    const gen = generation;
     pollTimer = setInterval(() => {
       void op<JobInfo[]>("jobs.list")
-        .then((r) => set({ jobs: r.status === "ok" && r.result ? r.result : [] }))
+        .then((r) => {
+          if (gen === generation && pollers > 0) set({ jobs: r.status === "ok" && r.result ? r.result : [] });
+        })
         .catch(() => undefined);
     }, 250);
   };
   const stopPolling = () => {
     if (--pollers > 0) return;
     clearInterval(pollTimer);
+    generation++;
     set({ jobs: [] });
   };
   const run = async <T,>(id: string, params: Record<string, unknown> = {}): Promise<Response<T>> => {
@@ -228,6 +233,7 @@ export const useStore = create<State>((set, get) => {
     liveTimer = setTimeout(async () => {
       const { project, live } = get();
       if (!project || !live) return;
+      startPolling(); // live evaluations show up in the header and can be cancelled too
       try {
         const r = await op<EvalReport>("graph.evaluate", { lod: previewLod() });
         if (r.status === "ok" && r.result) await adopt(r.result);
@@ -237,6 +243,8 @@ export const useStore = create<State>((set, get) => {
         } else log(r);
       } catch (e) {
         logFailure("graph.evaluate (live)", e);
+      } finally {
+        stopPolling();
       }
     }, 150);
   };

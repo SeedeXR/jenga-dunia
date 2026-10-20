@@ -19,7 +19,7 @@ test.describe("jobs against the real core", () => {
     await page.goto("/");
     await page.getByTestId("project-path").fill(path.join(ws, "Jobs.jdproj"));
     await page.getByLabel("Extent (m)").fill("1024");
-    await page.getByLabel("Resolution (px)").fill("128");
+    await page.getByLabel("Resolution (px)").fill("256");
     await page.getByTestId("new-project").click();
     await expect(page.getByTestId("viewport-info")).toContainText(/ [1-9][\d,]* tris/);
     // Turn live preview off, then wire a very long hydraulic run in front of the output.
@@ -32,7 +32,7 @@ test.describe("jobs against the real core", () => {
     const out = panel.locator(".react-flow__node", { hasText: "jd.output.height@1" });
     await hyd.click();
     const iterations = page.getByTestId("graph-inspector").locator("label", { hasText: "iterations" }).locator("input");
-    await iterations.fill("2000");
+    await iterations.fill("2000"); // the node's maximum; with a 256² world this runs for seconds
     await iterations.blur();
     await expect(page.getByTestId("log")).toContainText("graph.set_param: ok");
     const drag = async (from: ReturnType<typeof page.locator>, to: ReturnType<typeof page.locator>) => {

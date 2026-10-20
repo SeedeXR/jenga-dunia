@@ -169,7 +169,7 @@ export default function App() {
           viewport: {vp.backend} · {vp.triangles.toLocaleString()} tris
           {s.previewStats ? ` · preview lod ${s.previewStats.lod}, ${(s.previewStats.bytes / 1048576).toFixed(2)} MB in ${s.previewStats.ms.toFixed(0)} ms` : ""}
         </span>
-        {s.busy &&
+        {(s.busy || s.jobs.length > 0) &&
           (s.jobs.length > 0 ? (
             <span className="flex items-center gap-2 text-xs text-jd-accent" data-testid="job-progress">
               {s.jobs[0]!.op}

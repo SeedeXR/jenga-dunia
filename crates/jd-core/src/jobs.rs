@@ -125,3 +125,28 @@ impl Jobs {
             .is_some()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn guard_removes_the_job_even_when_the_op_panics() {
+        let jobs = Jobs::default();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let guard = jobs.start("graph.evaluate");
+            (guard.ctl.progress)(1, 3, "jd.noise.fbm@1");
+            let listed = jobs.list();
+            assert_eq!((listed.len(), listed[0].done, listed[0].total), (1, 1, 3));
+            assert_eq!(listed[0].current, "jd.noise.fbm@1");
+            panic!("kernel blew up");
+        }));
+        assert!(result.is_err());
+        assert!(jobs.list().is_empty(), "the guard dropped during unwinding");
+        assert!(!jobs.cancel(1), "unknown ids are not running");
+        let g = jobs.start("x");
+        assert!(jobs.cancel(g.id));
+        assert!(g.ctl.cancel.load(Ordering::Relaxed));
+        assert!(jobs.list()[0].cancelling);
+    }
+}

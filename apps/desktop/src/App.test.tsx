@@ -200,6 +200,16 @@ describe("App", () => {
     const connects = calls.filter((c) => (c.args as { request?: { op: string } }).request?.op === "graph.connect");
     expect(connects.length).toBe(2); // noise → sculpt, sculpt → output
     expect(screen.getByTestId("brush-strength")).toBeInTheDocument();
+    // Mode select swaps strength for amount, and strokes carry mode + amount to the core.
+    fireEvent.change(screen.getByTestId("brush-mode"), { target: { value: "flatten" } });
+    expect(screen.getByTestId("brush-amount")).toBeInTheDocument();
+    expect(screen.queryByTestId("brush-strength")).toBeNull();
+    await useStore.getState().addStroke([
+      [10, 20],
+      [30, 40],
+    ]);
+    const stroke = calls.find((c) => (c.args as { request?: { op: string; params: { key?: string } } }).request?.op === "graph.set_param" && (c.args as { request: { params: { key?: string } } }).request.params.key === "strokes");
+    expect(stroke).toMatchObject({ args: { request: { params: { value: [{ points: [[10, 20], [30, 40]], radius_m: 150, mode: "flatten", amount: 0.5 }] } } } });
   });
 
   it("a world preset fills resolution and extent (Unreal 2049²)", async () => {

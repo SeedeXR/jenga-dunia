@@ -155,12 +155,14 @@ impl ServerHandler for JdServer {
             .arguments
             .map(Value::Object)
             .unwrap_or_else(|| json!({}));
-        let value = match self.registry.get(&op) {
-            None => envelope_error(
+        // Checks that need `&self` happen now; the operation itself runs on a blocking thread so
+        // a long evaluation never pins a tokio worker (otherwise `jobs.cancel` could starve).
+        let pending: Result<Request, Value> = match self.registry.get(&op) {
+            None => Err(envelope_error(
                 &op,
                 JdError::new(ErrorCode::E_INPUT_INVALID, format!("unknown tool `{op}`")),
-            ),
-            Some(def) if !self.allowed(def.scope) => envelope_error(
+            )),
+            Some(def) if !self.allowed(def.scope) => Err(envelope_error(
                 &op,
                 JdError::new(
                     ErrorCode::E_PERMISSION,
@@ -170,9 +172,9 @@ impl ServerHandler for JdServer {
                     "Restart jd-mcp with --scope {}.",
                     scope_name(def.scope)
                 )),
-            ),
+            )),
             Some(_) => match self.check_workspace(&params) {
-                Err(e) => envelope_error(&op, e),
+                Err(e) => Err(envelope_error(&op, e)),
                 Ok(()) => {
                     let mut req = Request::new(&op, params);
                     req.client = Some(jd_core::envelope::Client {
@@ -180,18 +182,33 @@ impl ServerHandler for JdServer {
                         name: "jd-mcp".into(),
                         scopes: (*self.scopes).clone(),
                     });
-                    let resp = self.registry.invoke(&self.ctx, req);
-                    serde_json::to_value(&resp).unwrap_or(Value::Null)
+                    Ok(req)
                 }
             },
         };
-        let is_error = value.get("status").and_then(Value::as_str) == Some("error");
-        let result = if is_error {
-            CallToolResult::structured_error(value)
-        } else {
-            CallToolResult::structured(value)
-        };
-        std::future::ready(Ok(CallToolResponse::Complete(result)))
+        let registry = self.registry.clone();
+        let ctx = self.ctx.clone();
+        async move {
+            let value = match pending {
+                Err(v) => v,
+                Ok(req) => {
+                    match tokio::task::spawn_blocking(move || registry.invoke(&ctx, req)).await {
+                        Ok(resp) => serde_json::to_value(&resp).unwrap_or(Value::Null),
+                        Err(e) => envelope_error(
+                            &op,
+                            JdError::new(ErrorCode::E_INTERNAL, format!("operation panicked: {e}")),
+                        ),
+                    }
+                }
+            };
+            let is_error = value.get("status").and_then(Value::as_str) == Some("error");
+            let result = if is_error {
+                CallToolResult::structured_error(value)
+            } else {
+                CallToolResult::structured(value)
+            };
+            Ok(CallToolResponse::Complete(result))
+        }
     }
 }
 
