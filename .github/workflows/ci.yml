@@ -80,15 +80,7 @@ jobs:
           ./target/release/jd --json open "$RUNNER_TEMP/smoke.jdproj" | tail -1 | grep -q '"status":"ok"'
       - name: S1 bench smoke (real kernels, release; budget 15 s / 1 GB)
         shell: bash
-        run: |
-          ./target/release/jd --json diag bench s1 | tail -1 | python3 -c '
-          import json, sys
-          d = json.load(sys.stdin); r = d["result"]
-          print(f"S1 {r[\"size_px\"]}² {r[\"profile\"]}: " + ", ".join(f"{s[\"name\"]} {s[\"ms\"]:.0f} ms" for s in r["stages"]) + f"; total {r[\"total_ms\"]:.0f} ms; peak RSS {(r[\"peak_rss_bytes\"] or 0)/1048576:.0f} MB; hash {r[\"content_hash\"][:16]}")
-          assert d["status"] == "ok", d
-          assert r["total_ms"] < 15000, "S1 slower than the 15 s smoke budget"
-          assert (r["peak_rss_bytes"] or 0) < 1024**3, "S1 used more than 1 GB"
-          '
+        run: ./target/release/jd --json diag bench s1 | tail -1 | node scripts/check-bench.mjs 15000 1073741824
       - name: Generated schemas are committed and current
         if: runner.os == 'Linux'
         shell: bash
