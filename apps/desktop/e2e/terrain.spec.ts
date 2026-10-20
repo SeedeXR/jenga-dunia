@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, installBridge } from "./bridge";
+import { connectCore, installBridge, wire } from "./bridge";
 
 test.describe("desktop UI against the real core", () => {
   let ws: string;
@@ -57,6 +57,31 @@ test.describe("desktop UI against the real core", () => {
     expect(png[24]).toBe(16); // IHDR bit depth
 
     await page.screenshot({ path: testInfo.outputPath("terrain-generated.png"), fullPage: false });
+
+    // Import: an EXR export comes back through assets/ as a jd.input.heightmap node; wired to the
+    // height output and evaluated, the layer stats are the generated terrain's again.
+    const statsBefore = await page.getByTestId("layer-stats").innerText();
+    await page.getByTestId("export-path").fill("h.exr");
+    await page.getByTestId("export").click();
+    await expect.poll(() => existsSync(path.join(proj, "exports", "h.exr"))).toBe(true);
+    await page.getByTestId("import-path").fill(path.join(proj, "exports", "h.exr"));
+    await page.getByTestId("import-asset").click();
+    await expect(page.getByTestId("log")).toContainText("project.import_asset: ok");
+    expect(existsSync(path.join(proj, "assets", "h.exr"))).toBe(true);
+    const panel = page.getByTestId("graph-panel");
+    const input = panel.locator(".react-flow__node", { hasText: "jd.input.heightmap@1" });
+    await expect(input).toBeVisible();
+    await expect(input).toContainText("path=h.exr");
+    await page.screenshot({ path: testInfo.outputPath("terrain-import.png"), fullPage: false }); // tutorial image source
+    const height = panel.locator(".react-flow__node", { hasText: "jd.output.height@1" });
+    await wire(page, input, height);
+    await expect(page.getByTestId("log")).toContainText("graph.connect: ok");
+    await page.getByTestId("graph-evaluate").click();
+    await expect(page.getByTestId("log")).toContainText("graph.evaluate: ok");
+    // Same heights (EXR is lossless): min/max and mean match; time and hash lines may differ.
+    for (const m of [/([\d.]+ \/ [\d.]+ m)/, /mean\s+([\d.]+ m)/]) {
+      await expect(page.getByTestId("layer-stats")).toContainText(statsBefore.match(m)?.[1] ?? "no match");
+    }
     expect(errors, "no uncaught page errors").toEqual([]);
     await core.close();
   });

@@ -86,12 +86,16 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let export_item = MenuItemBuilder::with_id("export", "Export Heightmap…")
         .accelerator("CmdOrCtrl+E")
         .build(app)?;
+    let import_item = MenuItemBuilder::with_id("import", "Import Heightmap or Mesh…")
+        .accelerator("CmdOrCtrl+I")
+        .build(app)?;
     let file = SubmenuBuilder::new(app, "File")
         .item(&new_item)
         .item(&open_item)
         .separator()
         .item(&save_item)
         .separator()
+        .item(&import_item)
         .item(&export_item)
         .separator()
         .close_window()

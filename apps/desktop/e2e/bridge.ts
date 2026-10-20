@@ -85,3 +85,18 @@ export async function installBridge(page: Page, core: Client): Promise<void> {
     };
   });
 }
+
+/** Drag a connection in the React Flow graph from `from`'s source handle to `to`'s target handle. */
+export async function wire(page: Page, from: import("@playwright/test").Locator, to: import("@playwright/test").Locator, fromHandle = "out"): Promise<void> {
+  const src = from.locator(`.react-flow__handle.source[data-handleid="${fromHandle}"]`);
+  const dst = to.locator(".react-flow__handle.target");
+  await dst.hover();
+  await src.hover();
+  const a = await src.boundingBox();
+  const b = await dst.boundingBox();
+  if (!a || !b) throw new Error("handles not laid out");
+  await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 10 });
+  await page.mouse.up();
+}

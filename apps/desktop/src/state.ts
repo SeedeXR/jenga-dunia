@@ -89,6 +89,8 @@ interface State {
   openProject: (path: string) => Promise<void>;
   generate: () => Promise<void>;
   exportHeightmap: (path: string, format: HeightmapFormat) => Promise<void>;
+  /** Copy a heightmap or mesh file into assets/ and add an input node that reads it. */
+  importAsset: (path: string) => Promise<void>;
   save: () => Promise<void>;
   /** Bumped when a settings edit is refused so the inputs snap back to the stored values. */
   settingsRev: number;
@@ -384,6 +386,14 @@ export const useStore = create<State>((set, get) => {
     },
     setNoise: (patch) => set((s) => ({ noise: { ...s.noise, ...patch } })),
     loadGraph,
+    importAsset: async (path) => {
+      const r = await run("project.import_asset", { path });
+      if (r.status !== "ok" || !r.result) return;
+      const right = Math.max(-320, ...get().graph.nodes.map((n) => n.ui?.position?.[0] ?? 0));
+      graphGen++;
+      const add = await run("graph.add_node", { kind: "jd.input.heightmap@1", params: { path: r.result.name }, position: [right + 320, 0] });
+      if (add.status === "ok") await loadGraph();
+    },
     addNode: async (kind) => {
       // New nodes go to the right of the current graph so they are visible and easy to wire in.
       const right = Math.max(-320, ...get().graph.nodes.map((n) => n.ui?.position?.[0] ?? 0));

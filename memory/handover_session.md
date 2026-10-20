@@ -196,7 +196,9 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `13:30:00` **Own FBX reader** (`fbx.rs` second half): node-tree parser (32/64-bit headers, raw + zlib arrays via `flate2`, already in the tree), `read_fbx_mesh` (all `Geometry`/`Mesh`, `Model` Lcl TRS through `Connections`, `UnitScaleFactor`/`UpAxis`), `read_fbx_heightfield` rasteriser (cell centres edge to edge so a regular grid reads back exactly; coverage slack 1e-3 after Blender's f32-cm jitter left edge rows uncovered) → `read_foreign` `.fbx` → `jd.input.heightmap@1`. Verified: unit round trip exact; JD → Blender import → Blender FBX export → JD diff 0.0 on the 512² `land` layer (CLI graph `add(land, scale(fbx_in, −1))`); Optima's 23 MB FBX 7500 sample parses in 0.37 s. Disk hygiene: `target/debug` (18 GB of stale artefacts) removed, 24 GiB free.
 
-### Open / next (as of 2026-10-20 13:30, head after fbx-reader commit)
+- `14:00:00` **Desktop import**: store `importAsset(path)` = `project.import_asset` + `graph.add_node(jd.input.heightmap@1, {path: name})`; Project panel **Import** row (typed path + Upload button, Browse → native dialog filtered to png/exr/tif/tiff/r16/r32/fbx); File ▸ Import Heightmap or Mesh… (⌘I). `wire()` moved to `e2e/bridge.ts`. Terrain e2e: export EXR → import → node `path=h.exr` → wire to height → evaluate → min/max/mean equal (time/hash lines excluded). Capture `desktop-import.png`.
+
+### Open / next (as of 2026-10-20 14:00, head after desktop-import commit)
 1. **CI**: green through `43fab8e` (normal maps); the only red run was `dad6256` (priorities; fixed by `d84eaa9`). FBX-reader commit next.
 2. **Figma**: connector unavailable this session; plugin OAuth pending on the owner's side → tutorial images stay in `docs/user/images/`; place them in file `fxyeV62hgLoNmG3dU1LX6G` when a connector works.
 3. **Native leftovers**: Edit-menu capture; native sculpt capture/recording (needs Accessibility); signed/notarised bundle (needs an Apple developer account).

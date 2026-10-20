@@ -37,6 +37,7 @@ export function formatFor(path: string): HeightmapFormat {
 export default function App() {
   const s = useStore();
   const [projPath, setProjPath] = useState("");
+  const [importPath, setImportPath] = useState("");
   const [projName, setProjName] = useState("World");
   const [extent, setExtent] = useState(4096);
   const [resolution, setResolution] = useState(2048);
@@ -65,6 +66,17 @@ export default function App() {
     setProjPath(p);
     await useStore.getState().newProject(p, projName, extent, resolution);
   }, [projName, extent, resolution]);
+  const pickAssetToImport = useCallback(async () => {
+    const p = await openDialog({
+      title: "Import heightmap or mesh",
+      filters: [
+        { name: "Heightmaps and meshes", extensions: ["png", "exr", "tif", "tiff", "r16", "r32", "fbx"] },
+      ],
+    }).catch(() => null);
+    if (typeof p !== "string") return;
+    setImportPath(p);
+    await useStore.getState().importAsset(p);
+  }, []);
   const pickExportPath = useCallback(async () => {
     const p = await saveDialog({
       title: "Export heightmap",
@@ -138,6 +150,9 @@ export default function App() {
         case "export":
           if (st.layer) void pickExportPath();
           break;
+        case "import":
+          if (st.project) void pickAssetToImport();
+          break;
       }
     })
       .then((u) => {
@@ -149,7 +164,7 @@ export default function App() {
       cancelled = true;
       unlisten?.();
     };
-  }, [pickProjectToCreate, pickProjectToOpen, pickExportPath]);
+  }, [pickProjectToCreate, pickProjectToOpen, pickExportPath, pickAssetToImport]);
 
   return (
     <div className="grid h-full grid-rows-[40px_1fr_160px] bg-jd-bg-0 text-jd-fg-0">
@@ -249,6 +264,19 @@ export default function App() {
               <Save size={14} /> Save
             </button>
           </div>
+          {s.project && (
+            <Field label="Import">
+              <span className="flex gap-1">
+                <input className={`${inputCls} w-28`} value={importPath} onChange={(e) => setImportPath(e.target.value)} placeholder="dem.tif, sculpt.fbx…" title="Heightmap (PNG 16-bit, EXR, TIFF, RAW) or binary FBX mesh: copied into assets/ and read by a new jd.input.heightmap node" data-testid="import-path" />
+                <button className="btn px-1.5" title="Import this file (⌘I opens a dialog)" onClick={() => void s.importAsset(importPath)} disabled={!importPath || s.busy} data-testid="import-asset">
+                  <Upload size={14} />
+                </button>
+                <button className="btn px-1.5" title="Browse…" onClick={() => void pickAssetToImport()} disabled={s.busy} data-testid="browse-asset">
+                  <FolderSearch size={14} />
+                </button>
+              </span>
+            </Field>
+          )}
           {s.project && (
             <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-xs text-jd-fg-2">
               <dt>id</dt>

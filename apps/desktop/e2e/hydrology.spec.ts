@@ -2,26 +2,12 @@ import { expect, test } from "@playwright/test";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, installBridge } from "./bridge";
+import { connectCore, installBridge, wire } from "./bridge";
 
 const NOISE = "01JDGRAPH000000000000N01SE"; // starter graph ids (jd_graph::nodes)
 const HEIGHT = "01JDGRAPH0000000000HE1GHT0";
 
 /** Drag from a node's source handle to another node's target handle (graph.connect). */
-async function wire(page: import("@playwright/test").Page, from: import("@playwright/test").Locator, to: import("@playwright/test").Locator, fromHandle = "out") {
-  const src = from.locator(`.react-flow__handle.source[data-handleid="${fromHandle}"]`);
-  const dst = to.locator(".react-flow__handle.target");
-  await dst.hover();
-  await src.hover();
-  const a = await src.boundingBox();
-  const b = await dst.boundingBox();
-  if (!a || !b) throw new Error("handles not laid out");
-  await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 10 });
-  await page.mouse.up();
-}
-
 test.describe("hydrology nodes against the real core", () => {
   let ws: string;
   test.beforeEach(() => {
