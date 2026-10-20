@@ -19,6 +19,7 @@ fastnoise-lite = "1.1"
 exr = "1.74"
 smallvec = "1"
 image = { version = "0.25", default-features = false, features = ["png"] }
+png = "0.17" # the streaming 16-bit writer; the same crate `image` already pulls in
 blake3.workspace = true
 tiff = "0.11.3"
 flate2 = "1" # zlib arrays in FBX files (already in the tree via png/tiff)

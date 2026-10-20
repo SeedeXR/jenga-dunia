@@ -239,22 +239,35 @@ pub fn export_heightmap_geo(
             fs::metadata(path)?.len()
         }
         HeightmapFormat::Png16 => {
-            let q = quantise_rows(hf, flip, range);
-            let img = image::ImageBuffer::<image::Luma<u16>, Vec<u16>>::from_raw(w, h, q)
-                .ok_or_else(|| JdError::new(ErrorCode::E_INTERNAL, "PNG buffer size mismatch"))?;
-            img.save_with_format(path, image::ImageFormat::Png)
-                .map_err(|e| {
-                    JdError::new(ErrorCode::E_SERIALIZE, format!("PNG write failed: {e}"))
-                        .detail("path", path.display().to_string())
-                })?;
+            // Streamed through the png crate: no u16 plane, no encoder-side copy of it.
+            let png_err = |e: png::EncodingError| {
+                JdError::new(ErrorCode::E_SERIALIZE, format!("PNG write failed: {e}"))
+                    .detail("path", path.display().to_string())
+            };
+            let file = std::io::BufWriter::with_capacity(1 << 20, fs::File::create(path)?);
+            let mut enc = png::Encoder::new(file, w, h);
+            enc.set_color(png::ColorType::Grayscale);
+            enc.set_depth(png::BitDepth::Sixteen);
+            let mut writer = enc.write_header().map_err(png_err)?;
+            let mut stream = writer.stream_writer().map_err(png_err)?;
+            let mut bytes = vec![0u8; 2 * w as usize];
+            for_each_row_quantised(hf, flip, range, |q| {
+                for (b, v) in bytes.as_chunks_mut::<2>().0.iter_mut().zip(q) {
+                    *b = v.to_be_bytes();
+                }
+                stream.write_all(&bytes)
+            })?;
+            stream.finish().map_err(png_err)?;
             fs::metadata(path)?.len()
         }
         HeightmapFormat::RawR16 => {
-            let q = quantise_rows(hf, flip, range);
             let mut out = std::io::BufWriter::with_capacity(1 << 20, fs::File::create(path)?);
-            for v in q {
-                out.write_all(&v.to_le_bytes())?;
-            }
+            for_each_row_quantised(hf, flip, range, |q| {
+                for v in q {
+                    out.write_all(&v.to_le_bytes())?;
+                }
+                Ok(())
+            })?;
             finish(out)?;
             fs::metadata(path)?.len()
         }
@@ -353,16 +366,21 @@ fn quantise(data: &[f32], range: [f32; 2]) -> Vec<u16> {
         .collect()
 }
 
-/// [`quantise`] straight from the field's rows (top row first when `flip`), without the f32 copy.
-fn quantise_rows(hf: &Heightfield, flip: bool, range: [f32; 2]) -> Vec<u16> {
+/// [`quantise`] one row at a time straight from the field (top row first when `flip`), so a
+/// 16-bit export never holds a whole plane: a 16k² layer would be 512 MB of u16 alone.
+fn for_each_row_quantised(
+    hf: &Heightfield,
+    flip: bool,
+    range: [f32; 2],
+    mut f: impl FnMut(&[u16]) -> std::io::Result<()>,
+) -> JdResult<()> {
     let (w, h) = (hf.width(), hf.height());
-    let mut out = Vec::with_capacity((w as usize) * (h as usize));
     let mut row = vec![0.0f32; w as usize];
     for y in 0..h {
         hf.row(if flip { h - 1 - y } else { y }, &mut row);
-        out.extend(quantise(&row, range));
+        f(&quantise(&row, range))?;
     }
-    out
+    Ok(())
 }
 
 fn finish(out: std::io::BufWriter<fs::File>) -> JdResult<()> {
