@@ -26,5 +26,6 @@ pub use mesh::{MeshExportReport, auto_step, export_glb};
 pub use noise::{FractalKind, NoiseKind, NoiseParams, generate_noise};
 pub use sculpt::{Stroke, StrokeMode, apply_strokes};
 pub use sim::{
-    HydraulicParams, HydraulicResult, THERMAL_MAX_RATE, hydraulic_erode, slope_mask, thermal_erode,
+    HydraulicParams, HydraulicResult, StreamPowerParams, THERMAL_MAX_RATE, hydraulic_erode,
+    slope_mask, stream_power_erode, thermal_erode,
 };

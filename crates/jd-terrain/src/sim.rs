@@ -442,6 +442,75 @@ pub fn slope_mask(h: &Heightfield, spacing_m: [f32; 2], max_deg: f32) -> JdResul
 mod tests {
     use super::*;
 
+    #[test]
+    fn stream_power_incises_channels_keeps_slopes_non_negative_and_uplifts_uniformly() {
+        // Tilted plane with a central valley: the valley line collects the most area.
+        let mut h = Heightfield::new(48, 32, 64, 0).expect("hf");
+        h.fill_with(|x, y| 200.0 + y as f32 * 2.0 + (x as f32 - 24.0).abs() * 1.5);
+        let p = StreamPowerParams {
+            k: 5e-4,
+            m: 0.5,
+            uplift_m: 0.0,
+            iterations: 10,
+            method: crate::flow::FlowMethod::D8,
+        };
+        let out = stream_power_erode(&h, [10.0, 10.0], &p, None).expect("erode");
+        let valley_drop = h.get(24, 12) - out.get(24, 12);
+        let slope_drop = h.get(4, 12) - out.get(4, 12);
+        assert!(valley_drop > 0.0, "valley incised: {valley_drop}");
+        assert!(
+            valley_drop > 5.0 * slope_drop.max(1e-6),
+            "channels erode much faster than hillslopes: {valley_drop} vs {slope_drop}"
+        );
+        // Implicit scheme: every cell stays at or above its steepest-descent receiver.
+        let v = out.to_vec();
+        let recv = crate::flow::d8_receivers(&h.to_vec(), 48, 32, [10.0, 10.0]);
+        for (i, r) in recv.iter().enumerate() {
+            if let Some(j) = r {
+                assert!(
+                    v[i] >= v[*j as usize] - 1e-4,
+                    "cell {i} fell below its receiver"
+                );
+            }
+        }
+        // k = 0 with uplift raises the whole field by exactly uplift × iterations.
+        let lifted = stream_power_erode(
+            &h,
+            [10.0, 10.0],
+            &StreamPowerParams {
+                k: 0.0,
+                uplift_m: 0.5,
+                iterations: 4,
+                ..p.clone()
+            },
+            None,
+        )
+        .expect("uplift");
+        assert!((lifted.get(10, 10) - h.get(10, 10) - 2.0).abs() < 1e-4);
+        // Deterministic; invalid params and cancellation are refused.
+        let again = stream_power_erode(&h, [10.0, 10.0], &p, None).expect("again");
+        assert_eq!(out.content_hash(), again.content_hash());
+        assert!(
+            stream_power_erode(
+                &h,
+                [10.0, 10.0],
+                &StreamPowerParams {
+                    m: 3.0,
+                    ..p.clone()
+                },
+                None
+            )
+            .is_err()
+        );
+        let flag = AtomicBool::new(true);
+        assert_eq!(
+            stream_power_erode(&h, [10.0, 10.0], &p, Some(&flag))
+                .err()
+                .map(|e| e.code),
+            Some(jd_types::ErrorCode::E_CANCELLED)
+        );
+    }
+
     fn sum(h: &Heightfield) -> f64 {
         h.to_vec().iter().map(|&v| v as f64).sum()
     }
@@ -649,4 +718,105 @@ mod tests {
             0
         );
     }
+}
+
+/// Stream-power (detachment-limited fluvial) erosion parameters.
+#[derive(Debug, Clone, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StreamPowerParams {
+    /// Erodibility K: metres of incision per step for unit drainage area and unit slope
+    /// (`dz = -K·A^m·S`, A in m², S dimensionless). 1e-3 carves visible valleys on a 5 km world
+    /// in 20 steps; 1e-4 is subtle, 1e-2 is a badlands.
+    #[serde(default = "sp_k")]
+    pub k: f32,
+    /// Area exponent m (0.3–0.6 in nature; n is fixed at 1 for the implicit solve).
+    #[serde(default = "sp_m")]
+    pub m: f32,
+    /// Uniform uplift per step in metres (0 = none); outlets rise too, so base level is kept.
+    #[serde(default)]
+    pub uplift_m: f32,
+    /// Steps (1..=1000).
+    #[serde(default = "sp_iterations")]
+    pub iterations: u32,
+    /// Flow routing used for the drainage area.
+    #[serde(default)]
+    pub method: crate::flow::FlowMethod,
+}
+fn sp_k() -> f32 {
+    1e-3
+}
+fn sp_m() -> f32 {
+    0.5
+}
+fn sp_iterations() -> u32 {
+    20
+}
+
+/// Stream-power erosion (Howard 1994) with the implicit, unconditionally stable scheme of
+/// Braun & Willett 2013: cells are solved from the outlets upstream along steepest descent,
+/// `h' = (h + U + f·h'_recv) / (1 + f)` with `f = K·A^m / dist`, so a cell never drops below
+/// its receiver and no CFL limit applies. Drainage area comes from [`crate::flow_accumulation_with`]
+/// with the chosen method; outlets (no lower neighbour) only receive uplift.
+///
+/// ponytail: n = 1 (linear in slope) keeps the per-cell solve closed-form; n ≠ 1 needs a Newton
+/// iteration per cell. Hillslope diffusion is the thermal node's job.
+pub fn stream_power_erode(
+    h: &Heightfield,
+    spacing_m: [f32; 2],
+    p: &StreamPowerParams,
+    cancel: Option<&AtomicBool>,
+) -> JdResult<Heightfield> {
+    if !(p.k >= 0.0 && p.k.is_finite()) {
+        return Err(JdError::invalid("k", "must be finite and ≥ 0"));
+    }
+    if !(0.0..=2.0).contains(&p.m) {
+        return Err(JdError::invalid("m", "must be within 0..=2"));
+    }
+    if !p.uplift_m.is_finite() {
+        return Err(JdError::invalid("uplift_m", "must be finite"));
+    }
+    if !(1..=1000).contains(&p.iterations) {
+        return Err(JdError::invalid("iterations", "must be within 1..=1000"));
+    }
+    if !spacing_m.iter().all(|s| *s > 0.0 && s.is_finite()) {
+        return Err(JdError::invalid(
+            "spacing_m",
+            "sample spacing must be positive",
+        ));
+    }
+    h.validate_finite()?;
+    let (w, hh) = (h.width() as usize, h.height() as usize);
+    let cell_area = spacing_m[0] * spacing_m[1];
+    let dist = neighbour_dist(spacing_m);
+    let mut cur = h.clone();
+    let mut order: Vec<u32> = (0..(w * hh) as u32).collect();
+    for _ in 0..p.iterations {
+        check_cancel(cancel)?;
+        let v = cur.to_vec();
+        let acc = crate::flow::flow_accumulation_with(&cur, spacing_m, false, p.method)?.to_vec();
+        let recv = crate::flow::d8_receivers(&v, w, hh, spacing_m);
+        // Ascending height: a receiver is always lower, so it is solved before its donors.
+        order.par_sort_unstable_by(|a, b| v[*a as usize].total_cmp(&v[*b as usize]).then(a.cmp(b)));
+        let mut next = v.clone();
+        for &i in &order {
+            let i = i as usize;
+            match recv[i] {
+                None => next[i] = v[i] + p.uplift_m,
+                Some(j) => {
+                    let j = j as usize;
+                    let (xi, yi) = ((i % w) as i64, (i / w) as i64);
+                    let (xj, yj) = ((j % w) as i64, (j / w) as i64);
+                    let k = NEIGHBOURS
+                        .iter()
+                        .position(|(dx, dy)| xi + dx == xj && yi + dy == yj)
+                        .unwrap_or(4);
+                    let f = p.k * (acc[i] * cell_area).powf(p.m) / dist[k];
+                    next[i] = (v[i] + p.uplift_m + f * next[j]) / (1.0 + f);
+                }
+            }
+        }
+        cur.fill_with(|x, y| next[y as usize * w + x as usize]);
+    }
+    check_cancel(cancel)?;
+    Ok(cur)
 }

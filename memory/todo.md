@@ -50,7 +50,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [ ] Viewport terrain LOD + PBR + sky
 
 ## Phase 3 — Simulation
-- [~] Thermal ✔ (CPU Jacobi, `jd.erosion.thermal@1`, mass-conserving; GPU/tile-local ☐) · hydraulic (grid/virtual pipes) ✔ (`jd.erosion.hydraulic@1`, CPU, closed boundary, concentration cap ✔; drains/layers/GPU ☐) · hydraulic (particle) ☐ · stream-power ☐ · wind ☐ · coastal ☐ · snow ☐
+- [~] Thermal ✔ (CPU Jacobi, `jd.erosion.thermal@1`, mass-conserving; GPU/tile-local ☐) · hydraulic (grid/virtual pipes) ✔ (`jd.erosion.hydraulic@1`, CPU, closed boundary, concentration cap ✔; drains/layers/GPU ☐) · hydraulic (particle) ☐ · stream-power ✔ (`jd.erosion.stream_power@1`, implicit, D8/D∞/MFD area, uplift; 2048² × 20 ≈ 4 s release) · wind ☐ · coastal ☐ · snow ☐
 - [~] Hydrology: D8 flow accumulation ✔ (`jd.analysis.flow@1`), priority-flood fill ✔ (`jd.hydrology.fill@1`, outputs drainable field + `lakes`), rivers ✔ (`jd.hydrology.rivers@1`: fill → D8 accumulation → smoothstep incision, `rivers` mask); TWI ✔ (`jd.hydrology.wetness@1`); D∞ ✔ + MFD ✔ (`method: d8|dinf|mfd` on flow + rivers nodes; wetness D8-only); sea level ✔ (`jd.hydrology.sea_level@1`: border-connected `ocean` + `depth`); viewport sea plane ✔ (follows the sea_level node); hydrology-first generation ☐
 - [ ] Biomes + scatter + instance export
 - [ ] Weather state, timeline, water/ocean viewport

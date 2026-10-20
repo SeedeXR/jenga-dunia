@@ -175,6 +175,90 @@
     }
   },
   {
+    "kind": "jd.erosion.stream_power@1",
+    "description": "Fluvial (stream-power) erosion: channels incise in proportion to drainage area^m × slope, implicit and unconditionally stable; outputs the eroded terrain and an `incision` depth map",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "incision",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "StreamPowerParams",
+      "description": "Stream-power (detachment-limited fluvial) erosion parameters.",
+      "type": "object",
+      "properties": {
+        "k": {
+          "description": "Erodibility K: metres of incision per step for unit drainage area and unit slope\n(`dz = -K·A^m·S`, A in m², S dimensionless). 1e-3 carves visible valleys on a 5 km world\nin 20 steps; 1e-4 is subtle, 1e-2 is a badlands.",
+          "type": "number",
+          "format": "float",
+          "default": 0.0010000000474974513
+        },
+        "m": {
+          "description": "Area exponent m (0.3–0.6 in nature; n is fixed at 1 for the implicit solve).",
+          "type": "number",
+          "format": "float",
+          "default": 0.5
+        },
+        "uplift_m": {
+          "description": "Uniform uplift per step in metres (0 = none); outlets rise too, so base level is kept.",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        },
+        "iterations": {
+          "description": "Steps (1..=1000).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 20
+        },
+        "method": {
+          "description": "Flow routing used for the drainage area.",
+          "$ref": "#/$defs/FlowMethod",
+          "default": "d8"
+        }
+      },
+      "additionalProperties": false,
+      "$defs": {
+        "FlowMethod": {
+          "description": "Flow routing method.",
+          "oneOf": [
+            {
+              "description": "Single steepest neighbour (O'Callaghan & Mark 1984): fast, 45° quantised.",
+              "type": "string",
+              "const": "d8"
+            },
+            {
+              "description": "Tarboton 1997: steepest of eight triangular facets, flow split between its two neighbours.",
+              "type": "string",
+              "const": "dinf"
+            },
+            {
+              "description": "Freeman 1991 multiple-flow-direction: flow shared among all lower neighbours in proportion\nto slope^1.1 — the most diffuse (hillslope wash, wetness); streams come out wide.",
+              "type": "string",
+              "const": "mfd"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
     "kind": "jd.erosion.thermal@1",
     "description": "Thermal erosion: material steeper than the talus angle slides downhill (mass-conserving Jacobi steps)",
     "inputs": [

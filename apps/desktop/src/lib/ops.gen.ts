@@ -865,6 +865,21 @@ export type NodeParams_jd_erosion_hydraulic_1 = {
   "max_concentration"?: number;
 };
 
+export type NodeParams_jd_erosion_stream_power_1 = {
+  /** Erodibility K: metres of incision per step for unit drainage area and unit slope
+(`dz = -K·A^m·S`, A in m², S dimensionless). 1e-3 carves visible valleys on a 5 km world
+in 20 steps; 1e-4 is subtle, 1e-2 is a badlands. */
+  "k"?: number;
+  /** Area exponent m (0.3–0.6 in nature; n is fixed at 1 for the implicit solve). */
+  "m"?: number;
+  /** Uniform uplift per step in metres (0 = none); outlets rise too, so base level is kept. */
+  "uplift_m"?: number;
+  /** Steps (1..=1000). */
+  "iterations"?: number;
+  /** Flow routing used for the drainage area. */
+  "method"?: FlowMethod;
+};
+
 export type NodeParams_jd_erosion_thermal_1 = {
   /** Angle of repose in degrees (sand ≈ 30–35, scree ≈ 35–40). */
   "talus_deg"?: number;
@@ -1059,6 +1074,7 @@ export interface NodeKinds {
   "jd.analysis.flow@1": NodeParams_jd_analysis_flow_1;
   "jd.analysis.slope@1": NodeParams_jd_analysis_slope_1;
   "jd.erosion.hydraulic@1": NodeParams_jd_erosion_hydraulic_1;
+  "jd.erosion.stream_power@1": NodeParams_jd_erosion_stream_power_1;
   "jd.erosion.thermal@1": NodeParams_jd_erosion_thermal_1;
   "jd.filter.blur@1": NodeParams_jd_filter_blur_1;
   "jd.hydrology.fill@1": NodeParams_jd_hydrology_fill_1;

@@ -53,6 +53,7 @@ Processing time (wall, per stage), **peak RSS**, GPU memory peak, CPU utilisatio
 | 2026-10-20 | `jd.erosion.thermal@1`, 2048² × 50 steps, after fBm noise | release `jd op graph.evaluate` (CPU, rayon, flat two-pass Jacobi) | thermal 887 ms, noise 64 ms, total 952 ms; process 0.98 s wall, 130 MB peak RSS; 512² × 50 steps 62–68 ms | `crates/jd-terrain/src/sim.rs`; graph `noise → thermal → output`; `memory/handover_session.md` 02:10 |
 | 2026-10-20 | same | `jd.erosion.hydraulic@1` (virtual pipes, 100 steps, closed boundary) after fBm noise, release `jd op graph.evaluate` | 512²: erosion 171 ms (total 214 ms); 2048²: erosion 2.10 s (total 2.16 s, 2.19 s wall) | 369 MB at 2048² (≈ 40 B/cell scratch) | `crates/jd-terrain/src/sim.rs`; terrain + suspended sediment conserved (mean 254.2 → 254.2 at 512²) |
 
+| 2026-10-20 | same | `jd.erosion.stream_power@1`, 2048² × 20 steps (D8, release `jd op graph.evaluate`) | 4.00 s node time (noise 56 ms); 4.17 s wall | 321 MB | `crates/jd-terrain/src/sim.rs::stream_power_erode`; implicit Braun–Willett solve + one flow-accumulation sort per step (~200 ms/step at 2048²) |
 | 2026-10-20 | same | `jd diag bench s1` (S1-small-interactive: 1024² fBm + ridged + add + thermal×50, release) | fbm 30–47 ms, ridged 25–28 ms, add 1.6 ms, thermal 206–251 ms; total 283–308 ms (2 runs). 2048²: total 1.07 s | 43–44 MB (141 MB at 2048²) | `crates/jd-core/src/diag.rs::bench`; same content hash on both runs (deterministic); CI runs it on every push on the three OSes as a smoke with a 15 s / 1 GB budget |
 
 ## Regression policy

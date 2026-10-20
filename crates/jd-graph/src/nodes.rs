@@ -4,10 +4,10 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use jd_terrain::{
-    FlowMethod, ForeignImport, Heightfield, HydraulicParams, NoiseParams, Stroke, THERMAL_MAX_RATE,
-    apply_strokes, carve_rivers, fill_depressions, flow_accumulation_with, generate_noise,
-    hydraulic_erode, read_foreign, resample_to_world, sea_level, slope_mask, thermal_erode,
-    wetness_index,
+    FlowMethod, ForeignImport, Heightfield, HydraulicParams, NoiseParams, StreamPowerParams,
+    Stroke, THERMAL_MAX_RATE, apply_strokes, carve_rivers, fill_depressions,
+    flow_accumulation_with, generate_noise, hydraulic_erode, read_foreign, resample_to_world,
+    sea_level, slope_mask, stream_power_erode, thermal_erode, wetness_index,
 };
 use jd_types::{JdError, JdResult};
 use rayon::prelude::*;
@@ -429,6 +429,20 @@ pub fn register_all(r: &mut Registry) {
             Ok(out("out", thermal_erode(
                     field(i, "in")?,
                     spacing_m(ctx), tp.talus_deg, tp.iterations, tp.rate, Some(&ctx.cancel))?))
+        },
+    ));
+    r.register(NodeDef::new::<StreamPowerParams, _>(
+        "jd.erosion.stream_power@1",
+        "Fluvial (stream-power) erosion: channels incise in proportion to drainage area^m × slope, implicit and unconditionally stable; outputs the eroded terrain and an `incision` depth map",
+        vec![port("in", PortType::Heightfield, true)],
+        vec![port("out", PortType::Heightfield, false), port("incision", PortType::Heightfield, false)],
+        |ctx, p, i| {
+            let sp: StreamPowerParams = params(p)?;
+            let input = field(i, "in")?;
+            let eroded = stream_power_erode(input, spacing_m(ctx), &sp, Some(&ctx.cancel))?;
+            let mut incision = eroded.clone();
+            incision.fill_with(|x, y| (input.get(x, y) - eroded.get(x, y)).max(0.0));
+            Ok(BTreeMap::from([("out".to_owned(), Value::field(eroded)), ("incision".to_owned(), Value::field(incision))]))
         },
     ));
     r.register(NodeDef::new::<SlopeParams, _>(
