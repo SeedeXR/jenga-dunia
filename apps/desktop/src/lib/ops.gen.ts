@@ -846,6 +846,23 @@ export type NodeParams_jd_analysis_slope_1 = {
   "max_deg"?: number;
 };
 
+export type BiomeRule = {
+  /** Display name (e.g. "alpine meadow"). */
+  "name": string;
+  /** Height band in metres [min, max). */
+  "height_m"?: [number, number] | null;
+  /** Slope band in 0..1 (the `jd.analysis.slope@1` scale, 1 = 90°) [min, max). */
+  "slope"?: [number, number] | null;
+  /** Wetness band in 0..1 (the `jd.hydrology.wetness@1` index) [min, max). */
+  "wetness"?: [number, number] | null;
+};
+
+export type NodeParams_jd_biome_classify_1 = {
+  /** Rules in priority order; class ids are 1-based positions, 0 = unclassified. Empty = a
+temperate default set (beach, grassland, forest, rock, snow). */
+  "rules"?: BiomeRule[];
+};
+
 export type NodeParams_jd_erosion_hydraulic_1 = {
   /** Simulation steps (1..=2000). */
   "iterations"?: number;
@@ -929,6 +946,11 @@ export type NodeParams_jd_input_heightmap_1 = {
   /** Sample value meaning "no data" (filled with the lowest valid height). Default: the GeoTIFF
 `GDAL_NODATA` tag when present, otherwise none; non-finite samples are always treated as nodata. */
   "nodata"?: number | null;
+};
+
+export type NodeParams_jd_mask_class_1 = {
+  /** Class id to select (1-based rule position from `jd.biome.classify@1`). */
+  "id": number;
 };
 
 export type NodeParams_jd_math_add_1 = Record<string, unknown>;
@@ -1073,6 +1095,7 @@ export type OpId = keyof JdOps;
 export interface NodeKinds {
   "jd.analysis.flow@1": NodeParams_jd_analysis_flow_1;
   "jd.analysis.slope@1": NodeParams_jd_analysis_slope_1;
+  "jd.biome.classify@1": NodeParams_jd_biome_classify_1;
   "jd.erosion.hydraulic@1": NodeParams_jd_erosion_hydraulic_1;
   "jd.erosion.stream_power@1": NodeParams_jd_erosion_stream_power_1;
   "jd.erosion.thermal@1": NodeParams_jd_erosion_thermal_1;
@@ -1082,6 +1105,7 @@ export interface NodeKinds {
   "jd.hydrology.sea_level@1": NodeParams_jd_hydrology_sea_level_1;
   "jd.hydrology.wetness@1": NodeParams_jd_hydrology_wetness_1;
   "jd.input.heightmap@1": NodeParams_jd_input_heightmap_1;
+  "jd.mask.class@1": NodeParams_jd_mask_class_1;
   "jd.math.add@1": NodeParams_jd_math_add_1;
   "jd.math.multiply@1": NodeParams_jd_math_multiply_1;
   "jd.math.remap@1": NodeParams_jd_math_remap_1;

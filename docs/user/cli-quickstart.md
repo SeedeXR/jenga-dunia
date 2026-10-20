@@ -192,6 +192,24 @@ $ jd op graph.add_node --project Sp.jdproj --save --params '{"kind":"jd.output.h
 
 `jd.erosion.stream_power@1` is the river-carving law from geomorphology: each step lowers a cell by `K · A^m · S` where `A` is its drainage area (from `method`: d8, dinf or mfd) and `S` the slope to its steepest neighbour, solved implicitly from the outlets upstream so it is unconditionally stable — a cell never drops below its receiver, however large `K` or the step count. `uplift_m` raises the whole field per step (outlets included) for steady-state landscapes. On this 512² world (10 m cells, `k` 0.002, 20 steps, MFD) the incision map peaks at 10.4 m (mean 0.5 m) along the drainage network; 2048² × 20 steps takes 4.0 s and 321 MB in a release build (each step re-sorts the field for the drainage area). Pair it with `jd.erosion.thermal@1` for hillslope diffusion.
 
+### Biomes from rules
+
+```
+$ jd op graph.add_node --project Bio.jdproj --save --params '{"kind":"jd.analysis.slope@1"}'
+$ jd op graph.add_node --project Bio.jdproj --save --params '{"kind":"jd.biome.classify@1","params":{"rules":[
+    {"name":"rock","slope":[0.6,2.0]},
+    {"name":"snow","height_m":[900,1e9]},
+    {"name":"beach","height_m":[-1e9,5]},
+    {"name":"grassland","height_m":[5,300]},
+    {"name":"forest","height_m":[300,900]}]}}'
+$ jd op graph.add_node --project Bio.jdproj --save --params '{"kind":"jd.mask.class@1","params":{"id":1}}'   # rock mask
+# noise.out → slope.in; noise.out → classify.height; slope.out → classify.slope; classify.biome → mask.classes
+```
+
+![Biome map of a 512² world: grey rock on steep slopes, white snow above 900 m, light and dark green for grassland and forest](images/cli-biomes.png)
+
+`jd.biome.classify@1` tries its rules in order on every cell — each rule is a set of half-open ranges on `height_m`, `slope` (the 0..1 steepness from `jd.analysis.slope@1`) and `wetness` (`jd.hydrology.wetness@1`); the first match gives the cell that rule's 1-based id, 0 means no rule matched, and a rule that mentions an input you have not connected never matches. With no rules the temperate default above is used. `jd.mask.class@1 {id}` turns one class into a 0/1 mask for materials, scatter or export. On the 512² world shown (heights −50..1200 m): rock 21.6 %, snow 4.4 %, grassland 7.2 %, forest 66.8 %; classify took 61 ms (debug). Inspector note: the rules list shows as a count in the desktop for now — edit it through the CLI/MCP until the rules editor lands.
+
 ### Bring in a real DEM or engine heightmap
 
 ```
@@ -277,7 +295,7 @@ $ jd --json op graph.evaluate --project K.jdproj
 
 (2048² world, 50 steps, release build on the M-series reference Mac: 0.98 s wall, 130 MB peak RSS; 512² takes ~65 ms.) Material steeper than `talus_deg` slides to lower neighbours; the step is mass-conserving, so `terrain.stats` reports the same mean before and after.
 
-Built-in kinds today: `jd.noise.fbm@1`, `jd.math.add@1`, `jd.math.multiply@1`, `jd.math.scale@1`, `jd.math.remap@1`, `jd.filter.blur@1`, `jd.erosion.thermal@1` (talus angle, iterations, rate — mass-conserving; 2048² × 50 steps ≈ 0.9 s release), `jd.analysis.slope@1` (0..1 steepness mask; multiply it into a layer to attenuate by slope), `jd.erosion.hydraulic@1` (virtual-pipe shallow water with conservative sediment transport; outputs `out`, `water`, `sediment`; 2048² × 100 steps ≈ 2.1 s release), `jd.erosion.stream_power@1` (fluvial incision ∝ drainage area^m × slope, implicit/unconditionally stable, `k`/`m`/`uplift_m`/`iterations`/`method`; outputs `out` and `incision`; 2048² × 20 steps ≈ 4.0 s release), `jd.sculpt.strokes@1` (brush strokes as data: `points` in layer metres, `radius_m`, `mode` raise/smooth/flatten with `strength_m` or `amount`; cost is independent of brush size — a 600 m smooth stroke on 2048² takes 0.7 s in a debug build, down from 70 s), `jd.analysis.flow@1` (flow accumulation, `method` d8 / dinf / mfd, log-scaled 0..1 — rivers/wetness), `jd.hydrology.fill@1` (priority-flood depression filling; outputs the drainable field and `lakes` depth), `jd.hydrology.rivers@1` (carves channels where flow accumulates; outputs carved terrain and a `rivers` mask), `jd.hydrology.wetness@1` (topographic wetness index 0..1 for moisture/biome masks), `jd.hydrology.sea_level@1` (`ocean` mask below `level_m`, border-connected only so inland basins stay dry, soft `shore_m` edge; `depth` in metres), `jd.input.heightmap@1` (a PNG-16/EXR/TIFF/RAW file from the project's `assets/`, resampled onto the world; `project.import_asset` copies files in), `jd.output.height@1`.
+Built-in kinds today: `jd.noise.fbm@1`, `jd.math.add@1`, `jd.math.multiply@1`, `jd.math.scale@1`, `jd.math.remap@1`, `jd.filter.blur@1`, `jd.erosion.thermal@1` (talus angle, iterations, rate — mass-conserving; 2048² × 50 steps ≈ 0.9 s release), `jd.analysis.slope@1` (0..1 steepness mask; multiply it into a layer to attenuate by slope), `jd.erosion.hydraulic@1` (virtual-pipe shallow water with conservative sediment transport; outputs `out`, `water`, `sediment`; 2048² × 100 steps ≈ 2.1 s release), `jd.erosion.stream_power@1` (fluvial incision ∝ drainage area^m × slope, implicit/unconditionally stable, `k`/`m`/`uplift_m`/`iterations`/`method`; outputs `out` and `incision`; 2048² × 20 steps ≈ 4.0 s release), `jd.sculpt.strokes@1` (brush strokes as data: `points` in layer metres, `radius_m`, `mode` raise/smooth/flatten with `strength_m` or `amount`; cost is independent of brush size — a 600 m smooth stroke on 2048² takes 0.7 s in a debug build, down from 70 s), `jd.analysis.flow@1` (flow accumulation, `method` d8 / dinf / mfd, log-scaled 0..1 — rivers/wetness), `jd.hydrology.fill@1` (priority-flood depression filling; outputs the drainable field and `lakes` depth), `jd.hydrology.rivers@1` (carves channels where flow accumulates; outputs carved terrain and a `rivers` mask), `jd.hydrology.wetness@1` (topographic wetness index 0..1 for moisture/biome masks), `jd.hydrology.sea_level@1` (`ocean` mask below `level_m`, border-connected only so inland basins stay dry, soft `shore_m` edge; `depth` in metres), `jd.biome.classify@1` (ordered rules on height / slope / wetness → class-id map; default temperate set), `jd.mask.class@1` (0/1 mask of one class — feed materials and scatter), `jd.input.heightmap@1` (a PNG-16/EXR/TIFF/RAW file from the project's `assets/`, resampled onto the world; `project.import_asset` copies files in), `jd.output.height@1`.
 
 ## 6. Diagnostics
 

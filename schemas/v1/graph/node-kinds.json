@@ -90,6 +90,107 @@
     }
   },
   {
+    "kind": "jd.biome.classify@1",
+    "description": "Classify every cell into a biome by ordered rules on height, slope (0..1) and wetness (0..1); outputs the class id map (1-based rule index, 0 = none)",
+    "inputs": [
+      {
+        "name": "height",
+        "ty": "heightfield",
+        "required": true
+      },
+      {
+        "name": "slope",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "wetness",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "name": "biome",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "BiomeParams",
+      "type": "object",
+      "properties": {
+        "rules": {
+          "description": "Rules in priority order; class ids are 1-based positions, 0 = unclassified. Empty = a\ntemperate default set (beach, grassland, forest, rock, snow).",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BiomeRule"
+          }
+        }
+      },
+      "additionalProperties": false,
+      "$defs": {
+        "BiomeRule": {
+          "description": "One biome rule: every given range must hold; a range on an input that is not connected\nnever matches. Rules are tried in order; the first match wins.",
+          "type": "object",
+          "properties": {
+            "name": {
+              "description": "Display name (e.g. \"alpine meadow\").",
+              "type": "string"
+            },
+            "height_m": {
+              "description": "Height band in metres [min, max).",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "minItems": 2,
+              "maxItems": 2,
+              "default": null
+            },
+            "slope": {
+              "description": "Slope band in 0..1 (the `jd.analysis.slope@1` scale, 1 = 90°) [min, max).",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "minItems": 2,
+              "maxItems": 2,
+              "default": null
+            },
+            "wetness": {
+              "description": "Wetness band in 0..1 (the `jd.hydrology.wetness@1` index) [min, max).",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "minItems": 2,
+              "maxItems": 2,
+              "default": null
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "name"
+          ]
+        }
+      }
+    }
+  },
+  {
     "kind": "jd.erosion.hydraulic@1",
     "description": "Hydraulic erosion (virtual pipes / shallow water): rain flows downhill, dissolves, carries and deposits sediment; outputs terrain, water depth and suspended sediment",
     "inputs": [
@@ -579,6 +680,41 @@
       "additionalProperties": false,
       "required": [
         "path"
+      ]
+    }
+  },
+  {
+    "kind": "jd.mask.class@1",
+    "description": "0/1 mask of the cells whose class id equals `id` (feed a `jd.biome.classify@1` map)",
+    "inputs": [
+      {
+        "name": "classes",
+        "ty": "heightfield",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ClassMaskParams",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Class id to select (1-based rule position from `jd.biome.classify@1`).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id"
       ]
     }
   },

@@ -215,6 +215,56 @@ struct SculptParams {
     strokes: Vec<Stroke>,
 }
 
+/// One biome rule: every given range must hold; a range on an input that is not connected
+/// never matches. Rules are tried in order; the first match wins.
+#[derive(Clone, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct BiomeRule {
+    /// Display name (e.g. "alpine meadow").
+    name: String,
+    /// Height band in metres [min, max).
+    #[serde(default)]
+    height_m: Option<[f32; 2]>,
+    /// Slope band in 0..1 (the `jd.analysis.slope@1` scale, 1 = 90°) [min, max).
+    #[serde(default)]
+    slope: Option<[f32; 2]>,
+    /// Wetness band in 0..1 (the `jd.hydrology.wetness@1` index) [min, max).
+    #[serde(default)]
+    wetness: Option<[f32; 2]>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct BiomeParams {
+    /// Rules in priority order; class ids are 1-based positions, 0 = unclassified. Empty = a
+    /// temperate default set (beach, grassland, forest, rock, snow).
+    #[serde(default)]
+    rules: Vec<BiomeRule>,
+}
+
+fn default_biome_rules() -> Vec<BiomeRule> {
+    let r = |name: &str, h: Option<[f32; 2]>, s: Option<[f32; 2]>| BiomeRule {
+        name: name.to_owned(),
+        height_m: h,
+        slope: s,
+        wetness: None,
+    };
+    vec![
+        r("rock", None, Some([0.6, 2.0])),
+        r("snow", Some([900.0, f32::MAX]), None),
+        r("beach", Some([f32::MIN, 5.0]), None),
+        r("grassland", Some([5.0, 300.0]), None),
+        r("forest", Some([300.0, 900.0]), None),
+    ]
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ClassMaskParams {
+    /// Class id to select (1-based rule position from `jd.biome.classify@1`).
+    id: u32,
+}
+
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct FlowParams {
@@ -549,6 +599,78 @@ pub fn register_all(r: &mut Registry) {
             Ok(BTreeMap::from([("out".to_owned(), Value::field(filled)), ("lakes".to_owned(), Value::field(lakes))]))
         },
     ));
+    r.register(NodeDef::new::<BiomeParams, _>(
+        "jd.biome.classify@1",
+        "Classify every cell into a biome by ordered rules on height, slope (0..1) and wetness (0..1); outputs the class id map (1-based rule index, 0 = none)",
+        vec![
+            port("height", PortType::Heightfield, true),
+            port("slope", PortType::Heightfield, false),
+            port("wetness", PortType::Heightfield, false),
+        ],
+        vec![port("biome", PortType::Heightfield, false)],
+        |_, p, i| {
+            let bp: BiomeParams = params(p)?;
+            let rules = if bp.rules.is_empty() { default_biome_rules() } else { bp.rules };
+            for (k, rule) in rules.iter().enumerate() {
+                for (what, range) in [("height_m", rule.height_m), ("slope", rule.slope), ("wetness", rule.wetness)] {
+                    if let Some([lo, hi]) = range
+                        && (lo >= hi || lo.is_nan() || hi.is_nan())
+                    {
+                        return Err(JdError::invalid("rules", format!("rule {} ({}): {what} range must have min < max", k + 1, rule.name)));
+                    }
+                }
+            }
+            let h = field(i, "height")?;
+            let slope = i.get("slope").map(|v| v.as_field());
+            let wet = i.get("wetness").map(|v| v.as_field());
+            for (name, f) in [("slope", slope), ("wetness", wet)] {
+                if let Some(f) = f
+                    && (f.width(), f.height()) != (h.width(), h.height())
+                {
+                    return Err(JdError::invalid(name, "field sizes differ from `height`"));
+                }
+            }
+            let within = |v: f32, r: [f32; 2]| v >= r[0] && v < r[1];
+            let mut out_f = Heightfield::new(h.width(), h.height(), h.tile_size(), h.halo())?;
+            out_f.fill_with(|x, y| {
+                let hv = h.get(x, y);
+                for (k, rule) in rules.iter().enumerate() {
+                    let ok_h = rule.height_m.is_none_or(|r| within(hv, r));
+                    let ok_s = match (rule.slope, slope) {
+                        (None, _) => true,
+                        (Some(r), Some(f)) => within(f.get(x, y), r),
+                        (Some(_), None) => false,
+                    };
+                    let ok_w = match (rule.wetness, wet) {
+                        (None, _) => true,
+                        (Some(r), Some(f)) => within(f.get(x, y), r),
+                        (Some(_), None) => false,
+                    };
+                    if ok_h && ok_s && ok_w {
+                        return (k + 1) as f32;
+                    }
+                }
+                0.0
+            });
+            Ok(out("biome", out_f))
+        },
+    ));
+    r.register(NodeDef::new::<ClassMaskParams, _>(
+        "jd.mask.class@1",
+        "0/1 mask of the cells whose class id equals `id` (feed a `jd.biome.classify@1` map)",
+        vec![port("classes", PortType::Heightfield, true)],
+        vec![port("out", PortType::Heightfield, false)],
+        |_, p, i| {
+            let cp: ClassMaskParams = params(p)?;
+            let id = cp.id as f32;
+            Ok(out(
+                "out",
+                map1(field(i, "classes")?, |v| {
+                    if (v - id).abs() < 0.5 { 1.0 } else { 0.0 }
+                })?,
+            ))
+        },
+    ));
     r.register(NodeDef::new::<SeaLevelParams, _>(
         "jd.hydrology.sea_level@1",
         "Ocean mask (1 below `level_m` where connected to the border; inland basins stay dry) with a soft shoreline, and water `depth` in metres",
@@ -704,6 +826,71 @@ mod tests {
                 port: bp.into(),
             },
         });
+    }
+
+    #[test]
+    fn biome_rules_classify_in_order_and_skip_rules_on_missing_inputs() {
+        let reg = Registry::with_builtins();
+        let cache = Cache::with_capacity(0);
+        let mut g = Graph::default();
+        let noise = add(
+            &mut g,
+            "jd.noise.fbm@1",
+            serde_json::json!({ "seed": 3, "height_range_m": [0.0, 1200.0], "feature_size_m": 40.0 }),
+        );
+        let slope = add(&mut g, "jd.analysis.slope@1", serde_json::json!({}));
+        let biome = add(&mut g, "jd.biome.classify@1", serde_json::json!({}));
+        let rock = add(&mut g, "jd.mask.class@1", serde_json::json!({ "id": 1 }));
+        connect(&mut g, &noise, "out", &slope, "in");
+        connect(&mut g, &noise, "out", &biome, "height");
+        connect(&mut g, &biome, "biome", &rock, "classes");
+        // Without the slope input, rule 1 (rock, slope-only) can never match → no cell is class 1.
+        let ev = Evaluator::new(&reg, &cache);
+        let (outs, _) = ev.evaluate_with(&g, &world(), 0, None).expect("eval");
+        let classes = outs[&(biome.clone(), "biome".into())].as_field().to_vec();
+        assert!(
+            classes.iter().all(|c| *c != 1.0),
+            "rock needs the slope input"
+        );
+        assert!(
+            classes.contains(&4.0) && classes.contains(&5.0),
+            "grassland and forest present"
+        );
+        let heights = outs[&(noise.clone(), "out".into())].as_field().to_vec();
+        for (c, h) in classes.iter().zip(&heights) {
+            let expect = if *h >= 900.0 {
+                2.0
+            } else if *h < 5.0 {
+                3.0
+            } else if *h < 300.0 {
+                4.0
+            } else {
+                5.0
+            };
+            assert_eq!(*c, expect, "height {h} → class {c}");
+        }
+        // With slope connected, steep cells become rock (class 1) and the mask picks exactly them.
+        connect(&mut g, &slope, "out", &biome, "slope");
+        let (outs, _) = ev.evaluate_with(&g, &world(), 0, None).expect("eval");
+        let classes = outs[&(biome.clone(), "biome".into())].as_field().to_vec();
+        let steep = outs[&(slope.clone(), "out".into())].as_field().to_vec();
+        let mask = outs[&(rock.clone(), "out".into())].as_field().to_vec();
+        assert!(
+            classes.contains(&1.0),
+            "some cells are steep enough for rock"
+        );
+        for ((c, s), m) in classes.iter().zip(&steep).zip(&mask) {
+            assert_eq!(*c == 1.0, *s >= 0.6, "slope {s} → rock? {c}");
+            assert_eq!(*m == 1.0, *c == 1.0);
+        }
+        // Bad ranges are refused.
+        let bad = add(
+            &mut g,
+            "jd.biome.classify@1",
+            serde_json::json!({ "rules": [{ "name": "x", "height_m": [10.0, 5.0] }] }),
+        );
+        connect(&mut g, &noise, "out", &bad, "height");
+        assert!(ev.evaluate_with(&g, &world(), 0, None).is_err());
     }
 
     #[test]
