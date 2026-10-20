@@ -45,6 +45,9 @@ interface State {
   /** Jobs running in the core (polled while an operation is in flight). */
   jobs: JobInfo[];
   cancelJob: (id: number) => Promise<void>;
+  /** Last diagnostics results shown in the project panel. */
+  diag: { env?: JdOps["diag.env"]["result"]; gc?: JdOps["project.cache_gc"]["result"]; bench?: JdOps["diag.bench"]["result"] };
+  runDiag: (what: "env" | "gc" | "bench") => Promise<void>;
   /** Node selected in the graph editor (also the sculpt target when it is a sculpt node). */
   selectedNode: string | null;
   setSelectedNode: (id: string | null) => void;
@@ -269,6 +272,20 @@ export const useStore = create<State>((set, get) => {
     live: true,
     viewLayer: showLayer,
     jobs: [],
+    diag: {},
+    runDiag: async (what) => {
+      if (what === "env") {
+        const r = await run("diag.env");
+        if (r.status === "ok" && r.result) set((s) => ({ diag: { ...s.diag, env: r.result } }));
+      } else if (what === "gc") {
+        const r = await run("project.cache_gc");
+        if (r.status === "ok" && r.result) set((s) => ({ diag: { ...s.diag, gc: r.result } }));
+      } else {
+        // Small scene so it stays interactive; the CLI's `jd diag bench s1` is the real benchmark.
+        const r = await run("diag.bench", { scene: "s1", size_px: 256 });
+        if (r.status === "ok" && r.result) set((s) => ({ diag: { ...s.diag, bench: r.result } }));
+      }
+    },
     cancelJob: async (id) => {
       await op("jobs.cancel", { id }).catch((e) => logFailure("jobs.cancel", e));
     },

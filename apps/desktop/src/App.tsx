@@ -267,6 +267,47 @@ export default function App() {
               </label>
             </>
           )}
+          <h2 className="mt-4 mb-2 text-[11px] font-semibold tracking-wide text-jd-fg-2 uppercase">Tasks</h2>
+          <ul className="text-xs text-jd-fg-1" data-testid="tasks">
+            {s.jobs.length === 0 && <li className="text-jd-fg-2">no running jobs</li>}
+            {s.jobs.map((j) => (
+              <li key={j.id} className="mb-1 flex items-center justify-between gap-2" data-testid={`task-${j.id}`}>
+                <span className="truncate">
+                  #{j.id} {j.op}
+                  {j.total > 0 ? ` · ${Math.min(j.done + 1, j.total)}/${j.total}` : ""} · {(j.elapsed_ms / 1000).toFixed(1)} s
+                </span>
+                <button className="btn px-1.5 py-0" onClick={() => void s.cancelJob(j.id)} disabled={j.cancelling}>
+                  {j.cancelling ? "…" : "Cancel"}
+                </button>
+              </li>
+            ))}
+          </ul>
+          <h2 className="mt-4 mb-2 text-[11px] font-semibold tracking-wide text-jd-fg-2 uppercase">Diagnostics</h2>
+          <div className="mb-2 flex flex-wrap gap-1">
+            <button className="btn px-1.5 py-0" onClick={() => void s.runDiag("env")} disabled={s.busy} data-testid="diag-env">Environment</button>
+            <button className="btn px-1.5 py-0" onClick={() => void s.runDiag("gc")} disabled={!s.project || s.busy} data-testid="diag-gc">Cache GC</button>
+            <button className="btn px-1.5 py-0" onClick={() => void s.runDiag("bench")} disabled={s.busy} title="S1 scene at 256² with the real kernels; use `jd diag bench s1` for the full benchmark" data-testid="diag-bench">Bench 256²</button>
+          </div>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-xs text-jd-fg-2" data-testid="diag-results">
+            {s.diag.env && (
+              <>
+                <dt>host</dt>
+                <dd className="text-jd-fg-1">{s.diag.env.os} · {s.diag.env.arch} · {s.diag.env.cpus} cpus · {(s.diag.env.memory_total_bytes / 1073741824).toFixed(0)} GB</dd>
+              </>
+            )}
+            {s.diag.gc && (
+              <>
+                <dt>cache</dt>
+                <dd className="text-jd-fg-1">{s.diag.gc.blobs} blobs · {(s.diag.gc.bytes / 1048576).toFixed(1)} MB · evicted {s.diag.gc.evicted_blobs}{s.diag.gc.limit_bytes != null ? ` · limit ${(s.diag.gc.limit_bytes / 1048576).toFixed(0)} MB` : ""}</dd>
+              </>
+            )}
+            {s.diag.bench && (
+              <>
+                <dt>bench</dt>
+                <dd className="text-jd-fg-1">S1 {s.diag.bench.size_px}² {s.diag.bench.profile}: total {s.diag.bench.total_ms.toFixed(0)} ms{s.diag.bench.peak_rss_bytes != null ? ` · ${(s.diag.bench.peak_rss_bytes / 1048576).toFixed(0)} MB` : ""} · {s.diag.bench.stages.map((st) => `${st.name.split(".").pop()} ${st.ms.toFixed(0)}`).join(", ")}</dd>
+              </>
+            )}
+          </dl>
         </aside>
 
         {/* Center: viewport (top) + node graph (bottom, toggle) */}

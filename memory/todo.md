@@ -46,7 +46,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [~] Heightmap export: EXR f32 ✔, PNG16 ✔, RAW r16/r32 ✔ (+ JSON sidecar, flip + range conventions, round-trip tests); TIFF f32 ✔ (`tiff32`); foreign heightmap import ✔ (`jd.input.heightmap@1` + `project.import_asset`; GeoTIFF pixel scale / tie point / nodata ✔, nodata filled with the floor; CRS reprojection ☐ → `jd-geo`); Unity/Unreal size presets (2ⁿ+1) ✔ (project panel preset picker)
 - [~] Stroke sculpt nodes: `jd.sculpt.strokes@1` ✔ (smooth-falloff raise/lower polylines), desktop Sculpt mode ✔ (raycast strokes, brush panel, one undo step per stroke); brush ring cursor ✔; smooth/flatten brushes ✔; per-stroke bbox skip + summed-area smooth (2048², 600 m smooth: 70.5 s → 0.68 s debug) ✔; `graph.append_param` (one journal entry per stroke, linear WAL growth) ✔; stroke files under `strokes/` ☐
 - [~] GLB export ✔ (`terrain.export_mesh` / `jd export mesh`: grid mesh, normals, UVs, PBR material with baked hypsometric albedo texture, `--no-texture`; Khronos validator 0 errors / 0 warnings) + glTF Validator in CI ✔; normal/roughness maps ☐
-- [ ] Node editor UI, generated inspectors, task monitor, diagnostics console
+- [~] Node editor UI ✔, generated inspectors ✔ (incl. table editor), task monitor ✔ (Tasks list + Cancel), diagnostics console ✔ (env / cache GC / bench in the project panel); dockable panels / layouts ☐
 - [~] Viewport: sky dome + steerable sun (warm low sun) ✔; terrain LOD + PBR materials ☐
 
 ## Phase 3 — Simulation

@@ -91,6 +91,12 @@ Undo and redo are operations like everything else (`graph.undo` / `graph.redo`, 
 
 **Screen recording:** [`videos/graph-editor.mp4`](videos/graph-editor.mp4) (17 s, 1440×900) — the whole flow above: edit the seed, add a blur node, connect it by dragging the handles, move a node, evaluate, delete with the keyboard, undo and redo. It is the UI-driven test `apps/desktop/e2e/graph.spec.ts` running against the real core, recorded with `JD_VIDEO=1 pnpm exec playwright test e2e/graph.spec.ts` (actions slowed to human pace), so it is regenerated whenever the editor changes.
 
+## Tasks and diagnostics
+
+![Project panel: Tasks (no running jobs) and Diagnostics with host, cache and bench results](images/desktop-diagnostics.png)
+
+*Below the settings the project panel lists **Tasks** — every running job with its progress and a **Cancel** button (the header shows the first one; detached MCP jobs appear here too) — and **Diagnostics**: **Environment** (`diag.env`: OS, CPU count, memory), **Cache GC** (`project.cache_gc`: blobs and bytes kept, evicted, the project's limit) and **Bench 256²** (`diag.bench` S1 at a small size: per-stage milliseconds and peak memory; the CLI's `jd diag bench s1` is the comparable benchmark). Every result is an ordinary op envelope, so the log shows the same `ok`/error lines agents see. UI-driven test: `apps/desktop/e2e/diagnostics.spec.ts`.*
+
 ## Sky and sun
 
 ![Viewport with the gradient sky and a low warm sun; the Sun panel shows azimuth 140° and elevation 12°](images/desktop-sun.png)
