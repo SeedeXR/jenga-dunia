@@ -6,6 +6,10 @@
 //! ponytail: one process-wide device (`Gpu::shared`), buffers re-created per call; the upgrade
 //! path is a per-kernel buffer pool and cached pipelines.
 
+// `Gpu::shared()` keeps the device in a static: proving that `Option<Gpu>` is `Send + Sync`
+// walks wgpu's type graph deeper than the default limit on nightly (CI fuzz build).
+#![recursion_limit = "256"]
+
 mod hydraulic;
 
 use jd_terrain::Heightfield;
