@@ -1890,6 +1890,20 @@
             "$ref": "#/$defs/Stroke"
           },
           "default": []
+        },
+        "clamp": {
+          "description": "Keep the result within [min, max] after the strokes — `[0, 1]` when painting a density or\nclass mask instead of a height.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "default": null
         }
       },
       "additionalProperties": false,

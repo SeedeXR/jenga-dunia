@@ -264,6 +264,10 @@ struct SculptParams {
     /// Recorded brush strokes, applied in order on top of the input.
     #[serde(default)]
     strokes: Vec<Stroke>,
+    /// Keep the result within [min, max] after the strokes — `[0, 1]` when painting a density or
+    /// class mask instead of a height.
+    #[serde(default)]
+    clamp: Option<[f32; 2]>,
 }
 
 /// One biome rule: every given range must hold; a range on an input that is not connected
@@ -769,7 +773,16 @@ pub fn register_all(r: &mut Registry) {
         vec![port("out", PortType::Heightfield, false)],
         |ctx, p, i| {
             let sp: SculptParams = params(p)?;
-            Ok(out("out", apply_strokes(field(i, "in")?, spacing_m(ctx), &sp.strokes)?))
+            let painted = apply_strokes(field(i, "in")?, spacing_m(ctx), &sp.strokes)?;
+            let Some([lo, hi]) = sp.clamp else {
+                return Ok(out("out", painted));
+            };
+            if !(lo <= hi && lo.is_finite() && hi.is_finite()) {
+                return Err(JdError::invalid("clamp", "must be [min, max] with min ≤ max"));
+            }
+            let mut clamped = painted.clone();
+            clamped.fill_with(|x, y| painted.get(x, y).clamp(lo, hi));
+            Ok(out("out", clamped))
         },
     ).with_memory(12.0));
     r.register(NodeDef::new::<FlowParams, _>(

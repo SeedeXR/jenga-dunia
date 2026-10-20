@@ -84,6 +84,8 @@ interface State {
   setBrush: (patch: Partial<{ radius_m: number; strength_m: number; mode: "raise" | "smooth" | "flatten"; amount: number }>) => void;
   /** Insert a sculpt node in front of the first output (or select the existing one) and enter sculpt mode. */
   startSculpting: () => Promise<void>;
+  /** Paint the scatter mask: a clamped (0..1) stroke node in front of the mask's output, brush strength 0.5, sculpt mode on. */
+  paintDensity: () => Promise<void>;
   /** Append a stroke to the selected sculpt node (journaled: undo removes the whole stroke). */
   addStroke: (points: [number, number][]) => Promise<void>;
   setNoise: (patch: Partial<NoiseSettings>) => void;
@@ -318,6 +320,25 @@ export const useStore = create<State>((set, get) => {
     clearTimeout(liveTimer);
     if (liveInFlight) await liveInFlight;
   };
+  // The stroke node feeding the output that publishes `layer` — spliced in when there is none
+  // (clamped for masks). Returns its id, or null when nothing publishes that layer.
+  const strokesNodeFor = async (layer: string, clamp: [number, number] | null): Promise<string | null> => {
+    const g = get().graph;
+    const output = g.nodes.find((n) => n.kind.startsWith("jd.output.height@") && String(n.params?.layer ?? "height") === layer);
+    if (!output) return null;
+    const feed = g.edges.find((e) => e.to.node === output.id && e.to.port === "in");
+    const existing = feed ? g.nodes.find((n) => n.id === feed.from.node && n.kind.startsWith("jd.sculpt.strokes@")) : undefined;
+    if (existing) return existing.id;
+    const pos = output.ui?.position ?? [0, 0];
+    graphGen++;
+    const r = await run("graph.add_node", { kind: "jd.sculpt.strokes@1", position: [pos[0], pos[1] + 140], ...(clamp ? { params: { clamp } } : {}) });
+    if (r.status !== "ok" || !r.result) return null;
+    const id = r.result.id;
+    if (feed) await get().connectNodes(feed.from.node, feed.from.port, id, "in");
+    await get().connectNodes(id, "out", output.id, "in");
+    await loadGraph();
+    return id;
+  };
   type GraphView = GraphListResult;
   // Autosave: a debounced project.save after any journaled edit, so `dirty` / `journal` return to
   // false / 0 on their own (the WAL already survives crashes; this is about never losing work on
@@ -450,22 +471,14 @@ export const useStore = create<State>((set, get) => {
     },
     setBrush: (patch) => set((s) => ({ brush: { ...s.brush, ...patch } })),
     startSculpting: async () => {
-      const g = get().graph;
-      let node = g.nodes.find((n) => n.kind.startsWith("jd.sculpt.strokes@"));
-      if (!node) {
-        const output = g.nodes.find((n) => n.kind.startsWith("jd.output.height@"));
-        const feed = output ? g.edges.find((e) => e.to.node === output.id && e.to.port === "in") : undefined;
-        const pos = output?.ui?.position ?? [0, 0];
-        graphGen++;
-        const r = await run("graph.add_node", { kind: "jd.sculpt.strokes@1", position: [pos[0], pos[1] + 140] });
-        if (r.status !== "ok" || !r.result) return;
-        const id = r.result.id;
-        if (feed) await get().connectNodes(feed.from.node, feed.from.port, id, "in");
-        if (output) await get().connectNodes(id, "out", output.id, "in");
-        await loadGraph();
-        node = get().graph.nodes.find((n) => n.id === id);
-      }
-      if (node) set({ selectedNode: node.id, sculpting: true });
+      const id = await strokesNodeFor("height", null);
+      if (id) set({ selectedNode: id, sculpting: true });
+    },
+    paintDensity: async () => {
+      const mask = get().scatter.mask;
+      if (!mask) return;
+      const id = await strokesNodeFor(mask, [0, 1]);
+      if (id) set((s) => ({ selectedNode: id, sculpting: true, brush: { ...s.brush, mode: "raise", strength_m: 0.5 } }));
     },
     addStroke: async (points) => {
       const { selectedNode, graph, brush } = get();

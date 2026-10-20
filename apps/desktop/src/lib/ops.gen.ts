@@ -1519,6 +1519,9 @@ export type Stroke = {
 export type NodeParams_jd_sculpt_strokes_1 = {
   /** Recorded brush strokes, applied in order on top of the input. */
   "strokes"?: Stroke[];
+  /** Keep the result within [min, max] after the strokes — `[0, 1]` when painting a density or
+class mask instead of a height. */
+  "clamp"?: [number, number] | null;
 };
 
 export type NodeParams_jd_terrain_strata_1 = {

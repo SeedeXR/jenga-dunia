@@ -459,6 +459,9 @@ export default function App() {
             <button className="btn" onClick={() => void s.placeScatter()} disabled={!s.scatter.mask || s.busy} title="Place instances from the mask (one jittered candidate per spacing cell, kept with probability = mask value)" data-testid="scatter-place">
               Place
             </button>
+            <button className="btn" onClick={() => void s.paintDensity()} disabled={!s.scatter.mask || s.busy} title="Paint the density by hand: a clamped stroke node goes in front of the mask's output; drag on the terrain to add density (strength 0.5), negative strength to thin it" data-testid="scatter-paint">
+              Paint density
+            </button>
             <button className="btn" onClick={() => void s.exportScatter()} disabled={!s.scatter.points?.length || s.busy} title="Write exports/<mask>.glb: 1 m proxy mesh instanced with EXT_mesh_gpu_instancing" data-testid="scatter-export">
               Export .glb
             </button>
