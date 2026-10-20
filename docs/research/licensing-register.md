@@ -21,6 +21,7 @@ Rule (brief §16.1): no dependency enters the workspace without a row here, lice
 | thiserror, anyhow, miette | 2.0.21 / 1.0.104 / 7.6.0 | MIT OR Apache-2.0 / Apache-2.0 | errors | miette CLI only |
 | tokio, tokio-util | 1.53.3 / 0.7.20 | MIT | async, cancellation | — |
 | blake3 | 1.8.7 | CC0-1.0 OR Apache-2.0 | hashing | — |
+| flate2 | 1.1.10 | MIT OR Apache-2.0 | zlib arrays in FBX (already in the tree via png/tiff) | — |
 | redb | 4.4.0 | MIT OR Apache-2.0 | cache index | format changes across majors (or `rusqlite` bundled, MIT) |
 | zstd, lz4_flex | 0.14.3 / 0.14.0 | BSD-3-Clause / MIT | compression | — |
 | rmcp | 3.5.1 | Apache-2.0 | MCP | spec churn (2026-07-28) |

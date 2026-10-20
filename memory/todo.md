@@ -62,7 +62,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [ ] Material translation layer + loss reports
 - [~] Blender bridge add-on ✔ (`integrations/blender/jenga_dunia_bridge`, GPL-3.0-or-later, manifest validates, File ▸ Import operator via `jd` CLI) + headless round-trip test ✔ (`test_bridge.py`, Blender 5.2) · separate repo / Extensions Platform submission ☐ (needs owner)
 - [~] Unity/Unreal export profiles ✔ (`terrain.export_profile`: engine-specific heightmap encoding/row order, 8-bit weightmaps, README with Terrain Height / Z scale; size warnings) · engine-side import verified on a real Unity/Unreal ☐ · Unity C# TerrainData import script ☐
-- [~] Own FBX **writer** ✔ (`jd-terrain::fbx`, binary 7.4, quads/normals/UVs/Phong + embedded texture; verified against Blender 5.2 headless and Optima's parser) · own FBX **reader** ☐ · verify against Autodesk FBX SDK / Maya / Unity / Unreal ☐ (no licence/engine on this machine)
+- [~] Own FBX **writer** ✔ (`jd-terrain::fbx`, binary 7.4, quads/normals/UVs/Phong + embedded texture; verified against Blender 5.2 headless and Optima's parser) · own FBX **reader** ✔ (7.4/7.5, zlib, Model TRS, units/up axis → `jd.input.heightmap@1` rasterises any mesh; Blender round trip diff = 0) · verify against Autodesk FBX SDK / Maya / Unity / Unreal ☐ (no licence/engine on this machine)
 - [ ] FBX SDK  adapter for fbx we build our own high performance accurate reader and writer , exporter from sratch you can learn from optima it's in Software Projects , but also you can verify against blender headless , api , autodesk fbx  , maya , unity and unreal we build our own fbx dsk reader
 
 ## Phase 5 — Scale & hardening

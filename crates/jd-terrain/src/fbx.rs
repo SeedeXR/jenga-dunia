@@ -670,3 +670,566 @@ mod tests {
         );
     }
 }
+
+// ───────────────────────────── Reader ─────────────────────────────
+//
+// Our own parser for Kaydara FBX Binary 7.x (32-bit headers before 7500, 64-bit from 7500),
+// raw or zlib-compressed arrays. It reads what a terrain tool needs back from a DCC: every
+// `Geometry`/`Mesh` with its `Model` transform, `GlobalSettings` units and up axis, then
+// rasterises the mesh onto a height grid. No materials, animation or skinning.
+
+/// A parsed property (only the kinds the reader uses are inspected further).
+enum RP {
+    I32(i32),
+    I64(i64),
+    F64(f64),
+    Str(String),
+    F64s(Vec<f64>),
+    I32s(Vec<i32>),
+    Other,
+}
+
+struct RN {
+    name: String,
+    props: Vec<RP>,
+    kids: Vec<RN>,
+}
+
+fn corrupt(what: &str) -> jd_types::JdError {
+    jd_types::JdError::new(
+        jd_types::ErrorCode::E_FORMAT_CORRUPT,
+        format!("FBX: {what}"),
+    )
+}
+
+fn le_u32(b: &[u8], at: usize) -> JdResult<u32> {
+    b.get(at..at + 4)
+        .map(|s| u32::from_le_bytes([s[0], s[1], s[2], s[3]]))
+        .ok_or_else(|| corrupt("truncated record"))
+}
+fn le_u64(b: &[u8], at: usize) -> JdResult<u64> {
+    b.get(at..at + 8)
+        .map(|s| u64::from_le_bytes(s.try_into().unwrap_or([0; 8])))
+        .ok_or_else(|| corrupt("truncated record"))
+}
+
+/// Array property body: count, encoding, byte length, data (zlib when encoding == 1).
+fn read_array(b: &[u8], pos: usize, elem: usize) -> JdResult<(Vec<u8>, usize, usize)> {
+    let (count, encoding, len) = (
+        le_u32(b, pos)? as usize,
+        le_u32(b, pos + 4)?,
+        le_u32(b, pos + 8)? as usize,
+    );
+    let data = b
+        .get(pos + 12..pos + 12 + len)
+        .ok_or_else(|| corrupt("truncated array"))?;
+    let raw = match encoding {
+        0 => data.to_vec(),
+        1 => {
+            use std::io::Read as _;
+            let mut out = Vec::with_capacity(count * elem);
+            flate2::read::ZlibDecoder::new(data)
+                .read_to_end(&mut out)
+                .map_err(|e| corrupt(&format!("zlib array: {e}")))?;
+            out
+        }
+        other => return Err(corrupt(&format!("unknown array encoding {other}"))),
+    };
+    if raw.len() != count * elem {
+        return Err(corrupt("array length does not match its count"));
+    }
+    Ok((raw, count, pos + 12 + len))
+}
+
+fn parse_prop(b: &[u8], pos: usize) -> JdResult<(RP, usize)> {
+    let tag = *b.get(pos).ok_or_else(|| corrupt("truncated property"))?;
+    let p = pos + 1;
+    Ok(match tag {
+        b'Y' => (RP::Other, p + 2),
+        b'C' => (RP::Other, p + 1),
+        b'I' => (RP::I32(le_u32(b, p)? as i32), p + 4),
+        b'F' => (RP::Other, p + 4),
+        b'D' => (RP::F64(f64::from_bits(le_u64(b, p)?)), p + 8),
+        b'L' => (RP::I64(le_u64(b, p)? as i64), p + 8),
+        b'S' | b'R' => {
+            let len = le_u32(b, p)? as usize;
+            let bytes = b
+                .get(p + 4..p + 4 + len)
+                .ok_or_else(|| corrupt("truncated string"))?;
+            let v = if tag == b'S' {
+                RP::Str(String::from_utf8_lossy(bytes).into_owned())
+            } else {
+                RP::Other
+            };
+            (v, p + 4 + len)
+        }
+        b'd' => {
+            let (raw, n, end) = read_array(b, p, 8)?;
+            (
+                RP::F64s(
+                    (0..n)
+                        .map(|i| {
+                            f64::from_le_bytes(raw[i * 8..i * 8 + 8].try_into().unwrap_or([0; 8]))
+                        })
+                        .collect(),
+                ),
+                end,
+            )
+        }
+        b'f' => {
+            let (raw, n, end) = read_array(b, p, 4)?;
+            (
+                RP::F64s(
+                    (0..n)
+                        .map(|i| {
+                            f64::from(f32::from_le_bytes(
+                                raw[i * 4..i * 4 + 4].try_into().unwrap_or([0; 4]),
+                            ))
+                        })
+                        .collect(),
+                ),
+                end,
+            )
+        }
+        b'i' => {
+            let (raw, n, end) = read_array(b, p, 4)?;
+            (
+                RP::I32s(
+                    (0..n)
+                        .map(|i| {
+                            i32::from_le_bytes(raw[i * 4..i * 4 + 4].try_into().unwrap_or([0; 4]))
+                        })
+                        .collect(),
+                ),
+                end,
+            )
+        }
+        b'l' => {
+            let (_, _, end) = read_array(b, p, 8)?;
+            (RP::Other, end)
+        }
+        b'b' => {
+            let (_, _, end) = read_array(b, p, 1)?;
+            (RP::Other, end)
+        }
+        other => {
+            return Err(corrupt(&format!(
+                "unknown property type {:?}",
+                other as char
+            )));
+        }
+    })
+}
+
+/// One record at `pos`; `None` for a null record. `big` = 64-bit header fields (≥ 7500).
+fn parse_node(b: &[u8], pos: usize, big: bool) -> JdResult<Option<(RN, usize)>> {
+    let (end, n_props, props_len, mut p) = if big {
+        (
+            le_u64(b, pos)? as usize,
+            le_u64(b, pos + 8)? as usize,
+            le_u64(b, pos + 16)? as usize,
+            pos + 24,
+        )
+    } else {
+        (
+            le_u32(b, pos)? as usize,
+            le_u32(b, pos + 4)? as usize,
+            le_u32(b, pos + 8)? as usize,
+            pos + 12,
+        )
+    };
+    let name_len = *b.get(p).ok_or_else(|| corrupt("truncated record"))? as usize;
+    if end == 0 && n_props == 0 && props_len == 0 && name_len == 0 {
+        return Ok(None);
+    }
+    p += 1;
+    let name = String::from_utf8_lossy(
+        b.get(p..p + name_len)
+            .ok_or_else(|| corrupt("truncated name"))?,
+    )
+    .into_owned();
+    p += name_len;
+    let mut props = Vec::with_capacity(n_props);
+    for _ in 0..n_props {
+        let (v, next) = parse_prop(b, p)?;
+        props.push(v);
+        p = next;
+    }
+    let mut kids = Vec::new();
+    while p < end {
+        match parse_node(b, p, big)? {
+            Some((kid, next)) => {
+                kids.push(kid);
+                p = next;
+            }
+            None => {
+                p = end;
+            }
+        }
+    }
+    if p != end {
+        return Err(corrupt(&format!("record `{name}` overruns its end offset")));
+    }
+    Ok(Some((RN { name, props, kids }, end)))
+}
+
+fn parse_document(b: &[u8]) -> JdResult<Vec<RN>> {
+    if b.len() < 27 || b[..21] != MAGIC[..21] {
+        return Err(jd_types::JdError::new(
+            jd_types::ErrorCode::E_FORMAT_UNSUPPORTED,
+            "not a binary FBX file",
+        )
+        .next("ASCII FBX is not supported; export as binary (every DCC offers it) or as glTF."));
+    }
+    let version = le_u32(b, 23)?;
+    let big = version >= 7500;
+    let mut pos = 27;
+    let mut top = Vec::new();
+    while pos < b.len() {
+        match parse_node(b, pos, big)? {
+            Some((node, next)) => {
+                top.push(node);
+                pos = next;
+            }
+            None => break,
+        }
+    }
+    Ok(top)
+}
+
+impl RN {
+    fn child(&self, name: &str) -> Option<&RN> {
+        self.kids.iter().find(|k| k.name == name)
+    }
+    fn f64s(&self) -> Option<&[f64]> {
+        self.props.iter().find_map(|p| {
+            if let RP::F64s(v) = p {
+                Some(v.as_slice())
+            } else {
+                None
+            }
+        })
+    }
+    fn i32s(&self) -> Option<&[i32]> {
+        self.props.iter().find_map(|p| {
+            if let RP::I32s(v) = p {
+                Some(v.as_slice())
+            } else {
+                None
+            }
+        })
+    }
+    fn str_at(&self, i: usize) -> Option<&str> {
+        match self.props.get(i) {
+            Some(RP::Str(s)) => Some(s),
+            _ => None,
+        }
+    }
+    fn id(&self) -> Option<i64> {
+        match self.props.first() {
+            Some(RP::I64(v)) => Some(*v),
+            Some(RP::I32(v)) => Some(i64::from(*v)),
+            _ => None,
+        }
+    }
+    /// `Properties70` entry `name` → its numeric values (after the four header strings).
+    fn p70(&self, name: &str) -> Option<Vec<f64>> {
+        let props = self.child("Properties70")?;
+        let p = props
+            .kids
+            .iter()
+            .find(|k| k.name == "P" && k.str_at(0) == Some(name))?;
+        let nums: Vec<f64> = p
+            .props
+            .iter()
+            .skip(4)
+            .filter_map(|v| match v {
+                RP::F64(x) => Some(*x),
+                RP::I32(x) => Some(f64::from(*x)),
+                RP::I64(x) => Some(*x as f64),
+                _ => None,
+            })
+            .collect();
+        Some(nums)
+    }
+}
+
+/// A mesh read from an FBX file: positions in metres in the terrain frame (+X east, +Y up,
+/// +Z south), triangles as vertex indices.
+pub struct FbxMesh {
+    /// Vertex positions.
+    pub positions: Vec<[f64; 3]>,
+    /// Triangle indices.
+    pub triangles: Vec<[u32; 3]>,
+}
+
+/// Rotation (degrees, XYZ order), scale and translation applied to a point.
+fn transform(p: [f64; 3], t: &[f64], r: &[f64], s: &[f64]) -> [f64; 3] {
+    let [mut x, mut y, mut z] = p;
+    if s.len() == 3 {
+        x *= s[0];
+        y *= s[1];
+        z *= s[2];
+    }
+    if r.len() == 3 {
+        let (sx, cx) = r[0].to_radians().sin_cos();
+        let (sy, cy) = r[1].to_radians().sin_cos();
+        let (sz, cz) = r[2].to_radians().sin_cos();
+        // X, then Y, then Z (FBX default rotation order).
+        let (y1, z1) = (y * cx - z * sx, y * sx + z * cx);
+        let (x2, z2) = (x * cy + z1 * sy, -x * sy + z1 * cy);
+        let (x3, y3) = (x2 * cz - y1 * sz, x2 * sz + y1 * cz);
+        x = x3;
+        y = y3;
+        z = z2;
+    }
+    if t.len() == 3 {
+        x += t[0];
+        y += t[1];
+        z += t[2];
+    }
+    [x, y, z]
+}
+
+/// Read every mesh of a binary FBX file into one triangle soup in metres, +Y up.
+pub fn read_fbx_mesh(path: &Path) -> JdResult<FbxMesh> {
+    let bytes = fs::read(path)?;
+    let top = parse_document(&bytes)?;
+    let find = |name: &str| top.iter().find(|n| n.name == name);
+    let settings = find("GlobalSettings");
+    let unit = settings
+        .and_then(|g| g.p70("UnitScaleFactor"))
+        .and_then(|v| v.first().copied())
+        .unwrap_or(1.0);
+    let up_axis = settings
+        .and_then(|g| g.p70("UpAxis"))
+        .and_then(|v| v.first().copied())
+        .unwrap_or(1.0) as i32;
+    let up_sign = settings
+        .and_then(|g| g.p70("UpAxisSign"))
+        .and_then(|v| v.first().copied())
+        .unwrap_or(1.0);
+    let to_m = unit / 100.0;
+    let objects = find("Objects").ok_or_else(|| corrupt("no Objects section"))?;
+    // Geometry → Model links (`C "OO" child parent`), so each mesh gets its node's transform.
+    let mut parent_of = std::collections::HashMap::new();
+    if let Some(conn) = find("Connections") {
+        for c in conn
+            .kids
+            .iter()
+            .filter(|c| c.name == "C" && c.str_at(0) == Some("OO"))
+        {
+            if let (Some(RP::I64(child)), Some(RP::I64(parent))) = (c.props.get(1), c.props.get(2))
+            {
+                parent_of.insert(*child, *parent);
+            }
+        }
+    }
+    let models: std::collections::HashMap<i64, &RN> = objects
+        .kids
+        .iter()
+        .filter(|n| n.name == "Model")
+        .filter_map(|m| m.id().map(|id| (id, m)))
+        .collect();
+    let mut mesh = FbxMesh {
+        positions: Vec::new(),
+        triangles: Vec::new(),
+    };
+    for geom in objects
+        .kids
+        .iter()
+        .filter(|n| n.name == "Geometry" && n.str_at(2) == Some("Mesh"))
+    {
+        let verts = geom
+            .child("Vertices")
+            .and_then(RN::f64s)
+            .ok_or_else(|| corrupt("Geometry without Vertices"))?;
+        let poly = geom
+            .child("PolygonVertexIndex")
+            .and_then(RN::i32s)
+            .ok_or_else(|| corrupt("Geometry without PolygonVertexIndex"))?;
+        let model = geom
+            .id()
+            .and_then(|id| parent_of.get(&id))
+            .and_then(|m| models.get(m));
+        let (t, r, s) = match model {
+            Some(m) => (
+                m.p70("Lcl Translation").unwrap_or_default(),
+                m.p70("Lcl Rotation").unwrap_or_default(),
+                m.p70("Lcl Scaling").unwrap_or_default(),
+            ),
+            None => (Vec::new(), Vec::new(), Vec::new()),
+        };
+        let base = mesh.positions.len() as u32;
+        for v in verts.as_chunks::<3>().0 {
+            let [x, y, z] = transform([v[0], v[1], v[2]], &t, &r, &s);
+            // Z-up files (3ds Max, unconverted Blender): swing the up axis onto +Y.
+            let p = if up_axis == 2 {
+                [x, z * up_sign, -y]
+            } else {
+                [x, y * up_sign, z]
+            };
+            mesh.positions.push([p[0] * to_m, p[1] * to_m, p[2] * to_m]);
+        }
+        let n = verts.len() / 3;
+        let mut face: Vec<u32> = Vec::with_capacity(4);
+        for &i in poly {
+            let (idx, last) = if i < 0 {
+                ((-i - 1) as usize, true)
+            } else {
+                (i as usize, false)
+            };
+            if idx >= n {
+                return Err(corrupt("polygon index out of range"));
+            }
+            face.push(base + idx as u32);
+            if last {
+                for k in 1..face.len().saturating_sub(1) {
+                    mesh.triangles.push([face[0], face[k], face[k + 1]]);
+                }
+                face.clear();
+            }
+        }
+    }
+    if mesh.triangles.is_empty() {
+        return Err(corrupt("no mesh geometry found"));
+    }
+    Ok(mesh)
+}
+
+/// Rasterise an FBX mesh onto a height grid over its own footprint: `size_px` cells (default
+/// ≈ one cell per vertex, square cells), row 0 = north, cells no triangle covers filled with
+/// the lowest height. Returns `(heights, width, height)` like the other foreign readers.
+pub fn read_fbx_heightfield(
+    path: &Path,
+    size_px: Option<[u32; 2]>,
+) -> JdResult<(Vec<f32>, u32, u32)> {
+    let mesh = read_fbx_mesh(path)?;
+    let (mut min, mut max) = ([f64::MAX; 3], [f64::MIN; 3]);
+    for p in &mesh.positions {
+        for k in 0..3 {
+            min[k] = min[k].min(p[k]);
+            max[k] = max[k].max(p[k]);
+        }
+    }
+    let (ex, ez) = ((max[0] - min[0]).max(1e-9), (max[2] - min[2]).max(1e-9));
+    let [w, h] = size_px.unwrap_or_else(|| {
+        // About one cell per vertex, split by the footprint's aspect ratio.
+        let n = mesh.positions.len() as f64;
+        let w = (n * ex / ez).sqrt().round().clamp(2.0, 16384.0);
+        [w as u32, (n / w).round().clamp(2.0, 16384.0) as u32]
+    });
+    if w < 2 || h < 2 {
+        return Err(jd_types::JdError::invalid(
+            "size_px",
+            "needs at least 2×2 cells",
+        ));
+    }
+    // Cell centres span the footprint edge to edge: centre (i, j) = min + i · extent / (n − 1),
+    // so a regular mesh grid read at its own size puts every centre on a vertex (exact heights).
+    // Row 0 = north = the smallest Z (north is −Z).
+    let (cw, ch) = (ex / (w - 1) as f64, ez / (h - 1) as f64);
+    let mut grid = vec![f32::NAN; (w * h) as usize];
+    for tri in &mesh.triangles {
+        let [a, b, c] = tri.map(|i| mesh.positions[i as usize]);
+        let xs = [a[0], b[0], c[0]];
+        let zs = [a[2], b[2], c[2]];
+        let (x0, x1) = (
+            xs.iter().cloned().fold(f64::MAX, f64::min),
+            xs.iter().cloned().fold(f64::MIN, f64::max),
+        );
+        let (z0, z1) = (
+            zs.iter().cloned().fold(f64::MAX, f64::min),
+            zs.iter().cloned().fold(f64::MIN, f64::max),
+        );
+        let (i0, i1) = (
+            (((x0 - min[0]) / cw).floor().max(0.0)) as i64,
+            (((x1 - min[0]) / cw).ceil().min(w as f64 - 1.0)) as i64,
+        );
+        let (j0, j1) = (
+            (((z0 - min[2]) / ch).floor().max(0.0)) as i64,
+            (((z1 - min[2]) / ch).ceil().min(h as f64 - 1.0)) as i64,
+        );
+        let det = (b[0] - a[0]) * (c[2] - a[2]) - (c[0] - a[0]) * (b[2] - a[2]);
+        if det.abs() < 1e-18 {
+            continue;
+        }
+        for j in j0..=j1 {
+            let pz = min[2] + j as f64 * ch;
+            for i in i0..=i1 {
+                let px = min[0] + i as f64 * cw;
+                let l1 = ((b[0] - px) * (c[2] - pz) - (c[0] - px) * (b[2] - pz)) / det;
+                let l2 = ((c[0] - px) * (a[2] - pz) - (a[0] - px) * (c[2] - pz)) / det;
+                let l3 = 1.0 - l1 - l2;
+                // Slack of ~1e-3 of a triangle: DCCs store positions as f32 centimetres, so
+                // boundary vertices jitter by ~0.2 mm and a strict test left edge cells uncovered.
+                let eps = -1e-3;
+                if l1 >= eps && l2 >= eps && l3 >= eps {
+                    grid[(j as u32 * w + i as u32) as usize] =
+                        (l1 * a[1] + l2 * b[1] + l3 * c[1]) as f32;
+                }
+            }
+        }
+    }
+    let floor = grid
+        .iter()
+        .cloned()
+        .filter(|v| v.is_finite())
+        .fold(f32::MAX, f32::min);
+    if floor == f32::MAX {
+        return Err(corrupt("mesh covers no grid cell"));
+    }
+    for v in &mut grid {
+        if !v.is_finite() {
+            *v = floor;
+        }
+    }
+    Ok((grid, w, h))
+}
+
+#[cfg(test)]
+mod read_tests {
+    use super::*;
+
+    #[test]
+    fn our_fbx_reads_back_to_the_same_heights() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let mut hf = Heightfield::new(16, 12, 8, 0).expect("hf");
+        hf.fill_with(|x, y| ((x as f32) * 0.7).sin() * 30.0 + (y as f32) * 2.0 + 100.0);
+        let p = dir.path().join("rt.fbx");
+        export_fbx(&hf, [160.0, 120.0], &p, 1, false).expect("export");
+        let mesh = read_fbx_mesh(&p).expect("read");
+        assert_eq!(
+            (mesh.positions.len(), mesh.triangles.len()),
+            (16 * 12, 15 * 11 * 2)
+        );
+        // Grid of the same size: every cell centre is a vertex, so heights come back exactly.
+        let (data, w, h) = read_fbx_heightfield(&p, Some([16, 12])).expect("raster");
+        assert_eq!((w, h), (16, 12));
+        let mut worst = 0.0f32;
+        for y in 0..12 {
+            for x in 0..16 {
+                // Row 0 of the result is north = the field's last row.
+                let want = hf.get(x, 11 - y);
+                worst = worst.max((data[(y * 16 + x) as usize] - want).abs());
+            }
+        }
+        assert!(worst < 1e-3, "max height error {worst}");
+        // Default sizing lands near one cell per vertex; a coarser grid still samples the surface.
+        let (_, w2, h2) = read_fbx_heightfield(&p, None).expect("auto");
+        assert!(
+            (14..=18).contains(&w2) && (10..=14).contains(&h2),
+            "{w2}×{h2}"
+        );
+        let (coarse, _, _) = read_fbx_heightfield(&p, Some([8, 6])).expect("coarse");
+        assert!(coarse.iter().all(|v| (60.0..=160.0).contains(v)));
+        assert!(read_fbx_mesh(&dir.path().join("missing.fbx")).is_err());
+        fs::write(dir.path().join("ascii.fbx"), b"; FBX 7.4.0 project file\n").expect("write");
+        assert_eq!(
+            read_fbx_mesh(&dir.path().join("ascii.fbx"))
+                .err()
+                .map(|e| e.code),
+            Some(jd_types::ErrorCode::E_FORMAT_UNSUPPORTED)
+        );
+    }
+}

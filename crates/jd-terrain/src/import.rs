@@ -172,6 +172,9 @@ fn decode(path: &Path, opts: &ForeignImport) -> JdResult<(Vec<f32>, u32, u32)> {
         })
     };
     match ext.as_str() {
+        // A mesh (from Blender, Maya, our own export): rasterised onto a grid over its footprint,
+        // row 0 = north; `size_px` sets the grid, default ≈ one cell per vertex.
+        "fbx" => crate::fbx::read_fbx_heightfield(path, opts.size_px),
         "png" => {
             let img = image::open(path)
                 .map_err(|e| corrupt("PNG read failed", e))?
@@ -262,7 +265,7 @@ fn decode(path: &Path, opts: &ForeignImport) -> JdResult<(Vec<f32>, u32, u32)> {
             ErrorCode::E_FORMAT_UNSUPPORTED,
             format!("unsupported heightmap extension `{other}`"),
         )
-        .next("Use .png, .exr, .tif/.tiff, .r16 or .r32.")),
+        .next("Use .png, .exr, .tif/.tiff, .r16, .r32 or a binary .fbx mesh.")),
     }
 }
 

@@ -702,7 +702,7 @@ pub fn register_all(r: &mut Registry) {
     ).with_memory(20.0));
     r.register(NodeDef::new::<InputParams, _>(
         "jd.input.heightmap@1",
-        "Load a heightmap from the project's assets/ (PNG 16-bit, EXR, TIFF, RAW) and resample it onto the world grid",
+        "Load a heightmap from the project's assets/ (PNG 16-bit, EXR, TIFF, RAW, or a binary FBX mesh rasterised over its footprint) and resample it onto the world grid",
         vec![],
         vec![port("out", PortType::Heightfield, false)],
         |ctx, p, _| {

@@ -799,7 +799,7 @@
   },
   {
     "kind": "jd.input.heightmap@1",
-    "description": "Load a heightmap from the project's assets/ (PNG 16-bit, EXR, TIFF, RAW) and resample it onto the world grid",
+    "description": "Load a heightmap from the project's assets/ (PNG 16-bit, EXR, TIFF, RAW, or a binary FBX mesh rasterised over its footprint) and resample it onto the world grid",
     "inputs": [],
     "outputs": [
       {

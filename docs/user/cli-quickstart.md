@@ -180,7 +180,20 @@ $ jd --json export mesh --project Bio.jdproj --layer land land.fbx
 
 ![Textured FBX terrain rendered by Optima after reading our file](images/cli-fbx.png)
 
-The unit test (`fbx::tests`) walks the written record tree with a tiny independent reader: every record's end offset lands exactly on the next record, the footer sits at a 16-byte boundary, and the first quad is `0, 1, 10, -(9+1)`. 0.33 s for the 25 MB file in a debug build. Not written: animation, skinning, cameras, multiple materials — this is the FBX surface a terrain tool needs; the own FBX *reader* for imports is a later slice.
+The unit test (`fbx::tests`) walks the written record tree with a tiny independent reader: every record's end offset lands exactly on the next record, the footer sits at a 16-byte boundary, and the first quad is `0, 1, 10, -(9+1)`. 0.33 s for the 25 MB file in a debug build. Not written: animation, skinning, cameras, multiple materials — this is the FBX surface a terrain tool needs.
+
+**FBX in: the reader.** The same module reads binary FBX back (7.4 and 7.5 layouts, raw or zlib arrays, every `Geometry`/`Mesh` with its `Model` translation/rotation/scaling, `UnitScaleFactor` and up axis) and rasterises the mesh onto a height grid over its footprint, so a terrain sculpted in Blender or Maya comes home through `jd.input.heightmap@1`: copy the file into the project with `project.import_asset`, reference it by name, optionally pass `size_px` (default ≈ one cell per vertex), and the node resamples it onto the world like any other heightmap. Verified as a full round trip — Jenga Dunia → `land.fbx` → Blender 5.2 import → Blender's own FBX exporter (zlib arrays, `Lcl Scaling` 100, cm units) → our reader — diffed against the original layer in a graph (`land − fbx_in`):
+
+```
+$ jd op project.import_asset --project Bio.jdproj --params '{"path":"/abs/blender-out.fbx","name":"blender-out.fbx"}'
+$ jd op graph.add_node --project Bio.jdproj --save --params '{"kind":"jd.input.heightmap@1","params":{"path":"blender-out.fbx","size_px":[512,512]}}'
+# fbx_in = input.heightmap.out; fbx_diff = add(land, scale(fbx_in, -1))
+land      min 51.978  max 1085.047  mean 567.398
+fbx_in    min 51.978  max 1085.047  mean 567.398
+fbx_diff  min -0.0    max 0.0       mean -0.0
+```
+
+Blender stores positions as 32-bit floats in centimetres, so boundary vertices jitter by ~0.2 mm; the rasteriser's coverage test has ~1 cm of slack for exactly that (a strict test left the north and south edge rows uncovered on the first run). A third-party FBX 7500 file written by another tool (a 23 MB zlib-compressed character from Optima's samples) parses in 0.37 s — nonsense as terrain, but it proves the 64-bit record layout and compressed arrays. ASCII FBX is refused with `E_FORMAT_UNSUPPORTED`.
  Worlds above ~1 M vertices are sampled every `step` pixels (`W_MESH_DECIMATED`); pass `--step 1` for the full grid.
 
 ### Hydrology recipe: rivers, lakes and wetness
