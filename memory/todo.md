@@ -17,7 +17,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [ ] Commit + push to `SeedeXR/jenga-dunia` main
 - [ ] Research follow-ups listed in `docs/research/evidence-register.md`
 - [x] Installer-surface inventory of `installables/` (WM Basic 4067, Gaea 2.3.1.0) → `docs/research/research-log/2026-10-19-installer-inventory.md`
-- [ ] CI: bump `actions/checkout` and `actions/setup-node` off Node 20 (deprecation warning in run 2); cache `~/.npm/_npx` for mermaid-cli
+- [x] CI: `actions/checkout@v5` + `actions/setup-node@v5` (Node 24); `~/.npm/_npx` cached (`actions/cache@v4`)
 - [~] Phase 2 backlog additions from WM inventory: undo ✔ (cap 100 snapshots; paging/archive ☐); live preview at ≤ 512² preview LOD ✔ (target frame-time setting ☐)
 
 ## Phase 1 — Foundation (in progress, Session 2)
@@ -43,7 +43,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [~] `jd-terrain`: tiles + halos ✔, noise generators ✔ (OpenSimplex2/2S, Perlin, Value, ValueCubic, Cellular × none/fbm/ridged/ping-pong), filters/analysis nodes: blur ✔, slope mask ✔ (`jd.analysis.slope@1`); terrace/curvature/flow ☐
 - [x] Ops `terrain.generate` / `terrain.stats` / `terrain.export_heightmap` + CLI `jd terrain generate --out` / `jd export heightmap`; MCP end-to-end test
 - [~] `jd-graph`: typed DAG ✔, validation (types/cycles/required/unknown) ✔, blake3 content-hash incremental evaluation + in-memory cache ✔, LOD ✔, bypass ✔, 7 node kinds ✔, journaled `graph.*` ops with pre-journal structural validation (trial copy + `validate_structure`) ✔, `graph.move_node` ✔, lod>0 → `<layer>#lod<N>` ✔, node-editor UI (React Flow: add/connect/drag/delete/inspector, e2e-tested incl. enum selects and rounded f32 defaults) ✔; disk cache (`jd-cache`) layer-level ✔ (CLI can export a graph result across invocations); tile-level blobs + SQLite index + LRU eviction ☐, region/tile-level dirty sets ☐, progress/cancel ✔ (async detached jobs ☐), undo/redo ✔ (snapshot history, journaled `graph.restore`)
-- [~] Heightmap export: EXR f32 ✔, PNG16 ✔, RAW r16/r32 ✔ (+ JSON sidecar, flip + range conventions, round-trip tests); TIFF f32 ✔ (`tiff32`); foreign heightmap import ✔ (`jd.input.heightmap@1` + `project.import_asset`; GeoTIFF tags/nodata ☐); Unity/Unreal size presets (2ⁿ+1) ✔ (project panel preset picker)
+- [~] Heightmap export: EXR f32 ✔, PNG16 ✔, RAW r16/r32 ✔ (+ JSON sidecar, flip + range conventions, round-trip tests); TIFF f32 ✔ (`tiff32`); foreign heightmap import ✔ (`jd.input.heightmap@1` + `project.import_asset`; GeoTIFF pixel scale / tie point / nodata ✔, nodata filled with the floor; CRS reprojection ☐ → `jd-geo`); Unity/Unreal size presets (2ⁿ+1) ✔ (project panel preset picker)
 - [~] Stroke sculpt nodes: `jd.sculpt.strokes@1` ✔ (smooth-falloff raise/lower polylines), desktop Sculpt mode ✔ (raycast strokes, brush panel, one undo step per stroke); brush ring cursor ✔; smooth/flatten brushes ✔; per-stroke bbox skip + summed-area smooth (2048², 600 m smooth: 70.5 s → 0.68 s debug) ✔; stroke files under `strokes/` ☐
 - [~] GLB export ✔ (`terrain.export_mesh` / `jd export mesh`: grid mesh, normals, UVs, flat PBR material; Khronos validator 0 errors) + glTF Validator in CI ✔; textured PBR material ☐
 - [ ] Node editor UI, generated inspectors, task monitor, diagnostics console

@@ -13,10 +13,63 @@
       "type": "integer",
       "format": "uint64",
       "minimum": 0
+    },
+    "geo": {
+      "description": "GeoTIFF georeferencing (pixel scale, tie point, nodata) when the file carries it.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/GeoTags"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "required": [
     "name",
     "bytes"
-  ]
+  ],
+  "$defs": {
+    "GeoTags": {
+      "description": "Georeferencing read from a GeoTIFF (what the file says, no reprojection).",
+      "type": "object",
+      "properties": {
+        "pixel_scale": {
+          "description": "Ground size of one pixel, [x, y], in the file's CRS units (`ModelPixelScaleTag`).",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "tiepoint": {
+          "description": "Raster → model tie point `[i, j, k, x, y, z]` (`ModelTiepointTag`, first point).",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "minItems": 6,
+          "maxItems": 6
+        },
+        "nodata": {
+          "description": "`GDAL_NODATA` value.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        }
+      }
+    }
+  }
 }

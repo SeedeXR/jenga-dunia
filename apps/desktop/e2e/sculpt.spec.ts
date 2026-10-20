@@ -18,7 +18,7 @@ test.describe("sculpting against the real core", () => {
     await installBridge(page, core);
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(String(e)));
-    await page.goto("/");
+    await page.goto("/?autosave=0"); // this test reads the journal; autosave would truncate it
     const proj = path.join(ws, "Sculpt.jdproj");
     await page.getByTestId("project-path").fill(proj);
     await page.getByLabel("Extent (m)").fill("1024");
@@ -65,7 +65,7 @@ test.describe("sculpting against the real core", () => {
       .split("\n")
       .map((l) => JSON.parse(l) as { op: string; params: { key?: string; value?: unknown } });
     const stroke = journal.find((e) => e.op === "graph.set_param" && e.params.key === "strokes");
-    expect(stroke, "the stroke is journaled with its points").toBeTruthy();
+    expect(stroke, `the stroke is journaled with its points; journal ops: ${journal.map((e) => e.op + (e.params.key ? `(${e.params.key})` : "")).join(", ")}`).toBeTruthy();
     const pts = (stroke!.params.value as { points: [number, number][] }[])[0]!.points;
     expect(pts.length).toBeGreaterThan(2);
     for (const [u, v] of pts) {

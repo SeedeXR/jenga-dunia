@@ -2,14 +2,18 @@
 //! Decoded to f32 metres and resampled (bilinear) onto the project's world grid so any DEM or
 //! engine heightmap can drive a graph.
 //!
-//! ponytail: metres come from `range_m` (quantised sources) or the file values (float sources);
-//! GeoTIFF tags, projections and nodata handling arrive with `jd-geo`.
+//! Metres come from `range_m` (quantised sources) or the file values (float sources). GeoTIFF
+//! files contribute their nodata value (`GDAL_NODATA`) and ground geometry (pixel scale, tie point)
+//! through [`geotiff_tags`]; nodata cells are filled with the lowest valid height.
+//!
+//! ponytail: no projections / CRS transforms (those arrive with `jd-geo`); nodata fill is a flat
+//! floor, nearest-valid inpainting when real DEM voids show up.
 
 use std::path::Path;
 
 use crate::Heightfield;
 use jd_types::{ErrorCode, JdError, JdResult, WorldSettings};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// How to interpret a foreign file.
 #[derive(Debug, Clone, Default, Deserialize, schemars::JsonSchema)]
@@ -24,6 +28,87 @@ pub struct ForeignImport {
     /// Row 0 of the file is north (true, the usual image convention) or south (the field convention).
     #[serde(default = "yes")]
     pub north_up: bool,
+    /// Sample value meaning "no data" (filled with the lowest valid height). Default: the GeoTIFF
+    /// `GDAL_NODATA` tag when present, otherwise none; non-finite samples are always treated as nodata.
+    #[serde(default)]
+    pub nodata: Option<f32>,
+}
+
+/// Georeferencing read from a GeoTIFF (what the file says, no reprojection).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct GeoTags {
+    /// Ground size of one pixel, [x, y], in the file's CRS units (`ModelPixelScaleTag`).
+    pub pixel_scale: Option<[f64; 2]>,
+    /// Raster → model tie point `[i, j, k, x, y, z]` (`ModelTiepointTag`, first point).
+    pub tiepoint: Option<[f64; 6]>,
+    /// `GDAL_NODATA` value.
+    pub nodata: Option<f32>,
+}
+
+/// GeoTIFF tags of a `.tif`/`.tiff`; `None` for other extensions or when the file carries none.
+pub fn geotiff_tags(path: &Path) -> JdResult<Option<GeoTags>> {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase());
+    if !matches!(ext.as_deref(), Some("tif" | "tiff")) {
+        return Ok(None);
+    }
+    use tiff::tags::Tag;
+    let mut dec = tiff::decoder::Decoder::new(std::io::BufReader::new(std::fs::File::open(path)?))
+        .map_err(|e| corrupt("TIFF read failed", e))?;
+    let f64s = |dec: &mut tiff::decoder::Decoder<_>, tag: Tag| -> JdResult<Option<Vec<f64>>> {
+        match dec.find_tag(tag).map_err(|e| corrupt("TIFF tag", e))? {
+            Some(_) => Ok(Some(
+                dec.get_tag_f64_vec(tag)
+                    .map_err(|e| corrupt("TIFF tag", e))?,
+            )),
+            None => Ok(None),
+        }
+    };
+    let pixel_scale =
+        f64s(&mut dec, Tag::ModelPixelScaleTag)?.and_then(|v| (v.len() >= 2).then(|| [v[0], v[1]]));
+    let tiepoint = f64s(&mut dec, Tag::ModelTiepointTag)?
+        .and_then(|v| (v.len() >= 6).then(|| [v[0], v[1], v[2], v[3], v[4], v[5]]));
+    let nodata = match dec
+        .find_tag(Tag::GdalNodata)
+        .map_err(|e| corrupt("TIFF tag", e))?
+    {
+        Some(_) => dec
+            .get_tag_ascii_string(Tag::GdalNodata)
+            .ok()
+            .and_then(|s| s.trim().trim_end_matches('\0').parse::<f32>().ok()),
+        None => None,
+    };
+    if pixel_scale.is_none() && tiepoint.is_none() && nodata.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(GeoTags {
+        pixel_scale,
+        tiepoint,
+        nodata,
+    }))
+}
+
+/// Replace nodata / non-finite samples with the lowest valid height. Errors when nothing is valid.
+fn fill_nodata(data: &mut [f32], nodata: Option<f32>) -> JdResult<usize> {
+    let is_void = |v: f32| !v.is_finite() || nodata.is_some_and(|n| v == n);
+    let floor = data
+        .iter()
+        .copied()
+        .filter(|v| !is_void(*v))
+        .fold(f32::INFINITY, f32::min);
+    if !floor.is_finite() {
+        return Err(corrupt("heightmap", "every sample is nodata"));
+    }
+    let mut n = 0;
+    for v in data.iter_mut() {
+        if is_void(*v) {
+            *v = floor;
+            n += 1;
+        }
+    }
+    Ok(n)
 }
 fn yes() -> bool {
     true
@@ -39,7 +124,18 @@ fn dequant(q: &[u16], range: [f32; 2]) -> Vec<f32> {
 }
 
 /// Decode a file to (samples row-major, width, height). Quantised sources need `range_m`.
+/// Nodata samples (see [`ForeignImport::nodata`]) are filled with the lowest valid height.
 pub fn read_foreign(path: &Path, opts: &ForeignImport) -> JdResult<(Vec<f32>, u32, u32)> {
+    let (mut data, w, h) = decode(path, opts)?;
+    let nodata = match opts.nodata {
+        Some(n) => Some(n),
+        None => geotiff_tags(path)?.and_then(|t| t.nodata),
+    };
+    fill_nodata(&mut data, nodata)?;
+    Ok((data, w, h))
+}
+
+fn decode(path: &Path, opts: &ForeignImport) -> JdResult<(Vec<f32>, u32, u32)> {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
@@ -296,6 +392,82 @@ mod tests {
             .is_err(),
             "size mismatch"
         );
+    }
+
+    #[test]
+    fn geotiff_tags_are_read_and_nodata_is_filled_with_the_floor() {
+        use tiff::encoder::{TiffEncoder, colortype::Gray32Float};
+        use tiff::tags::Tag;
+        let dir = tempfile::tempdir().expect("tmp");
+        let t = dir.path().join("dem.tif");
+        let mut data: Vec<f32> = (0..32).map(|i| 100.0 + i as f32).collect();
+        data[5] = -9999.0;
+        data[17] = f32::NAN;
+        {
+            let mut enc = TiffEncoder::new(std::fs::File::create(&t).expect("file")).expect("enc");
+            let mut img = enc.new_image::<Gray32Float>(8, 4).expect("img");
+            img.encoder()
+                .write_tag(Tag::ModelPixelScaleTag, &[30.0f64, 30.0, 0.0][..])
+                .expect("scale");
+            img.encoder()
+                .write_tag(
+                    Tag::ModelTiepointTag,
+                    &[0.0f64, 0.0, 0.0, 500_000.0, 4_000_000.0, 0.0][..],
+                )
+                .expect("tie");
+            img.encoder()
+                .write_tag(Tag::GdalNodata, "-9999")
+                .expect("nodata");
+            img.rows_per_strip(4).expect("rps");
+            img.write_data(&data).expect("data");
+        }
+        let tags = geotiff_tags(&t).expect("tags").expect("some");
+        assert_eq!(tags.pixel_scale, Some([30.0, 30.0]));
+        assert_eq!(
+            tags.tiepoint.map(|p| [p[3], p[4]]),
+            Some([500_000.0, 4_000_000.0])
+        );
+        assert_eq!(tags.nodata, Some(-9999.0));
+        // The tag's nodata and the NaN are both filled with the lowest valid height (100 m).
+        let (v, w, h) = read_foreign(
+            &t,
+            &ForeignImport {
+                north_up: false,
+                ..Default::default()
+            },
+        )
+        .expect("read");
+        assert_eq!((w, h), (8, 4));
+        assert_eq!(v[5], 100.0);
+        assert_eq!(v[17], 100.0);
+        assert_eq!(v[31], 131.0);
+        // An explicit nodata wins over the tag.
+        let (v2, ..) = read_foreign(
+            &t,
+            &ForeignImport {
+                north_up: false,
+                nodata: Some(131.0),
+                ..Default::default()
+            },
+        )
+        .expect("read");
+        assert_eq!(
+            v2[31], -9999.0,
+            "131 is void now and the floor is that −9999 sample"
+        );
+        assert_eq!(
+            v2[5], -9999.0,
+            "the tag value is a normal sample when nodata is explicit"
+        );
+        // Everything void is an error, not a silent flat field.
+        let mut enc =
+            TiffEncoder::new(std::fs::File::create(dir.path().join("void.tif")).expect("file"))
+                .expect("enc");
+        enc.write_image::<Gray32Float>(2, 2, &[f32::NAN; 4])
+            .expect("img");
+        assert!(read_foreign(&dir.path().join("void.tif"), &ForeignImport::default()).is_err());
+        // Plain PNGs carry no tags.
+        assert_eq!(geotiff_tags(Path::new("x.png")).expect("png"), None);
     }
 
     #[test]

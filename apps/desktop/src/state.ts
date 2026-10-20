@@ -157,8 +157,12 @@ export const useStore = create<State>((set, get) => {
     }
   };
   // After an evaluation: adopt the first published layer (stats + viewport preview).
+  // Stats + preview refresh are background work: they must not flip `busy`, or every toolbar
+  // button flashes disabled for a moment after each live preview and a click landing right then
+  // is lost (seen as e2e flakes: a redo / add click with no op in the log).
   const showLayer = async (layerName: string) => {
-    const st = await run("terrain.stats", { layer: layerName });
+    const st = await op<TerrainStatsResult>("terrain.stats", { layer: layerName });
+    log(st);
     if (st.status === "ok" && st.result) {
       set({ layer: st.result });
       await refreshPreview();
@@ -225,12 +229,21 @@ export const useStore = create<State>((set, get) => {
       scheduleAutosave();
     }
   };
+  // Every mutation bumps this before its request goes out; a graph.list that started earlier may
+  // describe an older graph and is dropped (seen as e2e flakes: a late list hid a just-added node).
+  let graphGen = 0;
   const loadGraph = async () => {
     if (get().graphKinds.length === 0) {
       const k = await run("graph.kinds");
       if (k.status === "ok" && k.result) set({ graphKinds: k.result });
     }
-    applyGraph(await run("graph.list"));
+    const gen = graphGen;
+    const r = await run("graph.list");
+    if (gen === graphGen) applyGraph(r);
+  };
+  const mutate = async <K extends OpId>(id: K, params?: JdOps[K]["request"]) => {
+    graphGen++;
+    applyGraph((await run(id, params)) as Response<GraphView>);
   };
   return {
     project: null,
@@ -262,6 +275,7 @@ export const useStore = create<State>((set, get) => {
         const output = g.nodes.find((n) => n.kind.startsWith("jd.output.height@"));
         const feed = output ? g.edges.find((e) => e.to.node === output.id && e.to.port === "in") : undefined;
         const pos = output?.ui?.position ?? [0, 0];
+        graphGen++;
         const r = await run("graph.add_node", { kind: "jd.sculpt.strokes@1", position: [pos[0], pos[1] + 140] });
         if (r.status !== "ok" || !r.result) return;
         const id = r.result.id;
@@ -288,16 +302,17 @@ export const useStore = create<State>((set, get) => {
     addNode: async (kind) => {
       // New nodes go to the right of the current graph so they are visible and easy to wire in.
       const right = Math.max(-320, ...get().graph.nodes.map((n) => n.ui?.position?.[0] ?? 0));
+      graphGen++;
       const r = await run("graph.add_node", { kind, position: [right + 320, 0] });
       if (r.status === "ok") await loadGraph();
     },
-    removeNode: async (id) => applyGraph(await run("graph.remove_node", { id })),
-    moveNode: async (id, position) => applyGraph(await run("graph.move_node", { id, position })),
-    undoGraph: async () => applyGraph(await run("graph.undo")),
-    redoGraph: async () => applyGraph(await run("graph.redo")),
-    connectNodes: async (from, fromPort, to, toPort) => applyGraph(await run("graph.connect", { from, from_port: fromPort, to, to_port: toPort })),
-    disconnectNodes: async (from, fromPort, to, toPort) => applyGraph(await run("graph.disconnect", { from, from_port: fromPort, to, to_port: toPort })),
-    setParam: async (id, key, value) => applyGraph(await run("graph.set_param", { id, key, value })),
+    removeNode: async (id) => mutate("graph.remove_node", { id }),
+    moveNode: async (id, position) => mutate("graph.move_node", { id, position }),
+    undoGraph: async () => mutate("graph.undo"),
+    redoGraph: async () => mutate("graph.redo"),
+    connectNodes: async (from, fromPort, to, toPort) => mutate("graph.connect", { from, from_port: fromPort, to, to_port: toPort }),
+    disconnectNodes: async (from, fromPort, to, toPort) => mutate("graph.disconnect", { from, from_port: fromPort, to, to_port: toPort }),
+    setParam: async (id, key, value) => mutate("graph.set_param", { id, key, value }),
     evaluateGraph: async (lod = 0) => {
       const r = await run("graph.evaluate", { lod });
       if (r.status === "ok" && r.result) await adopt(r.result);

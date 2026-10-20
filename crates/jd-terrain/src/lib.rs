@@ -21,7 +21,7 @@ pub use flow::{
     flow_accumulation_with, sea_level, wetness_index,
 };
 pub use heightfield::{Heightfield, HeightfieldStats, Tile, TileCoord};
-pub use import::{ForeignImport, read_foreign, resample_to_world};
+pub use import::{ForeignImport, GeoTags, geotiff_tags, read_foreign, resample_to_world};
 pub use mesh::{MeshExportReport, auto_step, export_glb};
 pub use noise::{FractalKind, NoiseKind, NoiseParams, generate_noise};
 pub use sculpt::{Stroke, StrokeMode, apply_strokes};

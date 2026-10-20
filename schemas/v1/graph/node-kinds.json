@@ -471,6 +471,15 @@
           "description": "Row 0 of the file is north (true, the usual image convention) or south (the field convention).",
           "type": "boolean",
           "default": true
+        },
+        "nodata": {
+          "description": "Sample value meaning \"no data\" (filled with the lowest valid height). Default: the GeoTIFF\n`GDAL_NODATA` tag when present, otherwise none; non-finite samples are always treated as nodata.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float",
+          "default": null
         }
       },
       "additionalProperties": false,

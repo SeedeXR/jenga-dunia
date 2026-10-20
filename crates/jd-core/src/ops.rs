@@ -396,6 +396,9 @@ pub mod builtin {
         pub name: String,
         /// Bytes copied.
         pub bytes: u64,
+        /// GeoTIFF georeferencing (pixel scale, tie point, nodata) when the file carries it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub geo: Option<jd_terrain::GeoTags>,
     }
 
     /// `jobs.cancel` params.
@@ -616,7 +619,9 @@ pub mod builtin {
                 }
                 std::fs::create_dir_all(dest.parent().unwrap_or(&dest))?;
                 let bytes = std::fs::copy(&a.path, &dest)?;
-                Ok((ImportedAsset { name, bytes }, Vec::new()))
+                // Informational: a corrupt TIFF still imports (the input node reports the error later).
+                let geo = jd_terrain::geotiff_tags(&dest).ok().flatten();
+                Ok((ImportedAsset { name, bytes, geo }, Vec::new()))
             },
         );
         r.register::<NoParams, Vec<crate::jobs::JobInfo>, _>(

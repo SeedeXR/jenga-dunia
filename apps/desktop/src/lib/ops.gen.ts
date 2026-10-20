@@ -397,11 +397,22 @@ export type ProjectImportAssetRequest = {
   "name"?: string | null;
 };
 
+export type GeoTags = {
+  /** Ground size of one pixel, [x, y], in the file's CRS units (`ModelPixelScaleTag`). */
+  "pixel_scale"?: [number, number] | null;
+  /** Raster → model tie point `[i, j, k, x, y, z]` (`ModelTiepointTag`, first point). */
+  "tiepoint"?: [number, number, number, number, number, number] | null;
+  /** `GDAL_NODATA` value. */
+  "nodata"?: number | null;
+};
+
 export type ProjectImportAssetResult = {
   /** Name to reference from nodes (relative to `assets/`). */
   "name": string;
   /** Bytes copied. */
   "bytes": number;
+  /** GeoTIFF georeferencing (pixel scale, tie point, nodata) when the file carries it. */
+  "geo"?: GeoTags | null;
 };
 
 export type ProjectInfoRequest = Record<string, unknown>;
@@ -752,6 +763,9 @@ export type NodeParams_jd_input_heightmap_1 = {
   "size_px"?: [number, number] | null;
   /** Row 0 of the file is north (true, the usual image convention) or south (the field convention). */
   "north_up"?: boolean;
+  /** Sample value meaning "no data" (filled with the lowest valid height). Default: the GeoTIFF
+`GDAL_NODATA` tag when present, otherwise none; non-finite samples are always treated as nodata. */
+  "nodata"?: number | null;
 };
 
 export type NodeParams_jd_math_add_1 = Record<string, unknown>;
