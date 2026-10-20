@@ -177,6 +177,10 @@ Undo and redo are operations like everything else (`graph.undo` / `graph.redo`, 
 
 *Waves: `wind_speed_mps`, `fetch_km` and `wind_azimuth_deg` on the same node raise a wind sea. The app asks the core for the spectrum (`ocean.waves`: JONSWAP fetch-limited growth capped at the fully developed Pierson–Moskowitz sea) and moves the water plane along a Gerstner sum of its three components every frame, so a 3 m/s breeze makes 0.2 m ripples and a 20 m/s gale 9.8 m swells 380 m long (3.2 m / 96 m if the fetch is only 100 km). Waves break where the water is shallower than Hs / 0.78, and the shoreline foam widens to that surf zone — 12.6 m of depth in the gale above. The header shows the significant height and peak wavelength being drawn; recording below. **Export water maps** (Export panel) writes `exports/water/` — depth, colour, foam and a tileable wave normal map for the node's clarity and wind (`ocean.bake`, see the CLI quickstart). Not yet: refraction and shadowing by headlands.*
 
+![Network project: a hydrology-first node with no inputs feeds the height output and a rivers layer; the terrain is coloured by the rivers mask, red dendritic trunks draining to the south edge](images/desktop-network.png)
+
+*Hydrology first: `jd.hydrology.network@1` (1) has no inputs — it grows the drainage network from the river mouths (`mouths`: south by default, or the whole border for an island) and builds the heights along it, headwaters steep and big rivers flat. Wire `out` to the height output and `rivers` to a second output (2) to colour the terrain by its trunks; `river_order` sets which Strahler order counts as a river. Every cell drains by construction (3): a `jd.hydrology.fill@1` node on `out` reports an empty `lakes` layer. `network.spec.ts` drives this through the UI.*
+
 ## Horizon
 
 ![Viewport orbited to the horizon with Horizon on: the world's terrain sits in a hole cut in a coarse, dimmer skirt of the same noise that runs to three times the extent under the physical sky](images/desktop-horizon.png)
