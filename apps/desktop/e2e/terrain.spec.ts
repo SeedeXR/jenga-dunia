@@ -38,6 +38,16 @@ test.describe("desktop UI against the real core", () => {
     await expect(page.getByTestId("viewport-info")).toContainText(/viewport: (webgpu|webgl2)/);
     await expect(page.getByTestId("viewport-info")).toContainText(/ [1-9][\d,]* tris/);
     await expect(page.getByTestId("viewport-info")).toContainText(/preview lod \d, [\d.]+ MB in \d+ ms/);
+    // Sun controls: the default direction is reported; dragging the elevation slider re-lights the scene.
+    await expect(page.getByTestId("viewport-info")).toContainText("sun 35°/140°");
+    await page.getByTestId("sun-elevation").evaluate((el) => {
+      const input = el as HTMLInputElement;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(input, "12");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await expect(page.getByTestId("viewport-info")).toContainText("sun 12°/140°");
+    await page.screenshot({ path: testInfo.outputPath("terrain-low-sun.png"), fullPage: false }); // tutorial image source
 
     await page.getByTestId("export-path").fill("h.png");
     await page.getByTestId("export").click();

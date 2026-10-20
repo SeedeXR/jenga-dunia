@@ -47,7 +47,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [~] Stroke sculpt nodes: `jd.sculpt.strokes@1` ✔ (smooth-falloff raise/lower polylines), desktop Sculpt mode ✔ (raycast strokes, brush panel, one undo step per stroke); brush ring cursor ✔; smooth/flatten brushes ✔; per-stroke bbox skip + summed-area smooth (2048², 600 m smooth: 70.5 s → 0.68 s debug) ✔; `graph.append_param` (one journal entry per stroke, linear WAL growth) ✔; stroke files under `strokes/` ☐
 - [~] GLB export ✔ (`terrain.export_mesh` / `jd export mesh`: grid mesh, normals, UVs, PBR material with baked hypsometric albedo texture, `--no-texture`; Khronos validator 0 errors / 0 warnings) + glTF Validator in CI ✔; normal/roughness maps ☐
 - [ ] Node editor UI, generated inspectors, task monitor, diagnostics console
-- [ ] Viewport terrain LOD + PBR + sky
+- [~] Viewport: sky dome + steerable sun (warm low sun) ✔; terrain LOD + PBR materials ☐
 
 ## Phase 3 — Simulation
 - [~] Thermal ✔ (CPU Jacobi, `jd.erosion.thermal@1`, mass-conserving; GPU/tile-local ☐) · hydraulic (grid/virtual pipes) ✔ (`jd.erosion.hydraulic@1`, CPU, closed boundary, concentration cap ✔; drains/layers/GPU ☐) · hydraulic (particle) ☐ · stream-power ✔ (`jd.erosion.stream_power@1`, implicit, D8/D∞/MFD area, uplift; 2048² × 20 ≈ 4 s release) · wind ☐ · coastal ☐ · snow ☐

@@ -52,6 +52,9 @@ interface State {
   sculpting: boolean;
   setSculpting: (on: boolean) => void;
   brush: { radius_m: number; strength_m: number; mode: "raise" | "smooth" | "flatten"; amount: number };
+  /** Viewport sun direction (not part of the project). */
+  sun: { azimuth_deg: number; elevation_deg: number };
+  setSun: (patch: Partial<{ azimuth_deg: number; elevation_deg: number }>) => void;
   setBrush: (patch: Partial<{ radius_m: number; strength_m: number; mode: "raise" | "smooth" | "flatten"; amount: number }>) => void;
   /** Insert a sculpt node in front of the first output (or select the existing one) and enter sculpt mode. */
   startSculpting: () => Promise<void>;
@@ -274,6 +277,8 @@ export const useStore = create<State>((set, get) => {
     sculpting: false,
     setSculpting: (on) => set({ sculpting: on }),
     brush: { radius_m: 150, strength_m: 40, mode: "raise", amount: 0.5 },
+    sun: { azimuth_deg: 140, elevation_deg: 35 },
+    setSun: (patch) => set((s) => ({ sun: { ...s.sun, ...patch } })),
     setBrush: (patch) => set((s) => ({ brush: { ...s.brush, ...patch } })),
     startSculpting: async () => {
       const g = get().graph;

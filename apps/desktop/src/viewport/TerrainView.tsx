@@ -10,6 +10,8 @@ export interface ViewportInfo {
   triangles: number;
   /** Sea plane height in metres when one is drawn. */
   seaM?: number;
+  /** Sun direction currently lighting the scene, degrees. */
+  sun?: { azimuthDeg: number; elevationDeg: number };
 }
 
 interface Props {
@@ -21,6 +23,8 @@ interface Props {
   sculpt?: { enabled: boolean; radiusM: number; onStroke: (points: [number, number][]) => void };
   /** Draw a translucent water plane at this height (metres); null hides it. */
   seaLevelM?: number | null;
+  /** Sun direction: azimuth clockwise from north (0 = light from the north), elevation above the horizon. */
+  sun?: { azimuthDeg: number; elevationDeg: number };
 }
 
 function isWebGPU(r: WebGPURenderer): boolean {
@@ -102,6 +106,11 @@ interface SceneState {
   backend: ViewportInfo["backend"];
   triangles: number;
   sea: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshStandardMaterial> | null;
+  sun: THREE.DirectionalLight;
+  hemi: THREE.HemisphereLight;
+  /** Gradient sky dome (vertex colours, inside faces). */
+  sky: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>;
+  sunDeg: { azimuthDeg: number; elevationDeg: number };
   orbit: { theta: number; phi: number; radius: number; minR: number; maxR: number };
 }
 
@@ -111,7 +120,12 @@ function placeCamera(s: SceneState) {
   s.camera.lookAt(0, 0, 0);
 }
 
-export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevelM = null }: Props) {
+/** One report shape for every effect, so a later report never drops a field an earlier one set. */
+function infoOf(s: SceneState): ViewportInfo {
+  return { backend: s.backend, triangles: s.triangles, ...(s.sea ? { seaM: s.sea.position.y } : {}), sun: s.sunDeg };
+}
+
+export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevelM = null, sun }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<SceneState | null>(null);
   // Latest sculpt props without re-creating the renderer effect.
@@ -128,14 +142,40 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
     renderer.setSize(el.clientWidth, el.clientHeight);
     el.appendChild(renderer.domElement);
     const scene = new THREE.Scene();
-    // Sky: a dusk-blue background with distance fog so scale reads without a skybox asset.
+    // Sky: a gradient dome (zenith blue → pale horizon, vertex colours, no texture asset) plus
+    // distance fog in the horizon colour so scale reads. The dome ignores fog and depth.
     scene.background = new THREE.Color(0x1b2432);
-    scene.fog = new THREE.Fog(0x1b2432, 1, 2);
+    scene.fog = new THREE.Fog(0xb9c7d9, 1, 2);
     const camera = new THREE.PerspectiveCamera(50, el.clientWidth / Math.max(1, el.clientHeight), 1, 200000);
-    scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x202020, 0.9));
+    const hemi = new THREE.HemisphereLight(0xdfe8ff, 0x3a3630, 0.9);
+    scene.add(hemi);
     const sun = new THREE.DirectionalLight(0xffffff, 1.6);
     sun.position.set(3000, 5000, 2000);
     scene.add(sun);
+    const skyGeo = new THREE.SphereGeometry(1, 32, 16);
+    {
+      const pos = skyGeo.attributes.position as THREE.BufferAttribute;
+      const colors = new Float32Array(pos.count * 3);
+      const zenith = new THREE.Color(0x24467a);
+      const horizon = new THREE.Color(0xb9c7d9);
+      // Below the horizon the dome goes dark quickly (the old dusk background) so the terrain
+      // keeps its contrast when the camera looks down at it.
+      const ground = new THREE.Color(0x1b2432);
+      const c = new THREE.Color();
+      for (let i = 0; i < pos.count; i++) {
+        const y = pos.getY(i); // -1..1
+        if (y >= 0) c.copy(horizon).lerp(zenith, Math.pow(y, 0.6));
+        else c.copy(horizon).lerp(ground, Math.min(1, -y * 10));
+        colors[i * 3] = c.r;
+        colors[i * 3 + 1] = c.g;
+        colors[i * 3 + 2] = c.b;
+      }
+      skyGeo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    }
+    const sky = new THREE.Mesh(skyGeo, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false }));
+    sky.scale.setScalar(50000);
+    sky.renderOrder = -1;
+    scene.add(sky);
     // Brush cursor: a flat ring (unit radius, scaled per brush) lifted slightly above the surface.
     const brush = new THREE.Mesh(
       new THREE.RingGeometry(0.9, 1.0, 48),
@@ -155,6 +195,10 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
       backend: "none",
       triangles: 0,
       sea: null,
+      sun,
+      hemi,
+      sky,
+      sunDeg: { azimuthDeg: 140, elevationDeg: 35 },
       orbit: { theta: 0.6, phi: 1.0, radius: 5200, minR: 200, maxR: 100000 },
     };
     sceneRef.current = state;
@@ -251,7 +295,7 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
       if (!alive) return;
       // The backend is only known after init (WebGPU, or the WebGL 2 fallback).
       state.backend = isWebGPU(renderer) ? "webgpu" : "webgl2";
-      onInfo?.({ backend: state.backend, triangles: state.triangles });
+      onInfo?.(infoOf(state));
       const loop = () => {
         if (!alive) return;
         renderer.render(scene, camera);
@@ -302,14 +346,32 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
     s.orbit.maxR = size * 20;
     s.camera.near = Math.max(0.1, size * 0.001);
     s.camera.far = size * 50;
+    s.sky.scale.setScalar(size * 40);
     if (s.scene.fog instanceof THREE.Fog) {
       s.scene.fog.near = size * 2;
       s.scene.fog.far = size * 12;
     }
     s.camera.updateProjectionMatrix();
     placeCamera(s);
-    onInfo?.({ backend: s.backend, triangles: s.triangles, ...(s.sea ? { seaM: s.sea.position.y } : {}) });
+    onInfo?.(infoOf(s));
   }, [preview, extentM, onInfo]);
+
+  // Sun: direction from azimuth/elevation; low sun goes warm and dimmer, the sky light follows.
+  useEffect(() => {
+    const s = sceneRef.current;
+    if (!s) return;
+    const az = ((sun?.azimuthDeg ?? 140) * Math.PI) / 180;
+    const el = ((sun?.elevationDeg ?? 35) * Math.PI) / 180;
+    const r = 10000;
+    // Azimuth is where the light comes FROM, clockwise from north (-Z).
+    s.sun.position.set(r * Math.cos(el) * Math.sin(az), r * Math.sin(el), -r * Math.cos(el) * Math.cos(az));
+    const warm = Math.min(1, Math.max(0, (20 - (sun?.elevationDeg ?? 35)) / 20));
+    s.sun.color.set(0xffffff).lerp(new THREE.Color(0xffa054), warm);
+    s.sun.intensity = 1.6 * (0.55 + 0.45 * Math.sin(el));
+    s.hemi.intensity = 0.9 * (0.6 + 0.4 * Math.sin(el));
+    s.sunDeg = { azimuthDeg: sun?.azimuthDeg ?? 140, elevationDeg: sun?.elevationDeg ?? 35 };
+    onInfo?.(infoOf(s));
+  }, [sun?.azimuthDeg, sun?.elevationDeg, onInfo]);
 
   // Sea plane: follows the graph's sea-level node; a flat translucent quad over the whole world.
   useEffect(() => {
@@ -329,7 +391,7 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
       s.sea.position.y = seaLevelM;
       s.scene.add(s.sea);
     }
-    onInfo?.({ backend: s.backend, triangles: s.triangles, ...(s.sea ? { seaM: seaLevelM ?? 0 } : {}) });
+    onInfo?.(infoOf(s));
   }, [seaLevelM, extentM, preview, onInfo]);
 
   return <div ref={host} className="h-full w-full" data-testid="viewport" />;

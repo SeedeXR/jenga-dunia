@@ -91,6 +91,12 @@ Undo and redo are operations like everything else (`graph.undo` / `graph.redo`, 
 
 **Screen recording:** [`videos/graph-editor.mp4`](videos/graph-editor.mp4) (17 s, 1440×900) — the whole flow above: edit the seed, add a blur node, connect it by dragging the handles, move a node, evaluate, delete with the keyboard, undo and redo. It is the UI-driven test `apps/desktop/e2e/graph.spec.ts` running against the real core, recorded with `JD_VIDEO=1 pnpm exec playwright test e2e/graph.spec.ts` (actions slowed to human pace), so it is regenerated whenever the editor changes.
 
+## Sky and sun
+
+![Viewport with the gradient sky and a low warm sun; the Sun panel shows azimuth 140° and elevation 12°](images/desktop-sun.png)
+
+*The viewport draws a gradient sky dome (deep blue zenith → pale horizon, dark below) and lights the terrain with a sun you steer from the **Sun** panel (1): azimuth is the compass direction the light comes from, elevation its height above the horizon — below 20° the light turns warm and dimmer, like World Creator's time-of-day. The header reports the current direction (2). The sun is a view setting, not part of the project. UI-driven test: `apps/desktop/e2e/terrain.spec.ts` drags the elevation to 12° and checks the readout.*
+
 ## Hydrology layers in the viewport
 
 ![Rivers project: carved terrain with the layer picker showing height, rivers and wetness](images/desktop-rivers.png)
