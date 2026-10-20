@@ -6,7 +6,7 @@ use std::sync::Arc;
 use jd_terrain::{
     ForeignImport, Heightfield, HydraulicParams, NoiseParams, Stroke, THERMAL_MAX_RATE,
     apply_strokes, carve_rivers, fill_depressions, flow_accumulation, generate_noise,
-    hydraulic_erode, read_foreign, resample_to_world, slope_mask, thermal_erode,
+    hydraulic_erode, read_foreign, resample_to_world, slope_mask, thermal_erode, wetness_index,
 };
 use jd_types::{JdError, JdResult};
 use rayon::prelude::*;
@@ -517,6 +517,13 @@ pub fn register_all(r: &mut Registry) {
             let (carved, rivers) = carve_rivers(field(i, "in")?, spacing_m(ctx), rp.threshold, rp.depth_m)?;
             Ok(BTreeMap::from([("out".to_owned(), Value::field(carved)), ("rivers".to_owned(), Value::field(rivers))]))
         },
+    ));
+    r.register(NodeDef::new::<NoParams, _>(
+        "jd.hydrology.wetness@1",
+        "Topographic wetness index ln(a / tan β) normalised to 0..1 — wet valley floors high, steep ridges low (biome/moisture masks)",
+        vec![port("in", PortType::Heightfield, true)],
+        vec![port("out", PortType::Heightfield, false)],
+        |ctx, _, i| Ok(out("out", wetness_index(field(i, "in")?, spacing_m(ctx))?)),
     ));
     r.register(NodeDef::new::<OutputParams, _>(
         "jd.output.height@1",

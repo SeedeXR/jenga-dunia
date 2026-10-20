@@ -190,6 +190,32 @@ pub fn carve_rivers(
     Ok((out, mask))
 }
 
+/// Topographic wetness index (Beven & Kirkby 1979): `ln(a / tan β)` with `a` the upslope area per
+/// unit contour length (D8 accumulation × cell area / cell width) and `β` the local slope; the
+/// result is normalised to 0..1 across the field so it reads as a mask (wet valleys → 1).
+pub fn wetness_index(h: &Heightfield, spacing_m: [f32; 2]) -> JdResult<Heightfield> {
+    let acc = flow_accumulation(h, spacing_m, false)?;
+    let slope = crate::slope_mask(h, spacing_m, 90.0)?; // slope angle / 90 → degrees = ×90
+    let (w, hh) = (h.width(), h.height());
+    let cell_w = spacing_m[0].min(spacing_m[1]);
+    let area = spacing_m[0] * spacing_m[1];
+    let mut twi = vec![0.0f32; (w * hh) as usize];
+    for y in 0..hh {
+        for x in 0..w {
+            let a = acc.get(x, y) * area / cell_w;
+            let tan_b = (slope.get(x, y) * 90.0).to_radians().tan().max(1e-3);
+            twi[(y * w + x) as usize] = (a / tan_b).ln();
+        }
+    }
+    let (lo, hi) = twi
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(lo, hi), v| (lo.min(*v), hi.max(*v)));
+    let span = (hi - lo).max(1e-6);
+    let mut out = Heightfield::new(w, hh, h.tile_size(), h.halo())?;
+    out.fill_with(|x, y| (twi[(y * w + x) as usize] - lo) / span);
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,6 +319,26 @@ mod tests {
             carved.content_hash()
         );
         assert!(carve_rivers(&h, [1.0, 1.0], 1.0, 10.0).is_err());
+    }
+
+    #[test]
+    fn wetness_is_high_on_flat_valley_floors_and_low_on_steep_ridges() {
+        let mut h = Heightfield::new(33, 24, 32, 4).expect("hf");
+        h.fill_with(|x, y| (x as f32 - 16.0).abs() * 4.0 + y as f32 * 0.5);
+        let twi = wetness_index(&h, [1.0, 1.0]).expect("twi");
+        let s = twi.stats();
+        assert_eq!(s.non_finite, 0);
+        assert!(s.min >= 0.0 && s.max <= 1.0 + 1e-6);
+        assert!(
+            twi.get(16, 2) > twi.get(3, 20),
+            "valley outlet {} wetter than the ridge {}",
+            twi.get(16, 2),
+            twi.get(3, 20)
+        );
+        assert_eq!(
+            wetness_index(&h, [1.0, 1.0]).expect("again").content_hash(),
+            twi.content_hash()
+        );
     }
 
     #[test]
