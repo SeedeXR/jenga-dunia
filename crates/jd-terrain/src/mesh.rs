@@ -76,7 +76,7 @@ pub fn hypsometric_rgb(t: f32, slope: f32) -> [u8; 3] {
 
 /// Bake the base-colour texture for the exported grid (`gw`×`gh`, row 0 = south, matching the
 /// mesh UVs where v = 0 on the south edge) as PNG bytes.
-fn bake_albedo(
+pub(crate) fn bake_albedo(
     sample: &dyn Fn(u32, u32) -> f32,
     normal_y: &dyn Fn(u32, u32) -> f32,
     gw: u32,
@@ -704,11 +704,12 @@ pub fn export_mesh(
         Some("ply") => export_ply(hf, extent_m, path, step),
         Some("usda") => export_usda(hf, extent_m, path, step),
         Some("usdz") => export_usdz(hf, extent_m, path, step),
+        Some("fbx") => crate::fbx::export_fbx(hf, extent_m, path, step, texture),
         Some(other) => Err(JdError::new(
             jd_types::ErrorCode::E_FORMAT_UNSUPPORTED,
             format!("unsupported mesh extension `{other}`"),
         )
-        .next("Use .glb, .obj, .stl, .ply, .usda or .usdz.")),
+        .next("Use .glb, .fbx, .obj, .stl, .ply, .usda or .usdz.")),
     }
 }
 
@@ -877,7 +878,7 @@ mod tests {
             ply_bytes.len() - header_end,
             20 * (6 * 4 + 3) + 24 * (1 + 12)
         );
-        assert!(export_mesh(&hf, [50.0, 40.0], &dir.path().join("g.fbx"), 1, false).is_err());
+        assert!(export_mesh(&hf, [50.0, 40.0], &dir.path().join("g.xyz"), 1, false).is_err());
     }
 
     #[test]

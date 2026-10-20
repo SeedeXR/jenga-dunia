@@ -4487,7 +4487,7 @@ expression: list
   },
   {
     "id": "terrain.export_mesh",
-    "description": "Write a layer as a grid mesh — .glb (normals, UVs, PBR material with baked base-colour texture), .obj, binary .stl, binary .ply with vertex colours, .usda, or .usdz (needs usdzip) — metres, +Y up, centred on the world",
+    "description": "Write a layer as a grid mesh — .glb (normals, UVs, PBR material with baked base-colour texture), .fbx (binary 7.4 quads, Phong material with the baked texture embedded), .obj, binary .stl, binary .ply with vertex colours, .usda, or .usdz (needs usdzip) — metres, +Y up, centred on the world",
     "scope": "export",
     "request_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -4501,7 +4501,7 @@ expression: list
           "default": "height"
         },
         "path": {
-          "description": "Output `.glb`; relative paths resolve against the project's `exports/` directory.",
+          "description": "Output `.glb`, `.fbx`, `.obj`, `.stl`, `.ply`, `.usda` or `.usdz`; relative paths resolve against the project's `exports/` directory.",
           "type": "string"
         },
         "step": {

@@ -7,6 +7,7 @@
 
 pub mod droplet;
 pub mod export;
+pub mod fbx;
 pub mod flow;
 pub mod heightfield;
 pub mod import;

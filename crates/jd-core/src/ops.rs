@@ -2710,7 +2710,7 @@ pub mod terrain {
         /// Layer name.
         #[serde(default = "default_layer")]
         pub layer: String,
-        /// Output `.glb`; relative paths resolve against the project's `exports/` directory.
+        /// Output `.glb`, `.fbx`, `.obj`, `.stl`, `.ply`, `.usda` or `.usdz`; relative paths resolve against the project's `exports/` directory.
         pub path: PathBuf,
         /// Grid step (1 = every sample). Default: the smallest step that keeps the mesh within `max_vertices`.
         #[serde(default)]
@@ -2843,7 +2843,7 @@ pub mod terrain {
         );
         r.register::<TerrainExportMesh, jd_terrain::MeshExportReport, _>(
             "terrain.export_mesh",
-            "Write a layer as a grid mesh — .glb (normals, UVs, PBR material with baked base-colour texture), .obj, binary .stl, binary .ply with vertex colours, .usda, or .usdz (needs usdzip) — metres, +Y up, centred on the world",
+            "Write a layer as a grid mesh — .glb (normals, UVs, PBR material with baked base-colour texture), .fbx (binary 7.4 quads, Phong material with the baked texture embedded), .obj, binary .stl, binary .ply with vertex colours, .usda, or .usdz (needs usdzip) — metres, +Y up, centred on the world",
             Scope::Export,
             |ctx, p| {
                 let (path, extent) = ctx.with_project(|proj| {

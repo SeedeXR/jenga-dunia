@@ -153,6 +153,22 @@ The same command writes **OBJ**, binary **STL** and binary **PLY** by extension 
 ![The PLY export rendered in an external viewer with its vertex colours](images/cli-mesh-ply.png)
 
 **OpenUSD.** `terrain.usda` writes an ASCII USD stage (`metersPerUnit = 1`, `upAxis = "Y"`, `defaultPrim = "Terrain"`, a `Mesh` with points, triangles, vertex normals, `primvars:st` and hypsometric `primvars:displayColor`); `terrain.usdz` packages it with the system `usdzip` (Apple USD Tools on macOS 27, OpenUSD elsewhere — `E_DEPENDENCY_MISSING` names the install when it is absent). Both pass `usdchecker` ("Success!") on the 512² world at step 4 (16 641 vertices: 2.45 MB, 0.07 s for `.usda`, 0.14 s for `.usdz`). USDA is text — for large worlds export `.glb` or `.ply`, or let `usdcrush` compress the package.
+
+**FBX — our own writer, no SDK.** `terrain.fbx` writes Kaydara FBX Binary 7.4 from scratch (`crates/jd-terrain/src/fbx.rs`, ~500 lines, no dependency): the grid as *quads* (`PolygonVertexIndex` with the negated last corner), per-vertex normals (`ByVertice`), UVs as `ByPolygonVertex`/`IndexToDirect` (the layout the FBX SDK and Blender write, and the only one some readers accept), one Phong material, and — unless `--no-texture` — the baked albedo embedded as a `Video`/`Texture` pair on `DiffuseColor`. `UnitScaleFactor = 100` declares the unit as 100 cm, so the mesh stays in metres; axes are +Y up like the other exporters. FBX has no public specification, so the file is verified by two independent clean-room readers rather than a validator:
+
+```
+$ jd --json export mesh --project Bio.jdproj --layer land land.fbx
+{"op":"terrain.export_mesh","status":"ok","result":{"path":".../exports/land.fbx","format":"fbx","vertices":262144,"triangles":522242,"step":1,"bytes":25484444,...}}
+```
+
+| Reader | What it saw (512² world, step 1) |
+|---|---|
+| Blender 5.2 `import_scene.fbx` | 1 object `terrain`, 262 144 vertices, 261 121 polygons all quads, 5 110 × 5 110 m footprint, 1 033 m height range, UV layer `map1` in 0..1, material `terrain` with one image-texture node, embedded `terrain-albedo.png` 512² unpacked |
+| Optima (independent Rust parser) | 262 144 vertices, 261 121 authored quads, 0 degenerate / flipped / non-manifold, bounding box ±2 555 m × 52..1 085 m, `hasUvs: true`, `textured: true`, PNG 512² |
+
+![Textured FBX terrain rendered by Optima after reading our file](images/cli-fbx.png)
+
+The unit test (`fbx::tests`) walks the written record tree with a tiny independent reader: every record's end offset lands exactly on the next record, the footer sits at a 16-byte boundary, and the first quad is `0, 1, 10, -(9+1)`. 0.33 s for the 25 MB file in a debug build. Not written: animation, skinning, cameras, multiple materials — this is the FBX surface a terrain tool needs; the own FBX *reader* for imports is a later slice.
  Worlds above ~1 M vertices are sampled every `step` pixels (`W_MESH_DECIMATED`); pass `--step 1` for the full grid.
 
 ### Hydrology recipe: rivers, lakes and wetness

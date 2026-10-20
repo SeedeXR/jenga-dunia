@@ -723,7 +723,7 @@ export type TerrainExportHeightmapResult = {
 export type TerrainExportMeshRequest = {
   /** Layer name. */
   "layer"?: string;
-  /** Output `.glb`; relative paths resolve against the project's `exports/` directory. */
+  /** Output `.glb`, `.fbx`, `.obj`, `.stl`, `.ply`, `.usda` or `.usdz`; relative paths resolve against the project's `exports/` directory. */
   "path": string;
   /** Grid step (1 = every sample). Default: the smallest step that keeps the mesh within `max_vertices`. */
   "step"?: number | null;
@@ -1230,7 +1230,7 @@ export interface JdOps {
   "project.set_settings": { request: ProjectSetSettingsRequest; result: ProjectSetSettingsResult };
   /** Write a layer as EXR (f32), PNG16, RAW r16 or r32 with a JSON sidecar */
   "terrain.export_heightmap": { request: TerrainExportHeightmapRequest; result: TerrainExportHeightmapResult };
-  /** Write a layer as a grid mesh — .glb (normals, UVs, PBR material with baked base-colour texture), .obj, binary .stl, binary .ply with vertex colours, .usda, or .usdz (needs usdzip) — metres, +Y up, centred on the world */
+  /** Write a layer as a grid mesh — .glb (normals, UVs, PBR material with baked base-colour texture), .fbx (binary 7.4 quads, Phong material with the baked texture embedded), .obj, binary .stl, binary .ply with vertex colours, .usda, or .usdz (needs usdzip) — metres, +Y up, centred on the world */
   "terrain.export_mesh": { request: TerrainExportMeshRequest; result: TerrainExportMeshResult };
   /** Write a Unity or Unreal terrain import set: heightmap in the engine's encoding and row order, one 8-bit weightmap per mask layer, and a README with the computed Terrain Height / Z scale */
   "terrain.export_profile": { request: TerrainExportProfileRequest; result: TerrainExportProfileResult };

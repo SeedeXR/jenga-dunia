@@ -46,7 +46,7 @@ flowchart TB
   REG --> X3["OBJ / STL / PLY<br/>own writers"]
   REG --> X4["Heightfields<br/>EXR f32, PNG16, TIFF 16/32f, RAW r16/r32 + JSON sidecar; GeoTIFF (tiff GeoKeys)"]
   REG --> X5["Weight/splat maps<br/>per-layer PNG8 (Unreal), packed RGBA (Unity), sum-to-one"]
-  REG --> X6["FBX<br/>import: ufbx (MIT) · export: Blender bridge (P2) / fbxcel static mesh (P4) / opt-in Autodesk SDK adapter (out-of-process)"]
+  REG --> X6["FBX<br/>import: ufbx (MIT) or own reader (P4) · export: own binary 7.4 writer ✔ (jd-terrain::fbx) · opt-in Autodesk SDK adapter (out-of-process)"]
   REG --> X7["Bridge manifest JSON<br/>+ engine helper scripts (Unity C#, Unreal Python, Maya mayapy, Blender add-on)"]
   X1 & X2 & X3 & X4 & X5 & X6 & X7 --> VAL["Validators (optional, detected):<br/>gltf-validator / gltf-transform, usdchecker (--arkit), Blender headless import, exrinfo"]
   VAL --> REP["Export report: files, stats, losses (W_EXPORT_LOSS), validator output, attribution"]
