@@ -160,6 +160,36 @@ pub fn fill_depressions(h: &Heightfield, epsilon_m: f32) -> JdResult<(Heightfiel
     Ok((out, lakes))
 }
 
+/// River carving from flow accumulation: fill depressions, route D8 flow, then incise where the
+/// log-scaled accumulation exceeds `threshold` (0..1), down to `depth_m` at the largest rivers
+/// with a smooth ramp. Returns the carved terrain and the 0..1 river mask.
+///
+/// ponytail: incision depth follows accumulation only; width/meanders/banks and hydrology-first
+/// generation (Génevaux 2013) are later nodes.
+pub fn carve_rivers(
+    h: &Heightfield,
+    spacing_m: [f32; 2],
+    threshold: f32,
+    depth_m: f32,
+) -> JdResult<(Heightfield, Heightfield)> {
+    if !(0.0..1.0).contains(&threshold) {
+        return Err(JdError::invalid("threshold", "must be within 0..1"));
+    }
+    if !(depth_m >= 0.0 && depth_m.is_finite()) {
+        return Err(JdError::invalid("depth_m", "must be finite and ≥ 0"));
+    }
+    let (filled, _) = fill_depressions(h, 0.001)?;
+    let acc = flow_accumulation(&filled, spacing_m, true)?;
+    let mut mask = Heightfield::new(h.width(), h.height(), h.tile_size(), h.halo())?;
+    mask.fill_with(|x, y| {
+        let t = ((acc.get(x, y) - threshold) / (1.0 - threshold)).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    });
+    let mut out = h.clone();
+    out.fill_with(|x, y| h.get(x, y) - depth_m * mask.get(x, y));
+    Ok((out, mask))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,6 +264,35 @@ mod tests {
             eps.content_hash()
         );
         assert!(fill_depressions(&h, -1.0).is_err());
+    }
+
+    #[test]
+    fn rivers_carve_where_flow_concentrates() {
+        // A V-shaped valley: water from both slopes gathers along x = 16 and flows north (y → 0).
+        let mut h = Heightfield::new(33, 24, 32, 4).expect("hf");
+        h.fill_with(|x, y| (x as f32 - 16.0).abs() * 4.0 + y as f32 * 0.5);
+        let (carved, mask) = carve_rivers(&h, [1.0, 1.0], 0.6, 10.0).expect("carve");
+        assert!(
+            mask.get(16, 2) > 0.5,
+            "valley floor near the outlet is river: {}",
+            mask.get(16, 2)
+        );
+        assert_eq!(mask.get(2, 20), 0.0, "ridge top is dry");
+        assert!(
+            h.get(16, 2) - carved.get(16, 2) > 5.0,
+            "incised: {} → {}",
+            h.get(16, 2),
+            carved.get(16, 2)
+        );
+        assert_eq!(carved.get(2, 20), h.get(2, 20));
+        assert_eq!(
+            carve_rivers(&h, [1.0, 1.0], 0.6, 10.0)
+                .expect("again")
+                .0
+                .content_hash(),
+            carved.content_hash()
+        );
+        assert!(carve_rivers(&h, [1.0, 1.0], 1.0, 10.0).is_err());
     }
 
     #[test]

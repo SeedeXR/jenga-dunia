@@ -719,6 +719,13 @@ export type NodeParams_jd_hydrology_fill_1 = {
   "epsilon_m"?: number;
 };
 
+export type NodeParams_jd_hydrology_rivers_1 = {
+  /** Log-scaled flow accumulation (0..1) above which a cell is a river channel. */
+  "threshold"?: number;
+  /** Incision depth at the largest rivers, metres. */
+  "depth_m"?: number;
+};
+
 export type NodeParams_jd_input_heightmap_1 = {
   /** File inside the project's `assets/` directory (png, exr, tif/tiff, r16, r32). */
   "path": string;
@@ -864,6 +871,7 @@ export interface NodeKinds {
   "jd.erosion.thermal@1": NodeParams_jd_erosion_thermal_1;
   "jd.filter.blur@1": NodeParams_jd_filter_blur_1;
   "jd.hydrology.fill@1": NodeParams_jd_hydrology_fill_1;
+  "jd.hydrology.rivers@1": NodeParams_jd_hydrology_rivers_1;
   "jd.input.heightmap@1": NodeParams_jd_input_heightmap_1;
   "jd.math.add@1": NodeParams_jd_math_add_1;
   "jd.math.multiply@1": NodeParams_jd_math_multiply_1;

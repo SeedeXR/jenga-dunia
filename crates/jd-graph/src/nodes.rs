@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use jd_terrain::{
     ForeignImport, Heightfield, HydraulicParams, NoiseParams, Stroke, THERMAL_MAX_RATE,
-    apply_strokes, fill_depressions, flow_accumulation, generate_noise, hydraulic_erode,
-    read_foreign, resample_to_world, slope_mask, thermal_erode,
+    apply_strokes, carve_rivers, fill_depressions, flow_accumulation, generate_noise,
+    hydraulic_erode, read_foreign, resample_to_world, slope_mask, thermal_erode,
 };
 use jd_types::{JdError, JdResult};
 use rayon::prelude::*;
@@ -238,6 +238,23 @@ struct FillParams {
 }
 fn fill_eps() -> f32 {
     0.001
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct RiversParams {
+    /// Log-scaled flow accumulation (0..1) above which a cell is a river channel.
+    #[serde(default = "rivers_threshold")]
+    threshold: f32,
+    /// Incision depth at the largest rivers, metres.
+    #[serde(default = "rivers_depth")]
+    depth_m: f32,
+}
+fn rivers_threshold() -> f32 {
+    0.55
+}
+fn rivers_depth() -> f32 {
+    20.0
 }
 
 /// Tile-local box blur that reads neighbours through the halo (ADR-0005). Fails cleanly when
@@ -488,6 +505,17 @@ pub fn register_all(r: &mut Registry) {
             let fp: FillParams = params(p)?;
             let (filled, lakes) = fill_depressions(field(i, "in")?, fp.epsilon_m)?;
             Ok(BTreeMap::from([("out".to_owned(), Value::field(filled)), ("lakes".to_owned(), Value::field(lakes))]))
+        },
+    ));
+    r.register(NodeDef::new::<RiversParams, _>(
+        "jd.hydrology.rivers@1",
+        "Carve river channels where flow accumulates (depressions filled first); outputs the carved terrain and a 0..1 river mask",
+        vec![port("in", PortType::Heightfield, true)],
+        vec![port("out", PortType::Heightfield, false), port("rivers", PortType::Heightfield, false)],
+        |ctx, p, i| {
+            let rp: RiversParams = params(p)?;
+            let (carved, rivers) = carve_rivers(field(i, "in")?, spacing_m(ctx), rp.threshold, rp.depth_m)?;
+            Ok(BTreeMap::from([("out".to_owned(), Value::field(carved)), ("rivers".to_owned(), Value::field(rivers))]))
         },
     ));
     r.register(NodeDef::new::<OutputParams, _>(

@@ -104,6 +104,8 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `11:00:00` **Priority-flood depression filling** (`jd-terrain::flow::fill_depressions`, Barnes 2014 with an epsilon gradient; min-heap keyed by (height, index) → deterministic) + `jd.hydrology.fill@1` (outputs `out`, `lakes`). Test: a rim/pit/channel bowl fills exactly to the channel spill level, lakes depth = 40 m, nothing lowered, every interior cell has a D8 receiver after filling. Review of the jobs/brush/placement slices running in the background.
 
+- `11:15:00` **Rivers**: `carve_rivers` (fill → D8 log accumulation → smoothstep incision above `threshold` to `depth_m`) + `jd.hydrology.rivers@1` (outputs `out`, `rivers`). V-valley test: the valley floor near the outlet is river and incised > 5 m, the ridge is dry and untouched, deterministic.
+
 ### Open / next (as of 2026-10-20 09:55, head `fd63a43`)
 1. **CI**: `645408b` (document open + native log), `1678900` (package UTI), `fd63a43` (brush cursor) polling; everything through `208b120` green.
 2. **Figma**: connector unavailable this session ("server not found") and plugin OAuth pending on the owner's side → tutorial images stay in `docs/user/images/` (annotated by `annotate.mjs`); place them in file `fxyeV62hgLoNmG3dU1LX6G` when a connector works.

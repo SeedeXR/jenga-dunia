@@ -51,7 +51,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 
 ## Phase 3 — Simulation
 - [~] Thermal ✔ (CPU Jacobi, `jd.erosion.thermal@1`, mass-conserving; GPU/tile-local ☐) · hydraulic (grid/virtual pipes) ✔ (`jd.erosion.hydraulic@1`, CPU, closed boundary; drains/layers/GPU ☐) · hydraulic (particle) ☐ · stream-power ☐ · wind ☐ · coastal ☐ · snow ☐
-- [~] Hydrology: D8 flow accumulation ✔ (`jd.analysis.flow@1`), priority-flood fill ✔ (`jd.hydrology.fill@1`, outputs drainable field + `lakes`); D∞/MFD, rivers (carve), sea level, TWI ☐
+- [~] Hydrology: D8 flow accumulation ✔ (`jd.analysis.flow@1`), priority-flood fill ✔ (`jd.hydrology.fill@1`, outputs drainable field + `lakes`), rivers ✔ (`jd.hydrology.rivers@1`: fill → D8 accumulation → smoothstep incision, `rivers` mask); D∞/MFD, sea level, TWI, hydrology-first generation ☐
 - [ ] Biomes + scatter + instance export
 - [ ] Weather state, timeline, water/ocean viewport
 - [ ] Material graph + baking
