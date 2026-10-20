@@ -33,7 +33,7 @@ function svgFor(spec, w, h) {
   for (const l of labels) {
     parts.push(`<circle cx="${l.x}" cy="${l.y}" r="16" fill="${RED}"/><text x="${l.x}" y="${l.y + 6}" text-anchor="middle" font-size="18" font-weight="700" fill="#fff" font-family="Helvetica, Arial, sans-serif">${l.label}</text>`);
   }
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="position:absolute;left:0;top:0">
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 ${w} ${h}" style="position:absolute;left:0;top:0">
     <defs><marker id="head" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="${RED}"/></marker></defs>
     ${parts.join("\n")}</svg>`;
 }
@@ -51,24 +51,23 @@ async function run(specPath) {
   const png = readFileSync(src);
   const dataUri = `data:image/png;base64,${png.toString("base64")}`;
   const browser = await chromium.launch({ channel: process.env.CI ? undefined : "chrome" });
-  const page = await browser.newPage({ deviceScaleFactor: 1 });
-  await page.setContent(`<html><body style="margin:0"><img id="i" src="${dataUri}" style="display:block"></body></html>`);
-  const { w, h } = await page.evaluate(() => {
+  const probe = await browser.newPage();
+  await probe.setContent(`<img id="i" src="${dataUri}">`);
+  const { w, h } = await probe.evaluate(() => {
     const i = document.getElementById("i");
     return { w: i.naturalWidth, h: i.naturalHeight };
   });
-  await page.setViewportSize({ width: w, height: h });
-  await page.evaluate((svg) => {
-    const wrap = document.createElement("div");
-    wrap.style.cssText = "position:relative;width:100%;height:100%";
-    const img = document.getElementById("i");
-    document.body.appendChild(wrap);
-    wrap.appendChild(img);
-    img.style.position = "absolute";
-    wrap.insertAdjacentHTML("beforeend", svg);
-  }, svgFor(spec, w, h));
+  await probe.close();
+  // Headless Chrome on macOS wraps content taller than the physical screen (rows ≥ ~815 showed the
+  // page top again), so render at half CSS size with deviceScaleFactor 2: same output pixels,
+  // half the window.
+  const dsf = h > 800 ? 2 : 1;
+  const page = await browser.newPage({ deviceScaleFactor: dsf, viewport: { width: w / dsf, height: h / dsf } });
+  await page.setContent(
+    `<html><body style="margin:0"><div style="position:relative;width:${w / dsf}px;height:${h / dsf}px"><img src="${dataUri}" style="position:absolute;left:0;top:0;width:${w / dsf}px;height:${h / dsf}px">${svgFor(spec, w, h)}</div></body></html>`,
+  );
   mkdirSync(dirname(out), { recursive: true });
-  await page.screenshot({ path: out, clip: { x: 0, y: 0, width: w, height: h } });
+  await page.screenshot({ path: out, clip: { x: 0, y: 0, width: w / dsf, height: h / dsf }, scale: "device" });
   await browser.close();
   console.log(`annotated ${spec.src} → ${spec.out} (${spec.annotations.length} annotations)`);
 }

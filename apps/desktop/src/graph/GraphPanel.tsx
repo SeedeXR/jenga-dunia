@@ -190,6 +190,8 @@ function Inner() {
             {Object.entries(schemaProps).map(([key, prop]) => {
               const current = sel.params[key];
               const isNum = prop.type === "number" || prop.type === "integer";
+              // f32 params arrive as f64 (0.55 → 0.550000011920929); show 7 significant digits.
+              const show = (v: unknown): string => (Array.isArray(v) ? v.map(show).join(",") : typeof v === "number" ? String(Number(v.toPrecision(7))) : String(v));
               return (
                 <label key={key} className="mb-1 flex items-center justify-between gap-2" title={prop.description}>
                   <span className="text-jd-fg-1">{key}</span>
@@ -206,8 +208,8 @@ function Inner() {
                   ) : (
                     <input
                       className="w-28 rounded border border-jd-line bg-jd-bg-2 px-1 text-right text-xs"
-                      defaultValue={current === undefined ? "" : Array.isArray(current) ? current.join(",") : String(current)}
-                      placeholder={prop.default === undefined ? "" : Array.isArray(prop.default) ? prop.default.join(",") : String(prop.default)}
+                      defaultValue={current === undefined ? "" : show(current)}
+                      placeholder={prop.default === undefined ? "" : show(prop.default)}
                       onBlur={(e) => {
                         const raw = e.target.value.trim();
                         if (raw === "") return void s.setParam(sel.id, key, null);

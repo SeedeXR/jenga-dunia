@@ -118,13 +118,15 @@ Append-only log. Newest entry first. Timestamps are local (Africa/Nairobi, UTC+3
 
 - `13:30:00` Sea level pushed as `4f1dbfb`. **Sculpt perf**: `box_mean` is now a summed-area table (f64, O(N)) and each pixel skips strokes whose polyline ± radius box excludes it (falloff is exactly 0 there, so raise/flatten output is bit-identical; smooth differs only by f64-vs-f32 summation). Measured old vs new debug CLI on a 2048² world, one 600 m smooth stroke: sculpt node 70 554 ms → 681 ms, min/max identical, mean 249.711186 both. Test: SAT equals brute force on a pseudo-random 37×23 field; far pixels bit-identical.
 
-### Open / next (as of 2026-10-20 13:35, head after sculpt-perf commit)
-1. **CI**: everything through `4f1dbfb` (sea level) green; the sculpt-perf commit polling.
+- `13:50:00` Sculpt perf pushed as `6e5ba06`. **UI-driven hydrology test** `apps/desktop/e2e/hydrology.spec.ts`: add rivers node from the kinds dropdown → inspector `method` select has exactly `d8`/`dinf`, default `d8` → select `dinf` → `graph.set_param: ok`, node label `method=dinf` → wire noise → rivers → height by handle drag → Evaluate → stats + triangles → add sea_level, both output handles present. Found via the screenshot: f32 defaults rendered as `0.550000011920929` → inspector now shows 7 significant digits (asserted via the placeholder). Capture annotated into `docs/user/images/desktop-rivers-method.png` + desktop guide paragraph. **annotate.mjs bug**: headless Chrome (channel `chrome`, macOS) wraps content taller than the physical screen — rows ≥ 815 of a 1440×900 render showed the page top again (73 wrong rows, reproducible). Fix: render at half CSS size with `deviceScaleFactor` 2 and `scale: "device"` (same output pixels, half the window); verified pixel-exact against the source outside the annotation rows. Existing docs images checked for the signature (bottom strip == top strip): none affected.
+
+### Open / next (as of 2026-10-20 13:55, head after hydrology-e2e commit)
+1. **CI**: everything through `4f1dbfb` green; `6e5ba06` (sculpt perf) and the hydrology-e2e commit polling.
 2. **Figma**: connector unavailable this session; plugin OAuth pending on the owner's side → tutorial images stay in `docs/user/images/`; place them in file `fxyeV62hgLoNmG3dU1LX6G` when a connector works.
 3. **Native leftovers**: Edit-menu capture; native sculpt capture/recording (needs Accessibility); signed/notarised bundle (needs an Apple developer account).
 4. **Phase 3 follow-ups**: hydraulic concentration cap / layered materials / open drains; thermal + hydraulic WGSL twins (`jd-gpu`); particle hydraulic; MFD (D∞ ✔; `wetness` still D8-only); sea level ✔ (viewport water plane / ocean shading ☐); hydrology-first generation; smooth-brush blur done via summed-area table (whole-field blur is now O(N); tile-level dirty sets remain).
 5. **Phase 2 leftovers**: detached async jobs (queues/budgets/timeouts), adopt `JdOps` types in `state.ts`, GeoTIFF tags/nodata on import, textured PBR for GLB, Windows/Linux measurements, tile-level `jd-cache` with LRU.
-6. **Docs**: hydrology recipe ✔, `desktop-rivers.png` ✔; a desktop capture of the rivers inspector showing the `method` select is still open (needs the native app rebuilt from this head).
+6. **Docs**: hydrology recipe ✔, `desktop-rivers.png` ✔; rivers inspector `method` capture ✔ (e2e); a *native* capture of the same needs the app rebuilt from this head.
 
 ---
 

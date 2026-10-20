@@ -91,6 +91,10 @@ Undo and redo are operations like everything else (`graph.undo` / `graph.redo`, 
 
 *Native capture (v0.0.1): a `noise → rivers → height` graph with two extra outputs (`rivers`, `wetness`) built from the CLI (see the hydrology recipe in the CLI quickstart) and opened in the app. The header's **layer** picker lists every published layer; the viewport shows the carved terrain, and picking `rivers` or `wetness` shows those masks with their own stats.*
 
+![Node editor: rivers node selected, inspector with the method select set to dinf](images/desktop-rivers-method.png)
+
+*Inside the app: pick `jd.hydrology.rivers@1` in the kinds dropdown and **Add** (1), click the node (2) and the schema-driven inspector shows its parameters; `method` is a select built from the node's schema — switch it from `d8` to `dinf` (3) and the node label updates (`method=dinf`) after the core journals `graph.set_param`. `jd.hydrology.sea_level@1` adds the same way and exposes two output handles, `ocean` and `depth`. Numbers that come from the core as 32-bit floats are shown rounded (`0.55`, not `0.550000011920929`). Captured by the UI-driven test `apps/desktop/e2e/hydrology.spec.ts`.*
+
 ## Tutorial: sculpting
 
 1. Click **Sculpt** (top of the viewport). If the graph has no stroke node yet, a `jd.sculpt.strokes` node is inserted in front of the output and selected; the button reads **Sculpting…** and a **Brush** panel appears on the right: **mode** (raise/lower by a strength in metres — negative digs; **smooth** blends towards the local mean; **flatten** pulls towards the height under the first point of the stroke), radius, and strength or amount (0–1).
