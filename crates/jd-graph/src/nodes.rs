@@ -740,6 +740,17 @@ pub fn register_all(r: &mut Registry) {
             Ok(out("snow", snow_cover(field(i, "in")?, spacing_m(ctx), &sp)?))
         },
     ));
+    r.register(NodeDef::new::<jd_terrain::SnowpackParams, _>(
+        "jd.climate.snowpack@1",
+        "Snowpack over `steps`: snow falls where it is cold enough and holds on gentle ground, a degree-day melt follows the lapse rate and the sun, wind drifts it to the lee — `depth` in metres of snow and `cover` 0..1; key `temperature_c` over the timeline for a season",
+        vec![port("in", PortType::Heightfield, true)],
+        vec![port("depth", PortType::Heightfield, false), port("cover", PortType::Heightfield, false)],
+        |ctx, p, i| {
+            let sp: jd_terrain::SnowpackParams = params(&with_world_wind(ctx, p, &["wind_azimuth_deg"]))?;
+            let (depth, cover) = jd_terrain::snowpack(field(i, "in")?, spacing_m(ctx), &sp)?;
+            Ok(BTreeMap::from([("depth".to_owned(), Value::field(depth)), ("cover".to_owned(), Value::field(cover))]))
+        },
+    ).with_memory(16.0));
     r.register(NodeDef::new::<SlopeParams, _>(
         "jd.analysis.slope@1",
         "Slope mask 0..1 (gradient angle / max_deg) — feed into multiply to attenuate by steepness",

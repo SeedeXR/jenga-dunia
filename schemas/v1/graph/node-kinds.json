@@ -399,6 +399,105 @@
     }
   },
   {
+    "kind": "jd.climate.snowpack@1",
+    "description": "Snowpack over `steps`: snow falls where it is cold enough and holds on gentle ground, a degree-day melt follows the lapse rate and the sun, wind drifts it to the lee — `depth` in metres of snow and `cover` 0..1; key `temperature_c` over the timeline for a season",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "depth",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "cover",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "SnowpackParams",
+      "description": "Snowpack settings.",
+      "type": "object",
+      "properties": {
+        "steps": {
+          "description": "Steps (1..=2000).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 50
+        },
+        "accumulation_m": {
+          "description": "Snowfall per step on flat ground where it is colder than +1 °C, metres of snow (≥ 0).",
+          "type": "number",
+          "format": "float",
+          "default": 0.019999999552965164
+        },
+        "temperature_c": {
+          "description": "Air temperature at sea level, °C — key it over the timeline for a season.",
+          "type": "number",
+          "format": "float",
+          "default": -5.0
+        },
+        "lapse_c_per_km": {
+          "description": "Lapse rate, °C lost per km of height (≥ 0).",
+          "type": "number",
+          "format": "float",
+          "default": 6.5
+        },
+        "melt_m_per_c": {
+          "description": "Melt per step per degree above freezing, metres of snow (≥ 0).",
+          "type": "number",
+          "format": "float",
+          "default": 0.004000000189989805
+        },
+        "max_slope_deg": {
+          "description": "Slope at which snow no longer holds (0, 90]; snowfall retained falls linearly to 0 there.",
+          "type": "number",
+          "format": "float",
+          "default": 60.0
+        },
+        "sun_azimuth_deg": {
+          "description": "Compass direction of the sun, degrees clockwise from north (180 = south).",
+          "type": "number",
+          "format": "float",
+          "default": 180.0
+        },
+        "sun_strength": {
+          "description": "Sun-facing slopes run up to `sun_strength` × 5 °C warmer (0..1).",
+          "type": "number",
+          "format": "float",
+          "default": 0.5
+        },
+        "wind_azimuth_deg": {
+          "description": "Compass direction the wind blows from, degrees clockwise from north. In a graph, unset →\nthe world's shared wind.",
+          "type": "number",
+          "format": "float",
+          "default": 270.0
+        },
+        "wind_strength": {
+          "description": "Fraction of a windward face's snow that drifts to the cell downwind each step (0..1).",
+          "type": "number",
+          "format": "float",
+          "default": 0.10000000149011612
+        },
+        "cover_depth_m": {
+          "description": "Depth that counts as full cover in the `cover` output, metres (> 0).",
+          "type": "number",
+          "format": "float",
+          "default": 0.20000000298023224
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
     "kind": "jd.erosion.aeolian@1",
     "description": "Wind (aeolian) transport after Werner's slab model: sand hops downwind, stops in wind shadows and on sand, and the angle of repose holds — dunes and ripples; optional `sand` mask (0..1) says what can move, optional `vegetation` mask (0..1) holds it (stabilised and parabolic dunes); a second wind (`wind2_azimuth_deg`, `wind2_share`) makes linear and star dunes",
     "inputs": [

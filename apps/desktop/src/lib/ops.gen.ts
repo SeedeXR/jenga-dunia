@@ -1406,6 +1406,32 @@ world's shared wind. */
   "wind_strength"?: number;
 };
 
+export type NodeParams_jd_climate_snowpack_1 = {
+  /** Steps (1..=2000). */
+  "steps"?: number;
+  /** Snowfall per step on flat ground where it is colder than +1 °C, metres of snow (≥ 0). */
+  "accumulation_m"?: number;
+  /** Air temperature at sea level, °C — key it over the timeline for a season. */
+  "temperature_c"?: number;
+  /** Lapse rate, °C lost per km of height (≥ 0). */
+  "lapse_c_per_km"?: number;
+  /** Melt per step per degree above freezing, metres of snow (≥ 0). */
+  "melt_m_per_c"?: number;
+  /** Slope at which snow no longer holds (0, 90]; snowfall retained falls linearly to 0 there. */
+  "max_slope_deg"?: number;
+  /** Compass direction of the sun, degrees clockwise from north (180 = south). */
+  "sun_azimuth_deg"?: number;
+  /** Sun-facing slopes run up to `sun_strength` × 5 °C warmer (0..1). */
+  "sun_strength"?: number;
+  /** Compass direction the wind blows from, degrees clockwise from north. In a graph, unset →
+the world's shared wind. */
+  "wind_azimuth_deg"?: number;
+  /** Fraction of a windward face's snow that drifts to the cell downwind each step (0..1). */
+  "wind_strength"?: number;
+  /** Depth that counts as full cover in the `cover` output, metres (> 0). */
+  "cover_depth_m"?: number;
+};
+
 export type NodeParams_jd_erosion_aeolian_1 = {
   /** Steps; every step moves up to one slab per sandy cell. */
   "iterations"?: number;
@@ -1855,6 +1881,7 @@ export interface NodeKinds {
   "jd.biome.classify@1": NodeParams_jd_biome_classify_1;
   "jd.biome.seabed@1": NodeParams_jd_biome_seabed_1;
   "jd.climate.snow@1": NodeParams_jd_climate_snow_1;
+  "jd.climate.snowpack@1": NodeParams_jd_climate_snowpack_1;
   "jd.erosion.aeolian@1": NodeParams_jd_erosion_aeolian_1;
   "jd.erosion.coastal@1": NodeParams_jd_erosion_coastal_1;
   "jd.erosion.droplet@1": NodeParams_jd_erosion_droplet_1;
