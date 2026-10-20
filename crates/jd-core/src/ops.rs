@@ -2725,6 +2725,10 @@ pub mod terrain {
         /// flat ground collapses, ridges keep their detail. Not for `.fbx`.
         #[serde(default)]
         pub target_triangles: Option<u32>,
+        /// Also write this many coarser levels beside the file (`<stem>_lod1.<ext>`, …), each with
+        /// a quarter of the previous level's triangles; the report lists them under `lods`. 1..=8, not for `.fbx`.
+        #[serde(default)]
+        pub lods: Option<u32>,
     }
 
     fn yes() -> bool {
@@ -3020,7 +3024,10 @@ pub mod terrain {
                             format!("mesh sampled every {step} pixels to stay within {} vertices; pass `step: 1` for the full grid", p.max_vertices),
                         ));
                     }
-                    jd_terrain::export_mesh(hf, extent, &path, step, p.texture, p.target_triangles)
+                    match p.lods {
+                        Some(n) if n > 0 => jd_terrain::export_mesh_lods(hf, extent, &path, step, p.texture, p.target_triangles, n),
+                        _ => jd_terrain::export_mesh(hf, extent, &path, step, p.texture, p.target_triangles),
+                    }
                 })?;
                 Ok((report, warnings))
             },

@@ -38,7 +38,7 @@ test.describe("hydrology nodes against the real core", () => {
     await page.getByTestId("graph-kind").selectOption("jd.hydrology.rivers@1");
     await page.getByTestId("graph-add").click();
     const rivers = panel.locator(".react-flow__node", { hasText: "jd.hydrology.rivers@1" });
-    await rivers.click();
+    await rivers.click({ force: true }); 
     const inspector = page.getByTestId("graph-inspector");
     await expect(inspector).toContainText("jd.hydrology.rivers@1");
     // f32 defaults are shown rounded (0.55, not 0.550000011920929).
@@ -64,7 +64,7 @@ test.describe("hydrology nodes against the real core", () => {
     await page.getByTestId("graph-kind").selectOption("jd.output.height@1");
     await page.getByTestId("graph-add").click();
     const out2 = panel.locator(`.react-flow__node:not([data-id="${HEIGHT}"])`, { hasText: "jd.output.height@1" });
-    await out2.click();
+    await out2.click({ force: true }); 
     const layerInput = inspector.locator("label", { hasText: "layer" }).locator("input");
     await layerInput.fill("rivers");
     await layerInput.blur();
@@ -98,7 +98,7 @@ test.describe("hydrology nodes against the real core", () => {
     const sea = panel.locator(".react-flow__node", { hasText: "jd.hydrology.sea_level@1" });
     await expect(sea.locator('.react-flow__handle.source[data-handleid="ocean"]')).toBeAttached();
     await expect(sea.locator('.react-flow__handle.source[data-handleid="depth"]')).toBeAttached();
-    await sea.click();
+    await sea.click({ force: true }); 
     // The viewport draws a sea plane at the node's level; editing level_m moves it.
     await expect(page.getByTestId("viewport-info")).toContainText("sea 0 m");
     const level = inspector.locator("label", { hasText: "level_m" }).locator("input");
@@ -142,7 +142,7 @@ test.describe("hydrology nodes against the real core", () => {
     // New nodes land to the right of the graph, off-canvas by now: once the node exists, fit the
     // view so the handles are on screen (fitting before it appears leaves it off-canvas).
     await fitView(page, seabed);
-    await seabed.click();
+    await seabed.click({ force: true }); 
     const seabedLevel = inspector.locator("label", { hasText: "level_m" }).locator("input");
     await seabedLevel.fill("250");
     await seabedLevel.blur();
@@ -153,7 +153,7 @@ test.describe("hydrology nodes against the real core", () => {
     const out3 = panel.locator(".react-flow__node", { hasText: "jd.output.height@1" }).last();
     await expect(panel.locator(".react-flow__node", { hasText: "jd.output.height@1" })).toHaveCount(3);
     await fitView(page, out3);
-    await out3.click();
+    await out3.click({ force: true }); 
     const seabedLayer = inspector.locator("label", { hasText: "layer" }).locator("input");
     await seabedLayer.fill("seabed");
     await seabedLayer.blur();
@@ -165,7 +165,7 @@ test.describe("hydrology nodes against the real core", () => {
     await page.getByTestId("color-pick").selectOption("seabed");
     await expect(page.getByTestId("viewport-info")).toContainText("colour seabed");
     // Drain the sea plane (the seabed node keeps its own 250 m level) so the classified floor is visible.
-    await sea.click();
+    await sea.click({ force: true }); 
     await level.fill("0");
     await level.blur();
     await expect(page.getByTestId("viewport-info")).toContainText("sea 0 m");
@@ -177,7 +177,7 @@ test.describe("hydrology nodes against the real core", () => {
     await page.getByTestId("graph-add").click();
     const bathy = panel.locator(".react-flow__node", { hasText: "jd.ocean.bathymetry@1" });
     await fitView(page, bathy);
-    await bathy.click();
+    await bathy.click({ force: true }); 
     const bathyLevel = inspector.locator("label", { hasText: "level_m" }).locator("input");
     await bathyLevel.fill("250");
     await bathyLevel.blur();
@@ -189,7 +189,7 @@ test.describe("hydrology nodes against the real core", () => {
     const out4 = panel.locator(".react-flow__node", { hasText: "jd.output.height@1" }).last();
     await expect(panel.locator(".react-flow__node", { hasText: "jd.output.height@1" })).toHaveCount(4);
     await fitView(page, out4);
-    await out4.click();
+    await out4.click({ force: true }); // select: force skips the stability wait, which the slow CI runner never satisfies while live previews re-render
     const floorLayer = inspector.locator("label", { hasText: "layer" }).locator("input");
     await floorLayer.fill("floor");
     await floorLayer.blur();

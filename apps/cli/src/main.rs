@@ -164,6 +164,9 @@ enum ExportCommand {
         /// Decimate to at most this many triangles (quadric edge collapse; not for .fbx).
         #[arg(long)]
         target_triangles: Option<u32>,
+        /// Also write this many coarser levels (<stem>_lod1…, each a quarter of the triangles; not for .fbx).
+        #[arg(long)]
+        lods: Option<u32>,
         /// Layer name.
         #[arg(long, default_value = "height")]
         layer: String,
@@ -450,6 +453,7 @@ fn main() -> ExitCode {
                     step,
                     no_texture,
                     target_triangles,
+                    lods,
                     layer,
                 },
         } => {
@@ -466,6 +470,9 @@ fn main() -> ExitCode {
                 }
                 if let Some(t) = target_triangles {
                     params["target_triangles"] = json!(t);
+                }
+                if let Some(n) = lods {
+                    params["lods"] = json!(n);
                 }
                 outs.push(invoke(&registry, &ctx, "terrain.export_mesh", params));
             }

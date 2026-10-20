@@ -44,6 +44,16 @@
       "format": "uint32",
       "minimum": 0,
       "default": null
+    },
+    "lods": {
+      "description": "Also write this many coarser levels beside the file (`<stem>_lod1.<ext>`, …), each with\na quarter of the previous level's triangles; the report lists them under `lods`. 1..=8, not for `.fbx`.",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0,
+      "default": null
     }
   },
   "additionalProperties": false,

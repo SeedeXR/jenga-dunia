@@ -47,6 +47,10 @@ pub struct MeshExportReport {
     /// Baked normal + roughness map size in pixels (full field resolution, capped at 2048²).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub normal_px: Option<[u32; 2]>,
+    /// Coarser levels written beside this file (`<stem>_lod1.<ext>`, …), each with about a
+    /// quarter of the previous level's triangles.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lods: Vec<MeshExportReport>,
 }
 
 /// Hypsometric ramp (normalised height → RGB): lowland green → ochre → bare rock → snow.
@@ -434,6 +438,7 @@ pub fn export_glb(
     }
     let bytes = write_glb(path, &json, &bin)?;
     Ok(MeshExportReport {
+        lods: Vec::new(),
         path: path.to_path_buf(),
         format: "glb".into(),
         vertices: n_vertices as u32,
@@ -576,6 +581,7 @@ fn report(
     extent_m: [f64; 2],
 ) -> JdResult<MeshExportReport> {
     Ok(MeshExportReport {
+        lods: Vec::new(),
         path: path.to_path_buf(),
         format: format.into(),
         vertices: mesh.vertices(),
@@ -995,6 +1001,7 @@ pub fn write_glb_mesh(
     }
     let bytes = write_glb(path, &json, &bin)?;
     Ok(MeshExportReport {
+        lods: Vec::new(),
         path: path.to_path_buf(),
         format: "glb".into(),
         vertices: mesh.vertices(),
@@ -1025,29 +1032,10 @@ pub fn export_mesh(
     if let Some(target) = target_triangles {
         let grid = GridMesh::build(hf, extent_m, step)?;
         let mesh = crate::decimate::decimate(&grid, extent_m, target)?;
-        return match ext.as_deref() {
-            None | Some("glb") => {
-                let maps = texture
-                    .then(|| bake_maps(hf, extent_m, NORMAL_MAP_CAP))
-                    .transpose()?;
-                write_glb_mesh(&mesh, extent_m, path, step, maps.as_ref())
-            }
-            Some("obj") => write_obj(&mesh, extent_m, path, step),
-            Some("stl") => write_stl(&mesh, extent_m, path, step),
-            Some("ply") => write_ply(&mesh, extent_m, path, step),
-            Some("usda") => write_usda(&mesh, extent_m, path, step),
-            Some("usdz") => write_usdz(&mesh, extent_m, path, step),
-            Some("fbx") => Err(JdError::invalid(
-                "target_triangles",
-                "the FBX export writes the full quad grid",
-            )
-            .next("Use `step` to thin the grid for FBX, or export a decimated .glb/.obj.")),
-            Some(other) => Err(JdError::new(
-                jd_types::ErrorCode::E_FORMAT_UNSUPPORTED,
-                format!("unsupported mesh extension `{other}`"),
-            )
-            .next("Use .glb, .fbx, .obj, .stl, .ply, .usda or .usdz.")),
-        };
+        let maps = (texture && matches!(ext.as_deref(), None | Some("glb")))
+            .then(|| bake_maps(hf, extent_m, NORMAL_MAP_CAP))
+            .transpose()?;
+        return write_decimated(&mesh, ext.as_deref(), extent_m, path, step, maps.as_ref());
     }
     match ext.as_deref() {
         None | Some("glb") => export_glb(hf, extent_m, path, step, texture),
@@ -1065,9 +1053,123 @@ pub fn export_mesh(
     }
 }
 
+/// Write an already decimated mesh in the format `ext` names (FBX keeps the full quad grid and
+/// is refused here).
+fn write_decimated(
+    mesh: &GridMesh,
+    ext: Option<&str>,
+    extent_m: [f64; 2],
+    path: &Path,
+    step: u32,
+    maps: Option<&BakedMaps>,
+) -> JdResult<MeshExportReport> {
+    match ext {
+        None | Some("glb") => write_glb_mesh(mesh, extent_m, path, step, maps),
+        Some("obj") => write_obj(mesh, extent_m, path, step),
+        Some("stl") => write_stl(mesh, extent_m, path, step),
+        Some("ply") => write_ply(mesh, extent_m, path, step),
+        Some("usda") => write_usda(mesh, extent_m, path, step),
+        Some("usdz") => write_usdz(mesh, extent_m, path, step),
+        Some("fbx") => Err(JdError::invalid(
+            "target_triangles",
+            "the FBX export writes the full quad grid",
+        )
+        .next("Use `step` to thin the grid for FBX, or export a decimated .glb/.obj.")),
+        Some(other) => Err(JdError::new(
+            jd_types::ErrorCode::E_FORMAT_UNSUPPORTED,
+            format!("unsupported mesh extension `{other}`"),
+        )
+        .next("Use .glb, .fbx, .obj, .stl, .ply, .usda or .usdz.")),
+    }
+}
+
+/// [`export_mesh`] plus `lods` coarser levels beside it — `<stem>_lod1.<ext>`, `_lod2`, … — each
+/// decimated to a quarter of the previous level's triangles (quadric edge collapse on the same
+/// grid; the baked maps are shared). The report of the full mesh carries the levels in `lods`.
+pub fn export_mesh_lods(
+    hf: &Heightfield,
+    extent_m: [f64; 2],
+    path: &Path,
+    step: u32,
+    texture: bool,
+    target_triangles: Option<u32>,
+    lods: u32,
+) -> JdResult<MeshExportReport> {
+    if !(1..=8).contains(&lods) {
+        return Err(JdError::invalid("lods", "must be within 1..=8"));
+    }
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase());
+    if ext.as_deref() == Some("fbx") {
+        return Err(
+            JdError::invalid("lods", "the FBX export writes the full quad grid")
+                .next("Export the LOD chain as .glb/.obj/.ply/.usda, or write FBX without `lods`."),
+        );
+    }
+    let mut report = export_mesh(hf, extent_m, path, step, texture, target_triangles)?;
+    let grid = GridMesh::build(hf, extent_m, step)?;
+    let maps = (texture && matches!(ext.as_deref(), None | Some("glb")))
+        .then(|| bake_maps(hf, extent_m, NORMAL_MAP_CAP))
+        .transpose()?;
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("mesh")
+        .to_owned();
+    let mut target = report.triangles;
+    for i in 1..=lods {
+        target = (target / 4).max(2);
+        let mesh = crate::decimate::decimate(&grid, extent_m, target)?;
+        let mut lod_path = path.with_file_name(format!("{stem}_lod{i}"));
+        if let Some(e) = path.extension() {
+            lod_path.set_extension(e);
+        }
+        report.lods.push(write_decimated(
+            &mesh,
+            ext.as_deref(),
+            extent_m,
+            &lod_path,
+            step,
+            maps.as_ref(),
+        )?);
+    }
+    Ok(report)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lod_chain_writes_quartering_levels_beside_the_full_mesh() {
+        let mut hf = Heightfield::new(48, 48, 64, 0).expect("hf");
+        hf.fill_with(|x, y| ((x as f32 * 0.4).sin() + (y as f32 * 0.3).cos()) * 20.0);
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("t.glb");
+        let r = export_mesh_lods(&hf, [470.0, 470.0], &path, 1, false, None, 2).expect("lods");
+        assert_eq!(r.triangles, 47 * 47 * 2);
+        assert_eq!(r.lods.len(), 2);
+        assert!(dir.path().join("t_lod1.glb").exists());
+        assert!(dir.path().join("t_lod2.glb").exists());
+        let (t1, t2) = (r.lods[0].triangles, r.lods[1].triangles);
+        assert!(t1 <= r.triangles / 4 && t1 > r.triangles / 8, "lod1 {t1}");
+        assert!(t2 <= t1 / 4 + 1 && t2 > t1 / 8, "lod2 {t2}");
+        assert!(
+            export_mesh_lods(
+                &hf,
+                [470.0, 470.0],
+                &dir.path().join("t.fbx"),
+                1,
+                false,
+                None,
+                1
+            )
+            .is_err()
+        );
+        assert!(export_mesh_lods(&hf, [470.0, 470.0], &path, 1, false, None, 0).is_err());
+    }
 
     fn chunks(bytes: &[u8]) -> (serde_json::Value, &[u8]) {
         assert_eq!(&bytes[..4], b"glTF");

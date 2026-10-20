@@ -73,6 +73,13 @@
       },
       "minItems": 2,
       "maxItems": 2
+    },
+    "lods": {
+      "description": "Coarser levels written beside this file (`<stem>_lod1.<ext>`, …), each with about a\nquarter of the previous level's triangles.",
+      "type": "array",
+      "items": {
+        "$ref": "#"
+      }
     }
   },
   "required": [

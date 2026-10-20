@@ -830,6 +830,9 @@ export type TerrainExportMeshRequest = {
   /** Decimate the sampled grid to at most this many triangles (quadric edge collapse):
 flat ground collapses, ridges keep their detail. Not for `.fbx`. */
   "target_triangles"?: number | null;
+  /** Also write this many coarser levels beside the file (`<stem>_lod1.<ext>`, …), each with
+a quarter of the previous level's triangles; the report lists them under `lods`. 1..=8, not for `.fbx`. */
+  "lods"?: number | null;
 };
 
 export type TerrainExportMeshResult = {
@@ -851,6 +854,9 @@ export type TerrainExportMeshResult = {
   "texture_px"?: [number, number] | null;
   /** Baked normal + roughness map size in pixels (full field resolution, capped at 2048²). */
   "normal_px"?: [number, number] | null;
+  /** Coarser levels written beside this file (`<stem>_lod1.<ext>`, …), each with about a
+quarter of the previous level's triangles. */
+  "lods"?: unknown[];
 };
 
 export type EngineProfile = "unity" | "unreal";

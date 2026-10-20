@@ -155,6 +155,18 @@ $ jd --json export mesh --project Bio.jdproj --layer land --target-triangles 600
 
 Judged by an independent tool (Optima's `compare` of the two files, 40 000 surface samples, LOD preset): mean surface distance 0.00025 of the bounding diagonal (1.8 m on a 7.3 km diagonal), 99th percentile 0.0013 (9.4 m), Hausdorff 0.0031 (22.7 m, one point on a ridge), area ratio 1.016, silhouette IoU 1.00 (top) / 0.9996 (oblique), SSIM 0.96 / 0.99 — verdict pass. The Khronos validator reports 0 errors, 0 warnings. Decimation is O(n log n) on a global heap; thin the grid with `--step` first for worlds above ~1 M triangles.
 
+**LOD chains.** `--lods N` (op param `lods`, 1..=8) writes the full mesh and `N` coarser levels beside it — `<stem>_lod1.<ext>`, `_lod2`, … — each decimated to a quarter of the previous level's triangles on the same grid, sharing one bake; the report lists them under `lods`. On the 128² default world:
+
+```
+$ jd --json export mesh --project World.jdproj --lods 3 --step 1 lod/terrain.glb
+lod0 terrain.glb        32 258 triangles  1.27 MB   (128×128 albedo/normal/roughness)
+lod1 terrain_lod1.glb    8 063 triangles  0.40 MB
+lod2 terrain_lod2.glb    2 015 triangles  0.18 MB
+lod3 terrain_lod3.glb      849 triangles  0.14 MB   (the decimator keeps the border vertices, so the last level stops above its ¼ target)
+```
+
+All four pass the Khronos glTF validator with 0 errors / 0 warnings. Not for `.fbx` (the FBX writer keeps the full quad grid); engines switch between the files by distance — a single file with `MSFT_lod` is not written.
+
 **Normal and roughness maps.** The textured `.glb` also carries a tangent-space normal map and a roughness map baked from the *full-resolution* field (one texel per sample, capped at 2048 per side), plus a `TANGENT` attribute so the normal map needs no runtime tangent generation. That is what makes `--step` useful: a decimated mesh keeps the fine relief in shading. Roughness is a stated rule, not a measurement — 0.92 on flat ground falling to 0.62 on steep rock, 0.6 above the snow line (metallic 0).
 
 ```

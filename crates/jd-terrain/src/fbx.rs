@@ -551,6 +551,7 @@ pub fn export_fbx(
     }
     fs::write(path, &out)?;
     Ok(MeshExportReport {
+        lods: Vec::new(),
         path: path.to_path_buf(),
         format: "fbx".into(),
         vertices: n_vertices,
