@@ -326,8 +326,11 @@ pub fn export_glb(
         }
     }
     let uv_len = bin.len() - pos_len - nrm_len;
-    // Tangents (textured only — the normal map needs a tangent space): +X (the +U direction)
-    // made orthogonal to each vertex normal; w = +1 since normal × tangent = −Z = +V (north).
+    // Tangents (textured only — the normal map needs a tangent space): the surface's ∂P/∂u, which
+    // is what MikkTSpace computes. U runs east, so on a heightfield y = h(x, z) the tangent is
+    // (1, ∂h/∂x, 0) with ∂h/∂x = −n.x / n.y: in the tangent plane and, unlike +X projected onto
+    // the plane, without a z component (that projection was off by up to 51° on cross-slopes
+    // against Blender's calc_tangents). w = +1: normal × tangent = −Z = +V (north).
     let tan_off = bin.len();
     if texture {
         for v in 0..n_vertices as usize {
@@ -337,9 +340,8 @@ pub fn export_glb(
                     f32::from_le_bytes(bin[o + 4 * k..o + 4 * k + 4].try_into().unwrap_or([0; 4]))
                 })
                 .collect();
-            let t = [1.0 - n[0] * n[0], -n[0] * n[1], -n[0] * n[2]];
-            let len = (t[0] * t[0] + t[1] * t[1] + t[2] * t[2]).sqrt().max(1e-6);
-            for c in [t[0] / len, t[1] / len, t[2] / len, 1.0] {
+            let t = tangent_of(&[n[0], n[1], n[2]]);
+            for c in [t[0], t[1], t[2], 1.0] {
                 bin.extend_from_slice(&c.to_le_bytes());
             }
         }
@@ -934,10 +936,8 @@ pub fn write_glb_mesh(
     let uv_len = bin.len() - pos_len - nrm_len;
     let tan_off = bin.len();
     if maps.is_some() {
-        for nrm in mesh.normals.as_chunks::<3>().0 {
-            let t = [1.0 - nrm[0] * nrm[0], -nrm[0] * nrm[1], -nrm[0] * nrm[2]];
-            let len = (t[0] * t[0] + t[1] * t[1] + t[2] * t[2]).sqrt().max(1e-6);
-            push(&mut bin, &[t[0] / len, t[1] / len, t[2] / len, 1.0]);
+        for t in mikk_tangents(&mesh.positions, &mesh.normals, &mesh.indices) {
+            push(&mut bin, &t);
         }
     }
     let tan_len = bin.len() - tan_off;
@@ -1053,6 +1053,83 @@ pub fn export_mesh(
     }
 }
 
+/// Unit tangent along +U (east) for a vertex normal `n` of a heightfield: ∂P/∂x = (1, ∂h/∂x, 0)
+/// with ∂h/∂x = −n.x / n.y (MikkTSpace's answer for a grid whose U runs east). A vertical normal
+/// (n.y ≈ 0 never happens on a heightfield) falls back to +X projected onto the plane.
+pub fn tangent_of(n: &[f32; 3]) -> [f32; 3] {
+    let t = if n[1] > 1e-6 {
+        [1.0, -n[0] / n[1], 0.0]
+    } else {
+        [1.0 - n[0] * n[0], -n[0] * n[1], -n[0] * n[2]]
+    };
+    let len = (t[0] * t[0] + t[1] * t[1] + t[2] * t[2]).sqrt().max(1e-6);
+    [t[0] / len, t[1] / len, t[2] / len]
+}
+
+/// MikkTSpace tangents for a mesh whose U runs east and V north with no seams: every triangle's
+/// ∂P/∂u = (1, ∂h/∂x, 0) from its plane, accumulated at each corner weighted by the corner angle,
+/// then made orthogonal to the vertex normal. Irregular (decimated) triangles need this; on the
+/// regular grid [`tangent_of`] is within a degree of it. w = +1 (normal × tangent = north).
+pub fn mikk_tangents(positions: &[f32], normals: &[f32], indices: &[u32]) -> Vec<[f32; 4]> {
+    let n = positions.len() / 3;
+    let mut acc = vec![[0.0f32; 3]; n];
+    let p = |i: u32| {
+        let o = i as usize * 3;
+        [positions[o], positions[o + 1], positions[o + 2]]
+    };
+    let sub = |a: [f32; 3], b: [f32; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let angle = |u: [f32; 3], v: [f32; 3]| {
+        let dot = u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+        let lu = (u[0] * u[0] + u[1] * u[1] + u[2] * u[2]).sqrt();
+        let lv = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        (dot / (lu * lv).max(1e-12)).clamp(-1.0, 1.0).acos()
+    };
+    for tri in indices.as_chunks::<3>().0 {
+        let (a, b, c) = (p(tri[0]), p(tri[1]), p(tri[2]));
+        let (e1, e2) = (sub(b, a), sub(c, a));
+        let nf = [
+            e1[1] * e2[2] - e1[2] * e2[1],
+            e1[2] * e2[0] - e1[0] * e2[2],
+            e1[0] * e2[1] - e1[1] * e2[0],
+        ];
+        if nf[1].abs() < 1e-9 {
+            continue;
+        }
+        let hx = -nf[0] / nf[1];
+        let len = (1.0 + hx * hx).sqrt();
+        let tf = [1.0 / len, hx / len, 0.0];
+        let weights = [
+            angle(e1, e2),
+            angle(sub(a, b), sub(c, b)),
+            angle(sub(a, c), sub(b, c)),
+        ];
+        for (k, &vi) in tri.iter().enumerate() {
+            for d in 0..3 {
+                acc[vi as usize][d] += tf[d] * weights[k];
+            }
+        }
+    }
+    (0..n)
+        .map(|v| {
+            let nrm = [normals[v * 3], normals[v * 3 + 1], normals[v * 3 + 2]];
+            let a = acc[v];
+            let dot = a[0] * nrm[0] + a[1] * nrm[1] + a[2] * nrm[2];
+            let t = [
+                a[0] - dot * nrm[0],
+                a[1] - dot * nrm[1],
+                a[2] - dot * nrm[2],
+            ];
+            let len = (t[0] * t[0] + t[1] * t[1] + t[2] * t[2]).sqrt();
+            let t = if len > 1e-6 {
+                [t[0] / len, t[1] / len, t[2] / len]
+            } else {
+                tangent_of(&nrm)
+            };
+            [t[0], t[1], t[2], 1.0]
+        })
+        .collect()
+}
+
 /// Write an already decimated mesh in the format `ext` names (FBX keeps the full quad grid and
 /// is refused here).
 fn write_decimated(
@@ -1141,6 +1218,49 @@ pub fn export_mesh_lods(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tangent_follows_the_u_direction_and_stays_in_the_tangent_plane() {
+        // A slope rising to the east (∂h/∂x = 0.5) with a cross-slope to the north (∂h/∂z = −0.8).
+        let (hx, hz) = (0.5f32, -0.8f32);
+        let len = (hx * hx + 1.0 + hz * hz).sqrt();
+        let n = [-hx / len, 1.0 / len, -hz / len];
+        let t = tangent_of(&n);
+        assert!(
+            (t[0] * n[0] + t[1] * n[1] + t[2] * n[2]).abs() < 1e-6,
+            "orthogonal to the normal"
+        );
+        assert_eq!(t[2], 0.0, "∂P/∂u has no north–south component");
+        assert!(
+            (t[1] / t[0] - hx).abs() < 1e-6,
+            "rises with the eastward slope"
+        );
+        assert_eq!(tangent_of(&[0.0, 1.0, 0.0]), [1.0, 0.0, 0.0]);
+        // Two triangles on that same plane: the face-averaged tangent agrees with the analytic one.
+        let z = |x: f32, zz: f32| hx * x + hz * zz;
+        let pos = [
+            0.0,
+            z(0.0, 0.0),
+            0.0,
+            10.0,
+            z(10.0, 0.0),
+            0.0,
+            0.0,
+            z(0.0, -10.0),
+            -10.0,
+            10.0,
+            z(10.0, -10.0),
+            -10.0,
+        ];
+        let nrm: Vec<f32> = n.iter().cycle().take(12).copied().collect();
+        let m = mikk_tangents(&pos, &nrm, &[0, 1, 2, 2, 1, 3]);
+        for mt in &m {
+            for d in 0..3 {
+                assert!((mt[d] - t[d]).abs() < 1e-5, "{mt:?} vs {t:?}");
+            }
+            assert_eq!(mt[3], 1.0);
+        }
+    }
 
     #[test]
     fn lod_chain_writes_quartering_levels_beside_the_full_mesh() {
