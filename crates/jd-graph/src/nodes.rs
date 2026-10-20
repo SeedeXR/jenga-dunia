@@ -7,7 +7,7 @@ use jd_terrain::{
     AeolianParams, CoastalParams, DropletParams, FlowMethod, ForeignImport, Heightfield,
     HydraulicParams, NoiseParams, SeabedParams, SnowParams, StreamPowerParams, Stroke,
     THERMAL_MAX_RATE, aeolian_transport_with, apply_strokes, carve_rivers_with, classify_seabed,
-    coastal_erode, droplet_erode, fill_depressions_with, flow_accumulation_with, generate_noise,
+    droplet_erode, fill_depressions_with, flow_accumulation_with, generate_noise,
     resample_to_world, sea_level, slope_mask, snow_cover, wetness_index_with,
 };
 use jd_types::{JdError, JdResult};
@@ -777,15 +777,16 @@ pub fn register_all(r: &mut Registry) {
     ).with_memory(12.0));
     r.register(NodeDef::new::<CoastalParams, _>(
         "jd.erosion.coastal@1",
-        "Coastal erosion: waves cut the shore within `band_m` above `level_m` by its ocean exposure and lay the material on the adjacent sea floor — cliff retreat, wave-cut platforms, beaches; `drift` > 0 adds fetch (windward shores erode more) and longshore drift (deposits move downwind: spits, bars) from the wind; outputs the terrain and a `shore` mask of wave work",
-        vec![port("in", PortType::Heightfield, true)],
+        "Coastal erosion: waves cut the shore within `band_m` above `level_m` by its ocean exposure and lay the material on the adjacent sea floor — cliff retreat, wave-cut platforms, beaches; `drift` > 0 adds fetch (windward shores erode more) and longshore drift (deposits move downwind: spits, bars) from the wind; outputs the terrain and a `shore` mask of wave work; an optional `exposure` field (the sea-level node's wave exposure, 0..1) scales the wave work so sheltered bays keep their shore",
+        vec![port("in", PortType::Heightfield, true), port("exposure", PortType::Heightfield, false)],
         vec![port("out", PortType::Heightfield, false), port("shore", PortType::Heightfield, false)],
         |ctx, p, i| {
             let cp: CoastalParams = params(&with_world_wind(ctx, p, &["wind_azimuth_deg"]))?;
             if !(1..=1000).contains(&cp.iterations) {
                 return Err(JdError::invalid("iterations", "must be within 1..=1000"));
             }
-            let (out_h, shore) = coastal_erode(field(i, "in")?, &cp, Some(&ctx.cancel))?;
+            let energy = i.get("exposure").map(|v| v.as_field());
+            let (out_h, shore) = jd_terrain::coastal_erode_with(field(i, "in")?, &cp, energy.map(|e| &**e), Some(&ctx.cancel))?;
             Ok(BTreeMap::from([("out".to_owned(), Value::field(out_h)), ("shore".to_owned(), Value::field(shore))]))
         },
     ).with_memory(16.0));

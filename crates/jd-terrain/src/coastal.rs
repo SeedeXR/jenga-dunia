@@ -74,6 +74,23 @@ pub fn coastal_erode(
     p: &CoastalParams,
     cancel: Option<&AtomicBool>,
 ) -> JdResult<(Heightfield, Heightfield)> {
+    coastal_erode_with(h, p, None, cancel)
+}
+
+/// [`coastal_erode`] with an optional wave `energy` field (0..1 on water cells, e.g. the
+/// sea-level node's `exposure`): the wave work on a shore cell is scaled by the mean energy of
+/// the sea cells that reach it, so sheltered bays keep their shore while open coasts retreat.
+pub fn coastal_erode_with(
+    h: &Heightfield,
+    p: &CoastalParams,
+    energy: Option<&Heightfield>,
+    cancel: Option<&AtomicBool>,
+) -> JdResult<(Heightfield, Heightfield)> {
+    if let Some(e) = energy
+        && (e.width(), e.height()) != (h.width(), h.height())
+    {
+        return Err(JdError::invalid("exposure", "field size differs from `in`"));
+    }
     if !p.level_m.is_finite() {
         return Err(JdError::invalid("level_m", "must be finite"));
     }
@@ -143,7 +160,18 @@ pub fn coastal_erode(
                 // The notch cuts down to one step below the level, so the cell floods next step
                 // and exposes the next one inland: that is how the cliff retreats and a
                 // wave-cut platform just under the surface is left behind.
-                let cut = (p.rate_m * exposure).min((v[i] - (p.level_m - p.rate_m)).max(0.0));
+                // Wave energy: the mean exposure of the sea cells that reach this shore cell.
+                let energy_here = energy.map_or(1.0, |e| {
+                    wet.iter()
+                        .map(|(j, _)| {
+                            e.get((*j % w as usize) as u32, (*j / w as usize) as u32)
+                                .clamp(0.0, 1.0)
+                        })
+                        .sum::<f32>()
+                        / wet.len().max(1) as f32
+                });
+                let cut = (p.rate_m * exposure * energy_here)
+                    .min((v[i] - (p.level_m - p.rate_m)).max(0.0));
                 if cut <= 0.0 {
                     continue;
                 }
@@ -273,6 +301,42 @@ mod tests {
                     drift: 1.5,
                     ..base.clone()
                 },
+                None
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn wave_energy_shelters_the_east_half_of_a_straight_coast() {
+        // A straight east–west coast: sea (−10 m) in the south, a 30 m cliff in the north.
+        let mut h = Heightfield::new(64, 32, 64, 0).expect("h");
+        h.fill_with(|_, y| if y < 12 { -10.0 } else { 30.0 });
+        // Full wave energy on the west half, a sheltered bay (0.1) on the east half.
+        let mut energy = Heightfield::new(64, 32, 64, 0).expect("e");
+        energy.fill_with(|x, _| if x < 32 { 1.0 } else { 0.1 });
+        let p = CoastalParams {
+            iterations: 40,
+            band_m: 40.0, // the whole 30 m cliff face is within reach of the waves
+            ..CoastalParams::default()
+        };
+        let (_, shore) = coastal_erode_with(&h, &p, Some(&energy), None).expect("coast");
+        let work = |x0: u32, x1: u32| {
+            (x0..x1)
+                .flat_map(|x| (0..32).map(move |y| (x, y)))
+                .map(|(x, y)| shore.get(x, y))
+                .sum::<f32>()
+        };
+        let (west, east) = (work(2, 30), work(34, 62));
+        assert!(
+            west > 3.0 * east && east > 0.0,
+            "open coast {west} vs sheltered {east}"
+        );
+        assert!(
+            coastal_erode_with(
+                &h,
+                &p,
+                Some(&Heightfield::new(8, 8, 64, 0).expect("s")),
                 None
             )
             .is_err()
