@@ -173,6 +173,9 @@ impl Jobs {
             && let Some(e) = r.get_mut(&id)
         {
             e.priority = priority;
+            // Queued from the moment it is listed: the worker thread may not have reached
+            // `acquire_slot` yet when a caller polls `jobs.list` (seen on slow CI runners).
+            e.running_now.store(false, Ordering::Relaxed);
         }
         OwnedJobGuard {
             jobs: Arc::clone(self),
