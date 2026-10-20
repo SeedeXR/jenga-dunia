@@ -48,6 +48,18 @@
       ],
       "default": null
     },
+    "engine": {
+      "description": "Write `path` in an engine's own conventions instead of the plain formats: `unreal` → DataTable CSV in centimetres (X east, Y south, Z up, Yaw, Scale), `unity` → JSON in the Terrain's local metres (x east, y up, z north, nx/nz normalised).",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EngineProfile"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "spacing_m": {
       "description": "Target spacing between points in metres (grid cell size); must be ≥ one sample spacing.",
       "type": "number",
@@ -131,6 +143,21 @@
       "required": [
         "csv",
         "radius_m"
+      ]
+    },
+    "EngineProfile": {
+      "description": "Target engine.",
+      "oneOf": [
+        {
+          "description": "Unity Terrain: RAW 16-bit little-endian, row 0 = south (no flip), Terrain Height = range.",
+          "type": "string",
+          "const": "unity"
+        },
+        {
+          "description": "Unreal Landscape: PNG16, row 0 = north, Z scale = range_m × 100 / 512, 8-bit weightmaps.",
+          "type": "string",
+          "const": "unreal"
+        }
       ]
     }
   }

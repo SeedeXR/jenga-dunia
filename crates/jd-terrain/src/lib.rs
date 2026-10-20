@@ -62,7 +62,7 @@ pub use profiles::{EngineProfile, ProfileReport, ProfileSettings, export_profile
 pub use rocks::{RockParams, rock_mesh};
 pub use scatter::{
     ScatterParams, ScatterPoint, exclude_near, parse_points_csv, read_points_csv, scatter_points,
-    write_points, write_points_with,
+    write_points, write_points_engine, write_points_with,
 };
 pub use sculpt::{Stroke, StrokeMode, apply_strokes};
 pub use seabed::{SeabedParams, classify_seabed};

@@ -331,6 +331,19 @@ $ jd --json op terrain.scatter --project Bio.jdproj --params '{"mask":"forest","
 
 ![Biome map with yellow tree points covering exactly the forest class](images/cli-scatter.png)
 
+**Engine instance formats.** `engine` writes `path` in the engine's own conventions — the same axes and row order as `terrain.export_profile`, so instances land on the imported terrain:
+
+```
+$ jd --json op terrain.scatter --project Acceptance.jdproj --params '{"mask":"mask_forest","height":"height","spacing_m":40,"seed":1,"path":"trees_unreal.csv","engine":"unreal"}'
+Name,X,Y,Z,Yaw,Scale                      # DataTable CSV in centimetres: X east, Y south (Landscape row 0 is north), Z up (absolute, like the heightmap)
+inst_0,230301.0,510289.7,73335.4,153.76,0.971
+$ jd --json op terrain.scatter --project Acceptance.jdproj --params '{"mask":"mask_forest","height":"height","spacing_m":40,"seed":1,"path":"trees_unity.json","engine":"unity"}'
+{"engine":"unity","units":"m","frame":"Terrain local: x east, y up, z north; nx/nz = position / extent for TreeInstance","count":1207,
+ "instances":[{"x":2303.01,"y":733.35,"z":17.10,"nx":0.4498,"nz":0.0033,"yaw_deg":153.76,"scale":0.971}, …]}
+```
+
+`yaw_deg` = r × 360 and `scale` = 0.8 + 0.4 r turn each point's deterministic `r` into rotation and size variation; the importer side (a DataTable + Blueprint spawn loop in Unreal, `TerrainData.treeInstances` from `nx`/`nz` in Unity) is documented, not automated — no engine runner exists here.
+
 **Layers that exclude each other.** A second scatter can keep clear of an earlier one — VUE's EcoSystem layers, where trees never grow through the rocks placed before them. `avoid` names the earlier layer's `.csv` and a radius; every candidate within it is dropped (hash-grid test, so thousands of rocks cost nothing):
 
 ```

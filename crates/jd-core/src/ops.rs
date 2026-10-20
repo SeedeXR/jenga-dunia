@@ -3398,6 +3398,9 @@ pub mod terrain {
         /// Keep clear of an earlier scatter: no point within `radius_m` of any instance in that CSV (ecosystem layers that exclude each other).
         #[serde(default)]
         pub avoid: Option<ScatterAvoid>,
+        /// Write `path` in an engine's own conventions instead of the plain formats: `unreal` → DataTable CSV in centimetres (X east, Y south, Z up, Yaw, Scale), `unity` → JSON in the Terrain's local metres (x east, y up, z north, nx/nz normalised).
+        #[serde(default)]
+        pub engine: Option<jd_terrain::EngineProfile>,
         /// Spacing, jitter, seed.
         #[serde(flatten)]
         pub scatter: jd_terrain::ScatterParams,
@@ -4023,6 +4026,7 @@ pub mod terrain {
                 let count = points.len() as u64;
                 let excluded = placed - count;
                 let (bytes, points) = match &path {
+                    Some(f) if let Some(engine) = p.engine => (jd_terrain::write_points_engine(f, &points, extent, engine)?, None),
                     Some(f) => {
                         let rock = p.rock.as_ref().map(|r| jd_terrain::rock_mesh(&jd_terrain::RockParams { seed: r.seed ^ p.scatter.seed, ..r.clone() })).transpose()?;
                         (jd_terrain::write_points_with(f, &points, extent, rock.as_ref())?, None)

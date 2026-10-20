@@ -1198,6 +1198,8 @@ back in the result instead (viewport preview; at most 200 000). */
   "rock"?: RockParams | null;
   /** Keep clear of an earlier scatter: no point within `radius_m` of any instance in that CSV (ecosystem layers that exclude each other). */
   "avoid"?: ScatterAvoid | null;
+  /** Write `path` in an engine's own conventions instead of the plain formats: `unreal` → DataTable CSV in centimetres (X east, Y south, Z up, Yaw, Scale), `unity` → JSON in the Terrain's local metres (x east, y up, z north, nx/nz normalised). */
+  "engine"?: EngineProfile | null;
   /** Target spacing between points in metres (grid cell size); must be ≥ one sample spacing. */
   "spacing_m": number;
   /** Random offset inside the cell, 0 (regular grid) .. 1 (anywhere in the cell). */

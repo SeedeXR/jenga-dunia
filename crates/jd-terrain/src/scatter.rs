@@ -129,6 +129,57 @@ pub fn scatter_points(
     Ok(out)
 }
 
+/// Write instances in an engine's own conventions. Unreal: a DataTable-style CSV in centimetres
+/// (`Name,X,Y,Z,Yaw,Scale`; X east, Y south — image row 0 is north for the Landscape importer —
+/// Z up, absolute like the exported heightmap). Unity: JSON in metres in the Terrain's local
+/// frame (x east, y up, z north, plus `nx`/`nz` normalised 0..1 for `TreeInstance.position`).
+/// `yaw_deg` = r × 360 and `scale` = 0.8 + 0.4 r give each instance its deterministic variation.
+pub fn write_points_engine(
+    path: &std::path::Path,
+    points: &[ScatterPoint],
+    extent_m: [f64; 2],
+    engine: crate::EngineProfile,
+) -> JdResult<u64> {
+    let bytes = match engine {
+        crate::EngineProfile::Unreal => {
+            let mut s = String::from("Name,X,Y,Z,Yaw,Scale\n");
+            for (i, p) in points.iter().enumerate() {
+                let y_cm = (extent_m[1] as f32 - p.v) * 100.0;
+                s.push_str(&format!(
+                    "inst_{i},{:.1},{:.1},{:.1},{:.2},{:.3}\n",
+                    p.u * 100.0,
+                    y_cm,
+                    p.z * 100.0,
+                    p.r * 360.0,
+                    0.8 + 0.4 * p.r
+                ));
+            }
+            s.into_bytes()
+        }
+        crate::EngineProfile::Unity => {
+            let instances: Vec<serde_json::Value> = points
+                .iter()
+                .map(|p| {
+                    serde_json::json!({
+                        "x": p.u, "y": p.z, "z": p.v,
+                        "nx": p.u / extent_m[0] as f32, "nz": p.v / extent_m[1] as f32,
+                        "yaw_deg": p.r * 360.0, "scale": 0.8 + 0.4 * p.r,
+                    })
+                })
+                .collect();
+            serde_json::to_vec(&serde_json::json!({
+                "engine": "unity", "units": "m", "frame": "Terrain local: x east, y up, z north; nx/nz = position / extent for TreeInstance",
+                "extent_m": extent_m, "count": points.len(), "instances": instances,
+            }))?
+        }
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, &bytes)?;
+    Ok(bytes.len() as u64)
+}
+
 /// Drop every point within `radius_m` of any of `others` — ecosystem layers that exclude each
 /// other (trees keep clear of the rocks placed before them). Hash grid of `radius_m` cells, so a
 /// point checks nine buckets. Returns the survivors in their original order.
@@ -362,6 +413,39 @@ fn write_instances_glb(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn engine_formats_follow_the_profiles_conventions() {
+        let pts = [ScatterPoint {
+            u: 10.0,
+            v: 30.0,
+            z: 5.0,
+            r: 0.25,
+        }];
+        let dir = tempfile::tempdir().expect("tmp");
+        let ue = dir.path().join("ue.csv");
+        write_points_engine(&ue, &pts, [100.0, 100.0], crate::EngineProfile::Unreal).expect("ue");
+        let csv = std::fs::read_to_string(&ue).expect("read");
+        // X east in cm; Y = (extent − v) in cm because Landscape row 0 is north; Z in cm; yaw 90°; scale 0.9.
+        assert_eq!(
+            csv,
+            "Name,X,Y,Z,Yaw,Scale\ninst_0,1000.0,7000.0,500.0,90.00,0.900\n"
+        );
+        let un = dir.path().join("unity.json");
+        write_points_engine(&un, &pts, [100.0, 100.0], crate::EngineProfile::Unity).expect("unity");
+        let v: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&un).expect("read")).expect("json");
+        assert_eq!(v["count"], 1);
+        let i = &v["instances"][0];
+        assert_eq!(
+            (i["x"].as_f64(), i["y"].as_f64(), i["z"].as_f64()),
+            (Some(10.0), Some(5.0), Some(30.0))
+        );
+        assert!(
+            (i["nx"].as_f64().expect("nx") - 0.1).abs() < 1e-6
+                && (i["nz"].as_f64().expect("nz") - 0.3).abs() < 1e-6
+        );
+    }
 
     #[test]
     fn exclusion_matches_brute_force_and_csv_round_trips() {
