@@ -161,6 +161,9 @@ enum ExportCommand {
         /// Skip the baked base-colour texture (flat material, smaller file).
         #[arg(long)]
         no_texture: bool,
+        /// Decimate to at most this many triangles (quadric edge collapse; not for .fbx).
+        #[arg(long)]
+        target_triangles: Option<u32>,
         /// Layer name.
         #[arg(long, default_value = "height")]
         layer: String,
@@ -446,6 +449,7 @@ fn main() -> ExitCode {
                     path,
                     step,
                     no_texture,
+                    target_triangles,
                     layer,
                 },
         } => {
@@ -459,6 +463,9 @@ fn main() -> ExitCode {
                 let mut params = json!({ "layer": layer, "path": path, "texture": !no_texture });
                 if let Some(step) = step {
                     params["step"] = json!(step);
+                }
+                if let Some(t) = target_triangles {
+                    params["target_triangles"] = json!(t);
                 }
                 outs.push(invoke(&registry, &ctx, "terrain.export_mesh", params));
             }

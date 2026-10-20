@@ -144,6 +144,17 @@ $ jd --json export mesh --project M.jdproj terrain.glb
 
 (512² world.) `.glb` is the default; `.obj`, `.stl` and `.ply` work the same way (below). The `.glb` is a single grid mesh in metres, +Y up, centred on the world like the viewport, with normals, UVs and a PBR material whose base colour is a baked texture — the viewport's hypsometric ramp (lowland green → ochre → rock → snow) blended towards rock on steep slopes, one texel per vertex — so it opens looking like the app in Blender, three.js or any glTF 2.0 importer. `--no-texture` (op param `texture: false`) writes the flat material instead. The Khronos glTF Validator reports 0 errors and 0 warnings for both (CI runs it on every push); on a 512² world the texture adds 0.42 MB to a 14.7 MB mesh.
 
+**Decimation (LOD meshes).** `--target-triangles N` (op param `target_triangles`) collapses the sampled grid with quadric edge collapse (Garland–Heckbert) before writing: flat ground ends up as a few large triangles, ridges and gullies keep theirs, the footprint is pinned, and every face stays up-facing so the result is still a heightfield. Works for `.glb`, `.obj`, `.stl`, `.ply`, `.usda` and `.usdz`; `.fbx` keeps its quad grid (use `--step`). The GLB gets planar UVs, tangents and the full-field material maps, so a 60 k-triangle LOD still shades like the full mesh.
+
+```
+$ jd --json export mesh --project Bio.jdproj --layer land land-full.glb                           # 262 144 vertices, 522 242 triangles, 20.1 MB, 0.7 s
+$ jd --json export mesh --project Bio.jdproj --layer land --target-triangles 60000 land-qem.glb  #  31 023 vertices,  60 000 triangles,  3.4 MB, 12.7 s (debug build)
+```
+
+![Optima comparison sheet, top and oblique views: the full grid, the 60 000-triangle decimation, and the difference heat map](images/cli-decimate.png)
+
+Judged by an independent tool (Optima's `compare` of the two files, 40 000 surface samples, LOD preset): mean surface distance 0.00025 of the bounding diagonal (1.8 m on a 7.3 km diagonal), 99th percentile 0.0013 (9.4 m), Hausdorff 0.0031 (22.7 m, one point on a ridge), area ratio 1.016, silhouette IoU 1.00 (top) / 0.9996 (oblique), SSIM 0.96 / 0.99 — verdict pass. The Khronos validator reports 0 errors, 0 warnings. Decimation is O(n log n) on a global heap; thin the grid with `--step` first for worlds above ~1 M triangles.
+
 **Normal and roughness maps.** The textured `.glb` also carries a tangent-space normal map and a roughness map baked from the *full-resolution* field (one texel per sample, capped at 2048 per side), plus a `TANGENT` attribute so the normal map needs no runtime tangent generation. That is what makes `--step` useful: a decimated mesh keeps the fine relief in shading. Roughness is a stated rule, not a measurement — 0.92 on flat ground falling to 0.62 on steep rock, 0.6 above the snow line (metallic 0).
 
 ```

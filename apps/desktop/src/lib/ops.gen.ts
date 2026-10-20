@@ -731,6 +731,9 @@ export type TerrainExportMeshRequest = {
   "max_vertices"?: number;
   /** Embed a baked base-colour texture (hypsometric ramp + slope, one texel per vertex). */
   "texture"?: boolean;
+  /** Decimate the sampled grid to at most this many triangles (quadric edge collapse):
+flat ground collapses, ridges keep their detail. Not for `.fbx`. */
+  "target_triangles"?: number | null;
 };
 
 export type TerrainExportMeshResult = {

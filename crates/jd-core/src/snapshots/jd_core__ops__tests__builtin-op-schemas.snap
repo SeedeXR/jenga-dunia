@@ -4525,6 +4525,16 @@ expression: list
           "description": "Embed a baked base-colour texture (hypsometric ramp + slope, one texel per vertex).",
           "type": "boolean",
           "default": true
+        },
+        "target_triangles": {
+          "description": "Decimate the sampled grid to at most this many triangles (quadric edge collapse):\nflat ground collapses, ridges keep their detail. Not for `.fbx`.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "default": null
         }
       },
       "additionalProperties": false,

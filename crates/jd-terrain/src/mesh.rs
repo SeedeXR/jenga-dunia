@@ -596,6 +596,16 @@ pub fn export_obj(
     step: u32,
 ) -> JdResult<MeshExportReport> {
     let mesh = GridMesh::build(hf, extent_m, step)?;
+    write_obj(&mesh, extent_m, path, step)
+}
+
+/// Write an already built (or decimated) mesh as OBJ.
+pub fn write_obj(
+    mesh: &GridMesh,
+    extent_m: [f64; 2],
+    path: &Path,
+    step: u32,
+) -> JdResult<MeshExportReport> {
     let mut out = String::with_capacity(mesh.positions.len() * 12);
     out.push_str(&format!(
         "# jenga-dunia {} — metres, +Y up, +Z south, centred\no terrain\n",
@@ -618,7 +628,7 @@ pub fn export_obj(
         fs::create_dir_all(parent)?;
     }
     fs::write(path, out)?;
-    report(path, "obj", &mesh, step, extent_m)
+    report(path, "obj", mesh, step, extent_m)
 }
 
 /// Binary STL: 80-byte header, triangle count, per-triangle face normal + 3 vertices.
@@ -629,6 +639,16 @@ pub fn export_stl(
     step: u32,
 ) -> JdResult<MeshExportReport> {
     let mesh = GridMesh::build(hf, extent_m, step)?;
+    write_stl(&mesh, extent_m, path, step)
+}
+
+/// Write an already built (or decimated) mesh as STL.
+pub fn write_stl(
+    mesh: &GridMesh,
+    extent_m: [f64; 2],
+    path: &Path,
+    step: u32,
+) -> JdResult<MeshExportReport> {
     let mut out = Vec::with_capacity(84 + mesh.indices.len() / 3 * 50);
     let mut header = format!(
         "jenga-dunia {} binary STL, metres, +Y up",
@@ -670,7 +690,7 @@ pub fn export_stl(
         fs::create_dir_all(parent)?;
     }
     fs::write(path, &out)?;
-    report(path, "stl", &mesh, step, extent_m)
+    report(path, "stl", mesh, step, extent_m)
 }
 
 /// Binary little-endian PLY with per-vertex normals and hypsometric RGB colours.
@@ -681,6 +701,16 @@ pub fn export_ply(
     step: u32,
 ) -> JdResult<MeshExportReport> {
     let mesh = GridMesh::build(hf, extent_m, step)?;
+    write_ply(&mesh, extent_m, path, step)
+}
+
+/// Write an already built (or decimated) mesh as PLY.
+pub fn write_ply(
+    mesh: &GridMesh,
+    extent_m: [f64; 2],
+    path: &Path,
+    step: u32,
+) -> JdResult<MeshExportReport> {
     let header = format!(
         "ply\nformat binary_little_endian 1.0\ncomment jenga-dunia {} — metres, +Y up, +Z south, centred\nelement vertex {}\nproperty float x\nproperty float y\nproperty float z\nproperty float nx\nproperty float ny\nproperty float nz\nproperty uchar red\nproperty uchar green\nproperty uchar blue\nelement face {}\nproperty list uchar uint vertex_indices\nend_header\n",
         env!("CARGO_PKG_VERSION"),
@@ -713,7 +743,7 @@ pub fn export_ply(
         fs::create_dir_all(parent)?;
     }
     fs::write(path, &out)?;
-    report(path, "ply", &mesh, step, extent_m)
+    report(path, "ply", mesh, step, extent_m)
 }
 
 /// USDA (ASCII OpenUSD): one `Xform` with a `Mesh` — points, triangles, vertex normals,
@@ -726,6 +756,16 @@ pub fn export_usda(
     step: u32,
 ) -> JdResult<MeshExportReport> {
     let mesh = GridMesh::build(hf, extent_m, step)?;
+    write_usda(&mesh, extent_m, path, step)
+}
+
+/// Write an already built (or decimated) mesh as USDA.
+pub fn write_usda(
+    mesh: &GridMesh,
+    extent_m: [f64; 2],
+    path: &Path,
+    step: u32,
+) -> JdResult<MeshExportReport> {
     let n = mesh.vertices() as usize;
     let mut out = String::with_capacity(n * 90);
     out.push_str(&format!(
@@ -809,7 +849,7 @@ pub fn export_usda(
         fs::create_dir_all(parent)?;
     }
     fs::write(path, out)?;
-    report(path, "usda", &mesh, step, extent_m)
+    report(path, "usda", mesh, step, extent_m)
 }
 
 /// USDZ: the USDA layer packaged with the system `usdzip` (Apple USD Tools / OpenUSD), which
@@ -820,8 +860,19 @@ pub fn export_usdz(
     path: &Path,
     step: u32,
 ) -> JdResult<MeshExportReport> {
+    let mesh = GridMesh::build(hf, extent_m, step)?;
+    write_usdz(&mesh, extent_m, path, step)
+}
+
+/// Write an already built (or decimated) mesh as USDZ via `usdzip`.
+pub fn write_usdz(
+    mesh: &GridMesh,
+    extent_m: [f64; 2],
+    path: &Path,
+    step: u32,
+) -> JdResult<MeshExportReport> {
     let usda = path.with_extension("usda");
-    let mut rep = export_usda(hf, extent_m, &usda, step)?;
+    let mut rep = write_usda(mesh, extent_m, &usda, step)?;
     let status = std::process::Command::new("usdzip")
         .arg(path)
         .arg(&usda)
@@ -846,18 +897,158 @@ pub fn export_usdz(
     Ok(rep)
 }
 
+/// Write an irregular (decimated) mesh as `.glb`: positions, normals, planar UVs, tangents and
+/// the full-field material maps when `maps` is given.
+pub fn write_glb_mesh(
+    mesh: &GridMesh,
+    extent_m: [f64; 2],
+    path: &Path,
+    step: u32,
+    maps: Option<&BakedMaps>,
+) -> JdResult<MeshExportReport> {
+    let n = mesh.vertices() as usize;
+    let mut bin: Vec<u8> = Vec::with_capacity(n * 48 + mesh.indices.len() * 4);
+    let (mut min, mut max) = ([f32::MAX; 3], [f32::MIN; 3]);
+    for p in mesh.positions.as_chunks::<3>().0 {
+        for k in 0..3 {
+            min[k] = min[k].min(p[k]);
+            max[k] = max[k].max(p[k]);
+        }
+    }
+    let push = |bin: &mut Vec<u8>, vals: &[f32]| {
+        for v in vals {
+            bin.extend_from_slice(&v.to_le_bytes());
+        }
+    };
+    push(&mut bin, &mesh.positions);
+    let pos_len = bin.len();
+    push(&mut bin, &mesh.normals);
+    let nrm_len = bin.len() - pos_len;
+    push(&mut bin, &mesh.uvs);
+    let uv_len = bin.len() - pos_len - nrm_len;
+    let tan_off = bin.len();
+    if maps.is_some() {
+        for nrm in mesh.normals.as_chunks::<3>().0 {
+            let t = [1.0 - nrm[0] * nrm[0], -nrm[0] * nrm[1], -nrm[0] * nrm[2]];
+            let len = (t[0] * t[0] + t[1] * t[1] + t[2] * t[2]).sqrt().max(1e-6);
+            push(&mut bin, &[t[0] / len, t[1] / len, t[2] / len, 1.0]);
+        }
+    }
+    let tan_len = bin.len() - tan_off;
+    let idx_off = bin.len();
+    for i in &mesh.indices {
+        bin.extend_from_slice(&i.to_le_bytes());
+    }
+    let idx_len = bin.len() - idx_off;
+    pad4(&mut bin, 0);
+    let mut views = vec![
+        serde_json::json!({ "buffer": 0, "byteOffset": 0, "byteLength": pos_len, "target": 34962 }),
+        serde_json::json!({ "buffer": 0, "byteOffset": pos_len, "byteLength": nrm_len, "target": 34962 }),
+        serde_json::json!({ "buffer": 0, "byteOffset": pos_len + nrm_len, "byteLength": uv_len, "target": 34962 }),
+        serde_json::json!({ "buffer": 0, "byteOffset": idx_off, "byteLength": idx_len, "target": 34963 }),
+    ];
+    let mut accessors = vec![
+        serde_json::json!({ "bufferView": 0, "componentType": 5126, "count": n, "type": "VEC3", "min": min, "max": max }),
+        serde_json::json!({ "bufferView": 1, "componentType": 5126, "count": n, "type": "VEC3" }),
+        serde_json::json!({ "bufferView": 2, "componentType": 5126, "count": n, "type": "VEC2" }),
+        serde_json::json!({ "bufferView": 3, "componentType": 5125, "count": mesh.indices.len(), "type": "SCALAR" }),
+    ];
+    let mut attributes = serde_json::json!({ "POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2 });
+    let mut material = serde_json::json!({ "name": "terrain", "pbrMetallicRoughness": { "baseColorFactor": [0.55, 0.5, 0.45, 1.0], "metallicFactor": 0.0, "roughnessFactor": 0.95 } });
+    let mut images = Vec::new();
+    let mut normal_px = None;
+    if let Some(m) = maps {
+        views.push(serde_json::json!({ "buffer": 0, "byteOffset": tan_off, "byteLength": tan_len, "target": 34962 }));
+        accessors.push(serde_json::json!({ "bufferView": 4, "componentType": 5126, "count": n, "type": "VEC4" }));
+        attributes["TANGENT"] = serde_json::json!(4);
+        for (png, name) in [
+            (&m.albedo, "terrain-albedo"),
+            (&m.normal, "terrain-normal"),
+            (&m.roughness, "terrain-roughness"),
+        ] {
+            let off = bin.len();
+            bin.extend_from_slice(png);
+            views.push(
+                serde_json::json!({ "buffer": 0, "byteOffset": off, "byteLength": png.len() }),
+            );
+            images.push(serde_json::json!({ "bufferView": views.len() - 1, "mimeType": "image/png", "name": name }));
+            pad4(&mut bin, 0);
+        }
+        material = serde_json::json!({ "name": "terrain", "pbrMetallicRoughness": { "baseColorTexture": { "index": 0, "texCoord": 0 }, "baseColorFactor": [1.0, 1.0, 1.0, 1.0], "metallicRoughnessTexture": { "index": 2, "texCoord": 0 }, "metallicFactor": 0.0, "roughnessFactor": 1.0 }, "normalTexture": { "index": 1, "texCoord": 0 } });
+        normal_px = Some(m.px);
+    }
+    let mut json = serde_json::json!({
+        "asset": { "version": "2.0", "generator": format!("jenga-dunia {}", env!("CARGO_PKG_VERSION")) },
+        "buffers": [{ "byteLength": bin.len() }],
+        "bufferViews": views,
+        "accessors": accessors,
+        "materials": [material],
+        "meshes": [{ "name": "terrain", "primitives": [{ "attributes": attributes, "indices": 3, "material": 0, "mode": 4 }] }],
+        "nodes": [{ "mesh": 0, "name": "terrain" }],
+        "scenes": [{ "nodes": [0] }],
+        "scene": 0
+    });
+    if !images.is_empty() {
+        json["images"] = serde_json::Value::Array(images);
+        json["samplers"] = serde_json::json!([{ "magFilter": 9729, "minFilter": 9987, "wrapS": 33071, "wrapT": 33071 }]);
+        json["textures"] = serde_json::json!([{ "sampler": 0, "source": 0 }, { "sampler": 0, "source": 1 }, { "sampler": 0, "source": 2 }]);
+    }
+    let bytes = write_glb(path, &json, &bin)?;
+    Ok(MeshExportReport {
+        path: path.to_path_buf(),
+        format: "glb".into(),
+        vertices: mesh.vertices(),
+        triangles: mesh.triangles(),
+        step,
+        bytes,
+        extent_m,
+        texture_px: normal_px,
+        normal_px,
+    })
+}
+
 /// Export by extension: `.glb` (default, with optional texture), `.obj`, `.stl`, `.ply`, `.usda`, `.usdz`.
+/// With `target_triangles` the sampled grid is decimated first (quadric edge collapse) and
+/// written as an irregular mesh — every format but `.fbx`, which keeps its quad grid.
 pub fn export_mesh(
     hf: &Heightfield,
     extent_m: [f64; 2],
     path: &Path,
     step: u32,
     texture: bool,
+    target_triangles: Option<u32>,
 ) -> JdResult<MeshExportReport> {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
         .map(|e| e.to_ascii_lowercase());
+    if let Some(target) = target_triangles {
+        let grid = GridMesh::build(hf, extent_m, step)?;
+        let mesh = crate::decimate::decimate(&grid, extent_m, target)?;
+        return match ext.as_deref() {
+            None | Some("glb") => {
+                let maps = texture
+                    .then(|| bake_maps(hf, extent_m, NORMAL_MAP_CAP))
+                    .transpose()?;
+                write_glb_mesh(&mesh, extent_m, path, step, maps.as_ref())
+            }
+            Some("obj") => write_obj(&mesh, extent_m, path, step),
+            Some("stl") => write_stl(&mesh, extent_m, path, step),
+            Some("ply") => write_ply(&mesh, extent_m, path, step),
+            Some("usda") => write_usda(&mesh, extent_m, path, step),
+            Some("usdz") => write_usdz(&mesh, extent_m, path, step),
+            Some("fbx") => Err(JdError::invalid(
+                "target_triangles",
+                "the FBX export writes the full quad grid",
+            )
+            .next("Use `step` to thin the grid for FBX, or export a decimated .glb/.obj.")),
+            Some(other) => Err(JdError::new(
+                jd_types::ErrorCode::E_FORMAT_UNSUPPORTED,
+                format!("unsupported mesh extension `{other}`"),
+            )
+            .next("Use .glb, .fbx, .obj, .stl, .ply, .usda or .usdz.")),
+        };
+    }
     match ext.as_deref() {
         None | Some("glb") => export_glb(hf, extent_m, path, step, texture),
         Some("obj") => export_obj(hf, extent_m, path, step),
@@ -1040,9 +1231,12 @@ mod tests {
         hf.fill_with(|x, y| x as f32 * 2.0 + y as f32);
         let dir = tempfile::tempdir().expect("tmp");
         let glb = export_glb(&hf, [50.0, 40.0], &dir.path().join("g.glb"), 1, false).expect("glb");
-        let obj = export_mesh(&hf, [50.0, 40.0], &dir.path().join("g.obj"), 1, false).expect("obj");
-        let stl = export_mesh(&hf, [50.0, 40.0], &dir.path().join("g.stl"), 1, false).expect("stl");
-        let ply = export_mesh(&hf, [50.0, 40.0], &dir.path().join("g.ply"), 1, false).expect("ply");
+        let obj =
+            export_mesh(&hf, [50.0, 40.0], &dir.path().join("g.obj"), 1, false, None).expect("obj");
+        let stl =
+            export_mesh(&hf, [50.0, 40.0], &dir.path().join("g.stl"), 1, false, None).expect("stl");
+        let ply =
+            export_mesh(&hf, [50.0, 40.0], &dir.path().join("g.ply"), 1, false, None).expect("ply");
         for r in [&obj, &stl, &ply] {
             assert_eq!((r.vertices, r.triangles), (glb.vertices, glb.triangles));
         }
@@ -1085,7 +1279,7 @@ mod tests {
             ply_bytes.len() - header_end,
             20 * (6 * 4 + 3) + 24 * (1 + 12)
         );
-        assert!(export_mesh(&hf, [50.0, 40.0], &dir.path().join("g.xyz"), 1, false).is_err());
+        assert!(export_mesh(&hf, [50.0, 40.0], &dir.path().join("g.xyz"), 1, false, None).is_err());
     }
 
     #[test]
@@ -1093,7 +1287,15 @@ mod tests {
         let mut hf = Heightfield::new(4, 3, 64, 0).expect("hf");
         hf.fill_with(|x, y| x as f32 + y as f32);
         let dir = tempfile::tempdir().expect("tmp");
-        let r = export_mesh(&hf, [40.0, 30.0], &dir.path().join("t.usda"), 1, false).expect("usda");
+        let r = export_mesh(
+            &hf,
+            [40.0, 30.0],
+            &dir.path().join("t.usda"),
+            1,
+            false,
+            None,
+        )
+        .expect("usda");
         assert_eq!(
             (r.format.as_str(), r.vertices, r.triangles),
             ("usda", 12, 12)

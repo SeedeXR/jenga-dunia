@@ -58,7 +58,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 
 ## Phase 4 — Interoperability
 - [~] USD: USDA writer ✔ + USDZ via system `usdzip` ✔, both `usdchecker`-clean; native USDC ☐ (openusd crate); OBJ/STL/PLY ✔ (`jd export mesh x.obj|stl|ply`, shared grid, PLY vertex colours; validated in an external importer); GeoTIFF ✔ (export writes pixel scale / tie point / EPSG GeoKeys; import reads them)
-- [ ] QEM decimation, LOD chains, MikkTSpace, topology validation + stats
+- [~] QEM decimation ✔ (`jd-terrain::decimate`, `target_triangles` on every format but FBX; Optima compare pass: mean 1.8 m / p99 9.4 m at 11.5 % of the triangles) · LOD chains ☐ · MikkTSpace (tangents are analytic +X⟂N) ☐ · topology validation + stats (Optima health used externally) ☐
 - [ ] Material translation layer + loss reports
 - [~] Blender bridge add-on ✔ (`integrations/blender/jenga_dunia_bridge`, GPL-3.0-or-later, manifest validates, File ▸ Import operator via `jd` CLI) + headless round-trip test ✔ (`test_bridge.py`, Blender 5.2) · separate repo / Extensions Platform submission ☐ (needs owner)
 - [~] Unity/Unreal export profiles ✔ (`terrain.export_profile`: engine-specific heightmap encoding/row order, 8-bit weightmaps, README with Terrain Height / Z scale; size warnings) · engine-side import verified on a real Unity/Unreal ☐ · Unity C# TerrainData import script ☐

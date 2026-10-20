@@ -2721,6 +2721,10 @@ pub mod terrain {
         /// Embed a baked base-colour texture (hypsometric ramp + slope, one texel per vertex).
         #[serde(default = "yes")]
         pub texture: bool,
+        /// Decimate the sampled grid to at most this many triangles (quadric edge collapse):
+        /// flat ground collapses, ridges keep their detail. Not for `.fbx`.
+        #[serde(default)]
+        pub target_triangles: Option<u32>,
     }
 
     fn yes() -> bool {
@@ -2916,7 +2920,7 @@ pub mod terrain {
                             format!("mesh sampled every {step} pixels to stay within {} vertices; pass `step: 1` for the full grid", p.max_vertices),
                         ));
                     }
-                    jd_terrain::export_mesh(hf, extent, &path, step, p.texture)
+                    jd_terrain::export_mesh(hf, extent, &path, step, p.texture, p.target_triangles)
                 })?;
                 Ok((report, warnings))
             },
