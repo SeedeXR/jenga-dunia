@@ -4,11 +4,11 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use jd_terrain::{
-    AeolianParams, DropletParams, FlowMethod, ForeignImport, Heightfield, HydraulicParams,
-    NoiseParams, SnowParams, StreamPowerParams, Stroke, THERMAL_MAX_RATE, aeolian_transport,
-    apply_strokes, carve_rivers, droplet_erode, fill_depressions, flow_accumulation_with,
-    generate_noise, hydraulic_erode, read_foreign, resample_to_world, sea_level, slope_mask,
-    snow_cover, stream_power_erode, thermal_erode, wetness_index,
+    AeolianParams, CoastalParams, DropletParams, FlowMethod, ForeignImport, Heightfield,
+    HydraulicParams, NoiseParams, SnowParams, StreamPowerParams, Stroke, THERMAL_MAX_RATE,
+    aeolian_transport, apply_strokes, carve_rivers, coastal_erode, droplet_erode, fill_depressions,
+    flow_accumulation_with, generate_noise, hydraulic_erode, read_foreign, resample_to_world,
+    sea_level, slope_mask, snow_cover, stream_power_erode, thermal_erode, wetness_index,
 };
 use jd_types::{JdError, JdResult};
 use rayon::prelude::*;
@@ -647,6 +647,20 @@ pub fn register_all(r: &mut Registry) {
             Ok(out("out", aeolian_transport(field(i, "in")?, spacing_m(ctx), sand.map(|s| &**s), &ap, Some(&ctx.cancel))?))
         },
     ).with_memory(12.0));
+    r.register(NodeDef::new::<CoastalParams, _>(
+        "jd.erosion.coastal@1",
+        "Coastal erosion: waves cut the shore within `band_m` above `level_m` by its ocean exposure and lay the material on the adjacent sea floor — cliff retreat, wave-cut platforms, beaches; outputs the terrain and a `shore` mask of wave work",
+        vec![port("in", PortType::Heightfield, true)],
+        vec![port("out", PortType::Heightfield, false), port("shore", PortType::Heightfield, false)],
+        |ctx, p, i| {
+            let cp: CoastalParams = params(p)?;
+            if !(1..=1000).contains(&cp.iterations) {
+                return Err(JdError::invalid("iterations", "must be within 1..=1000"));
+            }
+            let (out_h, shore) = coastal_erode(field(i, "in")?, &cp, Some(&ctx.cancel))?;
+            Ok(BTreeMap::from([("out".to_owned(), Value::field(out_h)), ("shore".to_owned(), Value::field(shore))]))
+        },
+    ).with_memory(16.0));
     r.register(NodeDef::new::<SnowParams, _>(
         "jd.climate.snow@1",
         "Snow cover 0..1 from height alone: a soft snow line, retention that falls with slope, sun-facing slopes melt, windward slopes scour — for biome rules, scatter and colour overlays",

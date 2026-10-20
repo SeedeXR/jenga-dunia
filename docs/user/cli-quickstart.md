@@ -329,6 +329,22 @@ aeolian node 14.5 s for 256² × 200 steps (debug build; 10 m cells, default 2.5
 
 `jd.erosion.aeolian@1` is Werner's slab model (1995), the cellular automaton behind dune simulation: every step visits each cell in a seeded shuffle; a cell that holds sand and is not in a *wind shadow* (a lee slope steeper than `shadow_deg` seen along the wind) loses a slab of `slab_m`, which hops `hop_m` downwind and sticks with probability `deposit_on_sand` on sand, `deposit_on_bare` on bare ground, always in a shadow; after every move the angle of repose (`repose_deg`, 34° for dry sand) is enforced around the changed cell — down from it and down onto it from an uphill neighbour — which is where the slip faces come from. It is a *lattice* model: a slab has to be comparable to `cell × tan(shadow_deg)` for shadows to form at all (0.3 m slabs on 10 m cells only roughened the sheet into hummocks in the first run), so the defaults follow the sample spacing — slab = cell / 4, hop = 4 cells — and the unit test checks that the along-wind roughness ends up more than twice the across-wind roughness, i.e. ridges transverse to the wind. The optional `sand` input (0..1) scales erodibility and marks what counts as sand, so a mask from `jd.biome.classify@1` keeps rock in place. The field wraps around at its edges so the mass balance is exact (above: identical means). The result depends only on `seed`. One wind direction and one grain size for now; bimodal winds (seif dunes) and vegetation anchoring belong to the weather timeline.
 
+### Coastal erosion
+
+```
+$ jd new Coast.jdproj --extent 2560 --resolution 256        # noise −60..240 m, sea at 60 m → 28 % ocean
+$ jd op graph.add_node --project Coast.jdproj --save --params '{"kind":"jd.erosion.coastal@1","params":{"level_m":60,"band_m":8,"iterations":120,"rate_m":0.4}}'
+# noise.out → coastal.in; coastal.out → height; coastal.shore → a `shore` output
+before  min -30.3  max 213.64  mean 90.4077
+height  min -30.3  max 213.64  mean 90.4077          ← identical mean: eroded 8 457.4 m·cells, deposited 8 457.3
+2 534 cells cut (deepest 8.2 m) · 3 799 cells filled (highest 9.9 m) · 1 742 land cells became sea, 243 sea cells became land
+coastal node 3.6 s for 256² × 120 steps (debug build)
+```
+
+![Blender render with a translucent sea at 60 m: left the raw coast with ragged headlands and islets, right the same after 120 wave steps with headlands cut back and bays filled](images/cli-coast.png)
+
+`jd.erosion.coastal@1` re-floods the ocean from the field border every step (the same rule as `jd.hydrology.sea_level@1`, so inland basins are not coasts), then every land cell within `band_m` above `level_m` that touches the sea loses `rate_m × exposure` (exposure = share of its eight neighbours that are ocean) down to one step below the level, and that material is shared among those ocean neighbours. A cut cell floods on the next step and exposes the one behind it — cliff retreat with a wave-cut platform just under the surface — while the deposits build beaches that can rise above the level and become land again. The `shore` output is the wave work per cell normalised to the busiest one, a ready mask for beach and cliff materials. No fetch, wave direction or longshore drift yet, so spits, bars and deltas are a later term.
+
 ### Snow cover
 
 ```

@@ -1040,6 +1040,17 @@ cast wind shadows and only roughen the surface. */
   "seed"?: number;
 };
 
+export type NodeParams_jd_erosion_coastal_1 = {
+  /** Sea level, metres. */
+  "level_m"?: number;
+  /** How far above the level the waves reach (notch height / storm run-up), metres (> 0). */
+  "band_m"?: number;
+  /** Steps. */
+  "iterations"?: number;
+  /** Metres taken off a fully exposed shore cell per step (> 0). */
+  "rate_m"?: number;
+};
+
 export type NodeParams_jd_erosion_droplet_1 = {
   /** Number of droplets (1..=5 000 000). Aim for 1–2 per cell: 512² wants ~400 000; fewer gives
 diffuse, unstructured lowering, more deepens the same gullies. */
@@ -1317,6 +1328,7 @@ export interface NodeKinds {
   "jd.biome.classify@1": NodeParams_jd_biome_classify_1;
   "jd.climate.snow@1": NodeParams_jd_climate_snow_1;
   "jd.erosion.aeolian@1": NodeParams_jd_erosion_aeolian_1;
+  "jd.erosion.coastal@1": NodeParams_jd_erosion_coastal_1;
   "jd.erosion.droplet@1": NodeParams_jd_erosion_droplet_1;
   "jd.erosion.hydraulic@1": NodeParams_jd_erosion_hydraulic_1;
   "jd.erosion.stream_power@1": NodeParams_jd_erosion_stream_power_1;

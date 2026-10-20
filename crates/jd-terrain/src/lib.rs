@@ -7,6 +7,7 @@
 
 pub mod aeolian;
 pub mod climate;
+pub mod coastal;
 pub mod droplet;
 pub mod export;
 pub mod fbx;
@@ -23,6 +24,7 @@ pub mod sim;
 
 pub use aeolian::{AeolianParams, aeolian_transport};
 pub use climate::{SnowParams, snow_cover};
+pub use coastal::{CoastalParams, coastal_erode};
 pub use droplet::{DropletParams, DropletResult, droplet_erode};
 pub use export::{
     ExportOptions, GeoRef, HeightmapFormat, epsg_code, export_heightmap, export_heightmap_geo,
