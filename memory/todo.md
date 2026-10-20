@@ -34,7 +34,7 @@ Conventions: `- [ ]` planned · `- [x]` done · `- [~]` in progress (add owner) 
 - [~] Desktop: native file dialogs (tauri-plugin-dialog) ✔ (native check pending — display was locked), macOS menu bar + ⌘ shortcuts ✔, `.jdproj` launch-arg open ✔ / bundle file association ✔ (unsigned `.app`+`.dmg`, Apple-Event open verified) / `LSTypeIsPackage` + exported UTI ✔ (plain `open X.jdproj` launches the app), window state persistence ✔ (verified natively)
 - [~] Desktop tutorials: native annotated screenshots ✔ (tutorial-01/02/03 re-shot from the v0.0.1 build 2026-10-20; 04 sculpt is the e2e capture — clicks need Accessibility), native recording ✔ (graph-erosion-native.mp4) + first-terrain.mp4, Playwright-recorded graph-editor.mp4 ✔; Edit-menu capture ☐ (System Events click did not open it); place in the Figma file once the connector OAuth is completed by the owner ☐
 - [x] CI: Rust matrix (macOS, Ubuntu, Windows) fmt/clippy/test/release-smoke + cargo-deny job; docs job with npx cache
-- [ ] S1 bench smoke in CI (needs a kernel)
+- [x] S1 bench smoke in CI (`jd diag bench s1`, release, 3 OSes, 15 s / 1 GB budget; baseline comparison ☐)
 - [x] `fixtures/malformed/` corpus seed (15 broken PNG/TIFF/EXR/RAW files) + `jd-terrain/tests/malformed.rs`: every file must fail with a structured error, never panic; found that colour PNGs import as luminance by design (documented, not in the corpus)
 - [ ] `graphify` knowledge graph generation added to session-end checklist and CI (deterministic output)
 - [ ] Platform-native checklist (owner mandate): macOS menu bar/⌘ shortcuts/file association for `.jdproj`, Metal via wgpu; Windows DX12/NVIDIA; Linux Vulkan/NVIDIA; CPU path everywhere

@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BenchParams",
+  "description": "`diag.bench` params.",
+  "type": "object",
+  "properties": {
+    "scene": {
+      "description": "Scene to run.",
+      "$ref": "#/$defs/BenchScene",
+      "default": "s1"
+    },
+    "size_px": {
+      "description": "Square size in pixels (S1 default 1024).",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0,
+      "default": null
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "BenchScene": {
+      "description": "Benchmark scenes (`docs/spec/performance-targets.md`).",
+      "oneOf": [
+        {
+          "description": "S1-small-interactive: fBm + ridged noise, add, thermal erosion (50 steps) — the preview path.",
+          "type": "string",
+          "const": "s1"
+        }
+      ]
+    }
+  }
+}

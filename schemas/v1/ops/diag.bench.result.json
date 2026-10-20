@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BenchReport",
+  "description": "`diag.bench` result.",
+  "type": "object",
+  "properties": {
+    "scene": {
+      "description": "Scene.",
+      "$ref": "#/$defs/BenchScene"
+    },
+    "size_px": {
+      "description": "Square size in pixels.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "stages": {
+      "description": "Stages in order.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/BenchStage"
+      }
+    },
+    "total_ms": {
+      "description": "Sum of the stages, milliseconds.",
+      "type": "number",
+      "format": "double"
+    },
+    "peak_rss_bytes": {
+      "description": "Highest resident set size of this process observed between stages, bytes (None when the\nplatform does not report it).",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint64",
+      "minimum": 0
+    },
+    "profile": {
+      "description": "`debug` or `release` — debug numbers are not comparable with the spec's targets.",
+      "type": "string"
+    },
+    "content_hash": {
+      "description": "Content hash of the final field (determinism check across runs and machines).",
+      "type": "string"
+    }
+  },
+  "required": [
+    "scene",
+    "size_px",
+    "stages",
+    "total_ms",
+    "profile",
+    "content_hash"
+  ],
+  "$defs": {
+    "BenchScene": {
+      "description": "Benchmark scenes (`docs/spec/performance-targets.md`).",
+      "oneOf": [
+        {
+          "description": "S1-small-interactive: fBm + ridged noise, add, thermal erosion (50 steps) — the preview path.",
+          "type": "string",
+          "const": "s1"
+        }
+      ]
+    },
+    "BenchStage": {
+      "description": "One timed stage.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Stage name.",
+          "type": "string"
+        },
+        "ms": {
+          "description": "Wall time in milliseconds.",
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "name",
+        "ms"
+      ]
+    }
+  }
+}

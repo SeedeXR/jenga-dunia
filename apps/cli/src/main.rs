@@ -171,6 +171,15 @@ enum ExportCommand {
 enum DiagCommand {
     /// Host environment, memory, detected tools.
     Env,
+    /// Run a benchmark scene with the real kernels (release build for comparable numbers).
+    Bench {
+        /// Scene id (s1 = 1024² fBm + ridged + add + thermal×50).
+        #[arg(default_value = "s1")]
+        scene: String,
+        /// Square size in pixels (default per scene).
+        #[arg(long)]
+        size: Option<u32>,
+    },
 }
 
 /// Write the generated JSON Schemas (envelope, every op's request/result, graph node kinds) so
@@ -458,6 +467,15 @@ fn main() -> ExitCode {
         Command::Diag {
             what: DiagCommand::Env,
         } => vec![invoke(&registry, &ctx, "diag.env", json!({}))],
+        Command::Diag {
+            what: DiagCommand::Bench { scene, size },
+        } => {
+            let mut params = json!({ "scene": scene });
+            if let Some(size) = size {
+                params["size_px"] = json!(size);
+            }
+            vec![invoke(&registry, &ctx, "diag.bench", params)]
+        }
     };
     finish(responses, json)
 }

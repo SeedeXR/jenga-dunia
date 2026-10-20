@@ -642,6 +642,12 @@ pub mod builtin {
             Scope::None,
             |_, _| Ok((crate::diag::env_info(), Vec::new())),
         );
+        r.register::<crate::diag::BenchParams, crate::diag::BenchReport, _>(
+            "diag.bench",
+            "Run a benchmark scene (S1: fBm + ridged + add + thermal×50) with the real kernels; per-stage wall time, peak RSS, content hash",
+            Scope::None,
+            |_, p| Ok((crate::diag::bench(&p)?, Vec::new())),
+        );
         terrain::register_all(r);
         graph::register_all(r);
     }

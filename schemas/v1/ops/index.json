@@ -1,5 +1,10 @@
 [
   {
+    "id": "diag.bench",
+    "description": "Run a benchmark scene (S1: fBm + ridged + add + thermal×50) with the real kernels; per-stage wall time, peak RSS, content hash",
+    "scope": "none"
+  },
+  {
     "id": "diag.env",
     "description": "Report host environment and detected tools",
     "scope": "none"
