@@ -12,11 +12,18 @@ renderer) and reports, as JSON next to the input, what Unreal made of a Jenga Du
   centimetres and materials, plus whatever came alongside (textures, a material instance).
 
 `scripts/unreal-import-check.sh` is the wrapper: it writes a Blueprint-only `.uproject` under
-`target/scratch/UnrealJD` (Python, Interchange and InterchangeEditor plugins enabled), finds the
-newest engine under `/Users/Shared/Epic Games` (or `UNREAL` = the `UnrealEditor-Cmd` binary) and
-exits 1 unless the report says `ok`. The first run of the scratch project warms the shader cache
-(minutes); later runs take 20–50 s. The `pythonscript` commandlet is not used: it asserts inside
-`AssetTools.ImportAssetTasks` because the editor subsystems the importers need are not up.
+`target/scratch/UnrealJD` (`DisableEnginePluginsByDefault`: only Python, Interchange and
+InterchangeEditor load), finds the newest engine under `/Users/Shared/Epic Games` (or `UNREAL` =
+the `UnrealEditor-Cmd` binary) and exits 1 unless the report says `ok`. A run takes 9–12 s on an
+M4 (profile or mesh; 17–19 s with the engine's default plugin set, reports identical). The very
+first launch of a freshly installed engine on a machine takes minutes — it is not a shader
+warm-up: that run compiled no shaders, it loaded 627 engine libraries at ~0.4 s each while macOS
+validated and paged in the fresh install, and every later run, in any project, loads them in well
+under a second. It is paid once per machine and engine version; a `-ddc=Cold` sandbox run (empty
+derived-data cache) still finishes in 21 s. `-NoShaderCompile` aborts the editor (NotNull assert)
+and the `pythonscript` commandlet is not used either: it asserts inside
+`AssetTools.ImportAssetTasks` because the editor subsystems the importers need are not up
+(evidence: `docs/research/research-log/2026-10-22-unreal-first-run.md`).
 
 Not covered: the Landscape actor. Unreal has no scripting entry point that builds a Landscape from
 a heightmap file; that step is the editor's Landscape mode → Import from file, with the Z scale

@@ -3,10 +3,14 @@
 # report. Usage: scripts/unreal-import-check.sh <unreal profile dir>
 #        scripts/unreal-import-check.sh --mesh <terrain.glb|terrain.fbx>
 # Needs an Unreal Engine 5 install (UNREAL env = the UnrealEditor-Cmd binary, else the newest under
-# /Users/Shared/Epic Games). The scratch project is a Blueprint-only .uproject written here; the
-# first run warms the engine's shader cache (minutes), later runs take ~1 min. The script runs through
-# -ExecutePythonScript (full editor, unattended): the pythonscript commandlet asserts inside the
-# asset importers. Exit 1 on failure.
+# /Users/Shared/Epic Games). The scratch project is a Blueprint-only .uproject written here with
+# the engine's default plugins off (DisableEnginePluginsByDefault: only Python + Interchange load,
+# ~11 s a run instead of ~18 s). The very first launch of a freshly installed engine on a machine
+# takes minutes (macOS validates and pages in the engine's ~1200 binaries on first load, not a
+# shader warm-up: measured 627 module loads at ~0.4 s each, 0 shader jobs); every run after that,
+# in any project, takes seconds. The script runs through -ExecutePythonScript (full editor,
+# unattended): the pythonscript commandlet asserts inside the asset importers, and
+# -NoShaderCompile aborts the editor (NotNull assert). Exit 1 on failure.
 set -euo pipefail
 MODE=profile
 if [ "${1:-}" = "--mesh" ]; then MODE=mesh; MESH="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"; shift 2; else DIR="$(cd "$1" && pwd)"; fi
@@ -17,7 +21,7 @@ PROJ="${JD_UNREAL_PROJECT:-$ROOT/target/scratch/UnrealJD}"
 VER="$(python3 -c "import json;print(json.load(open('$(dirname "$(dirname "$(dirname "$(dirname "$UNREAL")")")")/Build/Build.version'))['MajorVersion'], end='.')" 2>/dev/null || echo 5.)$(python3 -c "import json;print(json.load(open('$(dirname "$(dirname "$(dirname "$(dirname "$UNREAL")")")")/Build/Build.version'))['MinorVersion'])" 2>/dev/null || echo 8)"
 mkdir -p "$PROJ/Content" "$PROJ/Saved"
 cat > "$PROJ/UnrealJD.uproject" <<JSON
-{ "FileVersion": 3, "EngineAssociation": "$VER", "Category": "", "Description": "Jenga Dunia import check",
+{ "FileVersion": 3, "EngineAssociation": "$VER", "Category": "", "Description": "Jenga Dunia import check", "DisableEnginePluginsByDefault": true,
   "Plugins": [ { "Name": "PythonScriptPlugin", "Enabled": true }, { "Name": "Interchange", "Enabled": true }, { "Name": "InterchangeEditor", "Enabled": true } ] }
 JSON
 LOG="$PROJ.log"
