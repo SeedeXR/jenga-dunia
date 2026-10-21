@@ -859,7 +859,7 @@ pub fn register_all(r: &mut Registry) {
     ).with_memory(16.0));
     r.register(NodeDef::new::<jd_terrain::RainParams, _>(
         "jd.climate.rain@1",
-        "Orographic rain: moisture rides the wind across the field; air holds less water the higher it climbs (`moisture_scale_m`), so windward slopes condense the excess as rain, descending air rains nothing (the shadow), flat ground takes a drizzle (`base_per_km`) and dry air re-moistens over `recovery_km` — `rain` 0..1 (the field's 99th percentile at 1; feed `jd.erosion.hydraulic@1`'s `rain` or a biome rule), `snowfall` (the share that falls where the lapsed `temperature_c` is below `snow_below_c`; key the temperature for a season) and `moisture` 0..1, the relative humidity of the air leaving each cell",
+        "Orographic rain: moisture rides the wind across the field; air holds less water the higher it climbs (`moisture_scale_m`), so windward slopes condense the excess as rain, descending air rains nothing (the shadow), flat ground takes a drizzle (`base_per_km`) and dry air re-moistens over `recovery_km`, and with `delay_km` the condensed water is carried that far downwind before it falls (onto the crest and over it) — `rain` 0..1 (the field's 99th percentile at 1; feed `jd.erosion.hydraulic@1`'s `rain` or a biome rule), `snowfall` (the share that falls where the lapsed `temperature_c` is below `snow_below_c`; key the temperature for a season) and `moisture` 0..1, the relative humidity of the air leaving each cell",
         vec![port("in", PortType::Heightfield, true)],
         vec![port("rain", PortType::Heightfield, false), port("snowfall", PortType::Heightfield, false), port("moisture", PortType::Heightfield, false)],
         |ctx, p, i| {
@@ -867,7 +867,9 @@ pub fn register_all(r: &mut Registry) {
             let (rain, snowfall, moisture) = jd_terrain::orographic_rain(field(i, "in")?, spacing_m(ctx), &rp)?;
             Ok(BTreeMap::from([("rain".to_owned(), Value::field(rain)), ("snowfall".to_owned(), Value::field(snowfall)), ("moisture".to_owned(), Value::field(moisture))]))
         },
-    ));
+    )
+    // Scratch: rain, vapour, cloud and humidity fields plus the percentile copy — 20 B/cell.
+    .with_memory(20.0));
     r.register(NodeDef::new::<SlopeParams, _>(
         "jd.analysis.slope@1",
         "Slope mask 0..1 (gradient angle / max_deg) — feed into multiply to attenuate by steepness",

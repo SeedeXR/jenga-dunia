@@ -7,8 +7,14 @@
 //! Descending air rains nothing (its capacity grows), so hills lower than the range upwind of them
 //! stay dry — the shadow — until the air has recovered.
 //!
+//! Advection delay (`delay_km`): condensed water does not fall where it formed — Smith & Barstad's
+//! conversion and fallout times carry the cloud downwind first — so a second scalar of cloud water
+//! rides along and rains out by `1 − exp(−step / delay_km)` per step, which moves the rain peak
+//! from the windward face onto the crest and spills it over into the lee.
+//!
 //! ponytail: the wind is rounded to one of 8 neighbours (like the snow drift), one scalar of water
-//! per cell, no advection delay, no temperature; `rain` is normalised to its own 99th percentile so it
+//! vapour and one of cloud per cell, no temperature; cloud carried into descending air keeps
+//! falling instead of re-evaporating; `rain` is normalised to its own 99th percentile so it
 //! reads as a 0..1 mask.
 
 use jd_types::{JdError, JdResult};
@@ -34,6 +40,13 @@ pub struct RainParams {
     /// Distance over which dry air re-moistens towards saturation, km (> 0): the length of a rain shadow.
     #[serde(default = "d_recovery")]
     pub recovery_km: f32,
+    /// Advection delay, km (≥ 0): how far condensed water is carried downwind before it falls
+    /// (wind speed × the cloud's conversion + fallout time, ~10 m/s × 2000 s ≈ 20 km). 0 = it falls
+    /// where it forms; 10–30 km moves the rain peak from the windward face onto the crest and over it.
+    /// Cloud still airborne at the downwind field edge leaves with the air, so a delay comparable to
+    /// the world's width loses part of the rain.
+    #[serde(default)]
+    pub delay_km: f32,
     /// Air temperature at sea level, °C — key it over the timeline for a season.
     #[serde(default = "d_temperature")]
     pub temperature_c: f32,
@@ -74,6 +87,7 @@ impl Default for RainParams {
             moisture_scale_m: d_scale(),
             base_per_km: d_base(),
             recovery_km: d_recovery(),
+            delay_km: 0.0,
             temperature_c: d_temperature(),
             lapse_c_per_km: d_lapse(),
             snow_below_c: d_snow_below(),
@@ -114,6 +128,9 @@ pub fn orographic_rain(
     if !p.wind_azimuth_deg.is_finite() {
         return Err(JdError::invalid("wind_azimuth_deg", "must be finite"));
     }
+    if !(p.delay_km >= 0.0 && p.delay_km.is_finite()) {
+        return Err(JdError::invalid("delay_km", "must be finite and ≥ 0"));
+    }
     if !spacing_m.iter().all(|s| *s > 0.0 && s.is_finite()) {
         return Err(JdError::invalid(
             "spacing_m",
@@ -130,7 +147,11 @@ pub fn orographic_rain(
     let n = (w * hh) as usize;
     let mut rain = vec![0.0f32; n];
     let mut q = vec![0.0f32; n];
+    let mut cloud = vec![0.0f32; n]; // ponytail: full field like `q`; two rows would do for both
     let mut rh = vec![0.0f32; n];
+    // Share of the cloud that falls per step (delay 0 → −∞ → all of it); exp_m1 keeps it exact
+    // for tiny step / delay ratios.
+    let fallout = -(-step_km / p.delay_km).exp_m1();
     // Sweep so the upwind neighbour is always visited first.
     let xs = |k: i64| if ddx >= 0 { k } else { w - 1 - k };
     let ys = |k: i64| if ddy >= 0 { k } else { hh - 1 - k };
@@ -139,15 +160,18 @@ pub fn orographic_rain(
             let i = (y * w + x) as usize;
             let c = cap(x, y);
             let (ux, uy) = (x - ddx, y - ddy);
-            let water = if ux >= 0 && uy >= 0 && ux < w && uy < hh {
-                q[(uy * w + ux) as usize]
+            let (water, carried) = if ux >= 0 && uy >= 0 && ux < w && uy < hh {
+                let u = (uy * w + ux) as usize;
+                (q[u], cloud[u])
             } else {
-                c
+                (c, 0.0)
             };
             let condensed = (water - c).max(0.0);
             let drizzle = (water - condensed) * (p.base_per_km * step_km).min(1.0);
-            rain[i] = condensed + drizzle;
-            let left = water - rain[i];
+            let formed = carried + condensed + drizzle;
+            rain[i] = formed * fallout;
+            cloud[i] = formed - rain[i];
+            let left = water - condensed - drizzle;
             q[i] = left + (c - left).max(0.0) * (step_km / p.recovery_km).min(1.0);
             rh[i] = (q[i] / c).clamp(0.0, 1.0);
         }
@@ -186,6 +210,63 @@ pub fn orographic_rain(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_advection_delay_carries_the_rain_peak_from_the_face_onto_the_crest_and_over_it() {
+        // A 2 km ridge across a westerly, 500 m cells: the face climbs from x = 20 to the crest at
+        // x = 40 and descends to x = 60.
+        let mut h = Heightfield::new(128, 8, 128, 0).expect("h");
+        h.fill_with(|x, _| 2000.0 * (1.0 - ((x as f32 - 40.0).abs() / 20.0).min(1.0)));
+        let p = RainParams {
+            base_per_km: 0.0,
+            temperature_c: 30.0, // no snow line: the whole crest rains
+            ..RainParams::default()
+        };
+        let peak_of = |r: &Heightfield| {
+            (0..128)
+                .max_by(|a, b| r.get(*a, 4).total_cmp(&r.get(*b, 4)))
+                .expect("peak")
+        };
+        let at_once = orographic_rain(&h, [500.0, 500.0], &p).expect("no delay").0;
+        let delayed = orographic_rain(
+            &h,
+            [500.0, 500.0],
+            &RainParams {
+                delay_km: 10.0,
+                ..p.clone()
+            },
+        )
+        .expect("delay")
+        .0;
+        let (p0, p1) = (peak_of(&at_once), peak_of(&delayed));
+        assert!(
+            p0 < 40,
+            "without delay the rain peaks on the windward face: {p0}"
+        );
+        // Condensation per step is largest low on the face (the capacity curve is steepest there),
+        // so the carried cloud peaks just below the crest, 15 cells downwind of the undelayed peak.
+        assert!(
+            p1 >= p0 + 10 && p1 >= 35,
+            "with a 10 km delay the peak moves up to the crest: {p0} → {p1}"
+        );
+        assert_eq!(at_once.get(50, 4), 0.0, "no delay: the lee is dry at once");
+        assert!(
+            delayed.get(50, 4) > 0.1,
+            "with it, rain spills into the lee: {}",
+            delayed.get(50, 4)
+        );
+        assert!(
+            orographic_rain(
+                &h,
+                [500.0, 500.0],
+                &RainParams {
+                    delay_km: -1.0,
+                    ..p
+                }
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn windward_face_is_wet_and_the_lee_sits_in_a_rain_shadow() {

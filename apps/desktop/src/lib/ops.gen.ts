@@ -1459,6 +1459,12 @@ wrings out most of the moisture. */
   "base_per_km"?: number;
   /** Distance over which dry air re-moistens towards saturation, km (> 0): the length of a rain shadow. */
   "recovery_km"?: number;
+  /** Advection delay, km (≥ 0): how far condensed water is carried downwind before it falls
+(wind speed × the cloud's conversion + fallout time, ~10 m/s × 2000 s ≈ 20 km). 0 = it falls
+where it forms; 10–30 km moves the rain peak from the windward face onto the crest and over it.
+Cloud still airborne at the downwind field edge leaves with the air, so a delay comparable to
+the world's width loses part of the rain. */
+  "delay_km"?: number;
   /** Air temperature at sea level, °C — key it over the timeline for a season. */
   "temperature_c"?: number;
   /** Lapse rate, °C lost per km of height (≥ 0). */

@@ -1,0 +1,9 @@
+{
+  "src": "/tmp/jd-scratch/cli-rain-delay-raw.png",
+  "out": "cli-rain-delay.png",
+  "annotations": [
+    { "type": "arrow", "x1": 400, "y1": 200, "x2": 440, "y2": 160, "text": "1  no delay: all the rain falls on the windward face, the crest and lee are dry", "tx": 16, "ty": 358 },
+    { "type": "arrow", "x1": 740, "y1": 240, "x2": 780, "y2": 200, "text": "2  20 km delay: the cloud is carried over the crest", "tx": 16, "ty": 382 },
+    { "type": "circle", "cx": 860, "cy": 150, "r": 26, "label": "3", "text": "3  and rains out across the lee, fading over the delay length", "tx": 16, "ty": 406 }
+  ]
+}
