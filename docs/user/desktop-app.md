@@ -181,6 +181,10 @@ Undo and redo are operations like everything else (`graph.undo` / `graph.redo`, 
 
 *Hydrology first: `jd.hydrology.network@1` (1) has no inputs — it grows the drainage network from the river mouths (`mouths`: south by default, or the whole border for an island) and builds the heights along it, headwaters steep and big rivers flat. Wire `out` to the height output and `rivers` to a second output (2) to colour the terrain by its trunks; `river_order` sets which Strahler order counts as a river. Every cell drains by construction (3): a `jd.hydrology.fill@1` node on `out` reports an empty `lakes` layer. `network.spec.ts` drives this through the UI.*
 
+![Gate project: a second chain reads the published height layer through a jd.input.layer node into an output named fine; the graph toolbar's selector reads "only fine" and the header lists both layers](images/desktop-gate.png)
+
+*The gate pattern in the app: `jd.input.layer@1` (1) reads any layer the project has published — `height` here, `height#lod2` when a coarse chain was evaluated at the preview resolution — and the toolbar's `only <output>` selector (2) makes Evaluate (and the live preview) run just that output's chain, so a 16k² world can erode at a coarse level and pick up its fine detail at full resolution without ever holding the heavy chain at 16k² (the CLI quickstart has the numbers). The header keeps listing every published layer (3). `gate.spec.ts` drives this through the UI.*
+
 ## Horizon
 
 ![Viewport orbited to the horizon with Horizon on: the world's terrain sits in a hole cut in a coarse, dimmer skirt of the same noise that runs to three times the extent under the physical sky](images/desktop-horizon.png)

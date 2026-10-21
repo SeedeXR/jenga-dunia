@@ -278,6 +278,25 @@ function Inner() {
           <button className={`btn px-1.5 ${s.live ? "text-jd-accent" : ""}`} title={s.live ? "Live preview on: every edit re-evaluates at preview resolution" : "Live preview off"} onClick={() => s.setLive(!s.live)} aria-pressed={s.live} data-testid="graph-live">
             {s.live ? <Zap size={12} /> : <ZapOff size={12} />}
           </button>
+          <select
+            className="rounded border border-jd-line bg-jd-bg-2 px-1 py-0.5 text-xs"
+            title="Evaluate only this output and what feeds it (the gate pattern: erode a coarse chain at the preview lod, then read it back with jd.input.layer in the fine chain)"
+            value={s.evalOutput ?? ""}
+            onChange={(e) => s.setEvalOutput(e.target.value || null)}
+            disabled={!s.project}
+            data-testid="graph-only"
+          >
+            <option value="">all outputs</option>
+            {Object.values(s.graph.nodes)
+              .filter((n) => n.kind.startsWith("jd.output.height@"))
+              .map((n) => String((n.params as { layer?: unknown }).layer ?? "height"))
+              .filter((v, i, a) => a.indexOf(v) === i)
+              .map((layer) => (
+                <option key={layer} value={layer}>
+                  only {layer}
+                </option>
+              ))}
+          </select>
           <button className="btn" title="Evaluate at full resolution" onClick={() => void s.evaluateGraph()} disabled={!s.project || s.busy} data-testid="graph-evaluate">
             <Play size={12} /> Evaluate
           </button>

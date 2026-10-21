@@ -1,0 +1,38 @@
+{
+  "src": "../../../apps/desktop/test-results/gate-gate-pattern-against--ceaa0-t-evaluates-just-that-chain/gate.png",
+  "out": "desktop-gate.png",
+  "annotations": [
+    {
+      "type": "box",
+      "x": 635,
+      "y": 572,
+      "w": 72,
+      "h": 36,
+      "label": "1",
+      "text": "1  jd.input.layer reads a published layer (here `height`; `height#lod2` for a coarse chain)",
+      "tx": 300,
+      "ty": 790
+    },
+    {
+      "type": "box",
+      "x": 553,
+      "y": 447,
+      "w": 74,
+      "h": 22,
+      "label": "2",
+      "text": "2  only <output>: Evaluate runs that chain and what feeds it \u2014 nothing else",
+      "tx": 300,
+      "ty": 814
+    },
+    {
+      "type": "arrow",
+      "x1": 760,
+      "y1": 60,
+      "x2": 790,
+      "y2": 28,
+      "text": "3  the header keeps every published layer listed",
+      "tx": 300,
+      "ty": 838
+    }
+  ]
+}

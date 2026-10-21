@@ -123,6 +123,9 @@ interface State {
   disconnectNodes: (from: string, fromPort: string, to: string, toPort: string) => Promise<void>;
   setParam: (id: string, key: string, value: unknown) => Promise<void>;
   evaluateGraph: (lod?: number) => Promise<void>;
+  /** Evaluate (and live-preview) only this output layer and what feeds it — the gate pattern; null = everything. */
+  evalOutput: string | null;
+  setEvalOutput: (layer: string | null) => void;
   /** Adopt a project the backend already has open (launch argument / file association). */
   probeProject: (isCancelled?: () => boolean) => Promise<void>;
   newProject: (path: string, name: string, extent: number, resolution: number) => Promise<void>;
@@ -304,7 +307,10 @@ export const useStore = create<State>((set, get) => {
   // After an evaluation: keep showing the layer the user is looking at (same name, or its
   // full-res/preview twin) when the graph still publishes it; otherwise the first one.
   const adopt = async (report: EvalReport) => {
-    set({ lastEval: report });
+    // A filtered evaluation (`only <output>`) republishes one chain; the other layers are still
+    // published, so the header keeps listing them.
+    const known = get().lastEval?.layers ?? {};
+    set({ lastEval: { ...report, layers: { ...known, ...report.layers } } });
     const names = Object.keys(report.layers);
     if (names.length === 0) return;
     const current = get().layer?.layer.split("#")[0];
@@ -332,7 +338,8 @@ export const useStore = create<State>((set, get) => {
         startPolling(); // live evaluations show up in the header and can be cancelled too
         const gen = graphGen;
         try {
-          const r = await op<EvalReport>("graph.evaluate", { lod: previewLod() });
+          const only = get().evalOutput;
+          const r = await op<EvalReport>("graph.evaluate", only ? { lod: previewLod(), outputs: [only] } : { lod: previewLod() });
           // The graph moved on while this ran (Generate's edits, a quick second edit): the result
           // is of an older graph and would overwrite the newer layer — drop it, the next one is queued.
           if (gen !== graphGen) return;
@@ -605,9 +612,12 @@ export const useStore = create<State>((set, get) => {
       clearTimeout(timeTimer);
       timeTimer = setTimeout(() => void mutate("graph.set_time", { time }), 200);
     },
+    evalOutput: null,
+    setEvalOutput: (layer) => set({ evalOutput: layer }),
     evaluateGraph: async (lod = 0) => {
       await settle();
-      const r = await run("graph.evaluate", { lod });
+      const only = get().evalOutput;
+      const r = await run("graph.evaluate", only ? { lod, outputs: [only] } : { lod });
       if (r.status === "ok" && r.result) await adopt(r.result);
     },
     probeProject: async (isCancelled) => {
@@ -630,14 +640,14 @@ export const useStore = create<State>((set, get) => {
         world: { extent_m: [extent, extent], resolution_px: [resolution, resolution], tile_size: 512, halo: 4, origin: [0, 0], seed: 42 },
       });
       if (r.status === "ok" && r.result) {
-        set({ project: r.result, layer: null, preview: null });
+        set({ project: r.result, layer: null, preview: null, lastEval: null }); // a new project publishes its own layers
         await loadGraph();
       }
     },
     openProject: async (path) => {
       const r = await run("project.open", { path });
       if (r.status === "ok" && r.result) {
-        set({ project: r.result, layer: null, preview: null });
+        set({ project: r.result, layer: null, preview: null, lastEval: null }); // a new project publishes its own layers
         await loadGraph();
       }
     },

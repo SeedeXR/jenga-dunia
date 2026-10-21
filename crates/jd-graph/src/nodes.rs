@@ -127,7 +127,11 @@ fn talus_default() -> f32 {
 #[serde(deny_unknown_fields)]
 struct LayerInputParams {
     /// Published layer to read, e.g. `height` or `height#lod2`.
+    #[serde(default = "layer_input_default")]
     name: String,
+}
+fn layer_input_default() -> String {
+    "height".to_owned()
 }
 
 /// Which processor runs a kernel that exists in both forms.

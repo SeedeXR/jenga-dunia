@@ -1907,13 +1907,11 @@
       "properties": {
         "name": {
           "description": "Published layer to read, e.g. `height` or `height#lod2`.",
-          "type": "string"
+          "type": "string",
+          "default": "height"
         }
       },
-      "additionalProperties": false,
-      "required": [
-        "name"
-      ]
+      "additionalProperties": false
     }
   },
   {

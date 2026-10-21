@@ -1779,7 +1779,7 @@ georeferencing are always stretched. */
 
 export type NodeParams_jd_input_layer_1 = {
   /** Published layer to read, e.g. `height` or `height#lod2`. */
-  "name": string;
+  "name"?: string;
 };
 
 export type NodeParams_jd_mask_class_1 = {
