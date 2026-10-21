@@ -65,7 +65,19 @@ Processing time (wall, per stage), **peak RSS**, GPU memory peak, CPU utilisatio
 | 2026-10-21 | same | `jd.erosion.thermal@1` **16k² × 10 steps**, `tile_px: 1024` (release `jd op graph.evaluate`) — the first erosion of a 16k² layer inside the 4 GiB budget | 17.1 s node, 22.3 s wall | **2.35 GB** | input + output layers (1.07 GB each) + one band buffer; the whole-field kernel would need 12 B/cell of scratch (3.2 GB) on top. The pre-flight estimate is now params-aware (tiled → 0.5 B/cell) and no longer counts the output node's aliased field, so it admits the run (2.2 GB estimated) |
 | 2026-10-21 | same | **Gate pattern on 16k²** (release `jd op graph.evaluate`): `{lod: 2, outputs: ["coarse"]}` = noise → hydraulic 100 steps at 4096²; then `{lod: 0, outputs: ["height"]}` = `jd.input.layer coarse#lod2` → add 300 m detail noise | coarse 11.6 s wall (hydraulic 11.2 s); fine 8.7 s wall (input.layer 1.3 s, add 1.6 s, noise 3.6 s) | coarse **1.31 GB**, fine **2.74 GB** | the unfiltered lod-0 evaluation is refused by the estimate (17 GiB); `outputs` filters both the evaluation and the estimate |
 | 2026-10-21 | same | `jd.hydrology.sea_level@1` with `refraction: true` (fast-marching eikonal + ray-spacing integral) after fBm noise, release `jd op graph.evaluate`, 20 m/s over 100 km (97 m waves) | 512²: 16 ms (5 ms without); 2048²: 245 ms (77 ms without) | 2048²: 214 MB peak RSS (111 MB without — ≈ 25 B/cell: time, slowness, ray direction, spacing integral, order, heap) | `crates/jd-terrain/src/ocean.rs::wave_refraction`; `/tmp/jd-scratch/relbench.sh`; `/usr/bin/time -l` |
+| 2026-10-21 | same | Tile-level re-evaluation through the MCP server (release `jd-mcp`, `scripts/tiles-mcp.mjs`): 4096² noise → sculpt → blur(2) / curvature(8) / thermal(30), one 120 m stroke then another | cold: thermal 2 606 ms, blur 97, curvature 99; after a stroke: thermal 282 ms (4 tiles) then 141 ms (1 tile), blur 86, curvature 88; unchanged: all cached, 0 ms; thermal layer hash identical to a cold server's | memo ≤ 1 GiB of pinned outputs (bytes-capped) | `crates/jd-graph/src/eval.rs::partial_evaluate`; the fixed cost (clone + splice + rebuild halos + re-hash ≈ 3 passes) is why only stencil kernels are declared local |
 | 2026-10-20 | same | `jd diag bench s1` (S1-small-interactive: 1024² fBm + ridged + add + thermal×50, release) | fbm 30–47 ms, ridged 25–28 ms, add 1.6 ms, thermal 206–251 ms; total 283–308 ms (2 runs). 2048²: total 1.07 s | 43–44 MB (141 MB at 2048²) | `crates/jd-core/src/diag.rs::bench`; same content hash on both runs (deterministic); CI runs it on every push on the three OSes as a smoke with a 15 s / 1 GB budget |
+
+## What runs on the GPU, and what does not
+
+`engine: gpu` exists on the two kernels where a profile showed a parallel stencil on top: thermal (incl. hardness) and hydraulic (incl. hardness, rain, drains, the soil layer), both with parity tests against the CPU kernel (thermal 1 ulp per step, hydraulic < 1e-3 m over 40 steps). The others stay on the CPU on purpose, not for lack of time:
+
+| Kernel | Why it stays on the CPU |
+|---|---|
+| Stream power (`jd.erosion.stream_power@1`) | Braun & Willett's implicit scheme solves cells from the outlets upstream — each cell needs its receiver's *new* height, a dependency chain as long as the river. An explicit GPU scheme would trade it for a CFL limit and a different result. |
+| D8 flow accumulation | A sort by height and one sweep; the parallel alternatives (pointer jumping) are slower than the serial sweep below a few thousand squared. |
+| Droplet erosion | Particles writing to shared cells: float atomics are order-dependent, which the determinism contract forbids. |
+| Blur, slope, curvature, remap, noise | Summed-area tables or a few milliseconds per megapixel already; the transfer would cost more than the work. |
 
 ## Regression policy
 

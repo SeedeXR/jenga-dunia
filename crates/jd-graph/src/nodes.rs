@@ -627,89 +627,119 @@ pub fn register_all(r: &mut Registry) {
             })?;
             let w = &ctx.lod_world;
             if (hf.width(), hf.height()) == (w.resolution_px[0], w.resolution_px[1]) {
-                return Ok(BTreeMap::from([("out".to_owned(), Value::Field(hf.clone(), hf.content_hash()))]));
+                return Ok(BTreeMap::from([("out".to_owned(), Value::from_arc(hf.clone()))]));
             }
             Ok(out("out", resample_to_world(&hf.to_vec(), hf.width(), hf.height(), false, w)?))
         },
     ));
-    r.register(NodeDef::new::<NoParams, _>(
-        "jd.math.add@1",
-        "a + b",
-        vec![
-            port("a", PortType::Heightfield, true),
-            port("b", PortType::Heightfield, true),
-        ],
-        vec![port("out", PortType::Heightfield, false)],
-        |_, _, i| {
-            Ok(out(
-                "out",
-                map2(field(i, "a")?, field(i, "b")?, |a, b| a + b)?,
-            ))
-        },
-    ));
-    r.register(NodeDef::new::<NoParams, _>(
-        "jd.math.multiply@1",
-        "a × b (use a 0..1 mask as b to attenuate)",
-        vec![
-            port("a", PortType::Heightfield, true),
-            port("b", PortType::Heightfield, true),
-        ],
-        vec![port("out", PortType::Heightfield, false)],
-        |_, _, i| {
-            Ok(out(
-                "out",
-                map2(field(i, "a")?, field(i, "b")?, |a, b| a * b)?,
-            ))
-        },
-    ));
-    r.register(NodeDef::new::<ScaleParams, _>(
-        "jd.math.scale@1",
-        "in × factor",
-        vec![port("in", PortType::Heightfield, true)],
-        vec![port("out", PortType::Heightfield, false)],
-        |_, p, i| {
-            let sp: ScaleParams = params(p)?;
-            Ok(out("out", map1(field(i, "in")?, |v| v * sp.factor)?))
-        },
-    ));
-    r.register(NodeDef::new::<RemapParams, _>(
-        "jd.math.remap@1",
-        "Linear remap of [from0, from1] to [to0, to1], optional clamp",
-        vec![port("in", PortType::Heightfield, true)],
-        vec![port("out", PortType::Heightfield, false)],
-        |_, p, i| {
-            let rp: RemapParams = params(p)?;
-            let span = rp.from[1] - rp.from[0];
-            if span == 0.0 || !span.is_finite() {
-                return Err(JdError::invalid(
-                    "from",
-                    "range must be non-empty and finite",
-                ));
-            }
-            let k = (rp.to[1] - rp.to[0]) / span;
-            let (lo, hi) = (rp.to[0].min(rp.to[1]), rp.to[0].max(rp.to[1]));
-            Ok(out(
-                "out",
-                map1(field(i, "in")?, |v| {
-                    let y = rp.to[0] + (v - rp.from[0]) * k;
-                    if rp.clamp { y.clamp(lo, hi) } else { y }
-                })?,
-            ))
-        },
-    ));
-    r.register(NodeDef::new::<BlurParams, _>(
-        "jd.filter.blur@1",
-        "Box blur (tile-local, reads through the halo; radius ≤ world.halo)",
-        vec![port("in", PortType::Heightfield, true)],
-        vec![port("out", PortType::Heightfield, false)],
-        |_, p, i| {
-            let bp: BlurParams = params(p)?;
-            if !(1..=4).contains(&bp.radius) {
-                return Err(JdError::invalid("radius", "must be within 1..=4"));
-            }
-            Ok(out("out", box_blur(field(i, "in")?, bp.radius)?))
-        },
-    ));
+    r.register(
+        NodeDef::new::<NoParams, _>(
+            "jd.math.add@1",
+            "a + b",
+            vec![
+                port("a", PortType::Heightfield, true),
+                port("b", PortType::Heightfield, true),
+            ],
+            vec![port("out", PortType::Heightfield, false)],
+            |_, _, i| {
+                Ok(out(
+                    "out",
+                    map2(field(i, "a")?, field(i, "b")?, |a, b| a + b)?,
+                ))
+            },
+        )
+        .local(|p| {
+            let _ = p;
+            0
+        }),
+    );
+    r.register(
+        NodeDef::new::<NoParams, _>(
+            "jd.math.multiply@1",
+            "a × b (use a 0..1 mask as b to attenuate)",
+            vec![
+                port("a", PortType::Heightfield, true),
+                port("b", PortType::Heightfield, true),
+            ],
+            vec![port("out", PortType::Heightfield, false)],
+            |_, _, i| {
+                Ok(out(
+                    "out",
+                    map2(field(i, "a")?, field(i, "b")?, |a, b| a * b)?,
+                ))
+            },
+        )
+        .local(|p| {
+            let _ = p;
+            0
+        }),
+    );
+    r.register(
+        NodeDef::new::<ScaleParams, _>(
+            "jd.math.scale@1",
+            "in × factor",
+            vec![port("in", PortType::Heightfield, true)],
+            vec![port("out", PortType::Heightfield, false)],
+            |_, p, i| {
+                let sp: ScaleParams = params(p)?;
+                Ok(out("out", map1(field(i, "in")?, |v| v * sp.factor)?))
+            },
+        )
+        .local(|p| {
+            let _ = p;
+            0
+        }),
+    );
+    r.register(
+        NodeDef::new::<RemapParams, _>(
+            "jd.math.remap@1",
+            "Linear remap of [from0, from1] to [to0, to1], optional clamp",
+            vec![port("in", PortType::Heightfield, true)],
+            vec![port("out", PortType::Heightfield, false)],
+            |_, p, i| {
+                let rp: RemapParams = params(p)?;
+                let span = rp.from[1] - rp.from[0];
+                if span == 0.0 || !span.is_finite() {
+                    return Err(JdError::invalid(
+                        "from",
+                        "range must be non-empty and finite",
+                    ));
+                }
+                let k = (rp.to[1] - rp.to[0]) / span;
+                let (lo, hi) = (rp.to[0].min(rp.to[1]), rp.to[0].max(rp.to[1]));
+                Ok(out(
+                    "out",
+                    map1(field(i, "in")?, |v| {
+                        let y = rp.to[0] + (v - rp.from[0]) * k;
+                        if rp.clamp { y.clamp(lo, hi) } else { y }
+                    })?,
+                ))
+            },
+        )
+        .local(|p| {
+            let _ = p;
+            0
+        }),
+    );
+    r.register(
+        NodeDef::new::<BlurParams, _>(
+            "jd.filter.blur@1",
+            "Box blur (tile-local, reads through the halo; radius ≤ world.halo)",
+            vec![port("in", PortType::Heightfield, true)],
+            vec![port("out", PortType::Heightfield, false)],
+            |_, p, i| {
+                let bp: BlurParams = params(p)?;
+                if !(1..=4).contains(&bp.radius) {
+                    return Err(JdError::invalid("radius", "must be within 1..=4"));
+                }
+                Ok(out("out", box_blur(field(i, "in")?, bp.radius)?))
+            },
+        )
+        .local(|p| {
+            let _ = p;
+            p.get("radius").and_then(|v| v.as_u64()).unwrap_or(1) as u32
+        }),
+    );
     r.register(NodeDef::new::<ThermalParams, _>(
         "jd.erosion.thermal@1",
         "Thermal erosion: material steeper than the talus angle slides downhill (mass-conserving Jacobi steps); an optional `hardness` field (0..1, e.g. from `jd.terrain.strata@1`) lets hard rock hold near-vertical faces and shed at a tenth of the rate; `engine: gpu` runs the same kernel on the headless GPU; `tile_px` erodes the CPU field tile by tile (exact, a tile's scratch) for very large worlds",
@@ -735,7 +765,7 @@ pub fn register_all(r: &mut Registry) {
             };
             Ok(out("out", eroded))
         },
-    ).with_memory_fn(|p| if p.get("tile_px").and_then(|v| v.as_u64()).unwrap_or(0) > 0 { 0.5 } else { 8.0 }));
+    ).with_memory_fn(|p| if p.get("tile_px").and_then(|v| v.as_u64()).unwrap_or(0) > 0 { 0.5 } else { 8.0 }).local(|p| p.get("iterations").and_then(|v| v.as_u64()).map(|v| v as u32).unwrap_or_else(iterations_default)));
     r.register(NodeDef::new::<DropletParams, _>(
         "jd.erosion.droplet@1",
         "Particle (droplet) hydraulic erosion after Beyer: seeded droplets follow the slope with inertia, erode through a brush and deposit as they slow — gullies and fans; outputs the terrain and the signed `delta`",
@@ -780,7 +810,9 @@ pub fn register_all(r: &mut Registry) {
             }
             Ok(out("out", map1(field(i, "in")?, |h| terrace(h, tp.step_m, tp.softness, tp.offset_m))?))
         },
-    ));
+    )
+    // Local: the kernel reads `radius` cells around a cell, so a change re-runs on its tiles only.
+    .local(|p| p.get("radius").and_then(|v| v.as_u64()).unwrap_or(1) as u32));
     r.register(NodeDef::new::<CurvatureParams, _>(
         "jd.analysis.curvature@1",
         "Curvature (Laplacian of height, 1/m) mapped to −1..1: positive on ridges and convex breaks, negative in valleys and hollows — for rock exposure, soil and sediment masks",
@@ -812,7 +844,9 @@ pub fn register_all(r: &mut Registry) {
             });
             Ok(out("out", o))
         },
-    ));
+    )
+    // Local: the kernel reads `radius` cells around a cell, so a change re-runs on its tiles only.
+    .local(|p| p.get("radius_px").and_then(|v| v.as_u64()).unwrap_or(1) as u32));
     r.register(NodeDef::new::<AeolianParams, _>(
         "jd.erosion.aeolian@1",
         "Wind (aeolian) transport after Werner's slab model: sand hops downwind, stops in wind shadows and on sand, and the angle of repose holds — dunes and ripples; optional `sand` mask (0..1) says what can move, optional `vegetation` mask (0..1) holds it (stabilised and parabolic dunes); a second wind (`wind2_azimuth_deg`, `wind2_share`) makes linear and star dunes",
@@ -1141,22 +1175,28 @@ pub fn register_all(r: &mut Registry) {
     // mask, classes, distance, weight and heap (≈ 28 B/cell); the estimate cannot see the port, so
     // it charges the supplied case.
     ).with_memory(44.0));
-    r.register(NodeDef::new::<ClassMaskParams, _>(
-        "jd.mask.class@1",
-        "0/1 mask of the cells whose class id equals `id` (feed a `jd.biome.classify@1` map)",
-        vec![port("classes", PortType::Heightfield, true)],
-        vec![port("out", PortType::Heightfield, false)],
-        |_, p, i| {
-            let cp: ClassMaskParams = params(p)?;
-            let id = cp.id as f32;
-            Ok(out(
-                "out",
-                map1(field(i, "classes")?, |v| {
-                    if (v - id).abs() < 0.5 { 1.0 } else { 0.0 }
-                })?,
-            ))
-        },
-    ));
+    r.register(
+        NodeDef::new::<ClassMaskParams, _>(
+            "jd.mask.class@1",
+            "0/1 mask of the cells whose class id equals `id` (feed a `jd.biome.classify@1` map)",
+            vec![port("classes", PortType::Heightfield, true)],
+            vec![port("out", PortType::Heightfield, false)],
+            |_, p, i| {
+                let cp: ClassMaskParams = params(p)?;
+                let id = cp.id as f32;
+                Ok(out(
+                    "out",
+                    map1(field(i, "classes")?, |v| {
+                        if (v - id).abs() < 0.5 { 1.0 } else { 0.0 }
+                    })?,
+                ))
+            },
+        )
+        .local(|p| {
+            let _ = p;
+            0
+        }),
+    );
     r.register(NodeDef::new::<SeaLevelParams, _>(
         "jd.hydrology.sea_level@1",
         "Ocean mask (1 below `level_m` where connected to the border; inland basins stay dry) with a soft shoreline, water `depth` in metres, and the wave `exposure` 0..1 of every water cell — the open-water fetch upwind of it (the wind and `fetch_km` of the node or the world), low in the lee of islands and headlands; with `refraction` the waves bend over the shelf and the exposure is focused on headlands (up to 2, which the coastal and seabed nodes honour) and spread in bays; `current` is the surface drift's direction (degrees clockwise from north the water flows towards): the wind offshore, bent alongshore within `current_band_m` of land — feed `jd.biome.seabed@1` so sediment travels downstream",
@@ -1344,6 +1384,85 @@ mod tests {
                 port: bp.into(),
             },
         });
+    }
+
+    #[test]
+    fn a_local_node_reruns_on_the_changed_tiles_only_and_matches_the_whole_run() {
+        // 512 m / 256² at tile 64 (16 tiles, halo 4): noise → sculpt → blur(2) and curvature(2). A
+        // single 20 m stroke in the middle of tile (0, 0) dirties that tile alone; the warm
+        // evaluator re-runs blur and curvature on it (plus halo) and the result is bit-identical
+        // to a cold evaluation of the same graph.
+
+        let reg = Registry::with_builtins();
+        let world = WorldSettings {
+            extent_m: [512.0, 512.0],
+            resolution_px: [256, 256],
+            tile_size: 64,
+            halo: 4,
+            ..Default::default()
+        };
+        let build = |stroke: bool| {
+            let mut g = Graph::default();
+            let noise = add(
+                &mut g,
+                "jd.noise.fbm@1",
+                serde_json::json!({ "seed": 3, "height_range_m": [0.0, 200.0], "feature_size_m": 80.0 }),
+            );
+            let strokes = if stroke {
+                serde_json::json!({ "strokes": [{ "points": [[64.0, 64.0]], "radius_m": 20.0, "strength_m": 30.0 }] })
+            } else {
+                serde_json::json!({ "strokes": [] })
+            };
+            let sculpt = add(&mut g, "jd.sculpt.strokes@1", strokes);
+            let blur = add(
+                &mut g,
+                "jd.filter.blur@1",
+                serde_json::json!({ "radius": 2 }),
+            );
+            let curv = add(
+                &mut g,
+                "jd.analysis.curvature@1",
+                serde_json::json!({ "radius_px": 2 }),
+            );
+            connect(&mut g, &noise, "out", &sculpt, "in");
+            connect(&mut g, &sculpt, "out", &blur, "in");
+            connect(&mut g, &sculpt, "out", &curv, "in");
+            (g, blur, curv)
+        };
+        // Same node ids in both graphs (the memo is per node): edit `plain`'s sculpt params.
+        let (plain, blur, curv) = build(false);
+        let mut edited = plain.clone();
+        for node in edited.nodes.values_mut() {
+            if node.kind.0 == "jd.sculpt.strokes@1" {
+                node.params = serde_json::json!({ "strokes": [{ "points": [[64.0, 64.0]], "radius_m": 20.0, "strength_m": 30.0 }] })
+                    .as_object()
+                    .cloned()
+                    .unwrap_or_default();
+            }
+        }
+        let cache = Cache::default();
+        let ev = Evaluator::new(&reg, &cache);
+        ev.evaluate_with(&plain, &world, 0, None).expect("first");
+        let (warm, report) = ev.evaluate_with(&edited, &world, 0, None).expect("warm");
+        let (cold, _) = Evaluator::new(&reg, &Cache::default())
+            .evaluate_with(&edited, &world, 0, None)
+            .expect("cold");
+        for id in [&blur, &curv] {
+            let r = report.nodes.iter().find(|n| &n.node == id).expect("report");
+            assert_eq!(
+                r.partial_tiles,
+                Some(1),
+                "{}: one tile re-run, got {:?}",
+                r.kind,
+                r.partial_tiles
+            );
+            let a = warm[&(id.clone(), "out".into())].as_field().to_vec();
+            let b = cold[&(id.clone(), "out".into())].as_field().to_vec();
+            assert_eq!(a, b, "{}: the spliced result equals the whole run", r.kind);
+        }
+        // A third evaluation with nothing changed is served from the cache outright.
+        let (_, again) = ev.evaluate_with(&edited, &world, 0, None).expect("again");
+        assert!(again.nodes.iter().all(|n| n.cached));
     }
 
     #[test]

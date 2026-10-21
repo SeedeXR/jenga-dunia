@@ -708,6 +708,26 @@ current   min 0  max 360  mean 73.3 °        seabed classes changed by the curr
 
 The sea-level node's fourth output, `current`, is the surface drift's direction per cell (degrees clockwise from north the water flows towards): the wind's travel direction in open water, bent to run alongshore within `current_band_m` of land — the tangent of the distance-to-land field, whichever way lies closer to the wind, blended in over the band (unit test on a straight coast under a south-westerly: 45° offshore, 0° — north, alongshore — at the coast, bending between). Wire it into `jd.biome.seabed@1`'s `current` port and the sediment reach of every river and shore cell becomes an ellipse pointing downstream: the full `river_reach_m` with the flow, a quarter of it against, half across — so the mud and the reef-free zone trail off downstream of a mouth instead of ringing it (unit test: a single mouth under an eastward current blocks reefs over twice as far east as west). On the coast above the change is real but modest — a reach of 2 km reshapes 1.2 % of the sea floor — which is the honest size of the effect. A river mouth or shore cell is land, so a land cell beside water carries its water neighbour's direction (the alongshore flow), and inland land the wind. The direction field is faceted near the coast (the 8-neighbour distance transform has corners; smoothing it is the upgrade), and nothing drives it but the wind: no Coriolis, no tides, no pressure set-up, and the bathymetry node's sediment supply still spreads isotropically.
 
+### Sculpt and re-evaluate: only the touched tiles
+
+```
+$ cargo build --release -p jd-mcp && jd new Tiles4k.jdproj --extent 40960 --resolution 4096
+$ node scripts/tiles-mcp.mjs Tiles4k.jdproj          # noise → sculpt → blur(2), curvature(8), thermal(30) through one MCP server
+== cold: total 3097 ms
+  jd.sculpt.strokes@1           65 ms cached=false partial=-
+  jd.filter.blur@1              97 ms cached=false partial=-
+  jd.analysis.curvature@1       99 ms cached=false partial=-
+  jd.erosion.thermal@1        2606 ms cached=false partial=-
+== one 120 m stroke in the middle: total 532 ms
+  jd.erosion.thermal@1         282 ms cached=false partial=4     (blur 86, curvature 88, four tiles each)
+== a second stroke elsewhere: total 389 ms
+  jd.erosion.thermal@1         141 ms cached=false partial=1
+== nothing changed: total 0 ms                                   (everything cached)
+thermal content hash (warm server): 844a22c1…  cold server: 2605 ms, hash 844a22c1… IDENTICAL
+```
+
+A node that only looks a few cells around each output cell — `jd.filter.blur@1` (`radius`), `jd.analysis.curvature@1` (`radius_px`), `jd.erosion.thermal@1` (`iterations`: each step moves material one cell) — is declared *local* with that stencil halo, and the evaluator keeps, per node, the per-tile hashes of what it last saw and the output it last produced (the hashes come free: a field's content hash is already built from its tile hashes). When such a node's inputs come back changed in a few tiles — a brush stroke, a painted mask — it is re-run on the bounding box of those tiles plus twice the halo, and the inner box plus one halo is spliced into the previous output; an output cell within a halo of a changed input lies in the kept box, and the kept box sits a further halo inside the computed one, so every kept cell saw exactly the inputs it would have seen — the result is bit-identical to a whole run (unit test on a 256² world; above, the warm server's thermal layer hashes the same as a cold server's). Thirty thermal steps on 4096² drop from 2.6 s to 0.14–0.28 s per stroke; blur and curvature gain a tenth, because the fixed cost — clone the previous output, splice, rebuild the halos, re-hash — is about three passes over the field, which is why per-cell maps are not declared local. The report's `partial_tiles` says how many tiles a node re-ran on; the memo holds at most 1 GiB of previous outputs and goes when the result cache is evicted. This only pays inside a long-lived process — the desktop app or an MCP server — since every `jd op` is its own process and starts cold. Not done: tile-level cache blobs on disk (the whole-layer `.jdl` blobs stay) and partial runs for global nodes (hydraulic, rivers, the sea).
+
 ### Erode a 16k world: the gate pattern
 
 Hydraulic erosion keeps ~40 bytes of state per cell, so a 16 384² world would need 10 GB of it — more than the 4 GiB budget. ADR-0005's answer is the gate: run the erosion chain at a coarser level of detail, publish it, and let the full-resolution chain read that layer back and add the fine detail. One graph, two evaluations:

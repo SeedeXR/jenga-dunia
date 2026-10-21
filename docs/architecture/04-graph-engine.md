@@ -91,7 +91,7 @@ Properties required by the brief §6 and how they are met:
 | Requirement | Mechanism |
 |---|---|
 | Typed inputs/outputs, validation, cycle detection | `PortType` + Kahn's algorithm on validate; errors carry `E_GRAPH_CYCLE`, `E_GRAPH_TYPE_MISMATCH` |
-| Dependency tracking, dirty propagation | hash chain; mutation marks node + descendants dirty; tile-level dirty sets when a node is local (stencil) |
+| Dependency tracking, dirty propagation | hash chain; mutation marks node + descendants dirty; tile-level dirty sets when a node is local (stencil) — shipped 2026-10-21: `NodeDef::local(halo)` + per-node tile memo in `jd-graph::eval` (blur, curvature, thermal), bit-identical splice, `partial_tiles` in the report |
 | Incremental evaluation, intelligent caching | content-addressed cache keyed by node hash + tile coord + lod; survives restarts (`jd-cache`) |
 | Asynchronous computation, cancellation, progress | jobs with `CancellationToken`; kernels poll between tiles and inside long loops (erosion iterations) |
 | Serialised graph definitions | JSON (`schema_version`, node `kind@version`), human-readable, diff-friendly, stable key ordering |

@@ -228,6 +228,8 @@ export type NodeReport = {
   "cached": boolean;
   /** Milliseconds spent (0 when cached). */
   "duration_ms": number;
+  /** For a local node re-run on its changed tiles only: how many tiles were recomputed. */
+  "partial_tiles"?: number | null;
 };
 
 export type GraphEvaluateResult = {

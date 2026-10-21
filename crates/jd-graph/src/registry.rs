@@ -58,9 +58,13 @@ pub struct NodeDef {
     scratch: ScratchFn,
     /// The node's output is its input (an `Arc` clone), so it costs no memory of its own.
     aliases_input: bool,
+    /// A local (stencil) node: every output cell depends only on input cells within this many
+    /// cells of it, so the evaluator may recompute just the tiles whose inputs changed.
+    local: Option<HaloFn>,
 }
 
 type ScratchFn = Arc<dyn Fn(&Map<String, Value>) -> f32 + Send + Sync>;
+type HaloFn = Arc<dyn Fn(&Map<String, Value>) -> u32 + Send + Sync>;
 
 impl NodeDef {
     /// Build a definition whose params deserialise into `P` (schema and check derive from it).
@@ -101,7 +105,26 @@ impl NodeDef {
             eval: Arc::new(eval),
             scratch: Arc::new(|_| 0.0),
             aliases_input: false,
+            local: None,
         }
+    }
+
+    /// Declare the node local: an output cell depends only on input cells within `halo(params)`
+    /// cells of it (the radius for a blur, the step count for a diffusion), which lets the
+    /// evaluator re-run it on the changed tiles alone. Worth declaring only for kernels that cost
+    /// more than a few passes over the field — the partial run clones, splices and re-hashes
+    /// the output, so a per-cell map gains nothing.
+    pub fn local(
+        mut self,
+        halo: impl Fn(&Map<String, Value>) -> u32 + Send + Sync + 'static,
+    ) -> Self {
+        self.local = Some(Arc::new(halo));
+        self
+    }
+
+    /// The stencil halo (cells) of a local node for these params; `None` for a global node.
+    pub fn local_halo(&self, params: &Map<String, Value>) -> Option<u32> {
+        self.local.as_ref().map(|f| f(params))
     }
 
     /// Declare the kernel's peak scratch memory per cell (bytes) for the pre-flight estimate.
