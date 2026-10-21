@@ -1,0 +1,36 @@
+{
+  "src": "/tmp/jd-scratch/cli-vision-raw.png",
+  "out": "cli-vision.png",
+  "annotations": [
+    {
+      "type": "circle",
+      "cx": 150,
+      "cy": 300,
+      "r": 26,
+      "label": "1",
+      "text": "1  the valley floor and trees nearest the camera",
+      "tx": 16,
+      "ty": 420
+    },
+    {
+      "type": "circle",
+      "cx": 520,
+      "cy": 295,
+      "r": 26,
+      "label": "2",
+      "text": "2  read as high (bright): the relief is distance from the camera, near = 1",
+      "tx": 16,
+      "ty": 444
+    },
+    {
+      "type": "circle",
+      "cx": 600,
+      "cy": 70,
+      "r": 22,
+      "label": "3",
+      "text": "3  the far cliffs read low; the sky (3 %) is masked and reads 0",
+      "tx": 16,
+      "ty": 468
+    }
+  ]
+}

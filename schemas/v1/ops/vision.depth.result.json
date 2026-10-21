@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "VisionDepthResult",
+  "description": "`vision.depth` result.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "The EXR written.",
+      "type": "string"
+    },
+    "px": {
+      "description": "Field size in pixels.",
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint32",
+        "minimum": 0
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "masked_share": {
+      "description": "Share of pixels the model masked out (sky, nothing), 0..1.",
+      "type": "number",
+      "format": "float"
+    },
+    "metric_scale": {
+      "description": "The model's metric-scale estimate (dimensionless until focal/shift recovery exists).",
+      "type": "number",
+      "format": "float"
+    },
+    "load_ms": {
+      "description": "Milliseconds loading the model (0 when it was already resident).",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "infer_ms": {
+      "description": "Milliseconds in the session.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "path",
+    "px",
+    "masked_share",
+    "metric_scale",
+    "load_ms",
+    "infer_ms"
+  ]
+}

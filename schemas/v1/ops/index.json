@@ -228,5 +228,10 @@
     "id": "timeline.export",
     "description": "Evaluate the graph at evenly spaced timeline positions and write one heightmap per frame (keyframed parameters animate; the project's own time is untouched)",
     "scope": "export"
+  },
+  {
+    "id": "vision.depth",
+    "description": "Monocular depth from a photograph (MoGe-2 through ONNX Runtime, CPU) written as an OpenEXR relief 0..1 — import it with `jd.input.heightmap@1` to sculpt from a picture",
+    "scope": "export"
   }
 ]

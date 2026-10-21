@@ -12,6 +12,7 @@ publish.workspace = true
 jd-types.workspace = true
 jd-terrain.workspace = true
 jd-geo.workspace = true
+jd-vision = { workspace = true, optional = true }
 jd-graph.workspace = true
 jd-cache.workspace = true
 base64.workspace = true
@@ -30,3 +31,8 @@ jsonschema.workspace = true
 
 [lints]
 workspace = true
+
+[features]
+# `vision`: the photograph-to-relief op; off → no ONNX Runtime download at build time.
+vision = ["dep:jd-vision"]
+default = ["vision"]

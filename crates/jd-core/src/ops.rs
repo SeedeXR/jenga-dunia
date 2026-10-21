@@ -3681,6 +3681,55 @@ pub mod terrain {
         }
     }
 
+    /// `vision.depth` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct VisionDepth {
+        /// Photograph to read (PNG or JPEG; absolute, or relative to the project's `assets/`).
+        pub image: PathBuf,
+        /// MoGe-2 ONNX model (`model.onnx` from `Ruicheng/moge-2-vit{s,b,l}-normal-onnx`, MIT;
+        /// absolute, or relative to the project root).
+        pub model: PathBuf,
+        /// Output heightmap, OpenEXR f32 (absolute, or relative to the project's `exports/`): the
+        /// relief 0..1, near = high, row 0 = the top of the photograph, masked pixels 0.
+        #[serde(default = "default_vision_path")]
+        pub path: PathBuf,
+        /// Long side the photograph is resized to before inference (518..=4096).
+        #[serde(default = "default_vision_px")]
+        #[schemars(range(min = 518, max = 4096))]
+        pub max_px: u32,
+        /// Token budget of the model (1200..=3600): more is finer and slower.
+        #[serde(default = "default_vision_tokens")]
+        #[schemars(range(min = 1200, max = 3600))]
+        pub num_tokens: i64,
+    }
+    fn default_vision_path() -> PathBuf {
+        PathBuf::from("photo-depth.exr")
+    }
+    fn default_vision_px() -> u32 {
+        1024
+    }
+    fn default_vision_tokens() -> i64 {
+        1800
+    }
+
+    /// `vision.depth` result.
+    #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct VisionDepthResult {
+        /// The EXR written.
+        pub path: PathBuf,
+        /// Field size in pixels.
+        pub px: [u32; 2],
+        /// Share of pixels the model masked out (sky, nothing), 0..1.
+        pub masked_share: f32,
+        /// The model's metric-scale estimate (dimensionless until focal/shift recovery exists).
+        pub metric_scale: f32,
+        /// Milliseconds loading the model (0 when it was already resident).
+        pub load_ms: u64,
+        /// Milliseconds in the session.
+        pub infer_ms: u64,
+    }
+
     /// `sky.bake` params.
     #[derive(Debug, Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
@@ -4068,6 +4117,38 @@ pub mod terrain {
                 let preview = path.with_extension("png");
                 std::fs::write(&preview, jd_terrain::sky_preview_png(&p.sky, p.width.min(1024))?)?;
                 Ok((SkyBakeResult { path, preview, px: [w, h], zenith_rgb, horizon_rgb }, Vec::new()))
+            },
+        );
+        #[cfg(feature = "vision")]
+        r.register::<VisionDepth, VisionDepthResult, _>(
+            "vision.depth",
+            "Monocular depth from a photograph (MoGe-2 through ONNX Runtime, CPU) written as an OpenEXR relief 0..1 — import it with `jd.input.heightmap@1` to sculpt from a picture",
+            Scope::Export,
+            |ctx, p| {
+                let (image, model, path) = ctx.with_project(|proj| {
+                    let image = if p.image.is_absolute() { p.image.clone() } else { proj.root().join("assets").join(&p.image) };
+                    let model = if p.model.is_absolute() { p.model.clone() } else { proj.root().join(&p.model) };
+                    let path = if p.path.is_absolute() { p.path.clone() } else { proj.root().join("exports").join(&p.path) };
+                    Ok((image, model, path))
+                })?;
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                let d = jd_vision::depth_from_image(&image, &model, p.max_px, p.num_tokens)?;
+                let mut hf = jd_terrain::Heightfield::new(d.width, d.height, 64, 0)?;
+                hf.fill_with(|x, y| {
+                    let v = d.height01[(y * d.width + x) as usize];
+                    if v.is_finite() { v } else { 0.0 }
+                });
+                jd_terrain::export_heightmap(
+                    &hf,
+                    &path,
+                    &jd_terrain::ExportOptions { format: jd_terrain::HeightmapFormat::Exr, flip_y: Some(false), range_m: None, georeference: false },
+                )?;
+                Ok((
+                    VisionDepthResult { path, px: [d.width, d.height], masked_share: d.masked_share, metric_scale: d.metric_scale, load_ms: d.load_ms, infer_ms: d.infer_ms },
+                    Vec::new(),
+                ))
             },
         );
         r.register::<OceanBake, OceanBakeResult, _>(

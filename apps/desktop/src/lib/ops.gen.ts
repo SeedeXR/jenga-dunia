@@ -1394,6 +1394,36 @@ export type TimelineExportResult = {
   "duration_ms": number;
 };
 
+export type VisionDepthRequest = {
+  /** Photograph to read (PNG or JPEG; absolute, or relative to the project's `assets/`). */
+  "image": string;
+  /** MoGe-2 ONNX model (`model.onnx` from `Ruicheng/moge-2-vit{s,b,l}-normal-onnx`, MIT;
+absolute, or relative to the project root). */
+  "model": string;
+  /** Output heightmap, OpenEXR f32 (absolute, or relative to the project's `exports/`): the
+relief 0..1, near = high, row 0 = the top of the photograph, masked pixels 0. */
+  "path"?: string;
+  /** Long side the photograph is resized to before inference (518..=4096). */
+  "max_px"?: number;
+  /** Token budget of the model (1200..=3600): more is finer and slower. */
+  "num_tokens"?: number;
+};
+
+export type VisionDepthResult = {
+  /** The EXR written. */
+  "path": string;
+  /** Field size in pixels. */
+  "px": [number, number];
+  /** Share of pixels the model masked out (sky, nothing), 0..1. */
+  "masked_share": number;
+  /** The model's metric-scale estimate (dimensionless until focal/shift recovery exists). */
+  "metric_scale": number;
+  /** Milliseconds loading the model (0 when it was already resident). */
+  "load_ms": number;
+  /** Milliseconds in the session. */
+  "infer_ms": number;
+};
+
 export type NodeParams_jd_analysis_curvature_1 = {
   /** Curvature (1/m) that maps to ±1; smaller values exaggerate. */
   "scale"?: number;
@@ -2032,6 +2062,8 @@ export interface JdOps {
   "terrain.textures": { request: TerrainTexturesRequest; result: TerrainTexturesResult };
   /** Evaluate the graph at evenly spaced timeline positions and write one heightmap per frame (keyframed parameters animate; the project's own time is untouched) */
   "timeline.export": { request: TimelineExportRequest; result: TimelineExportResult };
+  /** Monocular depth from a photograph (MoGe-2 through ONNX Runtime, CPU) written as an OpenEXR relief 0..1 — import it with `jd.input.heightmap@1` to sculpt from a picture */
+  "vision.depth": { request: VisionDepthRequest; result: VisionDepthResult };
 }
 
 export type OpId = keyof JdOps;

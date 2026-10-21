@@ -19,6 +19,7 @@ jd-graph = { path = "crates/jd-graph" }
 jd-cache = { path = "crates/jd-cache" }
 jd-gpu = { path = "crates/jd-gpu" }
 jd-geo = { path = "crates/jd-geo" }
+jd-vision = { path = "crates/jd-vision" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 schemars = { version = "1", features = ["preserve_order"] }
