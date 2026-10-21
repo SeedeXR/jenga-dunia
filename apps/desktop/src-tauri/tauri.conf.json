@@ -27,6 +27,7 @@
     }
   },
   "bundle": {
+    "macOS": { "files": { "Resources/Assets.car": "icons/Assets.car" } },
     "active": true,
     "targets": "all",
     "category": "GraphicsAndDesign",

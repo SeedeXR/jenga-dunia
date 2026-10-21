@@ -5,6 +5,10 @@
      (double-click, Open With, drag onto the Dock icon) instead of as a folder. -->
 <plist version="1.0">
 <dict>
+  <!-- macOS 26+ draws the Icon Composer icon compiled into Resources/Assets.car (scripts/app-icon.sh);
+       older systems fall back to icon.icns (CFBundleIconFile, set by the bundler). -->
+  <key>CFBundleIconName</key>
+  <string>icon</string>
   <key>CFBundleDocumentTypes</key>
   <array>
     <dict>
