@@ -1752,6 +1752,11 @@ the fully developed Pierson–Moskowitz sea); the ocean mask ignores it. */
   /** Where the wind blows FROM, degrees clockwise from north; waves travel the opposite way. Unset
 → the world's shared wind. */
   "wind_azimuth_deg"?: number;
+  /** Bend the waves over the shelf (refraction): the front slows in water shallower than half
+its length and turns towards the shore, so rays converge on headlands and spread in bays;
+`exposure` is multiplied by that focus (up to 2 at a headland). The wavelength is the wind
+sea's (`wind_speed_mps`, `fetch_km`); a 16 s swell bends from 200 m down, a 3 s chop from 7 m. */
+  "refraction"?: boolean;
 };
 
 export type NodeParams_jd_hydrology_wetness_1 = {

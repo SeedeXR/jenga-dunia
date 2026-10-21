@@ -77,7 +77,8 @@ pub fn coastal_erode(
     coastal_erode_with(h, p, None, cancel)
 }
 
-/// [`coastal_erode`] with an optional wave `energy` field (0..1 on water cells, e.g. the
+/// [`coastal_erode`] with an optional wave `energy` field (0..2 on water cells — above 1 where
+/// the sea-level node's refraction focuses the waves on a headland — e.g. the
 /// sea-level node's `exposure`): the wave work on a shore cell is scaled by the mean energy of
 /// the sea cells that reach it, so sheltered bays keep their shore while open coasts retreat.
 pub fn coastal_erode_with(
@@ -165,7 +166,7 @@ pub fn coastal_erode_with(
                     wet.iter()
                         .map(|(j, _)| {
                             e.get((*j % w as usize) as u32, (*j / w as usize) as u32)
-                                .clamp(0.0, 1.0)
+                                .clamp(0.0, 2.0)
                         })
                         .sum::<f32>()
                         / wet.len().max(1) as f32
@@ -331,6 +332,21 @@ mod tests {
         assert!(
             west > 3.0 * east && east > 0.0,
             "open coast {west} vs sheltered {east}"
+        );
+        // A refraction focus (energy 2) on the west half cuts more than the open coast does.
+        energy.fill_with(|x, _| if x < 32 { 2.0 } else { 1.0 });
+        let (_, focused) = coastal_erode_with(&h, &p, Some(&energy), None).expect("focus");
+        let focus_work = |x0: u32, x1: u32| {
+            (x0..x1)
+                .flat_map(|x| (0..32).map(move |y| (x, y)))
+                .map(|(x, y)| focused.get(x, y))
+                .sum::<f32>()
+        };
+        assert!(
+            focus_work(2, 30) > 1.2 * focus_work(34, 62),
+            "headland {} vs open {}",
+            focus_work(2, 30),
+            focus_work(34, 62)
         );
         assert!(
             coastal_erode_with(

@@ -15,8 +15,10 @@
 //! to look less regular.
 
 use crate::Heightfield;
+use crate::sim::check_cancel;
 use jd_types::{JdError, JdResult};
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::AtomicBool;
 
 const G: f32 = 9.81;
 
@@ -197,8 +199,313 @@ pub fn wave_exposure(
     Ok(out)
 }
 
+/// Refraction coefficient Kr per water cell for waves of deep-water length `wavelength_m` arriving
+/// on the wind. The wave front's arrival time T from the upwind field edge is solved on the grid
+/// (the eikonal equation |∇T| = 1/c by fast marching with the Godunov upwind update) with the
+/// phase speed of the depth — Fenton & McKee (1990), c/c₀ = tanh^⅔((2πd/L₀)^¾), within 1.7 % of
+/// the dispersion relation from deep water to the beach — so the front slows and turns over the
+/// shelf. Rays run along ∇T; ray theory conserves the energy between neighbouring rays, so the
+/// height scales by Kr = √(b₀/b) with b the ray spacing and d ln b/ds = ∇·û along a ray:
+/// Kr = exp(−½ ∫ ∇·û ds), integrated from the upwind edge down the steepest-descent path of T.
+/// Rays converge on headlands (Kr > 1, capped at 2 — ray theory diverges at caustics) and spread
+/// in bays (Kr < 1), and an oblique front over straight contours spreads as Snell's law turns it
+/// towards the shore (unit test against the textbook √(cos θ₀/cos θ)); deep water (d ≥ L₀/2)
+/// keeps the plane front and lets the focus a shoal gave the ray fade over five wavelengths —
+/// the scale on which diffraction smears it in a real sea — land, calm and water no upwind edge
+/// reaches (a bay that opens downwind only) are 1. Kr is held within 0.5..2: ray theory
+/// diverges at caustics and the first-arrival front has kinks where its families meet.
+/// The swell enters through the upwind field edges as if the deep ocean started there, so an
+/// oblique wind's two edge fronts cross along a line from the upwind corner (a lens trail of
+/// ±30 % where that line runs over a shelf). Not modelled: shoaling (the coastal node works at
+/// the shore, where every wave has broken) and diffraction, which in a real sea smears a shoal's
+/// focus within a few wavelengths downwind (hence the fade, not a model of it).
+/// ponytail: a binary heap of (time bits, cell); at 4096² it peaks around 400 MB — a bucketed
+/// fast marching (untidy priority queue) is the upgrade for bigger seas.
+pub fn wave_refraction(
+    ocean: &Heightfield,
+    depth: &Heightfield,
+    spacing_m: [f32; 2],
+    wind_azimuth_deg: f32,
+    wavelength_m: f32,
+    cancel: Option<&AtomicBool>,
+) -> JdResult<Heightfield> {
+    use std::cmp::Reverse;
+    use std::collections::BinaryHeap;
+    if !wind_azimuth_deg.is_finite() {
+        return Err(JdError::invalid("wind_azimuth_deg", "must be finite"));
+    }
+    if !(wavelength_m >= 0.0 && wavelength_m.is_finite()) {
+        return Err(JdError::invalid("wavelength_m", "must be finite and ≥ 0"));
+    }
+    if !spacing_m.iter().all(|s| *s > 0.0 && s.is_finite()) {
+        return Err(JdError::invalid(
+            "spacing_m",
+            "sample spacing must be positive",
+        ));
+    }
+    if (ocean.width(), ocean.height()) != (depth.width(), depth.height()) {
+        return Err(JdError::invalid(
+            "depth",
+            "size differs from the ocean mask",
+        ));
+    }
+    let mut out = Heightfield::new(
+        ocean.width(),
+        ocean.height(),
+        ocean.tile_size(),
+        ocean.halo(),
+    )?;
+    if wavelength_m == 0.0 {
+        out.fill_with(|_, _| 1.0);
+        return Ok(out);
+    }
+    let (w, h) = (ocean.width() as usize, ocean.height() as usize);
+    let n = w * h;
+    let water: Vec<bool> = ocean.to_vec().iter().map(|o| *o > 0.5).collect();
+    // Slowness c₀/c from d/L₀, floored so a cell lapping the shore cannot stall the front; the
+    // front only bends where the bottom is felt (d < L₀/2), so that is where the ray spacing is
+    // integrated — in deep water ∇·û is 0 by construction and would only add the kinks of the
+    // first-arrival solution where fronts have crossed.
+    let (slowness, shallow): (Vec<f32>, Vec<bool>) = depth
+        .to_vec()
+        .iter()
+        .map(|d| {
+            let d = d.max(0.0);
+            let s = (2.0 * std::f32::consts::PI * d / wavelength_m)
+                .powf(0.75)
+                .tanh()
+                .powf(2.0 / 3.0);
+            (1.0 / s.max(0.05), d < 0.5 * wavelength_m)
+        })
+        .unzip();
+    let to = (wind_azimuth_deg + 180.0).to_radians();
+    let snap = |v: f32| if v.abs() < 1e-6 { 0.0 } else { v };
+    let (dx, dy) = (snap(to.sin()), snap(to.cos())); // travel direction on the grid axes
+    let [sx, sy] = spacing_m;
+    let mut t = vec![f32::INFINITY; n];
+    let mut known = vec![false; n];
+    let mut heap: BinaryHeap<Reverse<(u32, u32)>> = BinaryHeap::new(); // T ≥ 0: its bits order like the float
+    // Sources: the water cells of the edges the front enters through, at the plane wave's time.
+    let plane = |x: usize, y: usize| x as f32 * sx * dx + y as f32 * sy * dy;
+    let t0 = plane(
+        if dx < 0.0 { w - 1 } else { 0 },
+        if dy < 0.0 { h - 1 } else { 0 },
+    );
+    for i in 0..n {
+        let (x, y) = (i % w, i / w);
+        let edge = (x == 0 && dx > 0.0)
+            || (x == w - 1 && dx < 0.0)
+            || (y == 0 && dy > 0.0)
+            || (y == h - 1 && dy < 0.0);
+        if edge && water[i] {
+            t[i] = plane(x, y) - t0;
+            heap.push(Reverse((t[i].to_bits(), i as u32)));
+        }
+    }
+    // Godunov update: ((T−a)/hx)² + ((T−b)/hy)² = f² over the known neighbours on each axis.
+    let eikonal = |a: f32, b: f32, f: f32| -> f32 {
+        match (a.is_finite(), b.is_finite()) {
+            (false, false) => f32::INFINITY,
+            (true, false) => a + f * sx,
+            (false, true) => b + f * sy,
+            (true, true) => {
+                // Solved for τ = T − min(a, b) so the discriminant is a sum, not a difference of
+                // squares (in f32 the plain form loses the plane front to cancellation).
+                let (lo, hi, ilo, ihi) = if a <= b {
+                    (a, b, 1.0 / (sx * sx), 1.0 / (sy * sy))
+                } else {
+                    (b, a, 1.0 / (sy * sy), 1.0 / (sx * sx))
+                };
+                let d = hi - lo;
+                let rad = (ilo + ihi) * f * f - ilo * ihi * d * d;
+                let tau = (ihi * d + rad.max(0.0).sqrt()) / (ilo + ihi);
+                if rad >= 0.0 && tau >= d {
+                    lo + tau
+                } else {
+                    (a + f * sx).min(b + f * sy)
+                }
+            }
+        }
+    };
+    let mut order: Vec<u32> = Vec::with_capacity(n);
+    while let Some(Reverse((_, i))) = heap.pop() {
+        let i = i as usize;
+        if known[i] {
+            continue;
+        }
+        known[i] = true;
+        order.push(i as u32);
+        if order.len().is_multiple_of(65_536) {
+            check_cancel(cancel)?;
+        }
+        let (x, y) = (i % w, i / w);
+        for (nx, ny) in [
+            (x.wrapping_sub(1), y),
+            (x + 1, y),
+            (x, y.wrapping_sub(1)),
+            (x, y + 1),
+        ] {
+            if nx >= w || ny >= h || known[ny * w + nx] || !water[ny * w + nx] {
+                continue;
+            }
+            // (borrows `known`/`t` only until the update below, so it lives inside the loop)
+            let at = |xx: usize, yy: usize| {
+                if xx < w && yy < h && known[yy * w + xx] {
+                    t[yy * w + xx]
+                } else {
+                    f32::INFINITY
+                }
+            };
+            let a = at(nx.wrapping_sub(1), ny).min(at(nx + 1, ny));
+            let b = at(nx, ny.wrapping_sub(1)).min(at(nx, ny + 1));
+            let j = ny * w + nx;
+            let cand = eikonal(a, b, slowness[j]);
+            if cand < t[j] {
+                t[j] = cand;
+                heap.push(Reverse((cand.to_bits(), j as u32)));
+            }
+        }
+    }
+    // Unit ray direction û = ∇T/|∇T| (central differences over reached cells, one-sided at the
+    // edges), then its divergence the same way.
+    let diff = |f: &dyn Fn(usize, usize) -> Option<f32>, x: usize, y: usize| -> [f32; 2] {
+        let d1 = |l: Option<f32>, r: Option<f32>, c: f32, h: f32| match (l, r) {
+            (Some(l), Some(r)) => (r - l) / (2.0 * h),
+            (Some(l), None) => (c - l) / h,
+            (None, Some(r)) => (r - c) / h,
+            (None, None) => 0.0,
+        };
+        let c = f(x, y).unwrap_or(0.0);
+        [
+            d1(x.checked_sub(1).and_then(|xm| f(xm, y)), f(x + 1, y), c, sx),
+            d1(y.checked_sub(1).and_then(|ym| f(x, ym)), f(x, y + 1), c, sy),
+        ]
+    };
+    let tt = |x: usize, y: usize| (x < w && y < h && known[y * w + x]).then(|| t[y * w + x]);
+    let u: Vec<[f32; 2]> = (0..n)
+        .map(|i| {
+            let g = diff(&tt, i % w, i / w);
+            let m = (g[0] * g[0] + g[1] * g[1]).sqrt();
+            if m > 0.0 {
+                [g[0] / m, g[1] / m]
+            } else {
+                [dx, dy]
+            }
+        })
+        .collect();
+    let (kn, uu) = (&known, &u);
+    let uc = |k: usize| {
+        move |x: usize, y: usize| (x < w && y < h && kn[y * w + x]).then(|| uu[y * w + x][k])
+    };
+    // ∫ ∇·û ds down the path the front took: each cell adds its divergence over the step from the
+    // reached 8-neighbour with the earliest arrival.
+    let mut s = vec![0.0f32; n];
+    for (k, &i) in order.iter().enumerate() {
+        if k.is_multiple_of(65_536) {
+            check_cancel(cancel)?;
+        }
+        let i = i as usize;
+        let (x, y) = (i % w, i / w);
+        let mut from: Option<(usize, f32)> = None;
+        for (ox, oy) in (-1i64..=1).flat_map(|oy| (-1i64..=1).map(move |ox| (ox, oy))) {
+            let (nx, ny) = (x as i64 + ox, y as i64 + oy);
+            if (ox, oy) == (0, 0) || nx < 0 || ny < 0 || nx >= w as i64 || ny >= h as i64 {
+                continue;
+            }
+            let j = ny as usize * w + nx as usize;
+            if known[j] && t[j] < t[i] && from.is_none_or(|(k, _)| t[j] < t[k]) {
+                from = Some((
+                    j,
+                    ((ox as f32 * sx).powi(2) + (oy as f32 * sy).powi(2)).sqrt(),
+                ));
+            }
+        }
+        if let Some((j, step)) = from {
+            // Over the shelf the ray spacing integrates exactly; in deep water a shoal's lens
+            // trail fades over five wavelengths, the scale on which diffraction smears it.
+            s[i] = if shallow[i] {
+                s[j] + (diff(&uc(0), x, y)[0] + diff(&uc(1), x, y)[1]) * step
+            } else {
+                s[j] * (-step / (5.0 * wavelength_m)).exp()
+            };
+        }
+    }
+    out.fill_with(|x, y| {
+        let i = y as usize * w + x as usize;
+        if known[i] {
+            (-0.5 * s[i]).exp().clamp(0.5, 2.0)
+        } else {
+            1.0
+        }
+    });
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn refraction_focuses_waves_on_a_headland_and_spreads_them_in_the_bays() {
+        // 128 × 64 sea, 50 m cells: deep water (80 m) in the west, a shelf shoaling to 2 m at the
+        // coast (x ≥ 100) with a shallow ridge running out from the middle of it — the headland —
+        // and a westerly sending 100 m waves (Tp 8 s) straight at it.
+        let (w, h) = (128u32, 64u32);
+        let mut ocean = Heightfield::new(w, h, 64, 0).expect("o");
+        ocean.fill_with(|x, _| if x >= 100 { 0.0 } else { 1.0 });
+        let mut depth = Heightfield::new(w, h, 64, 0).expect("d");
+        depth.fill_with(|x, y| {
+            let shelf = (100.0 - x as f32).clamp(0.0, 40.0) / 40.0; // 1 at 40 cells out, 0 at the coast
+            let ridge = (-((y as f32 - 32.0) / 10.0).powi(2)).exp() * (1.0 - shelf);
+            (2.0 + 78.0 * shelf) * (1.0 - 0.8 * ridge)
+        });
+        let kr = wave_refraction(&ocean, &depth, [50.0, 50.0], 270.0, 100.0, None).expect("kr");
+        assert!(
+            (kr.get(30, 32) - 1.0).abs() < 1e-3,
+            "deep water keeps the plane front: {}",
+            kr.get(30, 32)
+        );
+        assert!((kr.get(30, 5) - 1.0).abs() < 1e-3, "{}", kr.get(30, 5));
+        let (tip, bay) = (kr.get(97, 32), kr.get(97, 26)); // the tip and a flank the rays bend away from
+        assert!(tip > 1.15, "rays converge on the ridge: {tip}");
+        assert!(bay < 0.92, "and spread beside it: {bay}");
+        assert!(
+            (kr.get(97, 2) - 1.0).abs() < 0.01,
+            "far from the ridge the shelf is straight: {}",
+            kr.get(97, 2)
+        );
+        assert_eq!(kr.get(110, 32), 1.0, "land is 1");
+        assert!(
+            kr.to_vec().iter().all(|k| (0.5..=2.0).contains(k)),
+            "Kr stays within its floor and cap"
+        );
+        // Straight contours leave straight rays: without the ridge the shelf alone does nothing.
+        depth.fill_with(|x, _| 2.0 + 78.0 * (100.0 - x as f32).clamp(0.0, 40.0) / 40.0);
+        let flat = wave_refraction(&ocean, &depth, [50.0, 50.0], 270.0, 100.0, None).expect("flat");
+        assert!(
+            (flat.get(97, 32) - 1.0).abs() < 1e-3,
+            "{}",
+            flat.get(97, 32)
+        );
+        // An oblique front over straight contours follows Snell's law and spreads as it turns
+        // towards the normal: Kr = √(cos θ₀ / cos θ) (Dean & Dalrymple 1991, eq. 4.100). 45° in
+        // deep water, c/c₀ = 0.653 at the 7.85 m of column 97 → sin θ = 0.462, Kr = 0.893 — read
+        // away from the south edge, whose own front crosses the west edge's near it.
+        let obl =
+            wave_refraction(&ocean, &depth, [50.0, 50.0], 225.0, 100.0, None).expect("oblique");
+        assert!(
+            (obl.get(97, 50) - 0.893).abs() < 0.03,
+            "{}",
+            obl.get(97, 50)
+        );
+        // Calm: no waves to bend.
+        assert_eq!(
+            wave_refraction(&ocean, &depth, [50.0, 50.0], 270.0, 0.0, None)
+                .expect("calm")
+                .get(97, 32),
+            1.0
+        );
+        assert!(wave_refraction(&ocean, &depth, [50.0, 50.0], f32::NAN, 100.0, None).is_err());
+    }
 
     #[test]
     fn an_island_casts_a_wave_shadow_downwind_and_open_coasts_read_full() {

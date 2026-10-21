@@ -1,0 +1,36 @@
+{
+  "src": "/tmp/jd-scratch/cli-refraction-raw.png",
+  "out": "cli-refraction.png",
+  "annotations": [
+    {
+      "type": "arrow",
+      "x1": 470,
+      "y1": 250,
+      "x2": 560,
+      "y2": 214,
+      "text": "1  rays converge on the headland: exposure 1.44 at the tip",
+      "tx": 16,
+      "ty": 466
+    },
+    {
+      "type": "circle",
+      "cx": 640,
+      "cy": 150,
+      "r": 22,
+      "label": "2",
+      "text": "2  and spread into the bays beside it: 0.8",
+      "tx": 16,
+      "ty": 490
+    },
+    {
+      "type": "circle",
+      "cx": 470,
+      "cy": 340,
+      "r": 22,
+      "label": "3",
+      "text": "3  straight contours leave straight rays: 1, what the fetch alone gives",
+      "tx": 16,
+      "ty": 514
+    }
+  ]
+}

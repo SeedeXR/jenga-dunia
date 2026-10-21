@@ -83,9 +83,10 @@ pub fn classify_seabed(
     classify_seabed_with(h, spacing_m, rivers, shore, None, p)
 }
 
-/// [`classify_seabed`] with an optional wave `exposure` field (0..1, the sea-level node's):
-/// sheltered water is as calm as deeper water, so mud settles in a bay at depths where an
-/// open coast would still be sand — the effective depth for the mud rule is
+/// [`classify_seabed`] with an optional wave `exposure` field (0..2, the sea-level node's —
+/// above 1 where refraction focuses the waves): sheltered water is as calm as deeper water, so
+/// mud settles in a bay at depths where an open coast would still be sand, and a headland's
+/// floor stays sand deeper — the effective depth for the mud rule is
 /// `depth + (1 − exposure) × mud_min_depth_m`.
 pub fn classify_seabed_with(
     h: &Heightfield,
@@ -174,7 +175,7 @@ pub fn classify_seabed_with(
         }
         // Sheltered water is as still as deeper water: mud settles there sooner.
         let calm = exposure.map_or(0.0, |e| {
-            (1.0 - e.get(x, y).clamp(0.0, 1.0)) * p.mud_min_depth_m
+            (1.0 - e.get(x, y).clamp(0.0, 2.0)) * p.mud_min_depth_m
         });
         if depth + calm >= p.mud_min_depth_m {
             return 3.0;

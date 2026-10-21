@@ -487,6 +487,12 @@ struct SeaLevelParams {
     /// → the world's shared wind.
     #[serde(default = "wind_azimuth_deg")]
     wind_azimuth_deg: f32,
+    /// Bend the waves over the shelf (refraction): the front slows in water shallower than half
+    /// its length and turns towards the shore, so rays converge on headlands and spread in bays;
+    /// `exposure` is multiplied by that focus (up to 2 at a headland). The wavelength is the wind
+    /// sea's (`wind_speed_mps`, `fetch_km`); a 16 s swell bends from 200 m down, a 3 s chop from 7 m.
+    #[serde(default)]
+    refraction: bool,
 }
 fn wind_speed_mps() -> f32 {
     8.0
@@ -1134,7 +1140,7 @@ pub fn register_all(r: &mut Registry) {
     ));
     r.register(NodeDef::new::<SeaLevelParams, _>(
         "jd.hydrology.sea_level@1",
-        "Ocean mask (1 below `level_m` where connected to the border; inland basins stay dry) with a soft shoreline, water `depth` in metres, and the wave `exposure` 0..1 of every water cell — the open-water fetch upwind of it (the wind and `fetch_km` of the node or the world), low in the lee of islands and headlands",
+        "Ocean mask (1 below `level_m` where connected to the border; inland basins stay dry) with a soft shoreline, water `depth` in metres, and the wave `exposure` 0..1 of every water cell — the open-water fetch upwind of it (the wind and `fetch_km` of the node or the world), low in the lee of islands and headlands; with `refraction` the waves bend over the shelf and the exposure is focused on headlands (up to 2, which the coastal and seabed nodes honour) and spread in bays",
         vec![port("in", PortType::Heightfield, true)],
         vec![port("ocean", PortType::Heightfield, false), port("depth", PortType::Heightfield, false), port("exposure", PortType::Heightfield, false)],
         |ctx, p, i| {
@@ -1146,16 +1152,23 @@ pub fn register_all(r: &mut Registry) {
                 return Err(JdError::invalid("tint", "components must be within 0..=1"));
             }
             // The wind sea is drawn, not evaluated; validate it here so a bad edit fails at the node.
-            jd_terrain::wave_spectrum(&jd_terrain::WaveParams {
+            let sea = jd_terrain::wave_spectrum(&jd_terrain::WaveParams {
                 wind_speed_mps: sp.wind_speed_mps,
                 fetch_km: sp.fetch_km,
                 wind_azimuth_deg: sp.wind_azimuth_deg,
             })?;
             let (ocean, depth) = sea_level(field(i, "in")?, sp.level_m, sp.shore_m)?;
-            let exposure = jd_terrain::wave_exposure(&ocean, spacing_m(ctx), sp.wind_azimuth_deg, sp.fetch_km.unwrap_or(50.0))?; // no fetch limit set: a 50 km open-coast scale
+            let mut exposure = jd_terrain::wave_exposure(&ocean, spacing_m(ctx), sp.wind_azimuth_deg, sp.fetch_km.unwrap_or(50.0))?; // no fetch limit set: a 50 km open-coast scale
+            if sp.refraction {
+                let focus = jd_terrain::wave_refraction(&ocean, &depth, spacing_m(ctx), sp.wind_azimuth_deg, sea.wavelength_m, Some(&ctx.cancel))?;
+                exposure = map2(&exposure, &focus, |e, k| e * k)?;
+            }
             Ok(BTreeMap::from([("ocean".to_owned(), Value::field(ocean)), ("depth".to_owned(), Value::field(depth)), ("exposure".to_owned(), Value::field(exposure))]))
         },
-    ));
+    )
+    // Scratch: the flood (height copy, sea flags, reach) ≈ 9 B/cell; the refraction march adds
+    // arrival time, slowness, flags, ray direction, spacing integral, order and the heap ≈ 25 B/cell.
+    .with_memory_fn(|p| if p.get("refraction").and_then(|v| v.as_bool()).unwrap_or(false) { 36.0 } else { 9.0 }));
     r.register(NodeDef::new::<RiversParams, _>(
         "jd.hydrology.rivers@1",
         "Carve river channels where flow accumulates (depressions filled first); outputs the carved terrain and a 0..1 river mask",

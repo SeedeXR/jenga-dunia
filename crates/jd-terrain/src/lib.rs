@@ -65,7 +65,8 @@ pub use network::{Mouths, NetworkParams, hydrology_first};
 pub use noise::{FractalKind, NoiseKind, NoiseParams, generate_noise};
 pub use ocean::{
     WaterLook, WaterMaps, WaveComponent, WaveParams, WaveSpectrum, bake_water, bake_water_with,
-    bake_wave_displacement, bake_wave_normal, water_colour, wave_exposure, wave_spectrum,
+    bake_wave_displacement, bake_wave_normal, water_colour, wave_exposure, wave_refraction,
+    wave_spectrum,
 };
 pub use profiles::{
     EngineProfile, ProfileMaterial, ProfileReport, ProfileSettings, export_profile,
