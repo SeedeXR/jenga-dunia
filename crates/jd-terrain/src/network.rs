@@ -5,9 +5,17 @@
 //! parent's plus the slope of its stream order times the step, headwaters steep and big rivers
 //! flat.
 //!
-//! ponytail: a spanning tree over smooth lattice-noise costs instead of Génevaux's primitive
-//! blending; one slope law per order; mouths along one edge or the whole border; no explicit
-//! valley cross-sections (feed the result to the erosion nodes for those).
+//! River primitives (Génevaux's second half, `valley_relief_m` > 0): every river carries a
+//! valley cross-section — the terrain climbs `relief × (d / valley_width_m)^shape` above the
+//! tree height with d the distance along the drainage to the river the cell feeds, reaching the
+//! full relief at the width and staying there beyond it (shape 1 = a V, 2 = a U with a wide
+//! flat floor, 0.5 = a canyon notch, steep at the river and flattening to the rim). The tree
+//! is the plateau, the valleys are incised into it along the rivers; d only grows upstream, so
+//! every cell still sits above its parent and the field drains by construction.
+//!
+//! ponytail: a spanning tree over smooth lattice-noise costs; one slope law per order; mouths
+//! along one edge or the whole border; one profile for all orders (no profile per Rosgen
+//! class, no sum over overlapping primitives).
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
@@ -63,8 +71,23 @@ pub struct NetworkParams {
     pub river_order: u32,
     /// Valley floor: within this distance (metres along the stream) of a river the slope eases to a
     /// floodplain (15 % of the headwater law), so valleys get a floor instead of a V (0 = off).
+    /// With `valley_relief_m` it is also the half-width of the valley cross-section.
     #[serde(default = "d_valley_width")]
     pub valley_width_m: f32,
+    /// Valley cross-section as a river primitive (0 = off): the valley side climbs this many
+    /// metres above the river over `valley_width_m` (measured along the drainage), and the
+    /// ground beyond the width sits that much above the tree height — the tree becomes the
+    /// plateau the valleys are cut into.
+    #[serde(default)]
+    pub valley_relief_m: f32,
+    /// Shape of that cross-section, the exponent of (distance / width): 1 a V, 2 a U with a
+    /// wide flat floor (default), 0.5 a canyon notch — steep at the river, flattening to the
+    /// rim (> 0).
+    #[serde(default = "d_valley_shape")]
+    pub valley_shape: f32,
+}
+fn d_valley_shape() -> f32 {
+    2.0
 }
 fn d_valley_width() -> f32 {
     600.0
@@ -94,6 +117,8 @@ impl Default for NetworkParams {
             roughness: d_roughness(),
             river_order: d_river_order(),
             valley_width_m: d_valley_width(),
+            valley_relief_m: 0.0,
+            valley_shape: d_valley_shape(),
         }
     }
 }
@@ -148,6 +173,23 @@ pub fn hydrology_first(
             "spacing_m",
             "sample spacing must be positive",
         ));
+    }
+    if !(p.valley_relief_m >= 0.0 && p.valley_relief_m.is_finite()) {
+        return Err(JdError::invalid(
+            "valley_relief_m",
+            "must be finite and ≥ 0",
+        ));
+    }
+    if p.valley_relief_m > 0.0 {
+        if !(p.valley_shape > 0.0 && p.valley_shape.is_finite()) {
+            return Err(JdError::invalid("valley_shape", "must be positive"));
+        }
+        if p.valley_width_m <= 0.0 {
+            return Err(JdError::invalid(
+                "valley_width_m",
+                "must be > 0 with valley_relief_m",
+            ));
+        }
     }
     if !(p.slope_m_per_km > 0.0 && p.slope_m_per_km.is_finite()) {
         return Err(JdError::invalid("slope_m_per_km", "must be positive"));
@@ -281,6 +323,16 @@ pub fn hydrology_first(
     // `to_river` only grows upstream, so every cell still sits above its parent.
     let mut hgt = vec![p.base_m; n];
     let mut to_river = vec![0.0f32; n];
+    // With primitives on, a mouth that is not a river in its own right (order below
+    // `river_order`) is no valley bottom: it starts at the full width so its subtree sits on the
+    // plateau. (Relief off keeps the floodplain easing exactly as it was.)
+    if p.valley_relief_m > 0.0 {
+        for i in 0..n {
+            if parent[i] == NONE && order[i] < p.river_order {
+                to_river[i] = p.valley_width_m;
+            }
+        }
+    }
     for &i in by_dist.iter().rev() {
         let i = i as usize;
         let pi = parent[i];
@@ -304,8 +356,25 @@ pub fn hydrology_first(
         hgt[i] = hgt[pi] + step * slope;
     }
     let max_order = order.iter().copied().max().unwrap_or(1).max(1) as f32;
+    // River primitives: the ground climbs the cross-section profile above the tree height with
+    // the drainage distance to the river it feeds (`to_river`), to the full relief at the width
+    // and beyond. `to_river` only grows upstream, so the lift does too and every cell still
+    // sits above its parent; added on output so the tree heights stay the parents' reference.
+    let lift = |i: usize| {
+        if p.valley_relief_m > 0.0 {
+            p.valley_relief_m
+                * (to_river[i] / p.valley_width_m)
+                    .min(1.0)
+                    .powf(p.valley_shape)
+        } else {
+            0.0
+        }
+    };
     let mut out = Heightfield::new(width, height, tile_size, halo)?;
-    out.fill_with(|x, y| hgt[(y as usize) * w + x as usize]);
+    out.fill_with(|x, y| {
+        let i = (y as usize) * w + x as usize;
+        hgt[i] + lift(i)
+    });
     let mut rivers = Heightfield::new(width, height, tile_size, halo)?;
     rivers.fill_with(|x, y| {
         let o = order[(y as usize) * w + x as usize];
@@ -340,6 +409,102 @@ mod ordered {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn river_primitives_give_valleys_a_cross_section_and_leave_the_ridges_to_the_tree() {
+        // 128² at 20 m, rivers of order ≥ 6; a 300 m wide, 80 m deep U valley around every river.
+        let base = NetworkParams {
+            seed: 5,
+            river_order: 6,
+            valley_width_m: 300.0,
+            ..NetworkParams::default()
+        };
+        let (tree, rivers, _) =
+            hydrology_first(128, 128, 128, 0, [20.0, 20.0], &base).expect("tree");
+        let with = NetworkParams {
+            valley_relief_m: 80.0,
+            valley_shape: 2.0,
+            ..base.clone()
+        };
+        let (out, rivers2, _) =
+            hydrology_first(128, 128, 128, 0, [20.0, 20.0], &with).expect("primitives");
+        assert_eq!(
+            rivers.to_vec(),
+            rivers2.to_vec(),
+            "the network itself is unchanged"
+        );
+        // Straight-line distance to the nearest river cell (a lower bound on the drainage
+        // distance the profile uses).
+        let river_cells: Vec<(f32, f32)> = (0..128u32)
+            .flat_map(|y| (0..128u32).map(move |x| (x, y)))
+            .filter(|&(x, y)| rivers.get(x, y) > 0.0)
+            .map(|(x, y)| (x as f32 * 20.0, y as f32 * 20.0))
+            .collect();
+        assert!(river_cells.len() > 20, "{}", river_cells.len());
+        let dist = |x: u32, y: u32| {
+            river_cells
+                .iter()
+                .map(|(rx, ry)| (x as f32 * 20.0 - rx).hypot(y as f32 * 20.0 - ry))
+                .fold(f32::INFINITY, f32::min)
+        };
+        // River cells keep their height; the first cell up the drainage sits barely above its
+        // river while the valley side climbs to the full relief; beyond the width (straight-line,
+        // a lower bound on the drainage distance) the plateau sits exactly that much above the
+        // tree — mouths that are not rivers included, since they start at the width.
+        let easing = 0.85 * base.slope_m_per_km / 1000.0 * base.valley_width_m + 1e-3;
+        let (mut beside, mut outside, mut same, mut max_lift) = (Vec::new(), 0, 0, 0.0f32);
+        for y in 0..128 {
+            for x in 0..128 {
+                let dd = dist(x, y);
+                let lift = out.get(x, y) - tree.get(x, y);
+                if dd == 0.0 {
+                    assert!(lift.abs() < 1e-3, "river cell moved by {lift}");
+                    same += 1;
+                } else if dd > 300.0 * 1.5 {
+                    // (to the floodplain easing the relief-0 baseline still applies below a
+                    // non-river mouth and the primitives switch off: up to 85 % of the headwater
+                    // slope over the width)
+                    assert!(
+                        (lift - 80.0).abs() < easing,
+                        "beyond the width the plateau sits the full relief above the tree: {lift}"
+                    );
+                    outside += 1;
+                } else if lift > 0.0 {
+                    beside.push(lift);
+                }
+                max_lift = max_lift.max(lift);
+            }
+        }
+        assert!(
+            same > 20 && outside > 20 && beside.len() > 20,
+            "{same} {outside} {}",
+            beside.len()
+        );
+        // The first cell up the drainage from a river is one step in: U gives 80 × (20/300)²
+        // ≈ 0.4 m there, so the smallest positive lift is under 2 m whatever the seed.
+        let smallest = beside.iter().copied().fold(f32::INFINITY, f32::min);
+        assert!(
+            smallest < 2.0,
+            "beside the river the floor is flat: {smallest}"
+        );
+        assert!(
+            (max_lift - 80.0).abs() < easing,
+            "the valley side climbs the full relief: {max_lift}"
+        );
+        // Still drains by construction: priority-flood filling finds nothing.
+        let (_, lakes) = crate::fill_depressions(&out, 0.0).expect("fill");
+        let worst = lakes.to_vec().iter().copied().fold(0.0f32, f32::max);
+        assert!(worst < 1e-4, "no pits with primitives: max fill {worst} m");
+        let bad = |q: NetworkParams| hydrology_first(128, 128, 128, 0, [20.0, 20.0], &q).is_err();
+        assert!(bad(NetworkParams {
+            valley_shape: 0.0,
+            ..with.clone()
+        }));
+        assert!(bad(NetworkParams {
+            valley_width_m: 0.0,
+            ..with
+        }));
+    }
 
     #[test]
     fn every_cell_drains_to_a_mouth_and_big_rivers_run_flatter_than_headwaters() {

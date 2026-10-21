@@ -1,0 +1,36 @@
+{
+  "src": "/tmp/jd-scratch/cli-primitives-raw.png",
+  "out": "cli-primitives.png",
+  "annotations": [
+    {
+      "type": "circle",
+      "cx": 470,
+      "cy": 120,
+      "r": 26,
+      "label": "1",
+      "text": "1  every river carries a valley primitive: its height plus relief \u00d7 (distance / width)^shape",
+      "tx": 16,
+      "ty": 364
+    },
+    {
+      "type": "circle",
+      "cx": 780,
+      "cy": 150,
+      "r": 26,
+      "label": "2",
+      "text": "2  U (shape 2): a flat floor along the river, the walls a few hundred metres out",
+      "tx": 16,
+      "ty": 388
+    },
+    {
+      "type": "circle",
+      "cx": 1100,
+      "cy": 150,
+      "r": 26,
+      "label": "3",
+      "text": "3  canyon notch (shape 0.5): the walls climb right at the river; ridges keep the tree's shape",
+      "tx": 16,
+      "ty": 412
+    }
+  ]
+}
