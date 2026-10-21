@@ -13,7 +13,9 @@ Status: first working build. One window, native macOS title bar, dark theme (Hos
 ![File menu: New Project…, Open Project…, Save, Export Heightmap…](images/desktop-menu-file.png)
 ![Terrain menu: Generate Terrain, Evaluate Graph](images/desktop-menu-terrain.png)
 
-*The Edit menu adds **Undo Graph Edit** (⌥⌘Z) and **Redo Graph Edit** (⇧⌥⌘Z) below the WebView's Undo/Redo.*
+![The native Edit menu of the built app: Undo/Redo, then Undo Graph Edit ⌥⌘Z and Redo Graph Edit ⇧⌥⌘Z, then the WebView's Cut/Copy/Paste/Select All, Writing Tools, AutoFill, Dictation and Emoji items](images/desktop-menu-edit.png)
+
+*The Edit menu adds **Undo Graph Edit** (⌥⌘Z) and **Redo Graph Edit** (⇧⌥⌘Z) below the WebView's Undo/Redo (native capture of the v0.0.1 bundle, 2026-10-21).*
 
 ## Native integration
 

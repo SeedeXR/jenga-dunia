@@ -1074,6 +1074,15 @@ expression: list
               "type": "integer",
               "format": "uint64",
               "minimum": 0
+            },
+            "partial_tiles": {
+              "description": "For a local node re-run on its changed tiles only: how many tiles were recomputed.",
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0
             }
           },
           "required": [
