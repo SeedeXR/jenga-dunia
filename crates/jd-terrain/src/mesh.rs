@@ -1119,30 +1119,51 @@ pub fn write_usdz(
     path: &Path,
     step: u32,
 ) -> JdResult<MeshExportReport> {
-    let usda = path.with_extension("usda");
-    let mut rep = write_usda(mesh, extent_m, &usda, step)?;
-    let status = std::process::Command::new("usdzip")
-        .arg(path)
-        .arg(&usda)
-        .output()
-        .map_err(|e| {
-            JdError::new(jd_types::ErrorCode::E_DEPENDENCY_MISSING, format!("usdzip not available: {e}"))
-                .next("Install OpenUSD tools (macOS 27 ships them in /usr/bin; `pip install usd-core` elsewhere) or export .usda and package it yourself.")
-        })?;
-    if !status.status.success() {
-        return Err(JdError::new(
-            jd_types::ErrorCode::E_SERIALIZE,
-            format!(
-                "usdzip failed: {}",
-                String::from_utf8_lossy(&status.stderr).trim()
-            ),
-        )
-        .detail("path", path.display().to_string()));
-    }
-    rep.path = path.to_path_buf();
-    rep.format = "usdz".into();
-    rep.bytes = fs::metadata(path)?.len();
-    Ok(rep)
+    // The layer is written as `<stem>.usda` inside a private directory next to the output (so
+    // a sibling `.usda` export is never clobbered), usdzip runs in that directory with the bare
+    // name — it stores the argument as the entry name, and `tmp/…/terrain.usda` is what a path
+    // produced — and the directory goes whatever usdzip did.
+    let stem = path
+        .file_stem()
+        .ok_or_else(|| JdError::invalid("path", "needs a file name"))?
+        .to_owned();
+    let out_abs = std::path::absolute(path)?;
+    let dir = out_abs
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(format!(".jd-usdz-{}", std::process::id()));
+    fs::create_dir_all(&dir)?;
+    let name = format!("{}.usda", stem.to_string_lossy());
+    let usda = dir.join(&name);
+    let run = || -> JdResult<MeshExportReport> {
+        let mut rep = write_usda(mesh, extent_m, &usda, step)?;
+        let status = std::process::Command::new("usdzip")
+            .current_dir(&dir)
+            .arg(&out_abs)
+            .arg(&name)
+            .output()
+            .map_err(|e| {
+                JdError::new(jd_types::ErrorCode::E_DEPENDENCY_MISSING, format!("usdzip not available: {e}"))
+                    .next("Install OpenUSD tools (macOS 27 ships them in /usr/bin; `pip install usd-core` elsewhere) or export .usda and package it yourself.")
+            })?;
+        if !status.status.success() {
+            return Err(JdError::new(
+                jd_types::ErrorCode::E_SERIALIZE,
+                format!(
+                    "usdzip failed: {}",
+                    String::from_utf8_lossy(&status.stderr).trim()
+                ),
+            ));
+        }
+        rep.path = path.to_path_buf();
+        rep.format = "usdz".into();
+        rep.bytes = fs::metadata(path)?.len();
+        Ok(rep)
+    };
+    let result = run();
+    let _ = fs::remove_dir_all(&dir);
+    result
 }
 
 /// Write an irregular (decimated) mesh as `.glb`: positions, normals, planar UVs, tangents and
@@ -1507,6 +1528,35 @@ pub fn export_mesh_lods_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn usdz_holds_the_layer_under_a_bare_name_and_leaves_no_intermediate() {
+        if std::process::Command::new("usdzip")
+            .arg("--help")
+            .output()
+            .is_err()
+        {
+            eprintln!("no usdzip: skipping");
+            return;
+        }
+        let dir = tempfile::tempdir().expect("dir");
+        let mut hf = Heightfield::new(8, 8, 8, 0).expect("hf");
+        hf.fill_with(|x, y| (x + y) as f32);
+        let out = dir.path().join("terrain.usdz");
+        export_usdz(&hf, [80.0, 80.0], &out, 1).expect("usdz");
+        assert!(out.is_file());
+        assert_eq!(
+            fs::read_dir(dir.path()).expect("dir").count(),
+            1,
+            "only the archive is left behind"
+        );
+        // Stored zip: the first local header names the layer bare (no directory).
+        let bytes = fs::read(&out).expect("read");
+        assert_eq!(&bytes[..4], b"PK\x03\x04");
+        let name_len = u16::from_le_bytes([bytes[26], bytes[27]]) as usize;
+        let name = std::str::from_utf8(&bytes[30..30 + name_len]).expect("name");
+        assert_eq!(name, "terrain.usda", "entry name {name}");
+    }
 
     #[test]
     fn usdc_is_the_usda_layer_in_the_binary_crate() {

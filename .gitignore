@@ -10,3 +10,6 @@ apps/desktop/playwright-report/
 apps/desktop/src-tauri/gen/
 apps/desktop/src-tauri/target/
 graphify-out/
+
+# Playwright MCP page snapshots
+.playwright-mcp/
