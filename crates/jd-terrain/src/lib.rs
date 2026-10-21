@@ -36,7 +36,7 @@ pub mod strata;
 pub mod yardang;
 
 pub use aeolian::{AeolianParams, aeolian_transport, aeolian_transport_with};
-pub use bathymetry::{BathymetryParams, bathymetry};
+pub use bathymetry::{BathymetryParams, bathymetry, bathymetry_with};
 pub use climate::{SnowParams, snow_cover};
 pub use coastal::{CoastalParams, coastal_erode, coastal_erode_with};
 pub use decimate::decimate;

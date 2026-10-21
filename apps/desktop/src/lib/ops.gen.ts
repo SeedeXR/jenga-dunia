@@ -1840,6 +1840,12 @@ export type NodeParams_jd_ocean_bathymetry_1 = {
   "max_fill_m"?: number;
   /** How much of the infill to apply, 0..1 (1 = level the hollow completely). */
   "strength"?: number;
+  /** With a `supply` mask: how far sediment travels from its source, metres (> 0) — the
+infill fades by e⁻¹ per `reach_m` of water between a cell and the nearest supply cell. */
+  "reach_m"?: number;
+  /** Total sediment available, cubic metres (≥ 0): when the infill would lay down more, every
+cell's fill is scaled back by the same factor. Omit for no limit. */
+  "budget_m3"?: number | null;
 };
 
 export type NodeParams_jd_output_height_1 = {

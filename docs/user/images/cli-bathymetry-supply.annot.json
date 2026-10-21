@@ -1,0 +1,9 @@
+{
+  "src": "/tmp/jd-scratch/cli-bathymetry-raw.png",
+  "out": "cli-bathymetry-supply.png",
+  "annotations": [
+    { "type": "arrow", "x1": 420, "y1": 250, "x2": 470, "y2": 175, "text": "1  every worked shore cell (coastal `shore` > 0) is a sediment source", "tx": 16, "ty": 348 },
+    { "type": "circle", "cx": 1000, "cy": 75, "r": 26, "label": "2", "text": "2  hollows beside the shore fill as before (full 20 m)", "tx": 16, "ty": 372 },
+    { "type": "circle", "cx": 1190, "cy": 205, "r": 26, "label": "3", "text": "3  a reach or more from any shore the supply has faded: a fraction of the fill", "tx": 16, "ty": 396 }
+  ]
+}

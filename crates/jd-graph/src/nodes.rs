@@ -1111,17 +1111,22 @@ pub fn register_all(r: &mut Registry) {
     ).with_memory(16.0));
     r.register(NodeDef::new::<jd_terrain::BathymetryParams, _>(
         "jd.ocean.bathymetry@1",
-        "Sediment infill of the sea floor: sand and mud cells (from a `seabed` class map) rise towards the local mean over `smooth_m`, capped at `max_fill_m` and `level_m`; rock, reef and land are untouched",
+        "Sediment infill of the sea floor: sand and mud cells (from a `seabed` class map) rise towards the local mean over `smooth_m`, capped at `max_fill_m` and `level_m`; rock, reef and land are untouched. An optional `supply` mask (the coastal node's `shore`, a river mask, their sum) makes the sediment come from those cells and thin away from them over `reach_m`; `budget_m3` caps the volume laid down",
         vec![
             port("in", PortType::Heightfield, true),
             port("seabed", PortType::Heightfield, true),
+            port("supply", PortType::Heightfield, false),
         ],
         vec![port("out", PortType::Heightfield, false)],
         |ctx, p, i| {
             let bp: jd_terrain::BathymetryParams = params(p)?;
-            Ok(out("out", jd_terrain::bathymetry(field(i, "in")?, spacing_m(ctx), field(i, "seabed")?, &bp)?))
+            let supply = i.get("supply").map(|v| v.as_field());
+            Ok(out("out", jd_terrain::bathymetry_with(field(i, "in")?, spacing_m(ctx), field(i, "seabed")?, supply.map(|s| &**s), &bp, Some(&ctx.cancel))?))
         },
-    ).with_memory(16.0));
+    // Scratch: the f64 summed-area table + mean + fill (16 B/cell) plus, with `supply` wired, the
+    // mask, classes, distance, weight and heap (≈ 28 B/cell); the estimate cannot see the port, so
+    // it charges the supplied case.
+    ).with_memory(44.0));
     r.register(NodeDef::new::<ClassMaskParams, _>(
         "jd.mask.class@1",
         "0/1 mask of the cells whose class id equals `id` (feed a `jd.biome.classify@1` map)",

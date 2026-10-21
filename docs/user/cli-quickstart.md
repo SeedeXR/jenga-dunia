@@ -531,7 +531,17 @@ before  min 42.548  max 412.711  mean 229.370
 after   min 42.548  max 412.711  mean 230.109      (+0.74 m averaged over the world: ~10 m of sediment on the 7 % of cells that are sand or mud)
 ```
 
-`jd.ocean.bathymetry@1` takes the terrain and a `seabed` class map and raises every **sand** (1) or **mud** (3) cell towards the local mean height over `smooth_m` (a summed-area box filter, O(N)), never lowering a cell, never by more than `max_fill_m`, and never above `level_m` — sediment settles into hollows and levels the shelf, it does not build above the water. Rock (2), reef (4) and land keep the shape erosion gave them, so the chain coastal → seabed → bathymetry turns a noisy flooded landscape into a floor with smooth sediment plains between rock outcrops. `strength` (0..1) scales the fill. Not modelled: transport along the slope, sorting by grain size, a sediment budget.
+`jd.ocean.bathymetry@1` takes the terrain and a `seabed` class map and raises every **sand** (1) or **mud** (3) cell towards the local mean height over `smooth_m` (a summed-area box filter, O(N)), never lowering a cell, never by more than `max_fill_m`, and never above `level_m` — sediment settles into hollows and levels the shelf, it does not build above the water. Rock (2), reef (4) and land keep the shape erosion gave them, so the chain coastal → seabed → bathymetry turns a noisy flooded landscape into a floor with smooth sediment plains between rock outcrops. `strength` (0..1) scales the fill.
+
+```
+$ jd op graph.connect --project Coast.jdproj --save --params '{"from":"<coastal>","from_port":"shore","to":"<bathymetry>","to_port":"supply"}'
+bathymetry node 47 ms (256², 50 m cells, reach_m 1500)
+fill (out − in)   no supply: max 20  mean 3.156 m        with supply: max 18.7  mean 2.148 m
+```
+
+![Four panels: the flooded height field, the coastal shore mask, the sediment laid down without a supply (blobs of full fill wherever the floor is sand or mud) and with the shore as supply (full beside the shores, fading a reach or more away)](images/cli-bathymetry-supply.png)
+
+Wire a `supply` mask — the coastal node's `shore` (every cell the waves worked), a river mask, or their sum through `jd.math.add@1` — and the sediment has to come from somewhere: the fill at a cell is scaled by e^(−distance / `reach_m`), the distance measured through water (8-neighbour Dijkstra over the non-land cells) from the nearest supply cell, so hollows beside a worked shore still fill completely and a basin a few reaches out stays bare (unit test: one reach out the fill is e⁻¹ of the free fill, five reaches out nothing arrives; a wired mask with no source is an error, not a silent no-op, and a river channel on land carries the distance to its mouth). `budget_m3` caps the volume laid down over the whole world — when the infill would exceed it, every cell's fill is scaled back by the same factor (unit test: half the free volume gives half the lift everywhere). Not modelled: sorting by grain size (the seabed classifier already separates sand from mud by depth) and down-slope creep.
 
 ### Roads, paths and canals: the spline node
 
