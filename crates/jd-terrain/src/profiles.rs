@@ -3,8 +3,10 @@
 //! encoding and row order, one weightmap per mask at the matching resolution, and a README with
 //! the exact import settings (Unity Terrain Height / Unreal Z scale) computed from the data.
 //!
-//! The engine-side steps are documented, not automated: no Unity/Unreal runner exists here, so
-//! the README marks them UNVERIFIED until someone imports once and reports back.
+//! The engine-side steps are documented, and verified headlessly where an editor is installed
+//! (`scripts/unity-import-check.sh` rebuilds the Terrain; `scripts/unreal-import-check.sh` imports
+//! the textures and the glTF mesh — the Landscape actor has no scripting entry point); the
+//! README still spells out the manual steps for the editor.
 //!
 //! ponytail: two profiles, PNG8 weightmaps, no resampling to Unreal's recommended sizes (a
 //! warning instead); resampling and Unity splatmap packing come with the material graph.
@@ -308,7 +310,7 @@ fn readme(
             if !layers.is_empty() {
                 out.push_str(&format!("3. Layers: add one Landscape Layer per weightmap and assign {} (8-bit grayscale, same resolution as the heightmap — required by the importer).\n", layers.join(", ")));
             }
-            out.push_str("\nStatus: follows the Unreal 5 Landscape Technical Guide (PNG16/r16 import, Z-scale formula, weightmap rules); UNVERIFIED on a live Unreal until someone imports once — please report back.\n");
+            out.push_str("\nStatus: follows the Unreal 5 Landscape Technical Guide (PNG16/r16 import, Z-scale formula, weightmap rules). The repository's headless check (`integrations/unreal/jd_import_check.py`, run by `scripts/unreal-import-check.sh`) imports this directory's PNGs through UnrealEditor-Cmd 5.8 and writes `jd-unreal-import.json` with what Unreal got; the Landscape actor itself is the editor's Landscape mode → Import from file, with the Z scale above — that step has no scripting entry point.\n");
         }
     }
     if !notes.is_empty() {

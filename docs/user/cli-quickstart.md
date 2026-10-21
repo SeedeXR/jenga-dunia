@@ -210,6 +210,7 @@ $ jd --json export mesh --project Bio.jdproj --layer land land.fbx
 |---|---|
 | Blender 5.2 `import_scene.fbx` | 1 object `terrain`, 262 144 vertices, 261 121 polygons all quads, 5 110 × 5 110 m footprint, 1 033 m height range, UV layer `map1` in 0..1, material `terrain` with one image-texture node, embedded `terrain-albedo.png` 512² unpacked |
 | Unity 6000.4.8f1 `ModelImporter` (Autodesk FBX SDK) — `scripts/unity-import-check.sh --fbx terrain.fbx` | 1 mesh `terrain`, 262 144 vertices, 522 242 triangles (the 261 121 quads triangulated), bounds 5 110 × 1 232.5 × 5 110 m with the minimum at y = 32.54 m (absolute heights kept), scale 1 in file units; report `terrain.fbx.jd-unity-import.json` |
+| Unreal Engine 5.8.4 Interchange (FBX) — `scripts/unreal-import-check.sh --mesh terrain.fbx` | 1 StaticMesh `SM_terrain`, 16 116 vertices, 31 805 triangles, 1 section, 1 UV channel, bounds ±255 500 cm, albedo texture + material instance (headless, 33 s) |
 | Maya 2027, FBX plugin 2020.3.9 (the Autodesk FBX SDK itself) — `scripts/maya-fbx-check.sh terrain.fbx` (headless `mayapy`) | 1 mesh `terrain`, 262 144 vertices, 261 121 faces (quads), 522 242 triangles, UV set `map1`, world bounds 5 110 × 1 232.5 × 5 110 m (Maya converts the metre file to its centimetres: 511 000 × 123 253 × 511 000), minimum at y = 32.54 m, up axis Y; 2.1 s; report `terrain.fbx.jd-maya-import.json` |
 | Optima (independent Rust parser) | 262 144 vertices, 261 121 authored quads, 0 degenerate / flipped / non-manifold, bounding box ±2 555 m × 52..1 085 m, `hasUvs: true`, `textured: true`, PNG 512² |
 
@@ -1027,6 +1028,21 @@ $ scripts/unity-import-check.sh Acceptance.jdproj/exports/unity          # exten
  "sampled_height_min_max":[76.9,1227.5],"alphamap_layers":3,"layers":["weight_mask_forest.png","weight_mask_rock.png","weight_snow.png"],"trees":291,
  "warnings":["source 512×512 is not a 2ⁿ+1 square: TerrainData resolution 513, the extra row/column is left at the edge value"],"ok":true}
 ```
+
+**Verified in Unreal.** `scripts/unreal-import-check.sh <profile dir>` writes a Blueprint-only `.uproject` under `target/scratch/UnrealJD`, starts `UnrealEditor-Cmd 5.8` unattended without a renderer and runs `integrations/unreal/jd_import_check.py`, which pushes every PNG of the directory through Unreal's own texture importer and reads back what the asset registry says; `--mesh terrain.glb|terrain.fbx` does the same through the Interchange importer and reports the StaticMesh. The first run of the scratch project takes about seven minutes (shader warm-up, 1.2 GB); later runs 20–50 s.
+
+```
+$ scripts/unreal-import-check.sh Acceptance.jdproj/exports/unreal
+{"ok": true, "unreal": "5.8.4-58902052+++UE5+Release-5.8", "readme_z_scale": 100.0,
+ "heightmap_source_format": "TSF G16", "weightmap_source_formats": ["TSF G8"], "textures": {… 5 × 512×512 …}}        17 s
+$ scripts/unreal-import-check.sh --mesh Acceptance.jdproj/exports/terrain_lod0.glb
+StaticMesh SM_terrain_lod0: 34 171 triangles, 17 300 vertices, 1 section, 1 UV channel, bounds ±255 500 cm (5 110 m = 512 cells of 10 m),
+3 Texture2D + 1 MaterialInstanceConstant alongside                                                                          46 s
+$ scripts/unreal-import-check.sh --mesh Acceptance.jdproj/exports/terrain.fbx
+StaticMesh SM_terrain: 31 805 triangles, 16 116 vertices, the same bounds, albedo texture + material instance                  33 s
+```
+
+What this proves: the profile's heightmap reaches Unreal as 16-bit grayscale (`TSF G16`) and the weightmaps as 8-bit (`TSF G8`), at the exported size, with the README's Z scale parsed back; our glTF and our own FBX both come through Interchange as one StaticMesh with the world's footprint in centimetres and their textures and material. What it does not: the Landscape actor — Unreal exposes no scripting entry point that builds a Landscape from a file, so that step stays the editor's Landscape mode → Import from file with the README's numbers. And one loss, read from the engine's source rather than guessed: UE 5.8's glTF parser does not implement `EXT_mesh_gpu_instancing`, so the instanced scatter GLB imports as geometry, not instances (the CSV/DataTable route in the scatter section is the Unreal path).
 
 The acceptance scenario runs this when a Unity editor is found and marks its item 13 from the report; without one it stays PARTIAL. Unreal has no headless importer here yet (the Epic launcher is installed, no engine build).
 

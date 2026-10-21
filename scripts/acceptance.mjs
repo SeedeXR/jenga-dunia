@@ -185,6 +185,8 @@ mark(7, "VERIFIED", `ocean.bake: ${water.files.join(", ")} ${water.px.join("×")
 const skyBake = op("sky.bake", { sun_elevation_deg: 30, sun_azimuth_deg: 140, turbidity: 3, width: 1024, path: "sky.exr" }, false);
 mark(5, "VERIFIED", `sky.bake: Preetham daylight HDRI ${skyBake.px.join("×")} EXR + preview, zenith rgb ${skyBake.zenith_rgb.map((v) => v.toFixed(3)).join("/")}; desktop sun + turbidity drive the same sky on the dome`);
 let unityVerified = false;
+let unrealProfile = false;
+let unrealMesh = false;
 for (const profile of ["unity", "unreal"]) {
   const r = op("terrain.export_profile", { profile, dir: profile, layer: "height", masks: ["mask_forest", "mask_grassland", "mask_rock", "snow"] }, false);
   if (profile === "unity" && existsSync("scripts/unity-import-check.sh") && (process.env.UNITY || existsSync("/Applications/Unity/Hub/Editor"))) {
@@ -200,6 +202,17 @@ for (const profile of ["unity", "unreal"]) {
       void out;
     } catch (e) {
       mark(13, "FAILED", `unity profile: headless import did not complete: ${String(e).slice(0, 300)}`);
+    }
+  } else if (profile === "unreal" && existsSync("scripts/unreal-import-check.sh") && (process.env.UNREAL || existsSync("/Users/Shared/Epic Games"))) {
+    // Engine-side verification: the profile's textures and the LOD0 glTF through Unreal's own importers, headlessly.
+    try {
+      execFileSync("bash", ["scripts/unreal-import-check.sh", path.join(proj, "exports", "unreal")], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 1_800_000 });
+      const rep = JSON.parse(readFileSync(path.join(proj, "exports", "unreal", "jd-unreal-import.json"), "utf8"));
+      const hm = rep.textures?.["heightmap.png"] ?? {};
+      unrealProfile = Boolean(rep.ok);
+      mark(13, rep.ok ? "VERIFIED" : "FAILED", `Unreal ${rep.unreal} headless import of the unreal profile: heightmap.png → ${hm.class} ${hm.size?.join("×")} source ${rep.heightmap_source_format}, weightmaps ${(rep.weightmap_source_formats ?? []).join("/")} (${Object.keys(rep.textures ?? {}).length} textures), README Z scale ${rep.readme_z_scale}; the Landscape actor itself is an editor step (no scripting entry point)`);
+    } catch (e) {
+      mark(13, "FAILED", `unreal profile: headless import did not complete: ${String(e).slice(0, 300)}`);
     }
   } else {
     mark(13, "PARTIAL", `${profile} profile written: ${(r.files ?? []).length || "heightmap + 4 weightmaps + README"} files (engine-side import not run on this machine)`);
@@ -290,6 +303,20 @@ if (existsSync("scripts/unity-import-check.sh") && (process.env.UNITY || existsS
     mark(11, "FAILED", `terrain.fbx: Unity import did not complete: ${String(e).slice(0, 200)}`);
   }
 }
+// glTF through Unreal's Interchange importer (StaticMesh + textures + material instance) when an engine is installed.
+if (existsSync("scripts/unreal-import-check.sh") && (process.env.UNREAL || existsSync("/Users/Shared/Epic Games"))) {
+  try {
+    execFileSync("bash", ["scripts/unreal-import-check.sh", "--mesh", path.join(exportsDir, "terrain_lod0.glb")], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 1_800_000 });
+    const rep = JSON.parse(readFileSync(path.join(exportsDir, "terrain_lod0.glb.jd-unreal-import.json"), "utf8"));
+    const sm = Object.values(rep.static_meshes ?? {})[0] ?? {};
+    const widthM = sm.bounds_cm ? (sm.bounds_cm.max[0] - sm.bounds_cm.min[0]) / 100 : NaN;
+    const footprint = (extent * (res - 1)) / res; // cell centres, as the GLB check above
+    unrealMesh = Boolean(rep.ok) && Math.abs(widthM - footprint) < 1;
+    mark(13, unrealMesh ? "VERIFIED" : "FAILED", `terrain_lod0.glb through Unreal ${rep.unreal}'s Interchange importer: StaticMesh ${sm.triangles} triangles, ${sm.vertices} vertices, ${sm.sections} section, UV channels ${sm.uv_channels}, bounds ${widthM.toFixed(0)} m wide (expected ${footprint} m), ${(rep.other_assets ?? []).join(" + ")} alongside; EXT_mesh_gpu_instancing is not read by UE 5.8, so the scatter GLB would import un-instanced`);
+  } catch (e) {
+    mark(13, "FAILED", `terrain_lod0.glb: Unreal import did not complete: ${String(e).slice(0, 300)}`);
+  }
+}
 // FBX: the only validator is a reader — our own round trip through the heightmap input node.
 const importAsset = op("project.import_asset", { path: path.join(exportsDir, "terrain.fbx"), name: "roundtrip.fbx" }, false);
 const rt = addNode("jd.input.heightmap@1", { path: importAsset.name, size_px: [res, res] });
@@ -335,7 +362,7 @@ print("BLENDER " + json.dumps(res))
   mark(12, "UNVERIFIED", "Blender not installed on this machine");
   mark(14, "PARTIAL", "geometry/scale checked only through our own readers (FBX round trip); Blender absent");
 }
-mark(13, unityVerified ? "PARTIAL" : "UNVERIFIED", `${unityVerified ? "Unity import verified headlessly (above); " : "no engine editor found here; "}Unreal: no engine build on this machine (the Epic launcher only); the browser viewer is the desktop app's three.js viewport (WebGPU), which renders the same layers but does not load the exported GLB`);
+mark(13, unityVerified && unrealProfile && unrealMesh ? "VERIFIED" : unityVerified || unrealProfile || unrealMesh ? "PARTIAL" : "UNVERIFIED", `${unityVerified ? "Unity import verified headlessly; " : "Unity not verified; "}${unrealProfile ? "Unreal profile textures verified headlessly; " : "Unreal profile not verified; "}${unrealMesh ? "Unreal glTF StaticMesh verified headlessly; " : "Unreal glTF not verified; "}the browser viewer is the desktop app's three.js viewport (WebGPU), which renders the same layers but does not load the exported GLB`);
 
 // ── 16–18. CLI (this script), MCP replay, cancel + recovery ─────────────────────────────────────
 mark(16, "VERIFIED", `every step above ran through \`jd --json op …\` on ${path.basename(proj)}`);
