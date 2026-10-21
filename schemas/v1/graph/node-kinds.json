@@ -900,7 +900,7 @@
   },
   {
     "kind": "jd.erosion.hydraulic@1",
-    "description": "Hydraulic erosion (virtual pipes / shallow water): rain flows downhill, dissolves, carries and deposits sediment; outputs terrain, water depth and suspended sediment; an optional `hardness` field (0..1) drops the dissolving rate to a tenth on hard rock; an optional `rain` field (0..1, e.g. `jd.climate.rain@1`) scales `rain_rate` per cell; an optional `drains` mask (> 0.5, e.g. a sea or river-mouth mask) lets water and its sediment leave the field there; `engine: gpu` runs the same passes on the headless GPU",
+    "description": "Hydraulic erosion (virtual pipes / shallow water): rain flows downhill, dissolves, carries and deposits sediment; outputs terrain, water depth and suspended sediment; an optional `hardness` field (0..1) drops the dissolving rate to a tenth on hard rock; an optional `rain` field (0..1, e.g. `jd.climate.rain@1`) scales `rain_rate` per cell; an optional `drains` mask (> 0.5, e.g. a sea or river-mouth mask) lets water and its sediment leave the field there; an optional `soil` field (metres of loose material on the rock) is stripped at the full rate before the rock underneath and receives every deposit, and comes back as the `soil` output; `engine: gpu` runs the same passes on the headless GPU",
     "inputs": [
       {
         "name": "in",
@@ -921,6 +921,11 @@
         "name": "drains",
         "ty": "heightfield",
         "required": false
+      },
+      {
+        "name": "soil",
+        "ty": "heightfield",
+        "required": false
       }
     ],
     "outputs": [
@@ -936,6 +941,11 @@
       },
       {
         "name": "sediment",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "soil",
         "ty": "heightfield",
         "required": false
       }
@@ -1490,7 +1500,7 @@
   },
   {
     "kind": "jd.hydrology.network@1",
-    "description": "Hydrology-first terrain: a seeded drainage network is grown from the river mouths first and the heights are built along it (headwaters steep, big rivers flat), so every cell drains by construction — `out` heights, `rivers` (Strahler order ≥ `river_order`, 0..1) and `order`",
+    "description": "Hydrology-first terrain: a seeded drainage network is grown from the river mouths first and the heights are built along it (headwaters steep, big rivers flat), so every cell drains by construction; with `valley_relief_m` every river carries a valley cross-section (`valley_shape`: 1 V, 2 U, 0.5 canyon notch) blended into the heights within `valley_width_m` of it — `out` heights, `rivers` (Strahler order ≥ `river_order`, 0..1) and `order`",
     "inputs": [],
     "outputs": [
       {
@@ -1559,10 +1569,22 @@
           "default": 3
         },
         "valley_width_m": {
-          "description": "Valley floor: within this distance (metres along the stream) of a river the slope eases to a\nfloodplain (15 % of the headwater law), so valleys get a floor instead of a V (0 = off).",
+          "description": "Valley floor: within this distance (metres along the stream) of a river the slope eases to a\nfloodplain (15 % of the headwater law), so valleys get a floor instead of a V (0 = off).\nWith `valley_relief_m` it is also the half-width of the valley cross-section.",
           "type": "number",
           "format": "float",
           "default": 600.0
+        },
+        "valley_relief_m": {
+          "description": "Valley cross-section as a river primitive (0 = off): the valley side climbs this many\nmetres above the river over `valley_width_m` (measured along the drainage), and the\nground beyond the width sits that much above the tree height — the tree becomes the\nplateau the valleys are cut into.",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        },
+        "valley_shape": {
+          "description": "Shape of that cross-section, the exponent of (distance / width): 1 a V, 2 a U with a\nwide flat floor (default), 0.5 a canyon notch — steep at the river, flattening to the\nrim (> 0).",
+          "type": "number",
+          "format": "float",
+          "default": 2.0
         }
       },
       "additionalProperties": false,

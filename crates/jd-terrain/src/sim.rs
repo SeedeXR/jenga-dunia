@@ -355,6 +355,10 @@ pub struct HydraulicResult {
     pub water: Heightfield,
     /// Suspended sediment (metres).
     pub sediment: Heightfield,
+    /// Loose material on the surface (metres): what the `soil` input brought plus every deposit,
+    /// less what the flow picked up again — the top of the material stack (without a `soil`
+    /// input: the deposits alone).
+    pub soil: Heightfield,
 }
 
 /// Pipe directions: left, right, top (−y), bottom (+y); `OPPOSITE[k]` is the neighbour's pipe back to us.
@@ -393,7 +397,33 @@ pub fn hydraulic_erode_with(
     drains: Option<&Heightfield>,
     cancel: Option<&AtomicBool>,
 ) -> JdResult<HydraulicResult> {
-    for (name, f) in [("hardness", hardness), ("rain", rain), ("drains", drains)] {
+    hydraulic_erode_layered(h, spacing_m, p, hardness, rain, drains, None, cancel)
+}
+
+/// [`hydraulic_erode_with`] plus a material stack (Šťava et al. 2008 in spirit): an optional
+/// `soil` field is the thickness of loose material lying on the rock (metres, ≥ 0). The flow
+/// picks up soil at the full dissolving rate before it touches the rock underneath (which keeps
+/// the `hardness` rate), every deposit lands on the soil layer, and the layer comes back as
+/// `HydraulicResult::soil`. Without `soil` the layer rule is off: `height`, `water` and
+/// `sediment` are exactly what they always were (saved projects keep their numbers) and `soil`
+/// just records the deposits.
+#[allow(clippy::too_many_arguments)]
+pub fn hydraulic_erode_layered(
+    h: &Heightfield,
+    spacing_m: [f32; 2],
+    p: &HydraulicParams,
+    hardness: Option<&Heightfield>,
+    rain: Option<&Heightfield>,
+    drains: Option<&Heightfield>,
+    soil: Option<&Heightfield>,
+    cancel: Option<&AtomicBool>,
+) -> JdResult<HydraulicResult> {
+    for (name, f) in [
+        ("hardness", hardness),
+        ("rain", rain),
+        ("drains", drains),
+        ("soil", soil),
+    ] {
         if let Some(k) = f
             && (k.width(), k.height()) != (h.width(), h.height())
         {
@@ -443,6 +473,19 @@ pub fn hydraulic_erode_with(
     let mut terrain = h.to_vec();
     let mut water = vec![0.0f32; n];
     let mut sediment = vec![0.0f32; n];
+    // The layer rule (loose first) only runs with a `soil` field wired: without one the layer
+    // merely records deposits and the erosion is what it always was, hardness or not.
+    let layered = soil.is_some();
+    let mut loose: Vec<f32> = match soil {
+        Some(f) => {
+            let v = f.to_vec();
+            if v.iter().any(|x| !x.is_finite() || *x < 0.0) {
+                return Err(JdError::invalid("soil", "must be finite and ≥ 0"));
+            }
+            v
+        }
+        None => vec![0.0f32; n],
+    };
     let mut flux = vec![[0.0f32; 4]; n];
     let inside = |x: i64, y: i64| x >= 0 && y >= 0 && x < w && y < hh;
     let idx = |x: i64, y: i64| (y * w + x) as usize;
@@ -491,12 +534,14 @@ pub fn hydraulic_erode_with(
         let mut terrain2 = vec![0.0f32; n];
         let mut water2 = vec![0.0f32; n];
         let mut sediment2 = vec![0.0f32; n];
+        let mut loose2 = vec![0.0f32; n];
         terrain2
             .par_chunks_mut(w as usize)
             .zip(water2.par_chunks_mut(w as usize))
             .zip(sediment2.par_chunks_mut(w as usize))
+            .zip(loose2.par_chunks_mut(w as usize))
             .enumerate()
-            .for_each(|(y, ((trow, wrow), srow))| {
+            .for_each(|(y, (((trow, wrow), srow), lrow))| {
                 for x in 0..w as usize {
                     let (xi, yi) = (x as i64, y as i64);
                     let i = idx(xi, yi);
@@ -555,16 +600,20 @@ pub fn hydraulic_erode_with(
                     };
                     let mut s = (sediment[i] - sed_out).max(0.0) + sed_in;
                     let mut t = terrain[i];
+                    let mut l = loose[i];
                     if capacity > s {
-                        let delta = p.dissolve_k
-                            * soft.as_ref().map_or(1.0, |f| f[i])
-                            * (capacity - s)
-                            * p.dt;
+                        // Loose material first, at the full rate; the rock underneath at its own.
+                        let demand = p.dissolve_k * (capacity - s) * p.dt;
+                        let from_soil = if layered { demand.min(l) } else { 0.0 };
+                        let delta =
+                            from_soil + (demand - from_soil) * soft.as_ref().map_or(1.0, |f| f[i]);
+                        l -= from_soil;
                         t -= delta;
                         s += delta;
                     } else {
                         let delta = (p.deposit_k * (s - capacity) * p.dt).min(s);
                         t += delta;
+                        l += delta;
                         s -= delta;
                     }
                     // 4. Evaporation.
@@ -573,11 +622,13 @@ pub fn hydraulic_erode_with(
                     let cap = p.max_concentration * d_final;
                     if s > cap {
                         t += s - cap;
+                        l += s - cap;
                         s = cap;
                     }
                     // 5. Drains: the water and what it carries leave the field here.
                     let drained = drain.as_ref().is_some_and(|d| d[i]);
                     trow[x] = t;
+                    lrow[x] = l;
                     srow[x] = if drained { 0.0 } else { s };
                     wrow[x] = if drained { 0.0 } else { d_final };
                 }
@@ -585,6 +636,7 @@ pub fn hydraulic_erode_with(
         terrain = terrain2;
         water = water2;
         sediment = sediment2;
+        loose = loose2;
     }
     let build = |v: &[f32]| -> JdResult<Heightfield> {
         let mut f = Heightfield::new(h.width(), h.height(), h.tile_size(), h.halo())?;
@@ -595,6 +647,7 @@ pub fn hydraulic_erode_with(
         height: build(&terrain)?,
         water: build(&water)?,
         sediment: build(&sediment)?,
+        soil: build(&loose)?,
     })
 }
 
@@ -620,6 +673,107 @@ pub fn slope_mask(h: &Heightfield, spacing_m: [f32; 2], max_deg: f32) -> JdResul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn loose_soil_goes_before_the_rock_and_deposits_land_on_the_soil_layer() {
+        // A valley with 0.5 m of soil over rock as hard as it gets: the flow strips the soil
+        // where it runs and the rock below barely moves; deposits downstream thicken the layer.
+        let mut valley = Heightfield::new(48, 32, 64, 0).expect("v");
+        valley.fill_with(|x, y| 2.0 * (y as f32) + 0.05 * (x as f32 - 24.0).abs());
+        let mut rock = Heightfield::new(48, 32, 64, 0).expect("k");
+        rock.fill_with(|_, _| 1.0);
+        let mut soil = Heightfield::new(48, 32, 64, 0).expect("s");
+        soil.fill_with(|_, _| 0.5);
+        let p = HydraulicParams {
+            iterations: 60,
+            rain_rate: 0.02,
+            ..HydraulicParams::default()
+        };
+        let bare = hydraulic_erode_with(&valley, [10.0, 10.0], &p, Some(&rock), None, None, None)
+            .expect("bare");
+        let layered = hydraulic_erode_layered(
+            &valley,
+            [10.0, 10.0],
+            &p,
+            Some(&rock),
+            None,
+            None,
+            Some(&soil),
+            None,
+        )
+        .expect("layered");
+        let cut = |r: &HydraulicResult| {
+            (0..32)
+                .flat_map(|y| (0..48).map(move |x| (x, y)))
+                .map(|(x, y)| (valley.get(x, y) - r.height.get(x, y)).max(0.0))
+                .sum::<f32>()
+        };
+        // Both runs are capacity-limited (the flow carries what it can either way), so the layer
+        // shows in where the material comes from, not in the total: never less with soil on.
+        assert!(
+            cut(&layered) >= cut(&bare) - 1e-3,
+            "{} vs {}",
+            cut(&layered),
+            cut(&bare)
+        );
+        // Where the layer is not exhausted every metre the terrain loses or gains is the layer's
+        // (the rock never moves): Δheight == Δsoil cell by cell, to the f32 rounding of 60 steps
+        // on heights up to 64 m.
+        let (mut stripped, mut thickened, mut off_layer) = (0, 0, 0);
+        for y in 0..32 {
+            for x in 0..48 {
+                let d_soil = layered.soil.get(x, y) - 0.5;
+                let d_height = layered.height.get(x, y) - valley.get(x, y);
+                if d_soil < -1e-4 {
+                    stripped += 1;
+                }
+                if d_soil > 1e-4 {
+                    thickened += 1;
+                }
+                if layered.soil.get(x, y) > 0.0 && (d_height - d_soil).abs() > 5e-3 {
+                    off_layer += 1;
+                }
+            }
+        }
+        // (deposition needs the flow to slow below its load; on this straight slope it may not
+        // happen within 60 steps, so only the stripping is required)
+        assert!(stripped > 50, "stripped {stripped} thickened {thickened}");
+        assert_eq!(
+            off_layer, 0,
+            "the rock under an unexhausted layer never moves"
+        );
+        // Mass: terrain + sediment conserved (closed boundary) with the layer on.
+        let total = |r: &HydraulicResult| {
+            (0..32)
+                .flat_map(|y| (0..48).map(move |x| (x, y)))
+                .map(|(x, y)| (r.height.get(x, y) + r.sediment.get(x, y)) as f64)
+                .sum::<f64>()
+        };
+        let before: f64 = (0..32)
+            .flat_map(|y| (0..48).map(move |x| (x, y)))
+            .map(|(x, y)| valley.get(x, y) as f64)
+            .sum();
+        assert!(
+            (total(&layered) - before).abs() < 1e-2,
+            "{} vs {before}",
+            total(&layered)
+        );
+        let mut bad = soil.clone();
+        bad.set(0, 0, -1.0);
+        assert!(
+            hydraulic_erode_layered(
+                &valley,
+                [10.0, 10.0],
+                &p,
+                None,
+                None,
+                None,
+                Some(&bad),
+                None
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn hard_rock_dissolves_a_tenth_as_fast_under_rain() {

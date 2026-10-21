@@ -27,7 +27,8 @@ struct Params {
     area: f32,
     g: f32,
     has_drains: u32,
-    _pad: [u32; 3],
+    has_soil: u32,
+    _pad: [u32; 2],
 }
 
 impl Gpu {
@@ -44,11 +45,43 @@ impl Gpu {
         drains: Option<&Heightfield>,
         cancel: Option<&std::sync::atomic::AtomicBool>,
     ) -> JdResult<HydraulicResult> {
-        for (name, f) in [("hardness", hardness), ("rain", rain), ("drains", drains)] {
+        self.hydraulic_erode_layered(h, spacing_m, p, hardness, rain, drains, None, cancel)
+    }
+
+    /// [`jd_terrain::hydraulic_erode_layered`] on the GPU: the loose-material layer rides in the
+    /// fourth component of the state vector.
+    #[allow(clippy::too_many_arguments)]
+    pub fn hydraulic_erode_layered(
+        &self,
+        h: &Heightfield,
+        spacing_m: [f32; 2],
+        p: &HydraulicParams,
+        hardness: Option<&Heightfield>,
+        rain: Option<&Heightfield>,
+        drains: Option<&Heightfield>,
+        soil: Option<&Heightfield>,
+        cancel: Option<&std::sync::atomic::AtomicBool>,
+    ) -> JdResult<HydraulicResult> {
+        for (name, f) in [
+            ("hardness", hardness),
+            ("rain", rain),
+            ("drains", drains),
+            ("soil", soil),
+        ] {
             if let Some(k) = f
                 && (k.width(), k.height()) != (h.width(), h.height())
             {
                 return Err(JdError::invalid(name, "field size differs from `in`"));
+            }
+        }
+        if let Some(sf) = soil {
+            // Checked before any buffer is created or a row uploaded.
+            let mut row = vec![0.0f32; sf.width() as usize];
+            for y in 0..sf.height() {
+                sf.row(y, &mut row);
+                if row.iter().any(|v| !v.is_finite() || *v < 0.0) {
+                    return Err(JdError::invalid("soil", "must be finite and ≥ 0"));
+                }
             }
         }
         if !spacing_m.iter().all(|s| *s > 0.0 && s.is_finite()) {
@@ -103,7 +136,8 @@ impl Gpu {
             area: spacing_m[0] * spacing_m[1],
             g: 9.81,
             has_drains: drains.is_some() as u32,
-            _pad: [0; 3],
+            has_soil: soil.is_some() as u32,
+            _pad: [0; 2],
         };
         let dev = &self.device;
         let shader = dev.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -151,11 +185,15 @@ impl Gpu {
             .write_buffer(&uniform, 0, bytemuck::bytes_of(&params));
         // Upload row by row: no whole-field host copy of the vec4 state.
         let mut row = vec![0.0f32; w as usize];
+        let mut soil_row = vec![0.0f32; w as usize];
         let mut packed = vec![[0.0f32; 4]; w as usize];
         for y in 0..hh {
             h.row(y, &mut row);
-            for (p, t) in packed.iter_mut().zip(&row) {
-                *p = [*t, 0.0, 0.0, 0.0];
+            if let Some(sf) = soil {
+                sf.row(y, &mut soil_row);
+            }
+            for ((p, t), l) in packed.iter_mut().zip(&row).zip(&soil_row) {
+                *p = [*t, 0.0, 0.0, *l];
             }
             self.queue.write_buffer(
                 &state[0],
@@ -315,6 +353,7 @@ impl Gpu {
             height: build(0)?,
             water: build(1)?,
             sediment: build(2)?,
+            soil: build(3)?,
         })
     }
 }
@@ -322,6 +361,69 @@ impl Gpu {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hydraulic_soil_layer_matches_the_cpu_kernel() {
+        let Some(gpu) = Gpu::shared() else {
+            eprintln!("no GPU adapter: skipping");
+            return;
+        };
+        let mut valley = Heightfield::new(48, 32, 64, 0).expect("v");
+        valley.fill_with(|x, y| 2.0 * (y as f32) + 0.05 * (x as f32 - 24.0).abs());
+        let mut rock = Heightfield::new(48, 32, 64, 0).expect("k");
+        rock.fill_with(|_, _| 1.0);
+        let mut soil = Heightfield::new(48, 32, 64, 0).expect("s");
+        soil.fill_with(|x, _| if x < 24 { 0.5 } else { 0.0 });
+        let p = HydraulicParams {
+            iterations: 40,
+            rain_rate: 0.02,
+            ..HydraulicParams::default()
+        };
+        let c = jd_terrain::hydraulic_erode_layered(
+            &valley,
+            [10.0, 10.0],
+            &p,
+            Some(&rock),
+            None,
+            None,
+            Some(&soil),
+            None,
+        )
+        .expect("cpu");
+        let g = gpu
+            .hydraulic_erode_layered(
+                &valley,
+                [10.0, 10.0],
+                &p,
+                Some(&rock),
+                None,
+                None,
+                Some(&soil),
+                None,
+            )
+            .expect("gpu");
+        for (name, a, b) in [
+            ("height", &c.height, &g.height),
+            ("soil", &c.soil, &g.soil),
+            ("sediment", &c.sediment, &g.sediment),
+        ] {
+            let worst = a
+                .to_vec()
+                .iter()
+                .zip(b.to_vec())
+                .map(|(x, y)| (x - y).abs())
+                .fold(0.0f32, f32::max);
+            assert!(worst < 1e-3, "{name}: GPU differs from CPU by {worst}");
+        }
+        assert!(
+            c.soil.to_vec().iter().any(|l| *l < 0.45),
+            "the layer was stripped somewhere"
+        );
+        assert!(
+            c.soil.to_vec().iter().any(|l| *l > 0.0 && *l < 0.5),
+            "and thinned elsewhere"
+        );
+    }
 
     #[test]
     fn hydraulic_matches_the_cpu_kernel_with_hardness_and_a_rain_mask() {

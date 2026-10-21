@@ -21,7 +21,7 @@ struct Params {
     area: f32,
     g: f32,
     has_drains: u32,
-    _pad0: u32,
+    has_soil: u32,
     _pad1: u32,
     _pad2: u32,
 }
@@ -127,15 +127,22 @@ fn update_pass(@builtin(global_invocation_id) id: vec3<u32>) {
     if wp > 0.0 { sed_out = st.z / wp * out_total * p.dt / p.area; }
     var s = max(st.z - sed_out, 0.0) + sed_in;
     var t = st.x;
+    var l = st.w; // loose material on the rock
     if capacity > s {
+        // Loose material first, at the full rate; the rock underneath at its own.
         var k_soft = 1.0;
         if p.has_soft != 0u { k_soft = soft[i]; }
-        let delta = p.dissolve_k * k_soft * (capacity - s) * p.dt;
+        let demand = p.dissolve_k * (capacity - s) * p.dt;
+        var from_soil = 0.0;
+        if p.has_soil != 0u { from_soil = min(demand, l); }
+        let delta = from_soil + (demand - from_soil) * k_soft;
+        l -= from_soil;
         t -= delta;
         s += delta;
     } else {
         let delta = min(p.deposit_k * (s - capacity) * p.dt, s);
         t += delta;
+        l += delta;
         s -= delta;
     }
     let d_final = d_new * (1.0 - p.evaporation * p.dt);
@@ -143,12 +150,13 @@ fn update_pass(@builtin(global_invocation_id) id: vec3<u32>) {
     let cap = p.max_conc * d_final;
     if s > cap {
         t += s - cap;
+        l += s - cap;
         s = cap;
     }
     // Drains: the water and what it carries leave the field here.
     if p.has_drains != 0u && drains[i] > 0.5 {
-        state_out[i] = vec4(t, 0.0, 0.0, 0.0);
+        state_out[i] = vec4(t, 0.0, 0.0, l);
         return;
     }
-    state_out[i] = vec4(t, d_final, s, 0.0);
+    state_out[i] = vec4(t, d_final, s, l);
 }

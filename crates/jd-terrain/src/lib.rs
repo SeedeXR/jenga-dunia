@@ -82,8 +82,8 @@ pub use sculpt::{Stroke, StrokeMode, apply_strokes};
 pub use seabed::{SeabedParams, classify_seabed, classify_seabed_with};
 pub use sim::{
     HydraulicParams, HydraulicResult, StreamPowerParams, THERMAL_MAX_RATE, hydraulic_erode,
-    hydraulic_erode_with, slope_mask, stream_power_erode, stream_power_erode_with, thermal_erode,
-    thermal_erode_tiled, thermal_erode_with,
+    hydraulic_erode_layered, hydraulic_erode_with, slope_mask, stream_power_erode,
+    stream_power_erode_with, thermal_erode, thermal_erode_tiled, thermal_erode_with,
 };
 pub use sky::{Sky, SkyParams, bake_sky_hdri, sky_preview_png};
 pub use snowpack::{SnowpackParams, snowpack};

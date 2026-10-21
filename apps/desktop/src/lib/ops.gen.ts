@@ -1723,8 +1723,18 @@ export type NodeParams_jd_hydrology_network_1 = {
   /** Strahler order from which a channel counts as a river in the `rivers` output (≥ 1). */
   "river_order"?: number;
   /** Valley floor: within this distance (metres along the stream) of a river the slope eases to a
-floodplain (15 % of the headwater law), so valleys get a floor instead of a V (0 = off). */
+floodplain (15 % of the headwater law), so valleys get a floor instead of a V (0 = off).
+With `valley_relief_m` it is also the half-width of the valley cross-section. */
   "valley_width_m"?: number;
+  /** Valley cross-section as a river primitive (0 = off): the valley side climbs this many
+metres above the river over `valley_width_m` (measured along the drainage), and the
+ground beyond the width sits that much above the tree height — the tree becomes the
+plateau the valleys are cut into. */
+  "valley_relief_m"?: number;
+  /** Shape of that cross-section, the exponent of (distance / width): 1 a V, 2 a U with a
+wide flat floor (default), 0.5 a canyon notch — steep at the river, flattening to the
+rim (> 0). */
+  "valley_shape"?: number;
 };
 
 export type NodeParams_jd_hydrology_rivers_1 = {

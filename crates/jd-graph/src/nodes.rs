@@ -594,7 +594,7 @@ pub fn register_all(r: &mut Registry) {
     ));
     r.register(NodeDef::new::<jd_terrain::NetworkParams, _>(
         "jd.hydrology.network@1",
-        "Hydrology-first terrain: a seeded drainage network is grown from the river mouths first and the heights are built along it (headwaters steep, big rivers flat), so every cell drains by construction — `out` heights, `rivers` (Strahler order ≥ `river_order`, 0..1) and `order`",
+        "Hydrology-first terrain: a seeded drainage network is grown from the river mouths first and the heights are built along it (headwaters steep, big rivers flat), so every cell drains by construction; with `valley_relief_m` every river carries a valley cross-section (`valley_shape`: 1 V, 2 U, 0.5 canyon notch) blended into the heights within `valley_width_m` of it — `out` heights, `rivers` (Strahler order ≥ `river_order`, 0..1) and `order`",
         vec![],
         vec![port("out", PortType::Heightfield, false), port("rivers", PortType::Heightfield, false), port("order", PortType::Heightfield, false)],
         |ctx: &EvalCtx, p, _| {
@@ -885,12 +885,13 @@ pub fn register_all(r: &mut Registry) {
     ));
     r.register(NodeDef::new::<HydraulicNodeParams, _>(
         "jd.erosion.hydraulic@1",
-        "Hydraulic erosion (virtual pipes / shallow water): rain flows downhill, dissolves, carries and deposits sediment; outputs terrain, water depth and suspended sediment; an optional `hardness` field (0..1) drops the dissolving rate to a tenth on hard rock; an optional `rain` field (0..1, e.g. `jd.climate.rain@1`) scales `rain_rate` per cell; an optional `drains` mask (> 0.5, e.g. a sea or river-mouth mask) lets water and its sediment leave the field there; `engine: gpu` runs the same passes on the headless GPU",
-        vec![port("in", PortType::Heightfield, true), port("hardness", PortType::Heightfield, false), port("rain", PortType::Heightfield, false), port("drains", PortType::Heightfield, false)],
+        "Hydraulic erosion (virtual pipes / shallow water): rain flows downhill, dissolves, carries and deposits sediment; outputs terrain, water depth and suspended sediment; an optional `hardness` field (0..1) drops the dissolving rate to a tenth on hard rock; an optional `rain` field (0..1, e.g. `jd.climate.rain@1`) scales `rain_rate` per cell; an optional `drains` mask (> 0.5, e.g. a sea or river-mouth mask) lets water and its sediment leave the field there; an optional `soil` field (metres of loose material on the rock) is stripped at the full rate before the rock underneath and receives every deposit, and comes back as the `soil` output; `engine: gpu` runs the same passes on the headless GPU",
+        vec![port("in", PortType::Heightfield, true), port("hardness", PortType::Heightfield, false), port("rain", PortType::Heightfield, false), port("drains", PortType::Heightfield, false), port("soil", PortType::Heightfield, false)],
         vec![
             port("out", PortType::Heightfield, false),
             port("water", PortType::Heightfield, false),
             port("sediment", PortType::Heightfield, false),
+            port("soil", PortType::Heightfield, false),
         ],
         |ctx, p, i| {
             let hp: HydraulicNodeParams = params(p)?;
@@ -900,6 +901,7 @@ pub fn register_all(r: &mut Registry) {
             let hardness = i.get("hardness").map(|v| v.as_field());
             let rain = i.get("rain").map(|v| v.as_field());
             let drains = i.get("drains").map(|v| v.as_field());
+            let soil = i.get("soil").map(|v| v.as_field());
             let hp2 = HydraulicParams {
                     iterations: hp.iterations,
                     dt: hp.dt,
@@ -912,16 +914,17 @@ pub fn register_all(r: &mut Registry) {
                     ..Default::default()
                 };
             let r = match hp.engine {
-                Engine::Cpu => jd_terrain::hydraulic_erode_with(field(i, "in")?, spacing_m(ctx), &hp2, hardness.map(|k| &**k), rain.map(|k| &**k), drains.map(|k| &**k), Some(&ctx.cancel))?,
-                Engine::Gpu => gpu()?.hydraulic_erode(field(i, "in")?, spacing_m(ctx), &hp2, hardness.map(|k| &**k), rain.map(|k| &**k), drains.map(|k| &**k), Some(&ctx.cancel))?,
+                Engine::Cpu => jd_terrain::hydraulic_erode_layered(field(i, "in")?, spacing_m(ctx), &hp2, hardness.map(|k| &**k), rain.map(|k| &**k), drains.map(|k| &**k), soil.map(|k| &**k), Some(&ctx.cancel))?,
+                Engine::Gpu => gpu()?.hydraulic_erode_layered(field(i, "in")?, spacing_m(ctx), &hp2, hardness.map(|k| &**k), rain.map(|k| &**k), drains.map(|k| &**k), soil.map(|k| &**k), Some(&ctx.cancel))?,
             };
             Ok(BTreeMap::from([
                 ("out".to_owned(), Value::field(r.height)),
                 ("water".to_owned(), Value::field(r.water)),
                 ("sediment".to_owned(), Value::field(r.sediment)),
+                ("soil".to_owned(), Value::field(r.soil)),
             ]))
         },
-    ).with_memory(40.0));
+    ).with_memory(48.0));
     r.register(NodeDef::new::<SculptParams, _>(
         "jd.sculpt.strokes@1",
         "Brush strokes (raise/lower with smooth falloff) recorded as data: non-destructive, replayable, undo removes a whole stroke",

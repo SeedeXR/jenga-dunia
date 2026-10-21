@@ -643,7 +643,18 @@ lakes   min 0  max 0  mean 0                 ← the fill finds nothing: every c
 
 ![Two panels: a dendritic height field draining to the bottom edge, and the river mask of its order-5 and higher trunks](images/cli-network.png)
 
-`jd.hydrology.network@1` builds the terrain the way Génevaux et al. (2013) argue it should be built — network first. The river mouths are the cells of one edge (`mouths`: south / north / west / east, or the whole border for an island); a spanning tree grown from them over a smooth seeded cost field (two octaves of lattice noise, so cheap corridors — the valleys — hold their course for a dozen cells; `roughness` 0 = straight parallel drainage, 1 = the noise alone) is the drainage network; Strahler orders come from a post-order pass; then each cell sits above its downstream parent by the slope of its order times the step (`slope_m_per_km` for headwaters, × `order_falloff` per higher order, so big rivers run flat). Every cell drains to a mouth by construction — the unit test and the CLI run above both confirm that priority-flood filling changes nothing. Within `valley_width_m` (600 m along the stream) of a river cell the slope eases to a floodplain — 15 % of the law — so valleys get a floor instead of a V, and because that distance only grows upstream every cell still sits above its parent (unit test: the mean height drops by more than a fifth, the fill still finds nothing). `rivers` marks channels of `river_order` and up; `order` is the raw Strahler number. Not modelled: Génevaux's primitive blending, terraces (run the erosion nodes on the result).
+`jd.hydrology.network@1` builds the terrain the way Génevaux et al. (2013) argue it should be built — network first. The river mouths are the cells of one edge (`mouths`: south / north / west / east, or the whole border for an island); a spanning tree grown from them over a smooth seeded cost field (two octaves of lattice noise, so cheap corridors — the valleys — hold their course for a dozen cells; `roughness` 0 = straight parallel drainage, 1 = the noise alone) is the drainage network; Strahler orders come from a post-order pass; then each cell sits above its downstream parent by the slope of its order times the step (`slope_m_per_km` for headwaters, × `order_falloff` per higher order, so big rivers run flat). Every cell drains to a mouth by construction — the unit test and the CLI run above both confirm that priority-flood filling changes nothing. Within `valley_width_m` (600 m along the stream) of a river cell the slope eases to a floodplain — 15 % of the law — so valleys get a floor instead of a V, and because that distance only grows upstream every cell still sits above its parent (unit test: the mean height drops by more than a fifth, the fill still finds nothing). `rivers` marks channels of `river_order` and up; `order` is the raw Strahler number.
+
+```
+$ jd op graph.set_param --project Net.jdproj --save --params '{"id":"<network>","key":"valley_relief_m","value":150}'   # + valley_width_m 1200, valley_shape 2 / 1 / 0.5
+jd.hydrology.network@1  620 ms (512²; 628 ms without the primitives — one extra pass)
+net    tree alone: max 123 mean 19.5 m     U: max 273 mean 86.7     V: mean 104.1     canyon: mean 123.3
+lakes (jd.hydrology.fill@1 after it)   0 in every world
+```
+
+![Four panels: the tree heights of a quarter of the world, the same with U-shaped river primitives, and the slope masks of the U and canyon worlds showing flat floors with walls a few hundred metres out versus walls hugging the rivers](images/cli-primitives.png)
+
+`valley_relief_m` switches on Génevaux's other half, the primitives: every river (order ≥ `river_order`) carries a valley cross-section, and the ground climbs `valley_relief_m × (d / valley_width_m)^valley_shape` above the tree height with d the distance along the drainage to the river the cell feeds, reaching the full relief at the width and staying there beyond it — the tree becomes the plateau the valleys are incised into. `valley_shape` 2 gives a U — a wide flat floor along the river and walls a few hundred metres out — 1 a V, 0.5 a canyon notch, steep at the river and flattening towards the rim (unit test on a 128² world: river cells keep their height, cells beside a river gain under 2 m, the side reaches the full 80 m, the plateau beyond 1.5 widths sits exactly 80 m above the tree, and priority-flood filling still finds nothing). The distance is measured along the drainage to the river the cell feeds — the same `to_river` the floodplain uses — and only grows upstream, so the field drains by construction with the primitives on as it does without them (the `lakes` row above: zero in every world). Not modelled: a sum over overlapping primitives, a profile per stream order, terraces (run the erosion nodes on the result).
 
 ### Wave shadow: where the sea is sheltered
 
@@ -880,6 +891,19 @@ water_uniform     mean 0.0236  max 3.72
 ```
 
 5.5 % of the water for a mask whose mean is 0.056: rivers run where it rains. Biome rules take the same mask through `jd.biome.classify@1`'s `mask` input.
+
+**A soil layer on the rock.** Wire a thickness field into the hydraulic node's `soil` port — a constant from `jd.math.remap@1`, a mask from the biome rules, the `soil` output of an earlier run — and the material stack has two layers: the flow picks up loose soil at the full dissolving rate before it touches the rock underneath (which keeps its `hardness` rate), every deposit and every settling of an over-loaded flow lands on the soil, and the layer comes back as the `soil` output. Without the port the layer rule is off: the node's numbers are exactly what they were (saved projects keep theirs) and the `soil` output simply records the deposits. Both engines carry the layer (the GPU keeps it in the spare lane of its state vector; parity test under 1e-3 m).
+
+```
+$ jd op graph.connect --project Soil.jdproj --save --params '{"from":"<remap 1.5>","from_port":"out","to":"<hydraulic>","to_port":"soil"}'
+jd.erosion.hydraulic@1  2.6 s (128², 2000 steps, hardness 1, dissolve_k 0.05 — rate-limited so the layer shows)
+cut (out − in)   bare rock: min −3.66 max +10.8 mean −0.124 m      with 1.5 m of soil: min −1.60 max +11.2 mean −0.143 m
+soil             bare rock: deposits only, mean 0.05 m             with the layer: 0 … 12.7 m, mean 1.36 m
+```
+
+![Four panels: the height field, the height change on bare hard rock with dark gullies and bright deposits, the same with a soil layer showing fainter gullies, and the soil thickness afterwards](images/cli-soil.png)
+
+The comparison needs a rate-limited run (a low `dissolve_k`): at the default rate even hard rock saturates the flow's carrying capacity within a step, so both runs cut the same amount and only the `soil` output tells them apart. Rate-limited, the layer changes the pattern: on bare rock lightly loaded water concentrates into gullies up to 3.7 m deep, while on a soil layer the flow loads up with loose material along its whole path and the gullies stay under 1.6 m — the hollows take the difference as deposits. Unit test: wherever the layer is not exhausted the terrain's change equals the layer's change cell by cell (the rock never moves), the layer is stripped on the slopes, and terrain + suspended sediment are conserved.
 
 ### Snowpack: a season that falls, drifts and melts
 

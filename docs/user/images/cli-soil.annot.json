@@ -1,0 +1,9 @@
+{
+  "src": "/tmp/jd-scratch/cli-soil-raw.png",
+  "out": "cli-soil.png",
+  "annotations": [
+    { "type": "circle", "cx": 450, "cy": 150, "r": 26, "label": "1", "text": "1  bare hard rock: lightly loaded water concentrates and cuts gullies up to 3.7 m deep", "tx": 16, "ty": 364 },
+    { "type": "circle", "cx": 760, "cy": 150, "r": 26, "label": "2", "text": "2  on a 1.5 m soil layer the flow loads up with loose material on the way: gullies stay under 1.6 m", "tx": 16, "ty": 388 },
+    { "type": "circle", "cx": 1100, "cy": 120, "r": 26, "label": "3", "text": "3  the `soil` output: stripped thin on the slopes, piled up to 12 m where the flow drops its load", "tx": 16, "ty": 412 }
+  ]
+}
