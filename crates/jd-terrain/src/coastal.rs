@@ -42,6 +42,10 @@ pub struct CoastalParams {
     /// downwind — spits and bars grow along the coast. 0 = isotropic waves (the plain model).
     #[serde(default)]
     pub drift: f32,
+    /// Coast-wide budget: the volume the waves may move over the whole run, cubic metres (≥ 0);
+    /// the step that would exceed it is scaled down and the run stops there. Omit for no limit.
+    #[serde(default)]
+    pub budget_m3: Option<f32>,
 }
 
 fn d_band() -> f32 {
@@ -63,6 +67,7 @@ impl Default for CoastalParams {
             rate_m: d_rate(),
             wind_azimuth_deg: None,
             drift: 0.0,
+            budget_m3: None,
         }
     }
 }
@@ -87,6 +92,35 @@ pub fn coastal_erode_with(
     energy: Option<&Heightfield>,
     cancel: Option<&AtomicBool>,
 ) -> JdResult<(Heightfield, Heightfield)> {
+    if p.budget_m3.is_some() {
+        return Err(JdError::invalid("budget_m3", "needs the cell spacing")
+            .next("Call `coastal_erode_budget` with `spacing_m` to use a budget."));
+    }
+    coastal_erode_budget(h, [1.0, 1.0], p, energy, cancel)
+}
+
+/// [`coastal_erode_with`] with the cell spacing, which `budget_m3` needs to turn the cut
+/// heights into a volume: the waves move at most that much over the run (the step that would
+/// exceed it is scaled by the remainder and the run ends there). Without a budget the spacing
+/// is irrelevant; the spacing-less entries refuse a budget rather than guess a cell of 1 m².
+pub fn coastal_erode_budget(
+    h: &Heightfield,
+    spacing_m: [f32; 2],
+    p: &CoastalParams,
+    energy: Option<&Heightfield>,
+    cancel: Option<&AtomicBool>,
+) -> JdResult<(Heightfield, Heightfield)> {
+    if p.budget_m3.is_some_and(|b| !(b >= 0.0 && b.is_finite())) {
+        return Err(JdError::invalid("budget_m3", "must be finite and ≥ 0"));
+    }
+    if !spacing_m.iter().all(|s| *s > 0.0 && s.is_finite()) {
+        return Err(JdError::invalid(
+            "spacing_m",
+            "sample spacing must be positive",
+        ));
+    }
+    let area = (spacing_m[0] * spacing_m[1]) as f64;
+    let mut moved_m3 = 0.0f64;
     if let Some(e) = energy
         && (e.width(), e.height()) != (h.width(), h.height())
     {
@@ -131,6 +165,7 @@ pub fn coastal_erode_with(
         let sea: Vec<bool> = ocean.to_vec().iter().map(|v| *v > 0.5).collect();
         let v = cur.to_vec();
         let mut delta = vec![0.0f32; n];
+        let mut step_cut = 0.0f64; // this step's gross cut, metres summed over cells
         for y in 0..hh {
             for x in 0..w {
                 let i = at(x, y);
@@ -178,6 +213,7 @@ pub fn coastal_erode_with(
                 }
                 delta[i] -= cut;
                 work[i] += cut;
+                step_cut += cut as f64;
                 // Longshore drift: the material goes to the sea floor downwind first.
                 let weights: Vec<f32> = wet
                     .iter()
@@ -195,10 +231,37 @@ pub fn coastal_erode_with(
                 }
             }
         }
+        // Coast-wide budget: the step that reaches it is scaled to the remainder (its share of
+        // the wave work too) and the run ends.
+        let mut stop = false;
+        if let Some(budget) = p.budget_m3 {
+            let step_m3 = step_cut * area;
+            let remaining = (budget as f64 - moved_m3).max(0.0);
+            if step_m3 >= remaining {
+                let k = if step_m3 > 0.0 {
+                    (remaining / step_m3) as f32
+                } else {
+                    0.0
+                };
+                for (d, wk) in delta.iter_mut().zip(work.iter_mut()) {
+                    if *d < 0.0 {
+                        *wk += *d * (1.0 - k); // the cut that no longer happens leaves the work
+                    }
+                    *d *= k;
+                }
+                moved_m3 = budget as f64;
+                stop = true;
+            } else {
+                moved_m3 += step_m3;
+            }
+        }
         cur.fill_with(|x, y| {
             v[(y as usize) * w as usize + x as usize]
                 + delta[(y as usize) * w as usize + x as usize]
         });
+        if stop {
+            break;
+        }
     }
     let peak = work.iter().cloned().fold(0.0f32, f32::max).max(1e-9);
     let mut shore = Heightfield::new(h.width(), h.height(), h.tile_size(), h.halo())?;
@@ -209,6 +272,97 @@ pub fn coastal_erode_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_budget_caps_the_volume_the_waves_move_and_keeps_the_mass() {
+        // A 20 m island on a 64² sea at −10 m, 10 m cells, 40 isotropic steps.
+        let mut h = Heightfield::new(64, 64, 64, 0).expect("h");
+        h.fill_with(|x, y| {
+            if (x as i64 - 32).pow(2) + (y as i64 - 32).pow(2) < 150 {
+                20.0
+            } else {
+                -10.0
+            }
+        });
+        let p = CoastalParams {
+            iterations: 40,
+            band_m: 25.0,
+            ..CoastalParams::default()
+        };
+        let moved = |o: &Heightfield| {
+            (0..64)
+                .flat_map(|y| (0..64).map(move |x| (x, y)))
+                .map(|(x, y)| (h.get(x, y) - o.get(x, y)).max(0.0) * 100.0)
+                .sum::<f32>()
+        };
+        let mass = |o: &Heightfield| {
+            (0..64)
+                .flat_map(|y| (0..64).map(move |x| (x, y)))
+                .map(|(x, y)| o.get(x, y) as f64)
+                .sum::<f64>()
+        };
+        let (free, _) = coastal_erode_budget(&h, [10.0, 10.0], &p, None, None).expect("free");
+        let half = moved(&free) / 2.0;
+        let (capped, shore) = coastal_erode_budget(
+            &h,
+            [10.0, 10.0],
+            &CoastalParams {
+                budget_m3: Some(half),
+                ..p.clone()
+            },
+            None,
+            None,
+        )
+        .expect("capped");
+        assert!(
+            (moved(&capped) - half).abs() < 1e-3 * half,
+            "moved {} vs budget {half}",
+            moved(&capped)
+        );
+        assert!((mass(&capped) - mass(&h)).abs() < 1e-2, "mass kept");
+        assert!(
+            shore.to_vec().iter().any(|w| *w > 0.0)
+                && shore.to_vec().iter().cloned().fold(0.0f32, f32::max) <= 1.0
+        );
+        let (none, _) = coastal_erode_budget(
+            &h,
+            [10.0, 10.0],
+            &CoastalParams {
+                budget_m3: Some(0.0),
+                ..p.clone()
+            },
+            None,
+            None,
+        )
+        .expect("zero");
+        assert_eq!(none.to_vec(), h.to_vec(), "a zero budget moves nothing");
+        assert!(
+            coastal_erode_budget(
+                &h,
+                [10.0, 10.0],
+                &CoastalParams {
+                    budget_m3: Some(-1.0),
+                    ..p.clone()
+                },
+                None,
+                None
+            )
+            .is_err()
+        );
+        assert!(
+            coastal_erode_with(
+                &h,
+                &CoastalParams {
+                    budget_m3: Some(half),
+                    ..p
+                },
+                None,
+                None
+            )
+            .is_err(),
+            "no spacing, no budget"
+        );
+    }
 
     #[test]
     fn drift_moves_the_deposits_downwind_and_keeps_the_mass() {

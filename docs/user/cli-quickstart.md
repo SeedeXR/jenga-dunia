@@ -422,7 +422,17 @@ coastal node 3.6 s for 256² × 120 steps (debug build)
 
 ![Blender render with a translucent sea at 60 m: left the raw coast with ragged headlands and islets, right the same after 120 wave steps with headlands cut back and bays filled](images/cli-coast.png)
 
-`jd.erosion.coastal@1` re-floods the ocean from the field border every step (the same rule as `jd.hydrology.sea_level@1`, so inland basins are not coasts), then every land cell within `band_m` above `level_m` that touches the sea loses `rate_m × exposure` (exposure = share of its eight neighbours that are ocean) down to one step below the level, and that material is shared among those ocean neighbours. A cut cell floods on the next step and exposes the one behind it — cliff retreat with a wave-cut platform just under the surface — while the deposits build beaches that can rise above the level and become land again. The `shore` output is the wave work per cell normalised to the busiest one, a ready mask for beach and cliff materials. No fetch, wave direction or longshore drift yet, so spits, bars and deltas are a later term.
+`jd.erosion.coastal@1` re-floods the ocean from the field border every step (the same rule as `jd.hydrology.sea_level@1`, so inland basins are not coasts), then every land cell within `band_m` above `level_m` that touches the sea loses `rate_m × exposure` (exposure = share of its eight neighbours that are ocean) down to one step below the level, and that material is shared among those ocean neighbours. A cut cell floods on the next step and exposes the one behind it — cliff retreat with a wave-cut platform just under the surface — while the deposits build beaches that can rise above the level and become land again. The `shore` output is the wave work per cell normalised to the busiest one, a ready mask for beach and cliff materials. Fetch and longshore drift came later (`drift`, below), as did the sea-level node's `exposure` and the coast-wide budget.
+
+```
+$ jd op graph.set_param --project Coast.jdproj --save --params '{"id":"<coastal>","key":"budget_m3","value":20000000}'
+jd.erosion.coastal@1  771 ms (256², 50 m cells; 1 360 ms for the full 40 steps)
+net cut after re-deposition   no budget: 17.9 million m³ over 40 steps     budget 20 million m³ gross: 12.7 million m³, the run ends early
+```
+
+![Four panels: the height change over 40 coastal steps without and with a budget, and the shore work mask for both — the same coasts, less of each](images/cli-budget.png)
+
+`budget_m3` is the coast-wide budget: the gross volume the waves may cut from the shore over the whole run (cell area × metres cut, summed step by step, before any of it is laid back down). The step that would exceed it is scaled to the remainder — its share of the `shore` work too — and the run ends there, so a short, violent storm season and a long gentle one can be told apart by their budgets rather than by juggling `iterations` and `rate_m`. Unit test: a budget of half the free run's volume moves exactly half, keeps the mass, and a budget of 0 moves nothing. The net change after re-deposition is smaller than the budget (the figure's 12.7 million against 20), because material cut from one step's cliff is laid down and may be cut again.
 
 **Fetch and longshore drift.** `drift` (0..1, default 0 = the isotropic model above) brings the wind in: shores facing it erode up to (1 + drift)× harder than sheltered ones, and the material a wave takes off a cell is laid on the sea floor downwind first, so spits and bars grow along the coast. The direction is the node's `wind_azimuth_deg` or, unset, the world's shared wind:
 

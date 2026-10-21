@@ -1569,6 +1569,9 @@ the world's shared wind. Only matters when `drift` > 0. */
 sheltered ones, and the eroded material is laid down preferentially on the sea floor
 downwind — spits and bars grow along the coast. 0 = isotropic waves (the plain model). */
   "drift"?: number;
+  /** Coast-wide budget: the volume the waves may move over the whole run, cubic metres (≥ 0);
+the step that would exceed it is scaled down and the run stops there. Omit for no limit. */
+  "budget_m3"?: number | null;
 };
 
 export type NodeParams_jd_erosion_droplet_1 = {

@@ -830,7 +830,7 @@ pub fn register_all(r: &mut Registry) {
     ).with_memory(12.0));
     r.register(NodeDef::new::<CoastalParams, _>(
         "jd.erosion.coastal@1",
-        "Coastal erosion: waves cut the shore within `band_m` above `level_m` by its ocean exposure and lay the material on the adjacent sea floor — cliff retreat, wave-cut platforms, beaches; `drift` > 0 adds fetch (windward shores erode more) and longshore drift (deposits move downwind: spits, bars) from the wind; outputs the terrain and a `shore` mask of wave work; an optional `exposure` field (the sea-level node's wave exposure, 0..1) scales the wave work so sheltered bays keep their shore",
+        "Coastal erosion: waves cut the shore within `band_m` above `level_m` by its ocean exposure and lay the material on the adjacent sea floor — cliff retreat, wave-cut platforms, beaches; `drift` > 0 adds fetch (windward shores erode more) and longshore drift (deposits move downwind: spits, bars) from the wind; outputs the terrain and a `shore` mask of wave work; an optional `exposure` field (the sea-level node's wave exposure, 0..2) scales the wave work so sheltered bays keep their shore; `budget_m3` caps the volume the waves move over the whole run",
         vec![port("in", PortType::Heightfield, true), port("exposure", PortType::Heightfield, false)],
         vec![port("out", PortType::Heightfield, false), port("shore", PortType::Heightfield, false)],
         |ctx, p, i| {
@@ -839,7 +839,7 @@ pub fn register_all(r: &mut Registry) {
                 return Err(JdError::invalid("iterations", "must be within 1..=1000"));
             }
             let energy = i.get("exposure").map(|v| v.as_field());
-            let (out_h, shore) = jd_terrain::coastal_erode_with(field(i, "in")?, &cp, energy.map(|e| &**e), Some(&ctx.cancel))?;
+            let (out_h, shore) = jd_terrain::coastal_erode_budget(field(i, "in")?, spacing_m(ctx), &cp, energy.map(|e| &**e), Some(&ctx.cancel))?;
             Ok(BTreeMap::from([("out".to_owned(), Value::field(out_h)), ("shore".to_owned(), Value::field(shore))]))
         },
     ).with_memory(16.0));

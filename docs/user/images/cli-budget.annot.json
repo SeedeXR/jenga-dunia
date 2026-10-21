@@ -1,0 +1,9 @@
+{
+  "src": "/tmp/jd-scratch/cli-budget-raw.png",
+  "out": "cli-budget.png",
+  "annotations": [
+    { "type": "circle", "cx": 160, "cy": 160, "r": 26, "label": "1", "text": "1  free run: dark = cliff cut (to −8 m), bright = laid down in the shallows (to +6.6 m)", "tx": 16, "ty": 364 },
+    { "type": "circle", "cx": 472, "cy": 160, "r": 26, "label": "2", "text": "2  with a 20 million m³ budget the same coasts move less (−5.7 / +4.6 m) and the run ends early", "tx": 16, "ty": 388 },
+    { "type": "circle", "cx": 1096, "cy": 160, "r": 26, "label": "3", "text": "3  the `shore` work mask keeps its pattern: the un-cut share of the last step leaves it too", "tx": 16, "ty": 412 }
+  ]
+}
