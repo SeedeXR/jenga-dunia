@@ -96,6 +96,24 @@ pub fn classify_seabed_with(
     exposure: Option<&Heightfield>,
     p: &SeabedParams,
 ) -> JdResult<Heightfield> {
+    classify_seabed_current(h, spacing_m, rivers, shore, exposure, None, p)
+}
+
+/// [`classify_seabed_with`] plus an optional surface `current` field (degrees clockwise from
+/// north the water flows towards, the sea-level node's): the sediment reach of every river and
+/// shore cell becomes an ellipse pointing downstream — the full `river_reach_m` with the current,
+/// a quarter of it against, half of it across — so mud and the reef-free zone trail off
+/// downstream of a mouth instead of ringing it.
+#[allow(clippy::too_many_arguments)]
+pub fn classify_seabed_current(
+    h: &Heightfield,
+    spacing_m: [f32; 2],
+    rivers: Option<&Heightfield>,
+    shore: Option<&Heightfield>,
+    exposure: Option<&Heightfield>,
+    current: Option<&Heightfield>,
+    p: &SeabedParams,
+) -> JdResult<Heightfield> {
     if !(p.sand_max_depth_m > 0.0 && p.sand_max_depth_m.is_finite()) {
         return Err(JdError::invalid("sand_max_depth_m", "must be positive"));
     }
@@ -123,7 +141,12 @@ pub fn classify_seabed_with(
             "sample spacing must be positive",
         ));
     }
-    for (name, f) in [("rivers", rivers), ("shore", shore), ("exposure", exposure)] {
+    for (name, f) in [
+        ("rivers", rivers),
+        ("shore", shore),
+        ("exposure", exposure),
+        ("current", current),
+    ] {
         if let Some(f) = f
             && (f.width(), f.height()) != (h.width(), h.height())
         {
@@ -144,13 +167,29 @@ pub fn classify_seabed_with(
                 if !source(x, y) {
                     continue;
                 }
+                // With a current the disc becomes an ellipse pointing downstream: full reach
+                // with the flow, a quarter against it, half across.
+                let flow = current.and_then(|c| {
+                    let a = c.get(x, y);
+                    a.is_finite()
+                        .then(|| (a.to_radians().sin(), a.to_radians().cos())) // else the disc
+                });
                 for dy in -reach..=reach {
                     for dx in -reach..=reach {
                         let (nx, ny) = (x as i64 + dx, y as i64 + dy);
-                        if (0..w as i64).contains(&nx)
-                            && (0..hh as i64).contains(&ny)
-                            && dx * dx + dy * dy <= reach * reach
-                        {
+                        if !(0..w as i64).contains(&nx) || !(0..hh as i64).contains(&ny) {
+                            continue;
+                        }
+                        let inside = match flow {
+                            None => dx * dx + dy * dy <= reach * reach,
+                            Some((ux, uy)) => {
+                                let along = dx as f32 * ux + dy as f32 * uy;
+                                let across = -(dx as f32) * uy + dy as f32 * ux;
+                                let along = if along >= 0.0 { along } else { 4.0 * along };
+                                along * along + 4.0 * across * across <= (reach * reach) as f32
+                            }
+                        };
+                        if inside {
                             sediment[(ny as u32 * w + nx as u32) as usize] = true;
                         }
                     }
@@ -195,6 +234,55 @@ pub fn classify_seabed_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_current_carries_the_river_sediment_downstream() {
+        // A 64² shelf 5 m deep (reef conditions everywhere), one river mouth cell in the middle,
+        // 10 m cells, reach 100 m = 10 cells; the current flows east (90°).
+        let mut h = Heightfield::new(64, 64, 64, 0).expect("h");
+        h.fill_with(|_, _| -5.0);
+        let mut rivers = Heightfield::new(64, 64, 64, 0).expect("r");
+        rivers.set(32, 32, 1.0);
+        let mut east = Heightfield::new(64, 64, 64, 0).expect("c");
+        east.fill_with(|_, _| 90.0);
+        let p = SeabedParams {
+            river_reach_m: 100.0,
+            reef_depth_m: [2.0, 25.0],
+            ..SeabedParams::default()
+        };
+        let plain =
+            classify_seabed_with(&h, [10.0, 10.0], Some(&rivers), None, None, &p).expect("plain");
+        let drift =
+            classify_seabed_current(&h, [10.0, 10.0], Some(&rivers), None, None, Some(&east), &p)
+                .expect("drift");
+        let blocked = |o: &Heightfield, x0: u32, x1: u32| {
+            (x0..x1)
+                .flat_map(|x| (0..64u32).map(move |y| (x, y)))
+                .filter(|&(x, y)| o.get(x, y) != 4.0)
+                .count()
+        };
+        assert_eq!(
+            blocked(&plain, 0, 32),
+            blocked(&plain, 33, 64),
+            "no current: the reef-free disc is symmetric"
+        );
+        assert!(
+            blocked(&drift, 33, 64) > 2 * blocked(&drift, 0, 32),
+            "east of the mouth the sediment reaches far, west barely: {} vs {}",
+            blocked(&drift, 33, 64),
+            blocked(&drift, 0, 32)
+        );
+        assert_ne!(
+            drift.get(41, 32),
+            4.0,
+            "ten cells downstream still sediment (sand/mud, not reef)"
+        );
+        assert_eq!(
+            drift.get(27, 32),
+            4.0,
+            "five cells upstream the reef is back"
+        );
+    }
 
     #[test]
     fn a_sheltered_shelf_turns_to_mud_where_an_open_one_stays_sand() {

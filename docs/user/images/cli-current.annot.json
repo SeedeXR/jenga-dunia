@@ -1,0 +1,36 @@
+{
+  "src": "/tmp/jd-scratch/cli-current-raw.png",
+  "out": "cli-current.png",
+  "annotations": [
+    {
+      "type": "circle",
+      "cx": 250,
+      "cy": 110,
+      "r": 26,
+      "label": "1",
+      "text": "1  open water drifts with the wind (white); within 3 km of a coast the flow turns to run alongshore",
+      "tx": 16,
+      "ty": 372
+    },
+    {
+      "type": "circle",
+      "cx": 1190,
+      "cy": 200,
+      "r": 26,
+      "label": "2",
+      "text": "2  with the current the sediment reach of a shore is an ellipse pointing downstream: 1.2 % of the sea cells change class",
+      "tx": 16,
+      "ty": 396
+    },
+    {
+      "type": "circle",
+      "cx": 1215,
+      "cy": 110,
+      "r": 22,
+      "label": "3",
+      "text": "3  upstream of the sediment the reef (white) comes back; downstream it is held off",
+      "tx": 16,
+      "ty": 420
+    }
+  ]
+}

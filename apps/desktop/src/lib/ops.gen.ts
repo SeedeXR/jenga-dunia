@@ -1773,6 +1773,9 @@ its length and turns towards the shore, so rays converge on headlands and spread
 `exposure` is multiplied by that focus (up to 2 at a headland). The wavelength is the wind
 sea's (`wind_speed_mps`, `fetch_km`); a 16 s swell bends from 200 m down, a 3 s chop from 7 m. */
   "refraction"?: boolean;
+  /** Width of the coastal band, metres (> 0), within which the surface `current` bends from the
+wind's direction to run alongshore. */
+  "current_band_m"?: number;
 };
 
 export type NodeParams_jd_hydrology_wetness_1 = {

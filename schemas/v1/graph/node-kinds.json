@@ -250,7 +250,7 @@
   },
   {
     "kind": "jd.biome.seabed@1",
-    "description": "Classify the sea floor below `level_m`: 1 sand on the shelf above the wave base, 2 rock on steep slopes, 3 mud in deep still water, 4 reef on a shallow gentle shelf away from river sediment (optional `rivers` and `shore` masks); 0 = land; an optional `exposure` field (the sea-level node's wave exposure) lets mud settle sooner in sheltered water",
+    "description": "Classify the sea floor below `level_m`: 1 sand on the shelf above the wave base, 2 rock on steep slopes, 3 mud in deep still water, 4 reef on a shallow gentle shelf away from river sediment (optional `rivers` and `shore` masks); 0 = land; an optional `exposure` field (the sea-level node's wave exposure) lets mud settle sooner in sheltered water; an optional `current` field (the sea-level node's drift direction) carries the river and shore sediment downstream — the reach stretches with the current and shrinks against it",
     "inputs": [
       {
         "name": "in",
@@ -269,6 +269,11 @@
       },
       {
         "name": "exposure",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "current",
         "ty": "heightfield",
         "required": false
       }
@@ -1699,7 +1704,7 @@
   },
   {
     "kind": "jd.hydrology.sea_level@1",
-    "description": "Ocean mask (1 below `level_m` where connected to the border; inland basins stay dry) with a soft shoreline, water `depth` in metres, and the wave `exposure` 0..1 of every water cell — the open-water fetch upwind of it (the wind and `fetch_km` of the node or the world), low in the lee of islands and headlands; with `refraction` the waves bend over the shelf and the exposure is focused on headlands (up to 2, which the coastal and seabed nodes honour) and spread in bays",
+    "description": "Ocean mask (1 below `level_m` where connected to the border; inland basins stay dry) with a soft shoreline, water `depth` in metres, and the wave `exposure` 0..1 of every water cell — the open-water fetch upwind of it (the wind and `fetch_km` of the node or the world), low in the lee of islands and headlands; with `refraction` the waves bend over the shelf and the exposure is focused on headlands (up to 2, which the coastal and seabed nodes honour) and spread in bays; `current` is the surface drift's direction (degrees clockwise from north the water flows towards): the wind offshore, bent alongshore within `current_band_m` of land — feed `jd.biome.seabed@1` so sediment travels downstream",
     "inputs": [
       {
         "name": "in",
@@ -1720,6 +1725,11 @@
       },
       {
         "name": "exposure",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "current",
         "ty": "heightfield",
         "required": false
       }
@@ -1787,6 +1797,12 @@
           "description": "Bend the waves over the shelf (refraction): the front slows in water shallower than half\nits length and turns towards the shore, so rays converge on headlands and spread in bays;\n`exposure` is multiplied by that focus (up to 2 at a headland). The wavelength is the wind\nsea's (`wind_speed_mps`, `fetch_km`); a 16 s swell bends from 200 m down, a 3 s chop from 7 m.",
           "type": "boolean",
           "default": false
+        },
+        "current_band_m": {
+          "description": "Width of the coastal band, metres (> 0), within which the surface `current` bends from the\nwind's direction to run alongshore.",
+          "type": "number",
+          "format": "float",
+          "default": 2000.0
         }
       },
       "additionalProperties": false

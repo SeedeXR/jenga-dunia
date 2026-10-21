@@ -10,6 +10,7 @@ pub mod bathymetry;
 pub mod climate;
 pub mod coastal;
 pub mod decimate;
+mod dist;
 pub mod droplet;
 pub mod export;
 pub mod fbx;
@@ -65,8 +66,8 @@ pub use network::{Mouths, NetworkParams, hydrology_first};
 pub use noise::{FractalKind, NoiseKind, NoiseParams, generate_noise};
 pub use ocean::{
     WaterLook, WaterMaps, WaveComponent, WaveParams, WaveSpectrum, bake_water, bake_water_with,
-    bake_wave_displacement, bake_wave_normal, water_colour, wave_exposure, wave_refraction,
-    wave_spectrum,
+    bake_wave_displacement, bake_wave_normal, surface_current, water_colour, wave_exposure,
+    wave_refraction, wave_spectrum,
 };
 pub use profiles::{
     EngineProfile, ProfileMaterial, ProfileReport, ProfileSettings, export_profile,
@@ -79,7 +80,7 @@ pub use scatter::{
     write_points, write_points_engine, write_points_with,
 };
 pub use sculpt::{Stroke, StrokeMode, apply_strokes};
-pub use seabed::{SeabedParams, classify_seabed, classify_seabed_with};
+pub use seabed::{SeabedParams, classify_seabed, classify_seabed_current, classify_seabed_with};
 pub use sim::{
     HydraulicParams, HydraulicResult, StreamPowerParams, THERMAL_MAX_RATE, hydraulic_erode,
     hydraulic_erode_layered, hydraulic_erode_with, slope_mask, stream_power_erode,

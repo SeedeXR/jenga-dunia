@@ -24,7 +24,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::Heightfield;
 use crate::sculpt::box_mean;
-use crate::sim::check_cancel;
 
 /// Bathymetry settings.
 #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
@@ -141,18 +140,9 @@ pub fn bathymetry_with(
     let weight: Option<Vec<f32>> = match supply {
         None => None,
         Some(s) => {
-            use std::cmp::Reverse;
-            use std::collections::BinaryHeap;
             let (src, classes) = (s.to_vec(), seabed.to_vec());
-            let mut dist = vec![f32::INFINITY; w * hh];
-            let mut heap: BinaryHeap<Reverse<(u32, u32)>> = BinaryHeap::new(); // (metres as bits, cell)
-            for (i, v) in src.iter().enumerate() {
-                if *v > 0.0 {
-                    dist[i] = 0.0;
-                    heap.push(Reverse((0, i as u32)));
-                }
-            }
-            if heap.is_empty() {
+            let seeds: Vec<usize> = (0..w * hh).filter(|&i| src[i] > 0.0).collect();
+            if seeds.is_empty() {
                 return Err(JdError::invalid(
                     "supply",
                     "no cell above 0: nothing would be deposited",
@@ -161,44 +151,20 @@ pub fn bathymetry_with(
                     "Unwire `supply` to fill every sediment floor, or feed a mask with sources.",
                 ));
             }
-            let far = 10.0 * p.reach_m; // e⁻¹⁰: below any visible fill
-            let mut pops = 0usize;
-            while let Some(Reverse((d, i))) = heap.pop() {
-                let (i, d) = (i as usize, f32::from_bits(d));
-                if d > dist[i] || d > far {
-                    continue;
-                }
-                pops += 1;
-                if pops.is_multiple_of(65_536) {
-                    check_cancel(cancel)?;
-                }
-                let (x, y) = ((i % w) as i64, (i / w) as i64);
-                for oy in -1i64..=1 {
-                    for ox in -1i64..=1 {
-                        let (nx, ny) = (x + ox, y + oy);
-                        if (ox, oy) == (0, 0)
-                            || nx < 0
-                            || ny < 0
-                            || nx >= w as i64
-                            || ny >= hh as i64
-                        {
-                            continue;
-                        }
-                        let j = ny as usize * w + nx as usize;
-                        if classes[j].round() == 0.0 && src[j] <= 0.0 {
-                            continue; // land does not carry sediment (a supply channel does)
-                        }
-                        let nd = d
-                            + ((ox as f32 * spacing_m[0]).powi(2)
-                                + (oy as f32 * spacing_m[1]).powi(2))
-                            .sqrt();
-                        if nd < dist[j] {
-                            dist[j] = nd;
-                            heap.push(Reverse((nd.to_bits(), j as u32)));
-                        }
-                    }
-                }
-            }
+            // Through the sea floor and the supply cells themselves (a river channel on land
+            // carries the distance to its mouth); stopped where the weight has vanished (e⁻¹⁰).
+            let passable: Vec<bool> = (0..w * hh)
+                .map(|i| classes[i].round() != 0.0 || src[i] > 0.0)
+                .collect();
+            let dist = crate::dist::water_distance(
+                &passable,
+                seeds.into_iter(),
+                w,
+                hh,
+                spacing_m,
+                10.0 * p.reach_m,
+                cancel,
+            )?;
             Some(dist.iter().map(|d| (-d / p.reach_m).exp()).collect()) // unreached → exp(−∞) = 0
         }
     };

@@ -441,8 +441,153 @@ pub fn wave_refraction(
     Ok(out)
 }
 
+/// Surface current direction per cell, degrees clockwise from north the water flows TOWARDS:
+/// wind drift in open water (the air's travel direction), bent to run alongshore within
+/// `band_m` of land — the tangent of the distance-to-land field, whichever way lies closer to
+/// the wind — with a smooth blend between (`d / band_m`). A land cell beside water carries its
+/// water neighbour's direction (so a river mouth or a shore cell, where the seabed classifier
+/// samples it, reads the alongshore flow); land further in carries the wind.
+/// ponytail: no Coriolis, no pressure set-up, one band width; the distance to land is the
+/// shared 8-neighbour Dijkstra (`dist::water_distance`), seeded with the coast cells only.
+pub fn surface_current(
+    ocean: &Heightfield,
+    spacing_m: [f32; 2],
+    wind_azimuth_deg: f32,
+    band_m: f32,
+    cancel: Option<&AtomicBool>,
+) -> JdResult<Heightfield> {
+    if !wind_azimuth_deg.is_finite() {
+        return Err(JdError::invalid("wind_azimuth_deg", "must be finite"));
+    }
+    if !(band_m > 0.0 && band_m.is_finite()) {
+        return Err(JdError::invalid("current_band_m", "must be positive"));
+    }
+    if !spacing_m.iter().all(|s| *s > 0.0 && s.is_finite()) {
+        return Err(JdError::invalid(
+            "spacing_m",
+            "sample spacing must be positive",
+        ));
+    }
+    let (w, h) = (ocean.width() as usize, ocean.height() as usize);
+    let water: Vec<bool> = ocean.to_vec().iter().map(|o| *o > 0.5).collect();
+    let neighbours = |i: usize| {
+        let (x, y) = ((i % w) as i64, (i / w) as i64);
+        (-1i64..=1)
+            .flat_map(move |oy| (-1i64..=1).map(move |ox| (x + ox, y + oy)))
+            .filter(move |&(nx, ny)| {
+                (nx, ny) != (x, y) && nx >= 0 && ny >= 0 && nx < w as i64 && ny < h as i64
+            })
+            .map(move |(nx, ny)| ny as usize * w + nx as usize)
+    };
+    let coast = (0..w * h).filter(|&i| !water[i] && neighbours(i).any(|j| water[j]));
+    let d = crate::dist::water_distance(&water, coast, w, h, spacing_m, band_m, cancel)?;
+    let to = (wind_azimuth_deg + 180.0).to_radians();
+    let (wx, wy) = (to.sin(), to.cos());
+    let wind = (wind_azimuth_deg + 180.0).rem_euclid(360.0);
+    let [sx, sy] = spacing_m;
+    let dd =
+        |x: usize, y: usize| (x < w && y < h && water[y * w + x]).then(|| d[y * w + x].min(band_m));
+    let water_dir = |i: usize| -> f32 {
+        let (x, y) = (i % w, i / w);
+        if d[i] >= band_m {
+            return wind;
+        }
+        // Gradient of the distance field (central where possible), its tangent the alongshore line.
+        let g = |l: Option<f32>, r: Option<f32>, c: f32, hh: f32| match (l, r) {
+            (Some(l), Some(r)) => (r - l) / (2.0 * hh),
+            (Some(l), None) => (c - l) / hh,
+            (None, Some(r)) => (r - c) / hh,
+            (None, None) => 0.0,
+        };
+        let c = d[i].min(band_m);
+        let gx = g(
+            x.checked_sub(1).and_then(|xm| dd(xm, y)),
+            dd(x + 1, y),
+            c,
+            sx,
+        );
+        let gy = g(
+            y.checked_sub(1).and_then(|ym| dd(x, ym)),
+            dd(x, y + 1),
+            c,
+            sy,
+        );
+        let m = (gx * gx + gy * gy).sqrt();
+        if m <= 0.0 {
+            return wind;
+        }
+        let (mut tx, mut ty) = (-gy / m, gx / m);
+        if tx * wx + ty * wy < 0.0 {
+            (tx, ty) = (-tx, -ty);
+        }
+        let s = (c / band_m).clamp(0.0, 1.0);
+        let (vx, vy) = (wx * s + tx * (1.0 - s), wy * s + ty * (1.0 - s));
+        if vx.abs() + vy.abs() < 1e-6 {
+            return wind;
+        }
+        vx.atan2(vy).to_degrees().rem_euclid(360.0)
+    };
+    let mut out = Heightfield::new(
+        ocean.width(),
+        ocean.height(),
+        ocean.tile_size(),
+        ocean.halo(),
+    )?;
+    out.fill_with(|x, y| {
+        let i = y as usize * w + x as usize;
+        if water[i] {
+            water_dir(i)
+        } else {
+            // Land: the nearest water neighbour's flow, the wind further inland.
+            neighbours(i)
+                .filter(|&j| water[j])
+                .map(water_dir)
+                .next()
+                .unwrap_or(wind)
+        }
+    });
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn the_current_runs_with_the_wind_offshore_and_alongshore_at_the_coast() {
+        // 64 × 32 sea, 50 m cells, land from x = 48 east; a south-westerly (air travels north-east).
+        let mut ocean = Heightfield::new(64, 32, 64, 0).expect("o");
+        ocean.fill_with(|x, _| if x >= 48 { 0.0 } else { 1.0 });
+        let cur = surface_current(&ocean, [50.0, 50.0], 225.0, 1000.0, None).expect("current");
+        assert!(
+            (cur.get(4, 16) - 45.0).abs() < 1.0,
+            "offshore it is the wind: {}",
+            cur.get(4, 16)
+        );
+        assert!(
+            cur.get(47, 16) < 5.0 || cur.get(47, 16) > 355.0,
+            "at the coast it runs north, alongshore: {}",
+            cur.get(47, 16)
+        );
+        let mid = cur.get(38, 16); // 500 m out: half way round
+        assert!(mid > 5.0 && mid < 40.0, "between, it bends: {mid}");
+        assert!(
+            (cur.get(60, 16) - 45.0).abs() < 1.0,
+            "inland the land carries the wind"
+        );
+        assert!(
+            cur.get(48, 16) < 5.0 || cur.get(48, 16) > 355.0,
+            "the shore cell carries its water neighbour's alongshore flow: {}",
+            cur.get(48, 16)
+        );
+        // A straight-on westerly: alongshore either way; the convention picks the left-hand tangent.
+        let on = surface_current(&ocean, [50.0, 50.0], 270.0, 1000.0, None).expect("onshore");
+        let a = on.get(47, 16);
+        assert!(
+            a < 5.0 || a > 355.0 || (a - 180.0).abs() < 5.0,
+            "alongshore: {a}"
+        );
+        assert!(surface_current(&ocean, [50.0, 50.0], 270.0, 0.0, None).is_err());
+    }
 
     #[test]
     fn refraction_focuses_waves_on_a_headland_and_spreads_them_in_the_bays() {

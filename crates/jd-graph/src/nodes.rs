@@ -493,6 +493,13 @@ struct SeaLevelParams {
     /// sea's (`wind_speed_mps`, `fetch_km`); a 16 s swell bends from 200 m down, a 3 s chop from 7 m.
     #[serde(default)]
     refraction: bool,
+    /// Width of the coastal band, metres (> 0), within which the surface `current` bends from the
+    /// wind's direction to run alongshore.
+    #[serde(default = "current_band_m")]
+    current_band_m: f32,
+}
+fn current_band_m() -> f32 {
+    2000.0
 }
 fn wind_speed_mps() -> f32 {
     8.0
@@ -1051,12 +1058,13 @@ pub fn register_all(r: &mut Registry) {
     ).with_check(validate_biome_rules));
     r.register(NodeDef::new::<SeabedParams, _>(
         "jd.biome.seabed@1",
-        "Classify the sea floor below `level_m`: 1 sand on the shelf above the wave base, 2 rock on steep slopes, 3 mud in deep still water, 4 reef on a shallow gentle shelf away from river sediment (optional `rivers` and `shore` masks); 0 = land; an optional `exposure` field (the sea-level node's wave exposure) lets mud settle sooner in sheltered water",
+        "Classify the sea floor below `level_m`: 1 sand on the shelf above the wave base, 2 rock on steep slopes, 3 mud in deep still water, 4 reef on a shallow gentle shelf away from river sediment (optional `rivers` and `shore` masks); 0 = land; an optional `exposure` field (the sea-level node's wave exposure) lets mud settle sooner in sheltered water; an optional `current` field (the sea-level node's drift direction) carries the river and shore sediment downstream — the reach stretches with the current and shrinks against it",
         vec![
             port("in", PortType::Heightfield, true),
             port("rivers", PortType::Heightfield, false),
             port("shore", PortType::Heightfield, false),
             port("exposure", PortType::Heightfield, false),
+            port("current", PortType::Heightfield, false),
         ],
         vec![port("seabed", PortType::Heightfield, false)],
         |ctx, p, i| {
@@ -1064,7 +1072,8 @@ pub fn register_all(r: &mut Registry) {
             let rivers = i.get("rivers").map(|v| v.as_field());
             let shore = i.get("shore").map(|v| v.as_field());
             let exposure = i.get("exposure").map(|v| v.as_field());
-            Ok(out("seabed", jd_terrain::classify_seabed_with(field(i, "in")?, spacing_m(ctx), rivers.map(|r| &**r), shore.map(|s| &**s), exposure.map(|e| &**e), &sp)?))
+            let current = i.get("current").map(|v| v.as_field());
+            Ok(out("seabed", jd_terrain::classify_seabed_current(field(i, "in")?, spacing_m(ctx), rivers.map(|r| &**r), shore.map(|s| &**s), exposure.map(|e| &**e), current.map(|c| &**c), &sp)?))
         },
     ).with_memory(8.0));
     r.register(NodeDef::new::<jd_terrain::StrataParams, _>(
@@ -1150,13 +1159,16 @@ pub fn register_all(r: &mut Registry) {
     ));
     r.register(NodeDef::new::<SeaLevelParams, _>(
         "jd.hydrology.sea_level@1",
-        "Ocean mask (1 below `level_m` where connected to the border; inland basins stay dry) with a soft shoreline, water `depth` in metres, and the wave `exposure` 0..1 of every water cell — the open-water fetch upwind of it (the wind and `fetch_km` of the node or the world), low in the lee of islands and headlands; with `refraction` the waves bend over the shelf and the exposure is focused on headlands (up to 2, which the coastal and seabed nodes honour) and spread in bays",
+        "Ocean mask (1 below `level_m` where connected to the border; inland basins stay dry) with a soft shoreline, water `depth` in metres, and the wave `exposure` 0..1 of every water cell — the open-water fetch upwind of it (the wind and `fetch_km` of the node or the world), low in the lee of islands and headlands; with `refraction` the waves bend over the shelf and the exposure is focused on headlands (up to 2, which the coastal and seabed nodes honour) and spread in bays; `current` is the surface drift's direction (degrees clockwise from north the water flows towards): the wind offshore, bent alongshore within `current_band_m` of land — feed `jd.biome.seabed@1` so sediment travels downstream",
         vec![port("in", PortType::Heightfield, true)],
-        vec![port("ocean", PortType::Heightfield, false), port("depth", PortType::Heightfield, false), port("exposure", PortType::Heightfield, false)],
+        vec![port("ocean", PortType::Heightfield, false), port("depth", PortType::Heightfield, false), port("exposure", PortType::Heightfield, false), port("current", PortType::Heightfield, false)],
         |ctx, p, i| {
             let sp: SeaLevelParams = params(&with_world_wind(ctx, p, &["wind_azimuth_deg", "wind_speed_mps"]))?;
             if !(sp.visibility_m > 0.0 && sp.visibility_m.is_finite()) {
                 return Err(JdError::invalid("visibility_m", "must be positive"));
+            }
+            if !(sp.current_band_m > 0.0 && sp.current_band_m.is_finite()) {
+                return Err(JdError::invalid("current_band_m", "must be positive"));
             }
             if sp.tint.iter().any(|c| !(0.0..=1.0).contains(c)) {
                 return Err(JdError::invalid("tint", "components must be within 0..=1"));
@@ -1173,12 +1185,14 @@ pub fn register_all(r: &mut Registry) {
                 let focus = jd_terrain::wave_refraction(&ocean, &depth, spacing_m(ctx), sp.wind_azimuth_deg, sea.wavelength_m, Some(&ctx.cancel))?;
                 exposure = map2(&exposure, &focus, |e, k| e * k)?;
             }
-            Ok(BTreeMap::from([("ocean".to_owned(), Value::field(ocean)), ("depth".to_owned(), Value::field(depth)), ("exposure".to_owned(), Value::field(exposure))]))
+            let current = jd_terrain::surface_current(&ocean, spacing_m(ctx), sp.wind_azimuth_deg, sp.current_band_m, Some(&ctx.cancel))?;
+            Ok(BTreeMap::from([("ocean".to_owned(), Value::field(ocean)), ("depth".to_owned(), Value::field(depth)), ("exposure".to_owned(), Value::field(exposure)), ("current".to_owned(), Value::field(current))]))
         },
     )
-    // Scratch: the flood (height copy, sea flags, reach) ≈ 9 B/cell; the refraction march adds
-    // arrival time, slowness, flags, ray direction, spacing integral, order and the heap ≈ 25 B/cell.
-    .with_memory_fn(|p| if p.get("refraction").and_then(|v| v.as_bool()).unwrap_or(false) { 36.0 } else { 9.0 }));
+    // Scratch: the flood (height copy, sea flags, reach) ≈ 9 B/cell plus the current's distance
+    // to land, water flags and heap ≈ 13; the refraction march adds arrival time, slowness, flags,
+    // ray direction, spacing integral, order and its heap ≈ 25 B/cell (its own scratch is freed first).
+    .with_memory_fn(|p| if p.get("refraction").and_then(|v| v.as_bool()).unwrap_or(false) { 36.0 } else { 22.0 }));
     r.register(NodeDef::new::<RiversParams, _>(
         "jd.hydrology.rivers@1",
         "Carve river channels where flow accumulates (depressions filled first); outputs the carved terrain and a 0..1 river mask",
