@@ -24,8 +24,34 @@
       "type": "number",
       "format": "float"
     },
+    "model": {
+      "description": "`moge2` or `da3-metric`.",
+      "type": "string"
+    },
+    "metric": {
+      "description": "Whether `depth_m` (and a `metric` EXR) is in metres: always for MoGe-2, for DA3 only\nwith `fov_x_deg`.",
+      "type": "boolean"
+    },
+    "fov_x_deg": {
+      "description": "Horizontal field of view in degrees (recovered by MoGe-2, or the one given).",
+      "type": [
+        "number",
+        "null"
+      ],
+      "format": "float"
+    },
+    "depth_m": {
+      "description": "Depth over the trusted pixels, `[min, max]`: metres when `metric`, else the model's\ncanonical units.",
+      "type": "array",
+      "items": {
+        "type": "number",
+        "format": "float"
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
     "metric_scale": {
-      "description": "The model's metric-scale estimate (dimensionless until focal/shift recovery exists).",
+      "description": "MoGe-2's metric scale (metres per unit of shifted z; 1 for DA3).",
       "type": "number",
       "format": "float"
     },
@@ -46,6 +72,9 @@
     "path",
     "px",
     "masked_share",
+    "model",
+    "metric",
+    "depth_m",
     "metric_scale",
     "load_ms",
     "infer_ms"

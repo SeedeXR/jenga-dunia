@@ -1397,12 +1397,19 @@ export type TimelineExportResult = {
 export type VisionDepthRequest = {
   /** Photograph to read (PNG or JPEG; absolute, or relative to the project's `assets/`). */
   "image": string;
-  /** MoGe-2 ONNX model (`model.onnx` from `Ruicheng/moge-2-vit{s,b,l}-normal-onnx`, MIT;
-absolute, or relative to the project root). */
+  /** ONNX model (absolute, or relative to the project root): MoGe-2 (`model.onnx` from
+`Ruicheng/moge-2-vit{s,b,l}-normal-onnx`, MIT) or Depth Anything 3 metric
+(`Heliosoph/da3metric-large-onnx`, Apache-2.0) — told apart by the graph's outputs. */
   "model": string;
   /** Output heightmap, OpenEXR f32 (absolute, or relative to the project's `exports/`): the
-relief 0..1, near = high, row 0 = the top of the photograph, masked pixels 0. */
+relief 0..1, near = high, row 0 = the top of the photograph, masked pixels 0 — or,
+with `metric`, the depth per pixel in metres (masked pixels 0). */
   "path"?: string;
+  /** The camera's horizontal field of view in degrees, when known: MoGe-2 then fits the
+z shift only (its own estimate is the default), DA3 needs it for metres. */
+  "fov_x_deg"?: number | null;
+  /** Write the depth in metres instead of the 0..1 relief. */
+  "metric"?: boolean;
   /** Long side the photograph is resized to before inference (518..=4096). */
   "max_px"?: number;
   /** Token budget of the model (1200..=3600): more is finer and slower. */
@@ -1416,7 +1423,17 @@ export type VisionDepthResult = {
   "px": [number, number];
   /** Share of pixels the model masked out (sky, nothing), 0..1. */
   "masked_share": number;
-  /** The model's metric-scale estimate (dimensionless until focal/shift recovery exists). */
+  /** `moge2` or `da3-metric`. */
+  "model": string;
+  /** Whether `depth_m` (and a `metric` EXR) is in metres: always for MoGe-2, for DA3 only
+with `fov_x_deg`. */
+  "metric": boolean;
+  /** Horizontal field of view in degrees (recovered by MoGe-2, or the one given). */
+  "fov_x_deg"?: number | null;
+  /** Depth over the trusted pixels, `[min, max]`: metres when `metric`, else the model's
+canonical units. */
+  "depth_m": [number, number];
+  /** MoGe-2's metric scale (metres per unit of shifted z; 1 for DA3). */
   "metric_scale": number;
   /** Milliseconds loading the model (0 when it was already resident). */
   "load_ms": number;
@@ -2062,7 +2079,7 @@ export interface JdOps {
   "terrain.textures": { request: TerrainTexturesRequest; result: TerrainTexturesResult };
   /** Evaluate the graph at evenly spaced timeline positions and write one heightmap per frame (keyframed parameters animate; the project's own time is untouched) */
   "timeline.export": { request: TimelineExportRequest; result: TimelineExportResult };
-  /** Monocular depth from a photograph (MoGe-2 through ONNX Runtime, CPU) written as an OpenEXR relief 0..1 — import it with `jd.input.heightmap@1` to sculpt from a picture */
+  /** Monocular depth from a photograph (MoGe-2 or Depth Anything 3 metric through ONNX Runtime, CPU) written as an OpenEXR relief 0..1 — or metres with `metric` — import it with `jd.input.heightmap@1` to sculpt from a picture */
   "vision.depth": { request: VisionDepthRequest; result: VisionDepthResult };
 }
 

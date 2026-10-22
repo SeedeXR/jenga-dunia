@@ -231,7 +231,7 @@
   },
   {
     "id": "vision.depth",
-    "description": "Monocular depth from a photograph (MoGe-2 through ONNX Runtime, CPU) written as an OpenEXR relief 0..1 — import it with `jd.input.heightmap@1` to sculpt from a picture",
+    "description": "Monocular depth from a photograph (MoGe-2 or Depth Anything 3 metric through ONNX Runtime, CPU) written as an OpenEXR relief 0..1 — or metres with `metric` — import it with `jd.input.heightmap@1` to sculpt from a picture",
     "scope": "export"
   }
 ]

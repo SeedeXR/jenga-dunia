@@ -7424,7 +7424,7 @@ expression: list
   },
   {
     "id": "vision.depth",
-    "description": "Monocular depth from a photograph (MoGe-2 through ONNX Runtime, CPU) written as an OpenEXR relief 0..1 — import it with `jd.input.heightmap@1` to sculpt from a picture",
+    "description": "Monocular depth from a photograph (MoGe-2 or Depth Anything 3 metric through ONNX Runtime, CPU) written as an OpenEXR relief 0..1 — or metres with `metric` — import it with `jd.input.heightmap@1` to sculpt from a picture",
     "scope": "export",
     "request_schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -7437,13 +7437,29 @@ expression: list
           "type": "string"
         },
         "model": {
-          "description": "MoGe-2 ONNX model (`model.onnx` from `Ruicheng/moge-2-vit{s,b,l}-normal-onnx`, MIT;\nabsolute, or relative to the project root).",
+          "description": "ONNX model (absolute, or relative to the project root): MoGe-2 (`model.onnx` from\n`Ruicheng/moge-2-vit{s,b,l}-normal-onnx`, MIT) or Depth Anything 3 metric\n(`Heliosoph/da3metric-large-onnx`, Apache-2.0) — told apart by the graph's outputs.",
           "type": "string"
         },
         "path": {
-          "description": "Output heightmap, OpenEXR f32 (absolute, or relative to the project's `exports/`): the\nrelief 0..1, near = high, row 0 = the top of the photograph, masked pixels 0.",
+          "description": "Output heightmap, OpenEXR f32 (absolute, or relative to the project's `exports/`): the\nrelief 0..1, near = high, row 0 = the top of the photograph, masked pixels 0 — or,\nwith `metric`, the depth per pixel in metres (masked pixels 0).",
           "type": "string",
           "default": "photo-depth.exr"
+        },
+        "fov_x_deg": {
+          "description": "The camera's horizontal field of view in degrees, when known: MoGe-2 then fits the\nz shift only (its own estimate is the default), DA3 needs it for metres.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float",
+          "minimum": 1.0,
+          "maximum": 179.0,
+          "default": null
+        },
+        "metric": {
+          "description": "Write the depth in metres instead of the 0..1 relief.",
+          "type": "boolean",
+          "default": false
         },
         "max_px": {
           "description": "Long side the photograph is resized to before inference (518..=4096).",
@@ -7494,8 +7510,34 @@ expression: list
           "type": "number",
           "format": "float"
         },
+        "model": {
+          "description": "`moge2` or `da3-metric`.",
+          "type": "string"
+        },
+        "metric": {
+          "description": "Whether `depth_m` (and a `metric` EXR) is in metres: always for MoGe-2, for DA3 only\nwith `fov_x_deg`.",
+          "type": "boolean"
+        },
+        "fov_x_deg": {
+          "description": "Horizontal field of view in degrees (recovered by MoGe-2, or the one given).",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        },
+        "depth_m": {
+          "description": "Depth over the trusted pixels, `[min, max]`: metres when `metric`, else the model's\ncanonical units.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
         "metric_scale": {
-          "description": "The model's metric-scale estimate (dimensionless until focal/shift recovery exists).",
+          "description": "MoGe-2's metric scale (metres per unit of shifted z; 1 for DA3).",
           "type": "number",
           "format": "float"
         },
@@ -7516,6 +7558,9 @@ expression: list
         "path",
         "px",
         "masked_share",
+        "model",
+        "metric",
+        "depth_m",
         "metric_scale",
         "load_ms",
         "infer_ms"

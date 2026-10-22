@@ -3687,13 +3687,23 @@ pub mod terrain {
     pub struct VisionDepth {
         /// Photograph to read (PNG or JPEG; absolute, or relative to the project's `assets/`).
         pub image: PathBuf,
-        /// MoGe-2 ONNX model (`model.onnx` from `Ruicheng/moge-2-vit{s,b,l}-normal-onnx`, MIT;
-        /// absolute, or relative to the project root).
+        /// ONNX model (absolute, or relative to the project root): MoGe-2 (`model.onnx` from
+        /// `Ruicheng/moge-2-vit{s,b,l}-normal-onnx`, MIT) or Depth Anything 3 metric
+        /// (`Heliosoph/da3metric-large-onnx`, Apache-2.0) — told apart by the graph's outputs.
         pub model: PathBuf,
         /// Output heightmap, OpenEXR f32 (absolute, or relative to the project's `exports/`): the
-        /// relief 0..1, near = high, row 0 = the top of the photograph, masked pixels 0.
+        /// relief 0..1, near = high, row 0 = the top of the photograph, masked pixels 0 — or,
+        /// with `metric`, the depth per pixel in metres (masked pixels 0).
         #[serde(default = "default_vision_path")]
         pub path: PathBuf,
+        /// The camera's horizontal field of view in degrees, when known: MoGe-2 then fits the
+        /// z shift only (its own estimate is the default), DA3 needs it for metres.
+        #[serde(default)]
+        #[schemars(range(min = 1.0, max = 179.0))]
+        pub fov_x_deg: Option<f32>,
+        /// Write the depth in metres instead of the 0..1 relief.
+        #[serde(default)]
+        pub metric: bool,
         /// Long side the photograph is resized to before inference (518..=4096).
         #[serde(default = "default_vision_px")]
         #[schemars(range(min = 518, max = 4096))]
@@ -3722,7 +3732,17 @@ pub mod terrain {
         pub px: [u32; 2],
         /// Share of pixels the model masked out (sky, nothing), 0..1.
         pub masked_share: f32,
-        /// The model's metric-scale estimate (dimensionless until focal/shift recovery exists).
+        /// `moge2` or `da3-metric`.
+        pub model: String,
+        /// Whether `depth_m` (and a `metric` EXR) is in metres: always for MoGe-2, for DA3 only
+        /// with `fov_x_deg`.
+        pub metric: bool,
+        /// Horizontal field of view in degrees (recovered by MoGe-2, or the one given).
+        pub fov_x_deg: Option<f32>,
+        /// Depth over the trusted pixels, `[min, max]`: metres when `metric`, else the model's
+        /// canonical units.
+        pub depth_m: [f32; 2],
+        /// MoGe-2's metric scale (metres per unit of shifted z; 1 for DA3).
         pub metric_scale: f32,
         /// Milliseconds loading the model (0 when it was already resident).
         pub load_ms: u64,
@@ -4122,7 +4142,7 @@ pub mod terrain {
         #[cfg(feature = "vision")]
         r.register::<VisionDepth, VisionDepthResult, _>(
             "vision.depth",
-            "Monocular depth from a photograph (MoGe-2 through ONNX Runtime, CPU) written as an OpenEXR relief 0..1 — import it with `jd.input.heightmap@1` to sculpt from a picture",
+            "Monocular depth from a photograph (MoGe-2 or Depth Anything 3 metric through ONNX Runtime, CPU) written as an OpenEXR relief 0..1 — or metres with `metric` — import it with `jd.input.heightmap@1` to sculpt from a picture",
             Scope::Export,
             |ctx, p| {
                 let (image, model, path) = ctx.with_project(|proj| {
@@ -4134,19 +4154,24 @@ pub mod terrain {
                 if let Some(parent) = path.parent() {
                     std::fs::create_dir_all(parent)?;
                 }
-                let d = jd_vision::depth_from_image(&image, &model, p.max_px, p.num_tokens)?;
+                let d = jd_vision::depth_from_image(&image, &model, p.max_px, p.num_tokens, p.fov_x_deg)?;
+                if p.metric && !d.metric {
+                    return Err(JdError::invalid("metric", "DA3's depth is canonical without the camera's field of view").next("Pass `fov_x_deg`, or use MoGe-2, which recovers it."));
+                }
+                let field = if p.metric { &d.depth_m } else { &d.height01 };
                 let mut hf = jd_terrain::Heightfield::new(d.width, d.height, 64, 0)?;
                 hf.fill_with(|x, y| {
-                    let v = d.height01[(y * d.width + x) as usize];
+                    let v = field[(y * d.width + x) as usize];
                     if v.is_finite() { v } else { 0.0 }
                 });
+                let depth_m = d.depth_m.iter().filter(|v| v.is_finite()).fold([f32::INFINITY, f32::NEG_INFINITY], |[lo, hi], &v| [lo.min(v), hi.max(v)]);
                 jd_terrain::export_heightmap(
                     &hf,
                     &path,
                     &jd_terrain::ExportOptions { format: jd_terrain::HeightmapFormat::Exr, flip_y: Some(false), range_m: None, georeference: false },
                 )?;
                 Ok((
-                    VisionDepthResult { path, px: [d.width, d.height], masked_share: d.masked_share, metric_scale: d.metric_scale, load_ms: d.load_ms, infer_ms: d.infer_ms },
+                    VisionDepthResult { path, px: [d.width, d.height], masked_share: d.masked_share, model: d.model.as_str().into(), metric: d.metric, fov_x_deg: d.fov_x_deg, depth_m, metric_scale: d.metric_scale, load_ms: d.load_ms, infer_ms: d.infer_ms },
                     Vec::new(),
                 ))
             },
