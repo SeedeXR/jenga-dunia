@@ -3727,6 +3727,11 @@ pub mod terrain {
         /// Write the depth in metres instead of the 0..1 relief.
         #[serde(default)]
         pub metric: bool,
+        /// DA3 only: the `da3-base` ONNX export (`Heliosoph/da3-base-onnx`, Apache-2.0; absolute,
+        /// or relative to the project root) whose camera head estimates the field of view when
+        /// `fov_x_deg` is not given — the metric export has no camera head of its own.
+        #[serde(default)]
+        pub camera_model: Option<PathBuf>,
         /// Long side the photograph is resized to before inference (518..=4096).
         #[serde(default = "default_vision_px")]
         #[schemars(range(min = 518, max = 4096))]
@@ -3760,8 +3765,11 @@ pub mod terrain {
         /// Whether `depth_m` (and a `metric` EXR) is in metres: always for MoGe-2, for DA3 only
         /// with `fov_x_deg`.
         pub metric: bool,
-        /// Horizontal field of view in degrees (recovered by MoGe-2, or the one given).
+        /// Horizontal field of view in degrees (recovered by MoGe-2, estimated by DA3's camera
+        /// head, or the one given).
         pub fov_x_deg: Option<f32>,
+        /// `recovered`, `given`, `camera` or `none`.
+        pub fov_source: String,
         /// Depth over the trusted pixels, `[min, max]`: metres when `metric`, else the model's
         /// canonical units.
         pub depth_m: [f32; 2],
@@ -4177,9 +4185,10 @@ pub mod terrain {
                 if let Some(parent) = path.parent() {
                     std::fs::create_dir_all(parent)?;
                 }
-                let d = jd_vision::depth_from_image(&image, &model, p.max_px, p.num_tokens, p.fov_x_deg)?;
+                let camera = p.camera_model.as_ref().map(|c| if c.is_absolute() { Ok(c.clone()) } else { ctx.with_project(|proj| Ok(proj.root().join(c))) }).transpose()?;
+                let d = jd_vision::depth_from_image(&image, &model, p.max_px, p.num_tokens, p.fov_x_deg, camera.as_deref())?;
                 if p.metric && !d.metric {
-                    return Err(JdError::invalid("metric", "DA3's depth is canonical without the camera's field of view").next("Pass `fov_x_deg`, or use MoGe-2, which recovers it."));
+                    return Err(JdError::invalid("metric", "DA3's depth is canonical without the camera's field of view").next("Pass `fov_x_deg` or `camera_model` (the da3-base export), or use MoGe-2, which recovers it."));
                 }
                 let field = if p.metric { &d.depth_m } else { &d.height01 };
                 let mut hf = jd_terrain::Heightfield::new(d.width, d.height, 64, 0)?;
@@ -4194,7 +4203,7 @@ pub mod terrain {
                     &jd_terrain::ExportOptions { format: jd_terrain::HeightmapFormat::Exr, flip_y: Some(false), range_m: None, georeference: false },
                 )?;
                 Ok((
-                    VisionDepthResult { path, px: [d.width, d.height], masked_share: d.masked_share, model: d.model.as_str().into(), metric: d.metric, fov_x_deg: d.fov_x_deg, depth_m, metric_scale: d.metric_scale, load_ms: d.load_ms, infer_ms: d.infer_ms },
+                    VisionDepthResult { path, px: [d.width, d.height], masked_share: d.masked_share, model: d.model.as_str().into(), metric: d.metric, fov_x_deg: d.fov_x_deg, fov_source: d.fov_source.into(), depth_m, metric_scale: d.metric_scale, load_ms: d.load_ms, infer_ms: d.infer_ms },
                     Vec::new(),
                 ))
             },

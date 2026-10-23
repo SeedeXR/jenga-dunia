@@ -8272,6 +8272,14 @@ expression: list
           "type": "boolean",
           "default": false
         },
+        "camera_model": {
+          "description": "DA3 only: the `da3-base` ONNX export (`Heliosoph/da3-base-onnx`, Apache-2.0; absolute,\nor relative to the project root) whose camera head estimates the field of view when\n`fov_x_deg` is not given — the metric export has no camera head of its own.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
         "max_px": {
           "description": "Long side the photograph is resized to before inference (518..=4096).",
           "type": "integer",
@@ -8330,12 +8338,16 @@ expression: list
           "type": "boolean"
         },
         "fov_x_deg": {
-          "description": "Horizontal field of view in degrees (recovered by MoGe-2, or the one given).",
+          "description": "Horizontal field of view in degrees (recovered by MoGe-2, estimated by DA3's camera\nhead, or the one given).",
           "type": [
             "number",
             "null"
           ],
           "format": "float"
+        },
+        "fov_source": {
+          "description": "`recovered`, `given`, `camera` or `none`.",
+          "type": "string"
         },
         "depth_m": {
           "description": "Depth over the trusted pixels, `[min, max]`: metres when `metric`, else the model's\ncanonical units.",
@@ -8371,6 +8383,7 @@ expression: list
         "masked_share",
         "model",
         "metric",
+        "fov_source",
         "depth_m",
         "metric_scale",
         "load_ms",

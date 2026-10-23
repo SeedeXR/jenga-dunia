@@ -1578,6 +1578,10 @@ z shift only (its own estimate is the default), DA3 needs it for metres. */
   "fov_x_deg"?: number | null;
   /** Write the depth in metres instead of the 0..1 relief. */
   "metric"?: boolean;
+  /** DA3 only: the `da3-base` ONNX export (`Heliosoph/da3-base-onnx`, Apache-2.0; absolute,
+or relative to the project root) whose camera head estimates the field of view when
+`fov_x_deg` is not given — the metric export has no camera head of its own. */
+  "camera_model"?: string | null;
   /** Long side the photograph is resized to before inference (518..=4096). */
   "max_px"?: number;
   /** Token budget of the model (1200..=3600): more is finer and slower. */
@@ -1596,8 +1600,11 @@ export type VisionDepthResult = {
   /** Whether `depth_m` (and a `metric` EXR) is in metres: always for MoGe-2, for DA3 only
 with `fov_x_deg`. */
   "metric": boolean;
-  /** Horizontal field of view in degrees (recovered by MoGe-2, or the one given). */
+  /** Horizontal field of view in degrees (recovered by MoGe-2, estimated by DA3's camera
+head, or the one given). */
   "fov_x_deg"?: number | null;
+  /** `recovered`, `given`, `camera` or `none`. */
+  "fov_source": string;
   /** Depth over the trusted pixels, `[min, max]`: metres when `metric`, else the model's
 canonical units. */
   "depth_m": [number, number];

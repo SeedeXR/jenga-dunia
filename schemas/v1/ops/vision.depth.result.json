@@ -33,12 +33,16 @@
       "type": "boolean"
     },
     "fov_x_deg": {
-      "description": "Horizontal field of view in degrees (recovered by MoGe-2, or the one given).",
+      "description": "Horizontal field of view in degrees (recovered by MoGe-2, estimated by DA3's camera\nhead, or the one given).",
       "type": [
         "number",
         "null"
       ],
       "format": "float"
+    },
+    "fov_source": {
+      "description": "`recovered`, `given`, `camera` or `none`.",
+      "type": "string"
     },
     "depth_m": {
       "description": "Depth over the trusted pixels, `[min, max]`: metres when `metric`, else the model's\ncanonical units.",
@@ -74,6 +78,7 @@
     "masked_share",
     "model",
     "metric",
+    "fov_source",
     "depth_m",
     "metric_scale",
     "load_ms",

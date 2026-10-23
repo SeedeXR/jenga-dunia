@@ -62,6 +62,9 @@ pub struct Depth {
     /// Horizontal field of view in degrees: recovered from the points (MoGe-2) or the one
     /// given (DA3 needs it; `None` when it had none).
     pub fov_x_deg: Option<f32>,
+    /// Where `fov_x_deg` came from: `recovered` (MoGe's fit), `given`, `camera` (DA3's camera
+    /// head) or `none`.
+    pub fov_source: &'static str,
     /// MoGe-2: focal length relative to half the image diagonal, and the z shift added to the
     /// affine points; `None` for DA3.
     pub focal_shift: Option<(f32, f32)>,
@@ -80,6 +83,81 @@ pub struct Depth {
 /// One model resident at a time: the session (1.3 GB for ViT-L) is kept across calls and
 /// replaced when a different model path comes in.
 static SESSION: OnceLock<Mutex<Option<(PathBuf, ort::session::Session)>>> = OnceLock::new();
+/// The DA3 camera model (`Heliosoph/da3-base-onnx`), resident beside the depth model.
+static CAMERA: OnceLock<Mutex<Option<(PathBuf, ort::session::Session)>>> = OnceLock::new();
+
+fn ort_err<E: std::fmt::Display>(what: &'static str) -> impl Fn(E) -> JdError {
+    move |e| JdError::new(ErrorCode::E_INTERNAL, format!("onnxruntime {what}: {e}"))
+}
+
+/// Open an ONNX session on the CPU (see [`depth_from_image`] for why not CoreML).
+fn open_session(path: &Path) -> JdResult<ort::session::Session> {
+    // ONNX Runtime allows one environment per process; every session shares it.
+    static ENV: OnceLock<ort::environment::Environment> = OnceLock::new();
+    let env = match ENV.get() {
+        Some(e) => e.clone(),
+        None => {
+            let e = ort::init().build().map_err(ort_err("init"))?;
+            ENV.get_or_init(|| e).clone()
+        }
+    };
+    ort::session::Session::builder(&env)
+        .map_err(ort_err("builder"))?
+        .with_auto_device(ort::session::builder::AutoDevicePolicy::PreferCPU)
+        .map_err(ort_err("device policy"))?
+        .with_intra_threads(
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4),
+        )
+        .map_err(ort_err("threads"))?
+        .commit_from_file(path)
+        .map_err(ort_err("load"))
+}
+
+/// DA3's camera head from the `da3-base` export: `intrinsics` (1, 1, 3, 3) at the 504² grid →
+/// `(fx, fy)` in pixels (the principal point is fixed at 252, 252). The input is the same
+/// ImageNet-normalised square the metric model sees.
+fn da3_intrinsics(camera_model: &Path, chw: Vec<f32>, px: u32) -> JdResult<(f32, f32)> {
+    let abs = std::path::absolute(camera_model)?;
+    if !abs.is_file() {
+        return Err(JdError::new(ErrorCode::E_DEPENDENCY_MISSING, format!("camera model not found: {}", abs.display()))
+            .next("Download `model.onnx` from huggingface.co/Heliosoph/da3-base-onnx (Apache-2.0) and pass its path as `camera_model`."));
+    }
+    let slot = CAMERA.get_or_init(|| Mutex::new(None));
+    let mut guard = slot
+        .lock()
+        .map_err(|_| JdError::new(ErrorCode::E_INTERNAL, "camera session lock poisoned"))?;
+    if guard.as_ref().is_none_or(|(p, _)| *p != abs) {
+        let session = open_session(&abs)?;
+        if !session.outputs().iter().any(|o| o.name() == "intrinsics") {
+            return Err(JdError::invalid(
+                "camera_model",
+                "the graph has no `intrinsics` output (the DA3 metric export has no camera head; use the da3-base export)",
+            ));
+        }
+        *guard = Some((abs.clone(), session));
+    }
+    let session = &mut guard
+        .as_mut()
+        .ok_or_else(|| JdError::new(ErrorCode::E_INTERNAL, "no camera session"))?
+        .1;
+    let t = ort::value::Tensor::from_array(([1usize, 3, px as usize, px as usize], chw))
+        .map_err(ort_err("input"))?;
+    let outputs = session
+        .run(ort::inputs!["image" => t])
+        .map_err(ort_err("run"))?;
+    let (_, k) = outputs["intrinsics"]
+        .try_extract_tensor::<f32>()
+        .map_err(ort_err("intrinsics"))?;
+    if k.len() != 9 || !(k[0] > 0.0 && k[4] > 0.0) {
+        return Err(JdError::new(
+            ErrorCode::E_INTERNAL,
+            format!("unexpected DA3 intrinsics {k:?}"),
+        ));
+    }
+    Ok((k[0], k[4]))
+}
 
 /// DA3's fixed network input.
 const DA3_PX: u32 = 504;
@@ -90,7 +168,8 @@ const DA3_CANONICAL_FOCAL_PX: f32 = 300.0;
 /// first (MoGe works on a 14 px token grid of about `num_tokens` tokens whatever the input
 /// size; DA3 always sees 504×504 and its maps are resampled back to the `max_px` grid).
 /// `fov_x_deg`: the camera's horizontal field of view when known — MoGe then recovers the shift
-/// only, DA3 needs it for metres. CPU only: with ONNX Runtime 1.31 the CoreML provider claims
+/// only, DA3 needs it for metres; without it, `camera_model` (the DA3 base export, which has
+/// the camera head the metric export lacks) estimates the intrinsics from the same input. CPU only: with ONNX Runtime 1.31 the CoreML provider claims
 /// 221 of MoGe's 222 nodes and then fails to compute them ("Unable to compute the prediction",
 /// zero-sized slices in the encoder) — and ort's default device policy would register it on
 /// macOS anyway — so the session asks for the CPU outright.
@@ -100,6 +179,7 @@ pub fn depth_from_image(
     max_px: u32,
     num_tokens: i64,
     fov_x_deg: Option<f32>,
+    camera_model: Option<&Path>,
 ) -> JdResult<Depth> {
     if !(518..=4096).contains(&max_px) {
         return Err(JdError::invalid("max_px", "must be within 518..=4096"));
@@ -128,9 +208,6 @@ pub fn depth_from_image(
         ((iw as f32 * scale) as u32).max(14),
         ((ih as f32 * scale) as u32).max(14),
     );
-    fn ort_err<E: std::fmt::Display>(what: &'static str) -> impl Fn(E) -> JdError {
-        move |e| JdError::new(ErrorCode::E_INTERNAL, format!("onnxruntime {what}: {e}"))
-    }
     let model_abs = std::path::absolute(model)?;
     let slot = SESSION.get_or_init(|| Mutex::new(None));
     let mut guard = slot
@@ -139,21 +216,7 @@ pub fn depth_from_image(
     let mut load_ms = 0;
     if guard.as_ref().is_none_or(|(p, _)| *p != model_abs) {
         let t0 = std::time::Instant::now();
-        let env = ort::init().build().map_err(ort_err("init"))?;
-        // ort's default device policy registers CoreML on macOS whatever the session asks for;
-        // CoreML cannot compute this model (see above), so the CPU is chosen explicitly.
-        let session = ort::session::Session::builder(&env)
-            .map_err(ort_err("builder"))?
-            .with_auto_device(ort::session::builder::AutoDevicePolicy::PreferCPU)
-            .map_err(ort_err("device policy"))?
-            .with_intra_threads(
-                std::thread::available_parallelism()
-                    .map(|n| n.get())
-                    .unwrap_or(4),
-            )
-            .map_err(ort_err("threads"))?
-            .commit_from_file(&model_abs)
-            .map_err(ort_err("load"))?;
+        let session = open_session(&model_abs)?;
         *guard = Some((model_abs.clone(), session));
         load_ms = t0.elapsed().as_millis() as u64;
     }
@@ -195,11 +258,14 @@ pub fn depth_from_image(
             };
         }
     }
+    let chw_camera =
+        (kind == ModelKind::Da3Metric && fov_x_deg.is_none() && camera_model.is_some())
+            .then(|| chw.clone());
     let image_t = ort::value::Tensor::from_array(([1usize, 3, fh as usize, fw as usize], chw))
         .map_err(ort_err("input"))?;
     let t0 = std::time::Instant::now();
     // depth per pixel of the w×h grid (model units), trusted flag, and the metric facts.
-    let (mut depth, mut trusted, metric_scale, fov_x_deg, focal_shift) = match kind {
+    let (mut depth, mut trusted, metric_scale, fov_x_deg, focal_shift, fov_source) = match kind {
         ModelKind::MoGe2 => {
             let tokens_t = ort::value::Tensor::from_array(([] as [usize; 0], vec![num_tokens]))
                 .map_err(ort_err("input"))?;
@@ -241,7 +307,19 @@ pub fn depth_from_image(
                 .map(|i| (points[i * 3 + 2] + shift) * scale)
                 .collect();
             let fov = 2.0 * (span_x(w, h) / focal).atan().to_degrees();
-            (depth, trusted, scale, Some(fov), Some((focal, shift)))
+            let source = if fov_x_deg.is_some() {
+                "given"
+            } else {
+                "recovered"
+            };
+            (
+                depth,
+                trusted,
+                scale,
+                Some(fov),
+                Some((focal, shift)),
+                source,
+            )
         }
         ModelKind::Da3Metric => {
             let outputs = session
@@ -265,15 +343,26 @@ pub fn depth_from_image(
             // lengths in pixels of the 504² network input. The photograph was stretched to a
             // square, so fx comes from the horizontal field of view and fy from the vertical
             // one of the original aspect ratio.
-            let scale = match fov_x_deg {
+            let (scale, fov, source) = match fov_x_deg {
                 Some(f) => {
                     let tx = (f.to_radians() / 2.0).tan();
                     let ty = tx * ih as f32 / iw as f32;
                     let fx = 0.5 * DA3_PX as f32 / tx;
                     let fy = 0.5 * DA3_PX as f32 / ty;
-                    (fx + fy) / 2.0 / DA3_CANONICAL_FOCAL_PX
+                    ((fx + fy) / 2.0 / DA3_CANONICAL_FOCAL_PX, Some(f), "given")
                 }
-                None => 1.0,
+                None => match (camera_model, chw_camera) {
+                    (Some(cm), Some(data)) => {
+                        let (fx, fy) = da3_intrinsics(cm, data, DA3_PX)?;
+                        let fov = 2.0 * (DA3_PX as f32 / 2.0 / fx).atan().to_degrees();
+                        (
+                            (fx + fy) / 2.0 / DA3_CANONICAL_FOCAL_PX,
+                            Some(fov),
+                            "camera",
+                        )
+                    }
+                    _ => (1.0, None, "none"),
+                },
             };
             let depth_lr: Vec<f32> = canon.iter().map(|d| d * scale).collect();
             let depth = resample_bilinear(&depth_lr, DA3_PX, DA3_PX, w, h);
@@ -281,7 +370,7 @@ pub fn depth_from_image(
             let trusted: Vec<bool> = (0..n)
                 .map(|i| sky_hr[i] < 0.5 && depth[i].is_finite())
                 .collect();
-            (depth, trusted, 1.0, fov_x_deg, None)
+            (depth, trusted, 1.0, fov, None, source)
         }
     };
     let infer_ms = t0.elapsed().as_millis() as u64;
@@ -337,6 +426,7 @@ pub fn depth_from_image(
         depth_m: depth,
         metric,
         fov_x_deg,
+        fov_source,
         focal_shift,
         masked_share: 1.0 - n_trusted as f32 / n as f32,
         metric_scale,
@@ -547,6 +637,9 @@ mod tests {
         assert!(out[0] <= out[7] && (out[7] - 3.0).abs() < 1e-6, "{out:?}");
     }
 
+    /// The model-backed tests share the one resident session slot, so they take turns.
+    static TURN: Mutex<()> = Mutex::new(());
+
     fn hill_png() -> PathBuf {
         // A shaded dome on a flat plane: lighter towards the top (far), a bright blob in the
         // middle — the model should see something nearer in the middle than at the edges.
@@ -570,12 +663,13 @@ mod tests {
     /// Needs the 1.3 GB MoGe-2 ONNX model: `JD_MOGE_MODEL=/path/to/model.onnx`; skipped otherwise.
     #[test]
     fn a_synthetic_hill_photograph_comes_back_as_a_relief() {
+        let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
         let Ok(model) = std::env::var("JD_MOGE_MODEL") else {
             eprintln!("JD_MOGE_MODEL unset: skipping");
             return;
         };
         let path = hill_png();
-        let d = depth_from_image(&path, Path::new(&model), 518, 1200, None).expect("depth");
+        let d = depth_from_image(&path, Path::new(&model), 518, 1200, None, None).expect("depth");
         assert_eq!(d.model, ModelKind::MoGe2);
         assert_eq!((d.width, d.height), (256, 256));
         assert_eq!(d.height01.len(), 256 * 256);
@@ -598,31 +692,57 @@ mod tests {
         assert!(d.infer_ms > 0 && d.load_ms > 0);
         // The session stays resident: a second call loads nothing; a given fov pins it.
         let again =
-            depth_from_image(&path, Path::new(&model), 518, 1200, Some(60.0)).expect("again");
+            depth_from_image(&path, Path::new(&model), 518, 1200, Some(60.0), None).expect("again");
         assert_eq!(again.load_ms, 0);
         assert!((again.fov_x_deg.expect("fov") - 60.0).abs() < 1e-3);
-        assert!(depth_from_image(&path, Path::new("/nonexistent.onnx"), 518, 1200, None).is_err());
+        assert!(
+            depth_from_image(&path, Path::new("/nonexistent.onnx"), 518, 1200, None, None).is_err()
+        );
     }
 
     /// Needs the DA3 metric ONNX model: `JD_DA3_MODEL=/path/to/model.onnx`; skipped otherwise.
     #[test]
     fn the_da3_metric_graph_is_recognised_and_scaled_by_the_field_of_view() {
+        let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
         let Ok(model) = std::env::var("JD_DA3_MODEL") else {
             eprintln!("JD_DA3_MODEL unset: skipping");
             return;
         };
         let path = hill_png();
-        let canon = depth_from_image(&path, Path::new(&model), 518, 1200, None).expect("depth");
+        let canon =
+            depth_from_image(&path, Path::new(&model), 518, 1200, None, None).expect("depth");
         assert_eq!(canon.model, ModelKind::Da3Metric);
         assert!(!canon.metric && canon.fov_x_deg.is_none());
         assert_eq!((canon.width, canon.height), (256, 256));
-        let metric =
-            depth_from_image(&path, Path::new(&model), 518, 1200, Some(60.0)).expect("metric");
+        let metric = depth_from_image(&path, Path::new(&model), 518, 1200, Some(60.0), None)
+            .expect("metric");
         assert!(metric.metric);
         // 60° horizontal on a square: fx = fy = 252 / tan 30° = 436.5 px → × 436.5 / 300.
         let i = (150 * 256 + 128) as usize;
         let ratio = metric.depth_m[i] / canon.depth_m[i];
         assert!((ratio - 436.48 / 300.0).abs() < 1e-2, "ratio {ratio}");
         assert!(metric.height01[i].is_finite());
+        // The camera head of the da3-base export estimates the field of view when none is given.
+        if let Ok(cam) = std::env::var("JD_DA3_CAMERA_MODEL") {
+            let est = depth_from_image(
+                &path,
+                Path::new(&model),
+                518,
+                1200,
+                None,
+                Some(Path::new(&cam)),
+            )
+            .expect("camera");
+            assert!(est.metric && est.fov_source == "camera");
+            let fov = est.fov_x_deg.expect("fov");
+            assert!((10.0..170.0).contains(&fov), "fov {fov}");
+            let ratio = est.depth_m[i] / canon.depth_m[i];
+            assert!(
+                ratio > 0.1 && ratio < 10.0,
+                "scaled by the estimated focal: {ratio}"
+            );
+        } else {
+            eprintln!("JD_DA3_CAMERA_MODEL unset: skipping the camera head");
+        }
     }
 }
