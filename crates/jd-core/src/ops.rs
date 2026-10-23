@@ -2082,7 +2082,9 @@ pub mod graph {
         }
 
         fn wait_done(reg: &Registry, ctx: &Context, id: u64) -> Value {
-            for _ in 0..600 {
+            // Up to 60 s: the jobs under test are small, but a 2-core CI runner shares them with the
+            // other tests of this binary (the geo test alone fetches, decodes and evaluates).
+            for _ in 0..3000 {
                 let r = call(reg, ctx, "jobs.result", serde_json::json!({ "id": id }));
                 let res = r.result.expect("result");
                 if res["state"] == "done" {
