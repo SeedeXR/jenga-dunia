@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SdkCheck",
+  "description": "`fbx.sdk_check` params.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "The FBX file (absolute, or relative to the project's `exports/`).",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path"
+  ]
+}

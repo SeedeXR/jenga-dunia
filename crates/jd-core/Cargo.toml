@@ -12,6 +12,7 @@ publish.workspace = true
 jd-types.workspace = true
 jd-terrain.workspace = true
 jd-geo.workspace = true
+jd-fbxsdk.workspace = true
 jd-vision = { workspace = true, optional = true }
 jd-graph.workspace = true
 jd-cache.workspace = true

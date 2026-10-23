@@ -79,6 +79,40 @@ export type DiagEnvResult = {
   "tools": ToolStatus[];
 };
 
+export type FbxSdkCheckRequest = {
+  /** The FBX file (absolute, or relative to the project's `exports/`). */
+  "path": string;
+};
+
+export type FbxSdkCheckResult = {
+  /** The SDK's version string. */
+  "sdk": string;
+  /** The file's version as the SDK reports it (7400, 7500, …). */
+  "file_version": number;
+  /** Meshes in the scene; the rest describes the first. */
+  "meshes": number;
+  /** Control points. */
+  "vertices": number;
+  /** Polygons before the SDK's triangulation. */
+  "polygons": number;
+  /** Triangles after it. */
+  "triangles": number;
+  /** Bounds of the control points in file units, `[min, max]`. */
+  "bounds": [[number, number, number], [number, number, number]];
+  /** Centimetres per file unit (1 = cm, 100 = m). */
+  "unit_scale": number;
+  /** `Y` or `Z`. */
+  "up_axis": string;
+  /** A normal layer element exists. */
+  "has_normals": boolean;
+  /** A UV layer element exists. */
+  "has_uvs": boolean;
+  /** First material's name. */
+  "material"?: string | null;
+  /** First diffuse texture's relative file name. */
+  "texture"?: string | null;
+};
+
 export type GeoAttributionsRequest = Record<string, unknown>;
 
 export type Attribution = {
@@ -2205,6 +2239,8 @@ export interface JdOps {
   "diag.bundle": { request: DiagBundleRequest; result: DiagBundleResult };
   /** Report host environment and detected tools */
   "diag.env": { request: DiagEnvRequest; result: DiagEnvResult };
+  /** Read an FBX file through the Autodesk FBX SDK (when this build carries it) and report what the SDK sees: version, meshes, control points, polygons and triangles, bounds, units, up axis, normals, UVs, material and texture — the reference view of our own FBX writer */
+  "fbx.sdk_check": { request: FbxSdkCheckRequest; result: FbxSdkCheckResult };
   /** The project's consolidated data-source notices (what every export's ATTRIBUTION.txt carries) */
   "geo.attributions": { request: GeoAttributionsRequest; result: GeoAttributionsResult };
   /** Fetch a DEM for a lon/lat box (Terrarium tiles, Copernicus GLO-30, or OpenTopography with your key) into assets/ as a georeferenced f32 GeoTIFF, cached under cache/geo, with the provider's attribution recorded — then `jd.input.heightmap@1 {path, georeference: true}` places it */

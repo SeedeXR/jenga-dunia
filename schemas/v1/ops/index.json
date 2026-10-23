@@ -15,6 +15,11 @@
     "scope": "none"
   },
   {
+    "id": "fbx.sdk_check",
+    "description": "Read an FBX file through the Autodesk FBX SDK (when this build carries it) and report what the SDK sees: version, meshes, control points, polygons and triangles, bounds, units, up axis, normals, UVs, material and texture — the reference view of our own FBX writer",
+    "scope": "project-read"
+  },
+  {
     "id": "geo.attributions",
     "description": "The project's consolidated data-source notices (what every export's ATTRIBUTION.txt carries)",
     "scope": "project-read"

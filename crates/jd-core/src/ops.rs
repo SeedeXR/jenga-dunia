@@ -960,6 +960,7 @@ pub mod builtin {
         terrain::register_all(r);
         graph::register_all(r);
         crate::geo::register(r);
+        crate::fbxcheck::register(r);
     }
 }
 

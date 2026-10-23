@@ -28,6 +28,8 @@ flate2 = "1" # zlib arrays in FBX files (already in the tree via png/tiff)
 [dev-dependencies]
 proptest.workspace = true
 tempfile.workspace = true
+# The Autodesk FBX SDK as the oracle for our FBX writer and reader (ADR-0015); a stub without the SDK.
+jd-fbxsdk.workspace = true
 
 [lints]
 workspace = true

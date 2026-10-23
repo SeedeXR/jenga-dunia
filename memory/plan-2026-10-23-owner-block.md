@@ -1,4 +1,4 @@
-# Plan — owner block of 2026-10-23 (loop)
+# Plan — owner block of 2026-10-23 (loop) — all six stages done 2026-10-23 ~20:30 EAT
 
 Owner (2026-10-23): "clean up the stale markers and commit; work on: texture tiling and detail
 maps; in-process C++ FBX SDK adapter; DA3 intrinsics head; panel docking; a high-detail viewport
@@ -19,7 +19,7 @@ in one command), commit, push, CI watch. Record decisions here as they are made.
 | 2 | DA3 intrinsics: fov from `Heliosoph/da3-base-onnx` (Apache-2.0, `intrinsics` [1,1,3,3] at the 504² grid; the metric model has no camera head) feeding the metric model | done | second resident session, one ort environment per process (was: a second init failed), `camera_model` param, `fov_source`; 57.3° vs 60° truth on the render |
 | 3 | Texture tiling / detail maps | done | procedural seamless tiles; baked into maps/GLB by world position (glTF has one slot, no texture_transform); viewport TSL blend; Unity TerrainLayer tiles verified, Unreal tiles import, Blender GLB ok; library/triplanar/stochastic deferred |
 | 4 | Viewport: high-detail option beyond 1024² (setting + memory guard); panel docking | done | Preview detail 1024²/2048² (browser store; 4096² refused: ~1 GB of mesh); collapse left/right + graph dock bottom/right persisted (`jd.layout.dock`); docs corrected on the preview-lod readout |
-| 5 | In-process C++ FBX SDK adapter (feature-gated `jd-fbxsdk` crate, cc shim, macOS; skip on CI) + round-trip verification vs our writer/reader | planned | conflicts with ADR-0009 (out-of-process): owner asked for in-process → ADR-0015 supersedes the process boundary for the test oracle; licence notice 1.1.5; SDK libs universal arm64 at /Applications/Autodesk/FBX SDK/2020.3.9 |
+| 5 | In-process C++ FBX SDK adapter (feature-gated `jd-fbxsdk` crate, cc shim, macOS; skip on CI) + round-trip verification vs our writer/reader | done | ADR-0015; build-time detection (stub on CI); oracle test green; the shim surfaced nothing wrong with our writer (material, texture, units, axis all as intended); CLI + MCP `fbx.sdk_check`; macOS link line only |
 
 ## Decisions
 - 2026-10-23: fetch client = ureq 3 (rustls), no tokio in domain crates; providers Terrarium (default), Copernicus (AWS COGs), OpenTopography (BYOK); Overpass for OSM; cache under `cache/geo`; attribution automatic. ADR-0014.

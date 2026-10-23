@@ -2222,6 +2222,7 @@ dependencies = [
  "image",
  "insta",
  "jd-cache",
+ "jd-fbxsdk",
  "jd-geo",
  "jd-graph",
  "jd-terrain",
@@ -2236,6 +2237,14 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tracing",
+]
+
+[[package]]
+name = "jd-fbxsdk"
+version = "0.0.1"
+dependencies = [
+ "cc",
+ "jd-types",
 ]
 
 [[package]]
@@ -2307,6 +2316,7 @@ dependencies = [
  "fastnoise-lite",
  "flate2",
  "image",
+ "jd-fbxsdk",
  "jd-geo",
  "jd-types",
  "png 0.17.16",

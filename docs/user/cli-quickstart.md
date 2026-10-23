@@ -1068,6 +1068,17 @@ $ scripts/unity-import-check.sh Acceptance.jdproj/exports/unity          # exten
  "warnings":["source 512×512 is not a 2ⁿ+1 square: TerrainData resolution 513, the extra row/column is left at the edge value"],"ok":true}
 ```
 
+**The Autodesk FBX SDK as the oracle.** `crates/jd-fbxsdk` links the FBX SDK found on the machine (`FBXSDK_DIR`, or the default install under `/Applications/Autodesk`) through a small C shim at build time — never copied, never shipped; without it the crate is a stub and `fbx.sdk_check` answers `E_DEPENDENCY_MISSING` (ADR-0015). With it, the SDK reads our export and says what every SDK-based importer (Maya, Unreal's default FBX path, 3ds Max) will see:
+
+```
+$ jd --json op fbx.sdk_check --project Acceptance.jdproj --params '{"path":"oracle.fbx"}'
+{"sdk": "2020.3.9 Release (0)", "file_version": 7400, "meshes": 1, "vertices": 262144, "polygons": 261121, "triangles": 522242,
+ "bounds": [[-2555.0, 32.5, -2555.0], [2555.0, 1265.1, 2555.0]], "unit_scale": 100.0, "up_axis": "Y", "has_normals": true, "has_uvs": true,
+ "material": "terrain", "texture": "terrain-albedo.png"}
+```
+
+The same answer comes through the MCP server. The unit test (`the_fbx_sdk_reads_our_export_exactly_and_we_read_its_files`, skipped where the SDK is absent) compares the SDK's control points with our reader's to 1e-6, its triangle count with our report, confirms normals, UVs, the embedded diffuse texture, metres (`unit_scale` 100) and Y up, and then has the SDK write a 7500 file with its compressed arrays that our reader must read back to 1 mm — the first SDK-written fixture our reader is held to. A binary built on a machine with the SDK contains Autodesk code: *This software contains Autodesk® FBX® code developed by Autodesk, Inc. Copyright 2019 Autodesk, Inc. All rights, reserved. Such code is provided "as is" and Autodesk, Inc. disclaims any and all warranties, whether express or implied, including without limitation the implied warranties of merchantability, fitness for a particular purpose or non-infringement of third party rights. In no event shall Autodesk, Inc. be liable for any direct, indirect, incidental, special, exemplary, or consequential damages (including, but not limited to, procurement of substitute goods or services; loss of use, data, or profits; or business interruption) however caused and on any theory of liability, whether in contract, strict liability, or tort (including negligence or otherwise) arising in any way out of such code.* Release builds are made without the SDK and stay MIT.
+
 **Verified in Unreal.** `scripts/unreal-import-check.sh <profile dir>` writes a Blueprint-only `.uproject` under `target/scratch/UnrealJD`, starts `UnrealEditor-Cmd 5.8` unattended without a renderer and runs `integrations/unreal/jd_import_check.py`, which pushes every PNG of the directory through Unreal's own texture importer and reads back what the asset registry says; `--mesh terrain.glb|terrain.fbx` does the same through the Interchange importer and reports the StaticMesh. A run takes 9–12 s (the scratch project loads only the Python and Interchange plugins — `DisableEnginePluginsByDefault` — which took it from 17–19 s with identical reports). The very first launch of a freshly installed engine on a machine takes minutes, once: macOS validates and pages in the engine's binaries on first load (627 library loads at ~0.4 s each, no shader jobs — `docs/research/research-log/2026-10-22-unreal-first-run.md`).
 
 ```

@@ -283,6 +283,127 @@ expression: list
     }
   },
   {
+    "id": "fbx.sdk_check",
+    "description": "Read an FBX file through the Autodesk FBX SDK (when this build carries it) and report what the SDK sees: version, meshes, control points, polygons and triangles, bounds, units, up axis, normals, UVs, material and texture — the reference view of our own FBX writer",
+    "scope": "project-read",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "SdkCheck",
+      "description": "`fbx.sdk_check` params.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "The FBX file (absolute, or relative to the project's `exports/`).",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "SdkReport",
+      "description": "`fbx.sdk_check` result.",
+      "type": "object",
+      "properties": {
+        "sdk": {
+          "description": "The SDK's version string.",
+          "type": "string"
+        },
+        "file_version": {
+          "description": "The file's version as the SDK reports it (7400, 7500, …).",
+          "type": "integer",
+          "format": "int32"
+        },
+        "meshes": {
+          "description": "Meshes in the scene; the rest describes the first.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "vertices": {
+          "description": "Control points.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "polygons": {
+          "description": "Polygons before the SDK's triangulation.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "triangles": {
+          "description": "Triangles after it.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "bounds": {
+          "description": "Bounds of the control points in file units, `[min, max]`.",
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "double"
+            },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "unit_scale": {
+          "description": "Centimetres per file unit (1 = cm, 100 = m).",
+          "type": "number",
+          "format": "double"
+        },
+        "up_axis": {
+          "description": "`Y` or `Z`.",
+          "type": "string"
+        },
+        "has_normals": {
+          "description": "A normal layer element exists.",
+          "type": "boolean"
+        },
+        "has_uvs": {
+          "description": "A UV layer element exists.",
+          "type": "boolean"
+        },
+        "material": {
+          "description": "First material's name.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "texture": {
+          "description": "First diffuse texture's relative file name.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "sdk",
+        "file_version",
+        "meshes",
+        "vertices",
+        "polygons",
+        "triangles",
+        "bounds",
+        "unit_scale",
+        "up_axis",
+        "has_normals",
+        "has_uvs"
+      ]
+    }
+  },
+  {
     "id": "geo.attributions",
     "description": "The project's consolidated data-source notices (what every export's ATTRIBUTION.txt carries)",
     "scope": "project-read",

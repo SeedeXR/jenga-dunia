@@ -1328,6 +1328,69 @@ mod read_tests {
         );
     }
 
+    /// The Autodesk FBX SDK as the oracle (`jd-fbxsdk`, real only where the SDK is installed):
+    /// what we write it reads back exactly, and what it writes (7500, compressed arrays) we read.
+    #[test]
+    fn the_fbx_sdk_reads_our_export_exactly_and_we_read_its_files() {
+        if !jd_fbxsdk::available() {
+            eprintln!("no FBX SDK: skipping");
+            return;
+        }
+        let dir = tempfile::tempdir().expect("tmp");
+        let mut hf = Heightfield::new(16, 12, 8, 0).expect("hf");
+        hf.fill_with(|x, y| ((x as f32) * 0.7).sin() * 30.0 + (y as f32) * 2.0 + 100.0);
+        let p = dir.path().join("ours.fbx");
+        let report = export_fbx(&hf, [160.0, 120.0], &p, 1, true).expect("export");
+        let ours = read_fbx_mesh(&p).expect("our reader");
+        let sdk = jd_fbxsdk::read(&p).expect("sdk read");
+        assert_eq!(
+            (sdk.file_version, sdk.meshes, sdk.unit_scale, sdk.up_axis),
+            (7400, 1, 100.0, 1),
+            "7.4, one mesh, metres, Y up"
+        );
+        assert_eq!(sdk.polygons, report.triangles / 2, "the SDK sees our quads");
+        assert_eq!(
+            sdk.triangles.len() as u32,
+            report.triangles,
+            "and triangulates them to our count"
+        );
+        assert_eq!(sdk.positions.len(), ours.positions.len());
+        assert!(sdk.has_normals && sdk.has_uvs, "normals and UVs survive");
+        assert!(
+            sdk.texture.is_some(),
+            "the embedded diffuse texture is linked"
+        );
+        for (a, b) in sdk.positions.iter().zip(&ours.positions) {
+            for c in 0..3 {
+                assert!(
+                    (a[c] - b[c]).abs() < 1e-6,
+                    "control point {a:?} vs ours {b:?}"
+                );
+            }
+        }
+        // Every SDK triangle stays inside one grid cell of the 16-wide grid (whichever diagonal it chose).
+        for t in &sdk.triangles {
+            let (lo, hi) = (t.iter().min().expect("min"), t.iter().max().expect("max"));
+            assert!(hi - lo <= 17, "triangle {t:?} spans more than a cell");
+        }
+        assert!(
+            !std::fs::exists(dir.path().join("ours.fbm")).unwrap_or(false),
+            "no .fbm media folder was extracted"
+        );
+        // The SDK's own 7500 file (compressed arrays, centimetres) through our reader.
+        let q = dir.path().join("sdk.fbx");
+        jd_fbxsdk::write(&q, &ours.positions, &ours.triangles, 7500).expect("sdk write");
+        let back = read_fbx_mesh(&q).expect("our reader on the SDK's file");
+        assert_eq!(back.triangles.len(), ours.triangles.len());
+        for (a, b) in back.positions.iter().zip(&ours.positions) {
+            for c in 0..3 {
+                assert!((a[c] - b[c]).abs() < 1e-3, "{a:?} vs {b:?} (cm → m)");
+            }
+        }
+        let again = jd_fbxsdk::read(&q).expect("sdk re-read");
+        assert_eq!((again.file_version, again.unit_scale), (7500, 1.0));
+    }
+
     #[test]
     fn our_fbx_reads_back_to_the_same_heights() {
         let dir = tempfile::tempdir().expect("tmp");
