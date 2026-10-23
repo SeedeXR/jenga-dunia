@@ -29,6 +29,8 @@ export async function connectCore(workspace: string): Promise<Client> {
     command: mcpBinary(),
     args: ["--scope", "all", "--workspace", workspace],
     env: { ...process.env, JD_LOG: "warn" } as Record<string, string>,
+    // A 2048² u16 preview is 8 MB (10.7 MB as base64): above the SDK's 10 MiB default read buffer.
+    maxBufferSize: 64 * 1024 * 1024,
   });
   const client = new Client({ name: "jd-e2e", version: readFileSync(new URL("../../../VERSION", import.meta.url), "utf8").trim() });
   await client.connect(transport);

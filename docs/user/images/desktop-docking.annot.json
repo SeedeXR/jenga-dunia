@@ -1,0 +1,46 @@
+{
+  "src": "/tmp/jd-scratch/desktop-docking-raw.png",
+  "out": "desktop-docking.png",
+  "annotations": [
+    {
+      "type": "circle",
+      "cx": 10,
+      "cy": 55,
+      "r": 16,
+      "label": "1",
+      "text": "1  the project panel collapsed to a strip (click to bring it back)",
+      "tx": 40,
+      "ty": 130
+    },
+    {
+      "type": "circle",
+      "cx": 680,
+      "cy": 84,
+      "r": 18,
+      "label": "2",
+      "text": "2  dock the graph beside or under the viewport",
+      "tx": 40,
+      "ty": 154
+    },
+    {
+      "type": "circle",
+      "cx": 810,
+      "cy": 390,
+      "r": 40,
+      "label": "3",
+      "text": "3  the graph as a column you resize sideways",
+      "tx": 40,
+      "ty": 178
+    },
+    {
+      "type": "circle",
+      "cx": 1325,
+      "cy": 24,
+      "r": 16,
+      "label": "4",
+      "text": "4  Preview detail 2048\u00b2: lod 0, 8 MB, 8.4 M triangles",
+      "tx": 40,
+      "ty": 202
+    }
+  ]
+}

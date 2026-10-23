@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { Brush, FolderOpen, FolderPlus, FolderSearch, Globe, Mountain, Route, Save, Upload, Workflow } from "lucide-react";
+import { Brush, FolderOpen, FolderPlus, FolderSearch, Globe, Mountain, PanelBottom, PanelLeftClose, PanelLeftOpen, PanelRight, PanelRightClose, PanelRightOpen, Route, Save, Upload, Workflow } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import GraphPanel from "./graph/GraphPanel";
 import TerrainView, { type ViewportInfo } from "./viewport/TerrainView";
@@ -39,6 +39,16 @@ function usePersistedSize(key: string, axis: "width" | "height"): { ref: React.R
     [key, axis],
   );
   return { ref, style: saved.current ? { [axis]: `${saved.current}px` } : {} };
+}
+
+type Dock = { left: boolean; right: boolean; graph: "bottom" | "right" };
+function readDock(): Dock {
+  try {
+    const d = JSON.parse(localStorage.getItem("jd.layout.dock") ?? "{}") as Partial<Dock>;
+    return { left: d.left === true, right: d.right === true, graph: d.graph === "right" ? "right" : "bottom" };
+  } catch {
+    return { left: false, right: false, graph: "bottom" };
+  }
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -94,6 +104,20 @@ export default function App() {
   const leftSize = usePersistedSize("left", "width");
   const rightSize = usePersistedSize("right", "width");
   const graphSize = usePersistedSize("graph", "height");
+  const graphWidth = usePersistedSize("graphw", "width");
+  // Docking: side panels collapse to a strip, the graph docks under or beside the viewport; kept in the browser store.
+  const [dock, setDockState] = useState<Dock>(readDock);
+  const setDock = useCallback((patch: Partial<Dock>) => {
+    setDockState((d) => {
+      const next = { ...d, ...patch };
+      try {
+        localStorage.setItem("jd.layout.dock", JSON.stringify(next));
+      } catch {
+        /* no storage */
+      }
+      return next;
+    });
+  }, []);
   const [projName, setProjName] = useState("World");
   const [extent, setExtent] = useState(4096);
   const [resolution, setResolution] = useState(2048);
@@ -288,7 +312,17 @@ export default function App() {
 
       <div className="grid grid-cols-[auto_1fr_auto] overflow-hidden">
         {/* Left: project */}
-        <aside ref={leftSize.ref} style={leftSize.style} className="w-[260px] min-w-[200px] max-w-[520px] resize-x overflow-y-auto border-r border-jd-line bg-jd-bg-1 p-3" title="Drag the bottom-right corner to resize this panel" data-testid="panel-left">
+        {dock.left ? (
+          <aside className="flex w-6 flex-col items-center border-r border-jd-line bg-jd-bg-1 py-2" data-testid="panel-left-collapsed">
+            <button className="btn px-1 py-0" title="Show the project panel" onClick={() => setDock({ left: false })} data-testid="expand-left">
+              <PanelLeftOpen size={14} />
+            </button>
+          </aside>
+        ) : (
+        <aside ref={leftSize.ref} style={leftSize.style} className="relative w-[260px] min-w-[200px] max-w-[520px] resize-x overflow-y-auto border-r border-jd-line bg-jd-bg-1 p-3" title="Drag the bottom-right corner to resize this panel" data-testid="panel-left">
+          <button className="btn absolute top-2 right-2 px-1 py-0" title="Collapse the project panel to the edge" onClick={() => setDock({ left: true })} data-testid="collapse-left">
+            <PanelLeftClose size={14} />
+          </button>
           <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Project</h2>
           <Field label="Path">
             <span className="flex gap-1">
@@ -397,6 +431,13 @@ export default function App() {
                 Memory budget (GB)
                 <input className={inputCls} type="number" min={0.25} step={0.25} key={`mb-${s.settingsRev}-${s.project?.settings.memory_budget_bytes ?? 0}`} defaultValue={(s.project?.settings.memory_budget_bytes ?? 4294967296) / 1073741824} onBlur={(e) => { const v = Math.round(Number(e.target.value) * 1073741824); if (v !== (s.project?.settings.memory_budget_bytes ?? 4294967296)) void s.setSettings({ memory_budget_bytes: v }); }} title="Evaluations whose memory estimate exceeds this are refused (E_RESOURCE_MEMORY)" data-testid="setting-memory" />
               </label>
+              <label className="mb-1 flex items-center justify-between gap-2 text-xs text-jd-fg-1" title="Viewport preview detail: the longest side of the mesh the viewport shows. 1024² ≈ 1 M samples (2 MB a transfer, 2 M triangles); 2048² is 4× that — 8 MB and 8 M triangles, for worlds above 1024² when the fine ridges matter more than the frame rate">
+                Preview detail
+                <select className={inputCls} value={s.previewMaxPx} onChange={(e) => s.setPreviewMaxPx(Number(e.target.value))} data-testid="setting-preview-px">
+                  <option value={1024}>1024²</option>
+                  <option value={2048}>2048² (high)</option>
+                </select>
+              </label>
               <label className="mb-1 flex items-center justify-between gap-2 text-xs text-jd-fg-1" title="Live preview target per evaluation, ms (0 = off): the preview LOD steps coarser while evaluations run over it and finer again when they are well under; this app setting is not part of the project">
                 Live target (ms)
                 <input className={inputCls} type="number" min={0} step={50} value={s.previewTargetMs} onChange={(e) => s.setPreviewTargetMs(Number(e.target.value))} data-testid="preview-target" />
@@ -466,10 +507,11 @@ export default function App() {
             )}
           </dl>
         </aside>
+        )}
 
         {/* Center: viewport (top) + node graph (bottom, toggle) */}
-        <main className={`relative grid bg-jd-bg-0 ${showGraph ? "grid-rows-[1fr_auto]" : "grid-rows-[1fr]"}`}>
-          <div className="relative min-h-0">
+        <main className={`relative grid min-w-0 overflow-hidden bg-jd-bg-0 ${showGraph ? (dock.graph === "right" ? "grid-cols-[1fr_auto]" : "grid-rows-[1fr_auto]") : "grid-rows-[1fr]"}`}>
+          <div className="relative min-h-0 min-w-0">
             <TerrainView fog={s.sun.fog} preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} sculpt={{ enabled: s.sculpting && (sculptNode !== undefined || s.drawing !== null), radiusM: s.drawing === "road" ? s.roadWidthM / 2 : s.brush.radius_m, onStroke: (pts) => void s.addStroke(pts) }} seaLevelM={seaLevelM} water={water} waves={s.waves} sky={s.sky} horizon={s.horizon} sun={{ azimuthDeg: s.sun.azimuth_deg, elevationDeg: s.sun.elevation_deg }} overlay={s.colorPreview} instances={s.scatter.points ? { points: s.scatter.points, sizeM: Math.max(s.scatter.spacing_m * 0.35, (s.project?.world.extent_m[0] ?? 0) * 0.012) } : null} maps={s.maps} />
             <button
               className={`btn absolute top-2 right-28 ${s.sculpting ? "text-jd-accent" : ""}`}
@@ -504,9 +546,19 @@ export default function App() {
             <button className="btn absolute top-2 right-2" onClick={() => setShowGraph((v) => !v)} data-testid="toggle-graph">
               <Workflow size={14} /> {showGraph ? "Hide graph" : "Graph"}
             </button>
+            {showGraph && (
+              <button className="btn absolute top-10 right-2 px-1.5" title={dock.graph === "right" ? "Dock the graph under the viewport" : "Dock the graph beside the viewport"} onClick={() => setDock({ graph: dock.graph === "right" ? "bottom" : "right" })} data-testid="dock-graph">
+                {dock.graph === "right" ? <PanelBottom size={14} /> : <PanelRight size={14} />}
+              </button>
+            )}
           </div>
-          {showGraph && (
+          {showGraph && dock.graph === "bottom" && (
             <div ref={graphSize.ref} style={graphSize.style} className="h-[300px] max-h-[70vh] min-h-[160px] resize-y overflow-hidden border-t border-jd-line" title="Drag the bottom-right corner to resize the graph" data-testid="panel-graph">
+              <GraphPanel />
+            </div>
+          )}
+          {showGraph && dock.graph === "right" && (
+            <div ref={graphWidth.ref} style={graphWidth.style} className="w-[460px] min-w-[280px] max-w-[60vw] resize-x overflow-hidden border-l border-jd-line" title="Drag the bottom-right corner to resize the graph" data-testid="panel-graph">
               <GraphPanel />
             </div>
           )}
@@ -518,7 +570,17 @@ export default function App() {
         </main>
 
         {/* Right: terrain inspector */}
-        <aside ref={rightSize.ref} style={rightSize.style} className="w-[280px] min-w-[220px] max-w-[560px] resize-x overflow-y-auto border-l border-jd-line bg-jd-bg-1 p-3" title="Drag the bottom-right corner to resize this panel" data-testid="panel-right">
+        {dock.right ? (
+          <aside className="flex w-6 flex-col items-center border-l border-jd-line bg-jd-bg-1 py-2" data-testid="panel-right-collapsed">
+            <button className="btn px-1 py-0" title="Show the inspector" onClick={() => setDock({ right: false })} data-testid="expand-right">
+              <PanelRightOpen size={14} />
+            </button>
+          </aside>
+        ) : (
+        <aside ref={rightSize.ref} style={rightSize.style} className="relative w-[280px] min-w-[220px] max-w-[560px] resize-x overflow-y-auto border-l border-jd-line bg-jd-bg-1 p-3" title="Drag the bottom-right corner to resize this panel" data-testid="panel-right">
+          <button className="btn absolute top-2 right-2 px-1 py-0" title="Collapse the inspector to the edge" onClick={() => setDock({ right: true })} data-testid="collapse-right">
+            <PanelRightClose size={14} />
+          </button>
           {s.sculpting && (
             <>
               <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Brush</h2>
@@ -776,6 +838,7 @@ export default function App() {
             </button>
           </div>
         </aside>
+        )}
       </div>
 
       {/* Bottom: log */}

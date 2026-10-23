@@ -28,6 +28,14 @@ export type JobInfo = JobInfoGen;
 
 export type EvalReport = GraphEvaluateResult;
 
+function readPreviewMaxPx(): number {
+  try {
+    const v = Number(localStorage.getItem("jd.previewMaxPx") ?? 1024);
+    return v === 2048 ? 2048 : 1024;
+  } catch {
+    return 1024;
+  }
+}
 function readPreviewTarget(): number {
   try {
     return Math.max(0, Number(localStorage.getItem("jd.previewTargetMs") ?? 0)) || 0;
@@ -147,6 +155,9 @@ interface State {
   setSettings: (patch: JdOps["project.set_settings"]["request"]) => Promise<void>;
   /** Live-preview target per evaluation, ms (0 = off): the preview LOD adapts to stay under it. */
   previewTargetMs: number;
+  /** Longest side of the viewport preview in samples (1024 default, 2048 = high detail); browser store. */
+  previewMaxPx: number;
+  setPreviewMaxPx: (px: number) => void;
   /** Extra LOD steps the adaptive policy currently adds to the project's preview LOD. */
   previewLodBias: number;
   setPreviewTargetMs: (ms: number) => void;
@@ -222,8 +233,9 @@ export const useStore = create<State>((set, get) => {
   const refreshPreview = async () => {
     const { layer } = get();
     if (!layer) return;
-    // Preview LOD keeps the buffer ≤ ~1 M samples regardless of world size.
-    const lod = Math.max(0, Math.ceil(Math.log2(Math.max(layer.size_px[0], layer.size_px[1]) / 1024)));
+    // Preview LOD keeps the buffer at ≤ previewMaxPx² samples (1024² ≈ 1 M by default; 2048² is the
+    // high-detail option: 4× the samples, 8 MB per transfer, ~8 M triangles).
+    const lod = Math.max(0, Math.ceil(Math.log2(Math.max(layer.size_px[0], layer.size_px[1]) / get().previewMaxPx)));
     try {
       const { preview, bytes, ms } = await layerPreview(layer.layer, lod);
       set({ preview, previewStats: { bytes, ms, lod } });
@@ -249,7 +261,7 @@ export const useStore = create<State>((set, get) => {
     }
     if ((lastEval?.lod ?? 0) > 0 || sculpting) return;
     try {
-      const r = await layerTextures(layer.layer, 1024, get().materials);
+      const r = await layerTextures(layer.layer, get().previewMaxPx, get().materials);
       // Toggled off or moved to another layer while baking: this result is stale.
       if (!get().pbr || get().layer?.layer !== layer.layer) {
         if (r) for (const b of [r.maps.albedo, r.maps.normal, r.maps.roughness, r.maps.detailWeights, ...r.maps.details.flatMap((d) => [d.albedo, d.normal])]) b?.close();
@@ -716,6 +728,17 @@ export const useStore = create<State>((set, get) => {
         if (r.status !== "ok") return;
       }
       await run("terrain.export_heightmap", { layer: "height", path, format });
+    },
+    previewMaxPx: readPreviewMaxPx(),
+    setPreviewMaxPx: (px) => {
+      const v = px === 2048 ? 2048 : 1024;
+      set({ previewMaxPx: v });
+      try {
+        localStorage.setItem("jd.previewMaxPx", String(v));
+      } catch {
+        /* no storage */
+      }
+      void refreshPreview();
     },
     previewTargetMs: readPreviewTarget(),
     previewLodBias: 0,

@@ -74,7 +74,11 @@ Logs: `~/Library/Logs/com.seedexr.jengadunia/jd-app.log` on macOS (`$XDG_DATA_HO
 
 Every project starts with a two-node graph (`Noise → Height`), the same `graph.json` the CLI and MCP server edit. The panel under the viewport is that graph; **Hide graph** collapses it.
 
-**Layout.** The three columns and the graph strip are resizable with native handles: drag the bottom-right corner of the left or right panel sideways (200–520 px and 220–560 px) and the corner of the graph panel up or down (160 px to 70 % of the window); **Hide graph** gives the viewport the whole height. Sizes persist in the browser store, so the layout comes back on the next launch (UI-driven check: `apps/desktop/e2e/settings.spec.ts` reads the panels' `resize` style and reloads after a resize).
+**Layout and docking.** The three columns and the graph strip are resizable with native handles: drag the bottom-right corner of the left or right panel sideways (200–520 px and 220–560 px) and the corner of the graph panel up or down (160 px to 70 % of the window); **Hide graph** gives the viewport the whole height. Each side panel has a collapse button in its top corner that folds it to a 24 px strip (the strip's button brings it back), and the button under **Hide graph** docks the graph **beside** the viewport (a column you resize sideways, 280 px to 60 % of the window) or back **under** it. Sizes, collapsed panels and the graph's dock persist in the browser store, so the layout comes back on the next launch (UI-driven check: `apps/desktop/e2e/settings.spec.ts` reads the panels' `resize` style and reloads after a resize; `e2e/docking.spec.ts` collapses, docks, reloads).
+
+![The project panel collapsed to a strip on the left, the graph docked as a column beside the viewport, the inspector on the right](images/desktop-docking.png)
+
+**Preview detail.** The viewport shows a preview of at most **1024²** samples (about 2 MB a transfer and 2 M triangles) whatever the world's size — a 4096² world previews at lod 2. Settings ▸ **Preview detail** switches to **2048²** for worlds above 1024² when the fine ridges matter more than the frame rate: 4× the samples, 8 MB a transfer, about 8 M triangles, and the PBR maps bake at 2048 too; the header's `preview lod N, X MB` says what came across. The choice is an app setting in the browser store.
 
 ![Node graph: add, evaluate, edit, connect, inspect](images/tutorial-03-graph.png)
 
@@ -92,7 +96,7 @@ Undo and redo are operations like everything else (`graph.undo` / `graph.redo`, 
 
 ![Project panel with the Settings section: Autosave (s), Cache limit (MB), Preview LOD](images/desktop-settings.png)
 
-**Live target.** **Live target (ms)** (an app setting, kept in the browser store, 0 = off) is the time budget of one live-preview evaluation: while evaluations run over it the preview steps one LOD coarser (up to four steps above the project's preview LOD), and when they finish in under a quarter of it the preview steps finer again, never below the project default — the header's `preview lod N` shows where it settled. Evaluate and every export still run at full resolution.
+**Live target.** **Live target (ms)** (an app setting, kept in the browser store, 0 = off) is the time budget of one live-preview evaluation: while evaluations run over it the live evaluation steps one LOD coarser (up to four steps above the ≤ 512² live default), and when they finish in under a quarter of it it steps finer again, never below that default. The header's `preview lod N` is the *transfer* LOD of the viewport mesh (see Preview detail above), not the live-evaluation LOD; the project's **Preview LOD** setting is a hint stored in `project.json` for clients, the desktop's own choice is Preview detail. Evaluate and every export still run at full resolution.
 
 **Clouds.** The Sun panel's **Clouds** slider sets the cover of the sky dome (`cloud_cover` on `sky.preview`); the log names the cover each bake used, and `sky.bake` takes the same parameters for the HDRI. **Fog** is a viewport look setting next to it: 0 keeps the faint aerial perspective, 1 closes the view within the world's width (the header shows `fog N %`); bakes and exports are untouched.
 
