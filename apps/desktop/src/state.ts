@@ -138,6 +138,8 @@ interface State {
   exportFrames: (frames: number) => Promise<void>;
   /** Copy a heightmap or mesh file into assets/ and add an input node that reads it. */
   importAsset: (path: string) => Promise<void>;
+  /** Fetch a real-world DEM around a lon/lat, place the world in its CRS and wire it to the height output. */
+  fetchDem: (center: [number, number], radiusM: number, provider: "terrarium" | "copernicus" | "opentopography") => Promise<void>;
   save: () => Promise<void>;
   /** Bumped when a settings edit is refused so the inputs snap back to the stored values. */
   settingsRev: number;
@@ -592,6 +594,24 @@ export const useStore = create<State>((set, get) => {
       graphGen++;
       const add = await run("graph.add_node", { kind: "jd.input.heightmap@1", params: { path: r.result.name }, position: [right + 320, 0] });
       if (add.status === "ok") await loadGraph();
+    },
+    fetchDem: async (center, radiusM, provider) => {
+      const r = await run("geo.fetch_dem", { center, radius_m: radiusM, provider, res_m: 30 });
+      if (r.status !== "ok" || !r.result) return;
+      const dem = r.result;
+      await get().setSettings({ crs: dem.crs, origin: dem.origin });
+      const right = Math.max(-320, ...get().graph.nodes.map((n) => n.ui?.position?.[0] ?? 0));
+      graphGen++;
+      const add = await run("graph.add_node", { kind: "jd.input.heightmap@1", params: { path: dem.asset, georeference: true }, position: [right + 320, 0] });
+      if (add.status !== "ok" || !add.result) return;
+      // The starter noise feeds the height output; the DEM takes its place.
+      const out = get().graph.nodes.find((n) => n.kind.startsWith("jd.output.height"));
+      if (out) {
+        for (const e of get().graph.edges.filter((e) => e.to.node === out.id && e.to.port === "in")) await run("graph.disconnect", { from: e.from.node, from_port: e.from.port, to: e.to.node, to_port: e.to.port });
+        await run("graph.connect", { from: add.result.id, from_port: "out", to: out.id, to_port: "in" });
+      }
+      await loadGraph();
+      await get().evaluateGraph(0);
     },
     addNode: async (kind) => {
       // New nodes go to the right of the current graph so they are visible and easy to wire in.

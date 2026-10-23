@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FetchFeatures",
+  "description": "`geo.fetch_features` params.",
+  "type": "object",
+  "properties": {
+    "bbox": {
+      "description": "Lon/lat box in degrees.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Bbox"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "center": {
+      "description": "`[lon, lat]` of the centre (with `radius_m`).",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "number",
+        "format": "double"
+      },
+      "minItems": 2,
+      "maxItems": 2,
+      "default": null
+    },
+    "radius_m": {
+      "description": "Half-size of the box around `center`, metres.",
+      "type": [
+        "number",
+        "null"
+      ],
+      "format": "double",
+      "default": null
+    },
+    "kinds": {
+      "description": "Feature families; default all four.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/$defs/Kind"
+      },
+      "default": null
+    },
+    "name": {
+      "description": "Asset file name (`.geojson`); default `osm-<lat>_<lon>.geojson`.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "overwrite": {
+      "description": "Replace an existing asset of that name.",
+      "type": "boolean",
+      "default": false
+    },
+    "offline": {
+      "description": "Serve the cache only (also `JD_OFFLINE=1`).",
+      "type": "boolean",
+      "default": false
+    },
+    "base_url": {
+      "description": "Tests only: a loopback server standing in for Overpass.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "Bbox": {
+      "description": "A lon/lat box in degrees.",
+      "type": "object",
+      "properties": {
+        "south": {
+          "description": "Southern edge, degrees.",
+          "type": "number",
+          "format": "double"
+        },
+        "west": {
+          "description": "Western edge, degrees.",
+          "type": "number",
+          "format": "double"
+        },
+        "north": {
+          "description": "Northern edge, degrees.",
+          "type": "number",
+          "format": "double"
+        },
+        "east": {
+          "description": "Eastern edge, degrees.",
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "south",
+        "west",
+        "north",
+        "east"
+      ]
+    },
+    "Kind": {
+      "description": "Feature families the query asks for, in the project's words.",
+      "oneOf": [
+        {
+          "description": "`highway=*` ways.",
+          "type": "string",
+          "const": "roads"
+        },
+        {
+          "description": "`waterway` rivers, streams and canals.",
+          "type": "string",
+          "const": "waterways"
+        },
+        {
+          "description": "`natural=water` ways and relations (outer rings only).",
+          "type": "string",
+          "const": "water"
+        },
+        {
+          "description": "`building=*` ways.",
+          "type": "string",
+          "const": "buildings"
+        }
+      ]
+    }
+  }
+}

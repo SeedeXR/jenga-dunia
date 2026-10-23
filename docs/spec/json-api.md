@@ -59,5 +59,8 @@ Normative companion to `docs/architecture/07-agent-interfaces.md`. JSON Schemas 
 | `jobs.cancel` | project:rw | no | `job_id` | — |
 | `diag.env` | — | no | — | environment |
 | `diag.logs` | project:ro | no | `since`, `level`, `limit` | entries |
-| `geo.fetch_dem` | network:geo | yes | `bbox` or `center+radius`, `source`, `resolution` | heightfield node id, attribution |
+| `geo.fetch_dem` | network:geo | no (progress + cancel through jobs) | `bbox` or `center+radius_m`, `provider` (terrarium / copernicus / opentopography), `res_m`, `name`, `overwrite`, `api_key`, `offline` | asset name + path, px, spacing, crs, origin, height range, void share, fetch stats, attribution (ADR-0014) |
+| `geo.fetch_features` | network:geo | no | `bbox` or `center+radius_m`, `kinds` (roads, waterways, water, buildings), `name`, `offline` | GeoJSON asset, counts, fetch stats, attribution |
+| `geo.attributions` | project:ro | no | — | the project's notices + the `ATTRIBUTION.txt` text |
+| `project.add_attribution` | project:rw | no | `source`, `text`, `url`, `licence` | the list (journaled, deduplicated) |
 | `vision.estimate_depth` | vision | yes | `image_path`, `model` | depth/point map paths, intrinsics |

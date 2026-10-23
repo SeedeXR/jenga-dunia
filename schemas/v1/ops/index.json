@@ -15,6 +15,21 @@
     "scope": "none"
   },
   {
+    "id": "geo.attributions",
+    "description": "The project's consolidated data-source notices (what every export's ATTRIBUTION.txt carries)",
+    "scope": "project-read"
+  },
+  {
+    "id": "geo.fetch_dem",
+    "description": "Fetch a DEM for a lon/lat box (Terrarium tiles, Copernicus GLO-30, or OpenTopography with your key) into assets/ as a georeferenced f32 GeoTIFF, cached under cache/geo, with the provider's attribution recorded — then `jd.input.heightmap@1 {path, georeference: true}` places it",
+    "scope": "network-geo"
+  },
+  {
+    "id": "geo.fetch_features",
+    "description": "Fetch OpenStreetMap roads, waterways, water bodies and buildings for a lon/lat box through the Overpass API into assets/ as a GeoJSON file (ODbL; kept separately labelled), with the OSM attribution recorded",
+    "scope": "network-geo"
+  },
+  {
     "id": "graph.add_node",
     "description": "Add a node (journaled)",
     "scope": "project-write"
@@ -113,6 +128,11 @@
     "id": "ocean.waves",
     "description": "Wind sea for a wind speed and fetch (JONSWAP growth capped at the fully developed Pierson–Moskowitz sea): significant height, peak period and wavelength, breaking depth, and the Gerstner components the viewport animates",
     "scope": "none"
+  },
+  {
+    "id": "project.add_attribution",
+    "description": "Record a data-source notice on the project (journaled; deduplicated by source + text) so exports carry it",
+    "scope": "project-write"
   },
   {
     "id": "project.cache_gc",

@@ -1,0 +1,200 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FetchDemResult",
+  "description": "`geo.fetch_dem` result.",
+  "type": "object",
+  "properties": {
+    "asset": {
+      "description": "The asset's file name (what `jd.input.heightmap@1 {path}` takes).",
+      "type": "string"
+    },
+    "path": {
+      "description": "Where it was written.",
+      "type": "string"
+    },
+    "provider": {
+      "description": "The provider used.",
+      "$ref": "#/$defs/Provider"
+    },
+    "px": {
+      "description": "Raster size.",
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "format": "uint32",
+        "minimum": 0
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "spacing": {
+      "description": "Sample spacing in the raster's CRS units.",
+      "type": "array",
+      "items": {
+        "type": "number",
+        "format": "double"
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "crs": {
+      "description": "CRS of the raster (`EPSG:3857` for Terrarium, `EPSG:4326` otherwise).",
+      "type": "string"
+    },
+    "origin": {
+      "description": "Outer south-west corner in `crs` units.",
+      "type": "array",
+      "items": {
+        "type": "number",
+        "format": "double"
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "height_m": {
+      "description": "Height range, metres.",
+      "type": "array",
+      "items": {
+        "type": "number",
+        "format": "float"
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "void_share": {
+      "description": "Share of nodata samples filled, 0..1.",
+      "type": "number",
+      "format": "float"
+    },
+    "fetch": {
+      "description": "Fetch statistics.",
+      "$ref": "#/$defs/Stats"
+    },
+    "attribution": {
+      "description": "The notice appended to the project.",
+      "$ref": "#/$defs/Attribution"
+    },
+    "next": {
+      "description": "How to use it.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "asset",
+    "path",
+    "provider",
+    "px",
+    "spacing",
+    "crs",
+    "origin",
+    "height_m",
+    "void_share",
+    "fetch",
+    "attribution",
+    "next"
+  ],
+  "$defs": {
+    "Provider": {
+      "description": "Which provider a request names.",
+      "oneOf": [
+        {
+          "description": "AWS Terrain Tiles, Terrarium PNG (no key, no quota; Mapzen + per-source credits).",
+          "type": "string",
+          "const": "terrarium"
+        },
+        {
+          "description": "Copernicus DEM GLO-30 COGs on AWS (no key; the 6(b)/6(c) notices).",
+          "type": "string",
+          "const": "copernicus"
+        },
+        {
+          "description": "OpenTopography global DEM API (bring your own key; 50 calls a day).",
+          "type": "string",
+          "const": "opentopography"
+        }
+      ]
+    },
+    "Stats": {
+      "description": "What a batch cost.",
+      "type": "object",
+      "properties": {
+        "requests": {
+          "description": "Requests in the batch.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "cache_hits": {
+          "description": "Requests answered from the cache.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "bytes": {
+          "description": "Bytes that crossed the wire (a 304 counts nothing).",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "retries": {
+          "description": "Retries across the batch.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "connections": {
+          "description": "Connections in use when the batch ended.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "bytes_per_s": {
+          "description": "Throughput estimate at the end, bytes per second.",
+          "type": "number",
+          "format": "double"
+        },
+        "elapsed_ms": {
+          "description": "Wall time of the batch.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "requests",
+        "cache_hits",
+        "bytes",
+        "retries",
+        "connections",
+        "bytes_per_s",
+        "elapsed_ms"
+      ]
+    },
+    "Attribution": {
+      "description": "A data-source attribution obligation carried into exports.",
+      "type": "object",
+      "properties": {
+        "source": {
+          "description": "Source name (e.g. \"Copernicus DEM GLO-30\").",
+          "type": "string"
+        },
+        "text": {
+          "description": "Required notice text.",
+          "type": "string"
+        },
+        "url": {
+          "description": "Licence or terms URL.",
+          "type": "string"
+        },
+        "licence": {
+          "description": "Licence name or terms in a line.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "text"
+      ]
+    }
+  }
+}

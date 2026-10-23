@@ -17,3 +17,4 @@ Format: Status · Date · Context · Decision · Alternatives rejected (and why)
 | [0011](0011-project-as-directory.md) | Project is a directory with versioned JSON + disposable cache | Accepted |
 | [0012](0012-format-strategy.md) | Format strategy: glTF + USD pure Rust first, FBX via adapter | Proposed |
 | [0013](0013-single-edition.md) | One edition, no feature tiers (Blender model) | Accepted |
+| [0014](0014-geo-fetch-policy.md) | Geo data over the network: one client, allowlisted hosts, adaptive and cached | Accepted |

@@ -86,6 +86,9 @@ pub struct Attribution {
     /// Licence or terms URL.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub url: String,
+    /// Licence name or terms in a line.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub licence: String,
 }
 
 /// `project.json`.

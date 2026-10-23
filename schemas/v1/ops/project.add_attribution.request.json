@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Attribution",
+  "description": "A data-source attribution obligation carried into exports.",
+  "type": "object",
+  "properties": {
+    "source": {
+      "description": "Source name (e.g. \"Copernicus DEM GLO-30\").",
+      "type": "string"
+    },
+    "text": {
+      "description": "Required notice text.",
+      "type": "string"
+    },
+    "url": {
+      "description": "Licence or terms URL.",
+      "type": "string"
+    },
+    "licence": {
+      "description": "Licence name or terms in a line.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "source",
+    "text"
+  ]
+}

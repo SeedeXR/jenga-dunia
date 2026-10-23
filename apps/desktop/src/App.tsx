@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { Brush, FolderOpen, FolderPlus, FolderSearch, Mountain, Route, Save, Upload, Workflow } from "lucide-react";
+import { Brush, FolderOpen, FolderPlus, FolderSearch, Globe, Mountain, Route, Save, Upload, Workflow } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import GraphPanel from "./graph/GraphPanel";
 import TerrainView, { type ViewportInfo } from "./viewport/TerrainView";
@@ -89,6 +89,7 @@ export default function App() {
   const s = useStore();
   const [projPath, setProjPath] = useState("");
   const [importPath, setImportPath] = useState("");
+  const [geo, setGeo] = useState({ lon: 36.82, lat: -1.29, radius: 2000, provider: "terrarium" as "terrarium" | "copernicus" | "opentopography" });
   const [frames, setFrames] = useState(24);
   const leftSize = usePersistedSize("left", "width");
   const rightSize = usePersistedSize("right", "width");
@@ -346,6 +347,23 @@ export default function App() {
                 </button>
                 <button className="btn px-1.5" title="Browse…" onClick={() => void pickAssetToImport()} disabled={s.busy} data-testid="browse-asset">
                   <FolderSearch size={14} />
+                </button>
+              </span>
+            </Field>
+          )}
+          {s.project && (
+            <Field label="Real world">
+              <span className="flex flex-wrap gap-1" title="Fetch a DEM around a point (ADR-0014: Terrarium tiles without a key, Copernicus GLO-30, or OpenTopography with JD_OPENTOPOGRAPHY_KEY), place the world in its CRS and feed it to the height output; the provider's notice goes into every export">
+                <input className={`${inputCls} w-16`} type="number" step={0.001} value={geo.lon} onChange={(e) => setGeo({ ...geo, lon: Number(e.target.value) })} aria-label="Longitude" data-testid="geo-lon" />
+                <input className={`${inputCls} w-16`} type="number" step={0.001} value={geo.lat} onChange={(e) => setGeo({ ...geo, lat: Number(e.target.value) })} aria-label="Latitude" data-testid="geo-lat" />
+                <input className={`${inputCls} w-16`} type="number" min={100} step={100} value={geo.radius} onChange={(e) => setGeo({ ...geo, radius: Number(e.target.value) })} aria-label="Radius (m)" data-testid="geo-radius" />
+                <select className={`${inputCls} w-24`} value={geo.provider} onChange={(e) => setGeo({ ...geo, provider: e.target.value as typeof geo.provider })} aria-label="Provider" data-testid="geo-provider">
+                  <option value="terrarium">Terrarium</option>
+                  <option value="copernicus">Copernicus</option>
+                  <option value="opentopography">OpenTopography</option>
+                </select>
+                <button className="btn px-1.5" title="Fetch the DEM and place the world on it" onClick={() => void s.fetchDem([geo.lon, geo.lat], geo.radius, geo.provider)} disabled={s.busy} data-testid="geo-fetch">
+                  <Globe size={14} />
                 </button>
               </span>
             </Field>

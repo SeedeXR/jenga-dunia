@@ -627,6 +627,16 @@ pub mod builtin {
                 let args: ProjectSetName = serde_json::from_value(params.clone())?;
                 Project::validate_name(&args.name)
             }
+            "project.add_attribution" => {
+                let a: crate::project::Attribution = serde_json::from_value(params.clone())?;
+                if a.source.trim().is_empty() || a.text.trim().is_empty() {
+                    return Err(JdError::invalid(
+                        "params",
+                        "`source` and `text` are required",
+                    ));
+                }
+                Ok(())
+            }
             "project.set_settings" => {
                 let args: ProjectSetSettings = serde_json::from_value(params.clone())?;
                 if let Some(w) = args.wind {
@@ -674,6 +684,18 @@ pub mod builtin {
             "project.set_name" => {
                 let args: ProjectSetName = serde_json::from_value(params.clone())?;
                 p.set_name(&args.name)
+            }
+            "project.add_attribution" => {
+                let a: crate::project::Attribution = serde_json::from_value(params.clone())?;
+                if !p
+                    .doc
+                    .attribution
+                    .iter()
+                    .any(|x| x.source == a.source && x.text == a.text)
+                {
+                    p.doc.attribution.push(a);
+                }
+                Ok(())
             }
             "project.set_settings" => {
                 let args: ProjectSetSettings = serde_json::from_value(params.clone())?;
@@ -937,6 +959,7 @@ pub mod builtin {
         );
         terrain::register_all(r);
         graph::register_all(r);
+        crate::geo::register(r);
     }
 }
 
@@ -4310,6 +4333,7 @@ pub mod terrain {
                         _ => jd_terrain::export_mesh_with(hf, extent, &path, step, p.texture, p.target_triangles, &materials),
                     }
                 })?;
+                ctx.with_project(|proj| crate::geo::write_attribution_txt(proj, path.parent().unwrap_or(proj.root())).map(|_| ()))?;
                 Ok((report, warnings))
             },
         );
@@ -4339,6 +4363,7 @@ pub mod terrain {
                 })?;
                 let report = jd_terrain::export_profile_with(p.profile, &height, &refs, &stack, &dir, p.range_m, Some(&geo))?;
                 let warnings = report.notes.iter().map(|n| Warning::new("W_ENGINE_SIZE", n.clone())).collect();
+                ctx.with_project(|proj| crate::geo::write_attribution_txt(proj, &dir).map(|_| ()))?;
                 Ok((report, warnings))
             },
         );
@@ -4384,6 +4409,7 @@ pub mod terrain {
                     .then(|| Warning::new("W_EXPORT_LOSS", "`rock` proxies are not written in an engine format: the file holds instances only"))
                     .into_iter()
                     .collect();
+                ctx.with_project(|proj| crate::geo::write_attribution_txt(proj, path.as_deref().and_then(Path::parent).unwrap_or(proj.root())).map(|_| ()))?;
                 Ok((ScatterReport { path, count, excluded, bytes, spacing_m: p.scatter.spacing_m, points }, warnings))
             },
         );
@@ -4411,6 +4437,7 @@ pub mod terrain {
                         ),
                     );
                 }
+                ctx.with_project(|proj| crate::geo::write_attribution_txt(proj, path.parent().unwrap_or(proj.root())).map(|_| ()))?;
                 Ok((report, warnings))
             },
         );

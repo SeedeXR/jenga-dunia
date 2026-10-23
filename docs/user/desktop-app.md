@@ -190,6 +190,12 @@ Undo and redo are operations like everything else (`graph.undo` / `graph.redo`, 
 
 *The gate pattern in the app: `jd.input.layer@1` (1) reads any layer the project has published — `height` here, `height#lod2` when a coarse chain was evaluated at the preview resolution — and the toolbar's `only <output>` selector (2) makes Evaluate (and the live preview) run just that output's chain, so a 16k² world can erode at a coarse level and pick up its fine detail at full resolution without ever holding the heavy chain at 16k² (the CLI quickstart has the numbers). The header keeps listing every published layer (3). `gate.spec.ts` drives this through the UI.*
 
+## Real world
+
+![Project panel with the Real world row (longitude 36.82, latitude −1.29, radius 2000 m, Terrarium) and the fetched Nairobi terrain in the viewport; the graph shows the heightmap node wired to the height output and the Settings show CRS EPSG:3857 with the Web Mercator origin](images/desktop-geo.png)
+
+The Project panel's **Real world** row fetches a digital elevation model around a point and makes it the world: type a longitude, a latitude and a radius in metres, pick the provider — **Terrarium** (AWS Terrain Tiles; no key, no quota), **Copernicus** (GLO-30, 1° tiles from the public bucket) or **OpenTopography** (needs your key in `JD_OPENTOPOGRAPHY_KEY`) — and press the globe. The app runs `geo.fetch_dem`, sets the world's CRS and origin to the DEM's, adds a `jd.input.heightmap@1` node in place of the starter noise, connects it to the height output and evaluates; the log shows each step and the right panel's min / max turn into the real heights (Nairobi: 1 640–1 747 m). The tiles go into the project's `cache/geo/` and the DEM into `assets/`, and the provider's notice is recorded so every export carries `ATTRIBUTION.txt`. On a slow link the fetch is patient — one connection to start, more as the link allows, retries with back-off (`docs/adr/0014-geo-fetch-policy.md`); set `JD_OFFLINE=1` to work from the cache only. The CLI chapter (`cli-quickstart.md`, "A terrain from the real world") has the same sequence op by op, the OSM features fetch, and the engine checks.
+
 ## Horizon
 
 ![Viewport orbited to the horizon with Horizon on: the world's terrain sits in a hole cut in a coarse, dimmer skirt of the same noise that runs to three times the extent under the physical sky](images/desktop-horizon.png)

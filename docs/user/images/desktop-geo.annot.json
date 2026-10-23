@@ -1,0 +1,10 @@
+{
+  "src": "/tmp/jd-scratch/desktop-geo-raw.png",
+  "out": "desktop-geo.png",
+  "annotations": [
+    { "type": "circle", "cx": 132, "cy": 292, "r": 44, "label": "1", "text": "1  Real world: lon, lat, radius, provider — the globe fetches the DEM", "tx": 300, "ty": 318 },
+    { "type": "circle", "cx": 200, "cy": 574, "r": 34, "label": "2", "text": "2  the world is placed in the DEM's CRS at its origin", "tx": 300, "ty": 342 },
+    { "type": "circle", "cx": 772, "cy": 590, "r": 34, "label": "3", "text": "3  the heightmap node takes the noise's place at the height output", "tx": 300, "ty": 366 },
+    { "type": "circle", "cx": 1298, "cy": 727, "r": 26, "label": "4", "text": "4  Nairobi's real heights: 1 640–1 746 m", "tx": 300, "ty": 390 }
+  ]
+}

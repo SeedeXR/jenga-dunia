@@ -5,6 +5,10 @@
 //! ponytail: the EPSG table is the handful of codes terrain work meets (WGS 84, Web Mercator,
 //! UTM north/south); anything else must be given as a proj string. No datum grids.
 
+pub mod dem;
+pub mod fetch;
+pub mod osm;
+
 use jd_types::{JdError, JdResult};
 use proj4rs::proj::Proj;
 

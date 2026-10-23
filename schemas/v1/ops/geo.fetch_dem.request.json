@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FetchDem",
+  "description": "`geo.fetch_dem` params.",
+  "type": "object",
+  "properties": {
+    "bbox": {
+      "description": "Lon/lat box in degrees.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Bbox"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "center": {
+      "description": "`[lon, lat]` of the centre (with `radius_m`).",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "number",
+        "format": "double"
+      },
+      "minItems": 2,
+      "maxItems": 2,
+      "default": null
+    },
+    "radius_m": {
+      "description": "Half-size of the box around `center`, metres.",
+      "type": [
+        "number",
+        "null"
+      ],
+      "format": "double",
+      "default": null
+    },
+    "provider": {
+      "description": "`terrarium` (default; no key), `copernicus` (1° tiles, ~25 MB each) or `opentopography`\n(needs `api_key`).",
+      "$ref": "#/$defs/Provider",
+      "default": "terrarium"
+    },
+    "res_m": {
+      "description": "Target ground resolution in metres (Terrarium picks the nearest zoom; the others are 30 m).",
+      "type": "number",
+      "format": "double",
+      "minimum": 1.0,
+      "maximum": 10000.0,
+      "default": 30.0
+    },
+    "name": {
+      "description": "Asset file name (`.tif`); default `dem-<provider>-<lat>_<lon>.tif`.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "overwrite": {
+      "description": "Replace an existing asset of that name.",
+      "type": "boolean",
+      "default": false
+    },
+    "api_key": {
+      "description": "Your OpenTopography key (or `JD_OPENTOPOGRAPHY_KEY`); never stored.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "offline": {
+      "description": "Serve the cache only (also `JD_OFFLINE=1`).",
+      "type": "boolean",
+      "default": false
+    },
+    "base_url": {
+      "description": "Tests only: a loopback server standing in for the provider.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "Bbox": {
+      "description": "A lon/lat box in degrees.",
+      "type": "object",
+      "properties": {
+        "south": {
+          "description": "Southern edge, degrees.",
+          "type": "number",
+          "format": "double"
+        },
+        "west": {
+          "description": "Western edge, degrees.",
+          "type": "number",
+          "format": "double"
+        },
+        "north": {
+          "description": "Northern edge, degrees.",
+          "type": "number",
+          "format": "double"
+        },
+        "east": {
+          "description": "Eastern edge, degrees.",
+          "type": "number",
+          "format": "double"
+        }
+      },
+      "required": [
+        "south",
+        "west",
+        "north",
+        "east"
+      ]
+    },
+    "Provider": {
+      "description": "Which provider a request names.",
+      "oneOf": [
+        {
+          "description": "AWS Terrain Tiles, Terrarium PNG (no key, no quota; Mapzen + per-source credits).",
+          "type": "string",
+          "const": "terrarium"
+        },
+        {
+          "description": "Copernicus DEM GLO-30 COGs on AWS (no key; the 6(b)/6(c) notices).",
+          "type": "string",
+          "const": "copernicus"
+        },
+        {
+          "description": "OpenTopography global DEM API (bring your own key; 50 calls a day).",
+          "type": "string",
+          "const": "opentopography"
+        }
+      ]
+    }
+  }
+}

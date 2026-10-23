@@ -79,6 +79,156 @@ export type DiagEnvResult = {
   "tools": ToolStatus[];
 };
 
+export type GeoAttributionsRequest = Record<string, unknown>;
+
+export type Attribution = {
+  /** Source name (e.g. "Copernicus DEM GLO-30"). */
+  "source": string;
+  /** Required notice text. */
+  "text": string;
+  /** Licence or terms URL. */
+  "url"?: string;
+  /** Licence name or terms in a line. */
+  "licence"?: string;
+};
+
+export type GeoAttributionsResult = {
+  /** The notices on the project. */
+  "attribution": Attribution[];
+  /** The `ATTRIBUTION.txt` text exports carry. */
+  "text": string;
+};
+
+export type Bbox = {
+  /** Southern edge, degrees. */
+  "south": number;
+  /** Western edge, degrees. */
+  "west": number;
+  /** Northern edge, degrees. */
+  "north": number;
+  /** Eastern edge, degrees. */
+  "east": number;
+};
+
+export type Provider = "terrarium" | "copernicus" | "opentopography";
+
+export type GeoFetchDemRequest = {
+  /** Lon/lat box in degrees. */
+  "bbox"?: Bbox | null;
+  /** `[lon, lat]` of the centre (with `radius_m`). */
+  "center"?: [number, number] | null;
+  /** Half-size of the box around `center`, metres. */
+  "radius_m"?: number | null;
+  /** `terrarium` (default; no key), `copernicus` (1° tiles, ~25 MB each) or `opentopography`
+(needs `api_key`). */
+  "provider"?: Provider;
+  /** Target ground resolution in metres (Terrarium picks the nearest zoom; the others are 30 m). */
+  "res_m"?: number;
+  /** Asset file name (`.tif`); default `dem-<provider>-<lat>_<lon>.tif`. */
+  "name"?: string | null;
+  /** Replace an existing asset of that name. */
+  "overwrite"?: boolean;
+  /** Your OpenTopography key (or `JD_OPENTOPOGRAPHY_KEY`); never stored. */
+  "api_key"?: string | null;
+  /** Serve the cache only (also `JD_OFFLINE=1`). */
+  "offline"?: boolean;
+  /** Tests only: a loopback server standing in for the provider. */
+  "base_url"?: string | null;
+};
+
+export type Stats = {
+  /** Requests in the batch. */
+  "requests": number;
+  /** Requests answered from the cache. */
+  "cache_hits": number;
+  /** Bytes that crossed the wire (a 304 counts nothing). */
+  "bytes": number;
+  /** Retries across the batch. */
+  "retries": number;
+  /** Connections in use when the batch ended. */
+  "connections": number;
+  /** Throughput estimate at the end, bytes per second. */
+  "bytes_per_s": number;
+  /** Wall time of the batch. */
+  "elapsed_ms": number;
+};
+
+export type GeoFetchDemResult = {
+  /** The asset's file name (what `jd.input.heightmap@1 {path}` takes). */
+  "asset": string;
+  /** Where it was written. */
+  "path": string;
+  /** The provider used. */
+  "provider": Provider;
+  /** Raster size. */
+  "px": [number, number];
+  /** Sample spacing in the raster's CRS units. */
+  "spacing": [number, number];
+  /** CRS of the raster (`EPSG:3857` for Terrarium, `EPSG:4326` otherwise). */
+  "crs": string;
+  /** Outer south-west corner in `crs` units. */
+  "origin": [number, number];
+  /** Height range, metres. */
+  "height_m": [number, number];
+  /** Share of nodata samples filled, 0..1. */
+  "void_share": number;
+  /** Fetch statistics. */
+  "fetch": Stats;
+  /** The notice appended to the project. */
+  "attribution": Attribution;
+  /** How to use it. */
+  "next": string;
+};
+
+export type Kind = "roads" | "waterways" | "water" | "buildings";
+
+export type GeoFetchFeaturesRequest = {
+  /** Lon/lat box in degrees. */
+  "bbox"?: Bbox | null;
+  /** `[lon, lat]` of the centre (with `radius_m`). */
+  "center"?: [number, number] | null;
+  /** Half-size of the box around `center`, metres. */
+  "radius_m"?: number | null;
+  /** Feature families; default all four. */
+  "kinds"?: Kind[] | null;
+  /** Asset file name (`.geojson`); default `osm-<lat>_<lon>.geojson`. */
+  "name"?: string | null;
+  /** Replace an existing asset of that name. */
+  "overwrite"?: boolean;
+  /** Serve the cache only (also `JD_OFFLINE=1`). */
+  "offline"?: boolean;
+  /** Tests only: a loopback server standing in for Overpass. */
+  "base_url"?: string | null;
+};
+
+export type Counts = {
+  /** `highway` ways. */
+  "roads": number;
+  /** Rivers, streams, canals. */
+  "waterways": number;
+  /** Water bodies. */
+  "water": number;
+  /** Buildings. */
+  "buildings": number;
+  /** Coordinates written in total. */
+  "nodes": number;
+};
+
+export type GeoFetchFeaturesResult = {
+  /** The asset's file name. */
+  "asset": string;
+  /** Where it was written. */
+  "path": string;
+  /** Features per kind. */
+  "counts": Counts;
+  /** Size of the GeoJSON written. */
+  "bytes": number;
+  /** Fetch statistics. */
+  "fetch": Stats;
+  /** The notice appended to the project. */
+  "attribution": Attribution;
+};
+
 export type NodeKind = string;
 
 export type NodeId = string;
@@ -580,6 +730,24 @@ export type OceanWavesResult = {
   "breaking_depth_m": number;
   /** Gerstner components, largest first. */
   "components": WaveComponent[];
+};
+
+export type ProjectAddAttributionRequest = {
+  /** Source name (e.g. "Copernicus DEM GLO-30"). */
+  "source": string;
+  /** Required notice text. */
+  "text": string;
+  /** Licence or terms URL. */
+  "url"?: string;
+  /** Licence name or terms in a line. */
+  "licence"?: string;
+};
+
+export type ProjectAddAttributionResult = {
+  /** The notices on the project. */
+  "attribution": Attribution[];
+  /** The `ATTRIBUTION.txt` text exports carry. */
+  "text": string;
 };
 
 export type ProjectCacheGcRequest = Record<string, unknown>;
@@ -1993,6 +2161,12 @@ export interface JdOps {
   "diag.bundle": { request: DiagBundleRequest; result: DiagBundleResult };
   /** Report host environment and detected tools */
   "diag.env": { request: DiagEnvRequest; result: DiagEnvResult };
+  /** The project's consolidated data-source notices (what every export's ATTRIBUTION.txt carries) */
+  "geo.attributions": { request: GeoAttributionsRequest; result: GeoAttributionsResult };
+  /** Fetch a DEM for a lon/lat box (Terrarium tiles, Copernicus GLO-30, or OpenTopography with your key) into assets/ as a georeferenced f32 GeoTIFF, cached under cache/geo, with the provider's attribution recorded — then `jd.input.heightmap@1 {path, georeference: true}` places it */
+  "geo.fetch_dem": { request: GeoFetchDemRequest; result: GeoFetchDemResult };
+  /** Fetch OpenStreetMap roads, waterways, water bodies and buildings for a lon/lat box through the Overpass API into assets/ as a GeoJSON file (ODbL; kept separately labelled), with the OSM attribution recorded */
+  "geo.fetch_features": { request: GeoFetchFeaturesRequest; result: GeoFetchFeaturesResult };
   /** Add a node (journaled) */
   "graph.add_node": { request: GraphAddNodeRequest; result: GraphAddNodeResult };
   /** Push one element onto an array parameter (brush strokes): journaled with just the element, so a long sculpt session grows the journal linearly */
@@ -2033,6 +2207,8 @@ export interface JdOps {
   "ocean.bake": { request: OceanBakeRequest; result: OceanBakeResult };
   /** Wind sea for a wind speed and fetch (JONSWAP growth capped at the fully developed Pierson–Moskowitz sea): significant height, peak period and wavelength, breaking depth, and the Gerstner components the viewport animates */
   "ocean.waves": { request: OceanWavesRequest; result: OceanWavesResult };
+  /** Record a data-source notice on the project (journaled; deduplicated by source + text) so exports carry it */
+  "project.add_attribution": { request: ProjectAddAttributionRequest; result: ProjectAddAttributionResult };
   /** Evict the oldest cached layer blobs until the project's cache fits `settings.cache_limit_bytes` (the cache is disposable); reports what is left */
   "project.cache_gc": { request: ProjectCacheGcRequest; result: ProjectCacheGcResult };
   /** Close the open project (unsaved changes stay in the journal) */

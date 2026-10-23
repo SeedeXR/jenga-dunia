@@ -7,6 +7,7 @@
 
 pub mod diag;
 pub mod envelope;
+pub mod geo;
 pub mod jobs;
 pub mod ops;
 pub mod project;

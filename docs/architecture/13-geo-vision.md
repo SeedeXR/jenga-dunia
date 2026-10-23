@@ -28,6 +28,7 @@ Rules from the research (binding):
 - **Excluded:** Google Elevation API (no caching/storing; use restricted), Google Earth Engine (commercial licence required), Cesium World Terrain (streaming-only), MapTiler Terrain-RGB (no commercial derivative works), Mapbox Terrain-DEM (SDK-only).
 - **OSM/ODbL:** terrain exports are produced works (attribution); the intermediate feature dataset is a derivative database → keep it in separately labelled files that can be shared under ODbL.
 - **Attribution** accumulates in `project.json → attribution[]` and is written to every export (`ATTRIBUTION.txt` + metadata). `geo.attributions` returns the consolidated list.
+- **How the product talks to them** — client, hosts, adaptive connections, retries, cache, offline, keys: ADR-0014 (`docs/adr/0014-geo-fetch-policy.md`), implemented in `crates/jd-geo/src/fetch.rs` and the `geo.*` ops (2026-10-23).
 - **Vertical datum:** record EGM96/EGM2008 vs ellipsoid per source; convert when mixing.
 - `contour-isobands` crate is **AGPL — never linked**; use `contour`.
 

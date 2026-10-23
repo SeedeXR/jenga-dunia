@@ -2219,6 +2219,7 @@ name = "jd-core"
 version = "0.0.1"
 dependencies = [
  "base64 0.22.1",
+ "image",
  "insta",
  "jd-cache",
  "jd-geo",
@@ -2241,8 +2242,14 @@ dependencies = [
 name = "jd-geo"
 version = "0.0.1"
 dependencies = [
+ "image",
  "jd-types",
  "proj4rs",
+ "schemars 1.2.3",
+ "serde",
+ "serde_json",
+ "tiff",
+ "ureq",
 ]
 
 [[package]]
@@ -5735,6 +5742,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a7ac20be9b7726e0bbdbf974c059676d9acb1cd414961f570a4e8231cacd7fc"
 dependencies = [
  "base64 0.23.1",
+ "flate2",
  "log",
  "percent-encoding",
  "rustls",

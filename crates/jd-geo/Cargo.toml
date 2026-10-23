@@ -11,6 +11,14 @@ publish.workspace = true
 [dependencies]
 jd-types.workspace = true
 proj4rs = "0.2"
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
+# The one HTTP client of the workspace (ADR-0014): blocking, rustls + webpki roots, gzip.
+ureq = { version = "3", default-features = false, features = ["rustls", "gzip"] }
+# Tile and raster decoding: Terrarium PNG tiles and GeoTIFF rasters.
+image = { version = "0.25", default-features = false, features = ["png"] }
+tiff = "0.11.3"
 
 [lints]
 workspace = true

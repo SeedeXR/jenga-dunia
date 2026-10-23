@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FetchFeaturesResult",
+  "description": "`geo.fetch_features` result.",
+  "type": "object",
+  "properties": {
+    "asset": {
+      "description": "The asset's file name.",
+      "type": "string"
+    },
+    "path": {
+      "description": "Where it was written.",
+      "type": "string"
+    },
+    "counts": {
+      "description": "Features per kind.",
+      "$ref": "#/$defs/Counts"
+    },
+    "bytes": {
+      "description": "Size of the GeoJSON written.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "fetch": {
+      "description": "Fetch statistics.",
+      "$ref": "#/$defs/Stats"
+    },
+    "attribution": {
+      "description": "The notice appended to the project.",
+      "$ref": "#/$defs/Attribution"
+    }
+  },
+  "required": [
+    "asset",
+    "path",
+    "counts",
+    "bytes",
+    "fetch",
+    "attribution"
+  ],
+  "$defs": {
+    "Counts": {
+      "description": "How many features of each kind came back.",
+      "type": "object",
+      "properties": {
+        "roads": {
+          "description": "`highway` ways.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "waterways": {
+          "description": "Rivers, streams, canals.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "water": {
+          "description": "Water bodies.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "buildings": {
+          "description": "Buildings.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "nodes": {
+          "description": "Coordinates written in total.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "roads",
+        "waterways",
+        "water",
+        "buildings",
+        "nodes"
+      ]
+    },
+    "Stats": {
+      "description": "What a batch cost.",
+      "type": "object",
+      "properties": {
+        "requests": {
+          "description": "Requests in the batch.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "cache_hits": {
+          "description": "Requests answered from the cache.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "bytes": {
+          "description": "Bytes that crossed the wire (a 304 counts nothing).",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "retries": {
+          "description": "Retries across the batch.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "connections": {
+          "description": "Connections in use when the batch ended.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "bytes_per_s": {
+          "description": "Throughput estimate at the end, bytes per second.",
+          "type": "number",
+          "format": "double"
+        },
+        "elapsed_ms": {
+          "description": "Wall time of the batch.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "requests",
+        "cache_hits",
+        "bytes",
+        "retries",
+        "connections",
+        "bytes_per_s",
+        "elapsed_ms"
+      ]
+    },
+    "Attribution": {
+      "description": "A data-source attribution obligation carried into exports.",
+      "type": "object",
+      "properties": {
+        "source": {
+          "description": "Source name (e.g. \"Copernicus DEM GLO-30\").",
+          "type": "string"
+        },
+        "text": {
+          "description": "Required notice text.",
+          "type": "string"
+        },
+        "url": {
+          "description": "Licence or terms URL.",
+          "type": "string"
+        },
+        "licence": {
+          "description": "Licence name or terms in a line.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "text"
+      ]
+    }
+  }
+}

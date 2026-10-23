@@ -283,6 +283,733 @@ expression: list
     }
   },
   {
+    "id": "geo.attributions",
+    "description": "The project's consolidated data-source notices (what every export's ATTRIBUTION.txt carries)",
+    "scope": "project-read",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "NoParams",
+      "description": "Empty params.",
+      "type": "object",
+      "additionalProperties": false
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "AttributionsResult",
+      "description": "`geo.attributions` result.",
+      "type": "object",
+      "properties": {
+        "attribution": {
+          "description": "The notices on the project.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Attribution"
+          }
+        },
+        "text": {
+          "description": "The `ATTRIBUTION.txt` text exports carry.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "attribution",
+        "text"
+      ],
+      "$defs": {
+        "Attribution": {
+          "description": "A data-source attribution obligation carried into exports.",
+          "type": "object",
+          "properties": {
+            "source": {
+              "description": "Source name (e.g. \"Copernicus DEM GLO-30\").",
+              "type": "string"
+            },
+            "text": {
+              "description": "Required notice text.",
+              "type": "string"
+            },
+            "url": {
+              "description": "Licence or terms URL.",
+              "type": "string"
+            },
+            "licence": {
+              "description": "Licence name or terms in a line.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "text"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "id": "geo.fetch_dem",
+    "description": "Fetch a DEM for a lon/lat box (Terrarium tiles, Copernicus GLO-30, or OpenTopography with your key) into assets/ as a georeferenced f32 GeoTIFF, cached under cache/geo, with the provider's attribution recorded — then `jd.input.heightmap@1 {path, georeference: true}` places it",
+    "scope": "network-geo",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "FetchDem",
+      "description": "`geo.fetch_dem` params.",
+      "type": "object",
+      "properties": {
+        "bbox": {
+          "description": "Lon/lat box in degrees.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Bbox"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "center": {
+          "description": "`[lon, lat]` of the centre (with `radius_m`).",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "default": null
+        },
+        "radius_m": {
+          "description": "Half-size of the box around `center`, metres.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double",
+          "default": null
+        },
+        "provider": {
+          "description": "`terrarium` (default; no key), `copernicus` (1° tiles, ~25 MB each) or `opentopography`\n(needs `api_key`).",
+          "$ref": "#/$defs/Provider",
+          "default": "terrarium"
+        },
+        "res_m": {
+          "description": "Target ground resolution in metres (Terrarium picks the nearest zoom; the others are 30 m).",
+          "type": "number",
+          "format": "double",
+          "minimum": 1.0,
+          "maximum": 10000.0,
+          "default": 30.0
+        },
+        "name": {
+          "description": "Asset file name (`.tif`); default `dem-<provider>-<lat>_<lon>.tif`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "overwrite": {
+          "description": "Replace an existing asset of that name.",
+          "type": "boolean",
+          "default": false
+        },
+        "api_key": {
+          "description": "Your OpenTopography key (or `JD_OPENTOPOGRAPHY_KEY`); never stored.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "offline": {
+          "description": "Serve the cache only (also `JD_OFFLINE=1`).",
+          "type": "boolean",
+          "default": false
+        },
+        "base_url": {
+          "description": "Tests only: a loopback server standing in for the provider.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "$defs": {
+        "Bbox": {
+          "description": "A lon/lat box in degrees.",
+          "type": "object",
+          "properties": {
+            "south": {
+              "description": "Southern edge, degrees.",
+              "type": "number",
+              "format": "double"
+            },
+            "west": {
+              "description": "Western edge, degrees.",
+              "type": "number",
+              "format": "double"
+            },
+            "north": {
+              "description": "Northern edge, degrees.",
+              "type": "number",
+              "format": "double"
+            },
+            "east": {
+              "description": "Eastern edge, degrees.",
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "required": [
+            "south",
+            "west",
+            "north",
+            "east"
+          ]
+        },
+        "Provider": {
+          "description": "Which provider a request names.",
+          "oneOf": [
+            {
+              "description": "AWS Terrain Tiles, Terrarium PNG (no key, no quota; Mapzen + per-source credits).",
+              "type": "string",
+              "const": "terrarium"
+            },
+            {
+              "description": "Copernicus DEM GLO-30 COGs on AWS (no key; the 6(b)/6(c) notices).",
+              "type": "string",
+              "const": "copernicus"
+            },
+            {
+              "description": "OpenTopography global DEM API (bring your own key; 50 calls a day).",
+              "type": "string",
+              "const": "opentopography"
+            }
+          ]
+        }
+      }
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "FetchDemResult",
+      "description": "`geo.fetch_dem` result.",
+      "type": "object",
+      "properties": {
+        "asset": {
+          "description": "The asset's file name (what `jd.input.heightmap@1 {path}` takes).",
+          "type": "string"
+        },
+        "path": {
+          "description": "Where it was written.",
+          "type": "string"
+        },
+        "provider": {
+          "description": "The provider used.",
+          "$ref": "#/$defs/Provider"
+        },
+        "px": {
+          "description": "Raster size.",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "spacing": {
+          "description": "Sample spacing in the raster's CRS units.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "crs": {
+          "description": "CRS of the raster (`EPSG:3857` for Terrarium, `EPSG:4326` otherwise).",
+          "type": "string"
+        },
+        "origin": {
+          "description": "Outer south-west corner in `crs` units.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "height_m": {
+          "description": "Height range, metres.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "void_share": {
+          "description": "Share of nodata samples filled, 0..1.",
+          "type": "number",
+          "format": "float"
+        },
+        "fetch": {
+          "description": "Fetch statistics.",
+          "$ref": "#/$defs/Stats"
+        },
+        "attribution": {
+          "description": "The notice appended to the project.",
+          "$ref": "#/$defs/Attribution"
+        },
+        "next": {
+          "description": "How to use it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "asset",
+        "path",
+        "provider",
+        "px",
+        "spacing",
+        "crs",
+        "origin",
+        "height_m",
+        "void_share",
+        "fetch",
+        "attribution",
+        "next"
+      ],
+      "$defs": {
+        "Provider": {
+          "description": "Which provider a request names.",
+          "oneOf": [
+            {
+              "description": "AWS Terrain Tiles, Terrarium PNG (no key, no quota; Mapzen + per-source credits).",
+              "type": "string",
+              "const": "terrarium"
+            },
+            {
+              "description": "Copernicus DEM GLO-30 COGs on AWS (no key; the 6(b)/6(c) notices).",
+              "type": "string",
+              "const": "copernicus"
+            },
+            {
+              "description": "OpenTopography global DEM API (bring your own key; 50 calls a day).",
+              "type": "string",
+              "const": "opentopography"
+            }
+          ]
+        },
+        "Stats": {
+          "description": "What a batch cost.",
+          "type": "object",
+          "properties": {
+            "requests": {
+              "description": "Requests in the batch.",
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "cache_hits": {
+              "description": "Requests answered from the cache.",
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "bytes": {
+              "description": "Bytes that crossed the wire (a 304 counts nothing).",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "retries": {
+              "description": "Retries across the batch.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "connections": {
+              "description": "Connections in use when the batch ended.",
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "bytes_per_s": {
+              "description": "Throughput estimate at the end, bytes per second.",
+              "type": "number",
+              "format": "double"
+            },
+            "elapsed_ms": {
+              "description": "Wall time of the batch.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "requests",
+            "cache_hits",
+            "bytes",
+            "retries",
+            "connections",
+            "bytes_per_s",
+            "elapsed_ms"
+          ]
+        },
+        "Attribution": {
+          "description": "A data-source attribution obligation carried into exports.",
+          "type": "object",
+          "properties": {
+            "source": {
+              "description": "Source name (e.g. \"Copernicus DEM GLO-30\").",
+              "type": "string"
+            },
+            "text": {
+              "description": "Required notice text.",
+              "type": "string"
+            },
+            "url": {
+              "description": "Licence or terms URL.",
+              "type": "string"
+            },
+            "licence": {
+              "description": "Licence name or terms in a line.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "text"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "id": "geo.fetch_features",
+    "description": "Fetch OpenStreetMap roads, waterways, water bodies and buildings for a lon/lat box through the Overpass API into assets/ as a GeoJSON file (ODbL; kept separately labelled), with the OSM attribution recorded",
+    "scope": "network-geo",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "FetchFeatures",
+      "description": "`geo.fetch_features` params.",
+      "type": "object",
+      "properties": {
+        "bbox": {
+          "description": "Lon/lat box in degrees.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Bbox"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "center": {
+          "description": "`[lon, lat]` of the centre (with `radius_m`).",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "default": null
+        },
+        "radius_m": {
+          "description": "Half-size of the box around `center`, metres.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double",
+          "default": null
+        },
+        "kinds": {
+          "description": "Feature families; default all four.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/$defs/Kind"
+          },
+          "default": null
+        },
+        "name": {
+          "description": "Asset file name (`.geojson`); default `osm-<lat>_<lon>.geojson`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "overwrite": {
+          "description": "Replace an existing asset of that name.",
+          "type": "boolean",
+          "default": false
+        },
+        "offline": {
+          "description": "Serve the cache only (also `JD_OFFLINE=1`).",
+          "type": "boolean",
+          "default": false
+        },
+        "base_url": {
+          "description": "Tests only: a loopback server standing in for Overpass.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "$defs": {
+        "Bbox": {
+          "description": "A lon/lat box in degrees.",
+          "type": "object",
+          "properties": {
+            "south": {
+              "description": "Southern edge, degrees.",
+              "type": "number",
+              "format": "double"
+            },
+            "west": {
+              "description": "Western edge, degrees.",
+              "type": "number",
+              "format": "double"
+            },
+            "north": {
+              "description": "Northern edge, degrees.",
+              "type": "number",
+              "format": "double"
+            },
+            "east": {
+              "description": "Eastern edge, degrees.",
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "required": [
+            "south",
+            "west",
+            "north",
+            "east"
+          ]
+        },
+        "Kind": {
+          "description": "Feature families the query asks for, in the project's words.",
+          "oneOf": [
+            {
+              "description": "`highway=*` ways.",
+              "type": "string",
+              "const": "roads"
+            },
+            {
+              "description": "`waterway` rivers, streams and canals.",
+              "type": "string",
+              "const": "waterways"
+            },
+            {
+              "description": "`natural=water` ways and relations (outer rings only).",
+              "type": "string",
+              "const": "water"
+            },
+            {
+              "description": "`building=*` ways.",
+              "type": "string",
+              "const": "buildings"
+            }
+          ]
+        }
+      }
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "FetchFeaturesResult",
+      "description": "`geo.fetch_features` result.",
+      "type": "object",
+      "properties": {
+        "asset": {
+          "description": "The asset's file name.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Where it was written.",
+          "type": "string"
+        },
+        "counts": {
+          "description": "Features per kind.",
+          "$ref": "#/$defs/Counts"
+        },
+        "bytes": {
+          "description": "Size of the GeoJSON written.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "fetch": {
+          "description": "Fetch statistics.",
+          "$ref": "#/$defs/Stats"
+        },
+        "attribution": {
+          "description": "The notice appended to the project.",
+          "$ref": "#/$defs/Attribution"
+        }
+      },
+      "required": [
+        "asset",
+        "path",
+        "counts",
+        "bytes",
+        "fetch",
+        "attribution"
+      ],
+      "$defs": {
+        "Counts": {
+          "description": "How many features of each kind came back.",
+          "type": "object",
+          "properties": {
+            "roads": {
+              "description": "`highway` ways.",
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "waterways": {
+              "description": "Rivers, streams, canals.",
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "water": {
+              "description": "Water bodies.",
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "buildings": {
+              "description": "Buildings.",
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "nodes": {
+              "description": "Coordinates written in total.",
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "roads",
+            "waterways",
+            "water",
+            "buildings",
+            "nodes"
+          ]
+        },
+        "Stats": {
+          "description": "What a batch cost.",
+          "type": "object",
+          "properties": {
+            "requests": {
+              "description": "Requests in the batch.",
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "cache_hits": {
+              "description": "Requests answered from the cache.",
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "bytes": {
+              "description": "Bytes that crossed the wire (a 304 counts nothing).",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "retries": {
+              "description": "Retries across the batch.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            },
+            "connections": {
+              "description": "Connections in use when the batch ended.",
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "bytes_per_s": {
+              "description": "Throughput estimate at the end, bytes per second.",
+              "type": "number",
+              "format": "double"
+            },
+            "elapsed_ms": {
+              "description": "Wall time of the batch.",
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "requests",
+            "cache_hits",
+            "bytes",
+            "retries",
+            "connections",
+            "bytes_per_s",
+            "elapsed_ms"
+          ]
+        },
+        "Attribution": {
+          "description": "A data-source attribution obligation carried into exports.",
+          "type": "object",
+          "properties": {
+            "source": {
+              "description": "Source name (e.g. \"Copernicus DEM GLO-30\").",
+              "type": "string"
+            },
+            "text": {
+              "description": "Required notice text.",
+              "type": "string"
+            },
+            "url": {
+              "description": "Licence or terms URL.",
+              "type": "string"
+            },
+            "licence": {
+              "description": "Licence name or terms in a line.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "text"
+          ]
+        }
+      }
+    }
+  },
+  {
     "id": "graph.add_node",
     "description": "Add a node (journaled)",
     "scope": "project-write",
@@ -3340,6 +4067,90 @@ expression: list
             "direction_deg",
             "speed_mps",
             "phase"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "id": "project.add_attribution",
+    "description": "Record a data-source notice on the project (journaled; deduplicated by source + text) so exports carry it",
+    "scope": "project-write",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "Attribution",
+      "description": "A data-source attribution obligation carried into exports.",
+      "type": "object",
+      "properties": {
+        "source": {
+          "description": "Source name (e.g. \"Copernicus DEM GLO-30\").",
+          "type": "string"
+        },
+        "text": {
+          "description": "Required notice text.",
+          "type": "string"
+        },
+        "url": {
+          "description": "Licence or terms URL.",
+          "type": "string"
+        },
+        "licence": {
+          "description": "Licence name or terms in a line.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "text"
+      ]
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "AttributionsResult",
+      "description": "`geo.attributions` result.",
+      "type": "object",
+      "properties": {
+        "attribution": {
+          "description": "The notices on the project.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Attribution"
+          }
+        },
+        "text": {
+          "description": "The `ATTRIBUTION.txt` text exports carry.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "attribution",
+        "text"
+      ],
+      "$defs": {
+        "Attribution": {
+          "description": "A data-source attribution obligation carried into exports.",
+          "type": "object",
+          "properties": {
+            "source": {
+              "description": "Source name (e.g. \"Copernicus DEM GLO-30\").",
+              "type": "string"
+            },
+            "text": {
+              "description": "Required notice text.",
+              "type": "string"
+            },
+            "url": {
+              "description": "Licence or terms URL.",
+              "type": "string"
+            },
+            "licence": {
+              "description": "Licence name or terms in a line.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "text"
           ]
         }
       }
