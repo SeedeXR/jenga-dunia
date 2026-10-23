@@ -239,7 +239,7 @@ export const useStore = create<State>((set, get) => {
   // brush stroke would cost more than the stroke itself on large worlds.
   const dropMaps = () => {
     const old = get().maps;
-    if (old) for (const b of [old.albedo, old.normal, old.roughness]) b.close();
+    if (old) for (const b of [old.albedo, old.normal, old.roughness, old.detailWeights, ...old.details.flatMap((d) => [d.albedo, d.normal])]) b?.close();
   };
   const refreshMaps = async () => {
     const { layer, pbr, lastEval, sculpting } = get();
@@ -252,7 +252,7 @@ export const useStore = create<State>((set, get) => {
       const r = await layerTextures(layer.layer, 1024, get().materials);
       // Toggled off or moved to another layer while baking: this result is stale.
       if (!get().pbr || get().layer?.layer !== layer.layer) {
-        if (r) for (const b of [r.maps.albedo, r.maps.normal, r.maps.roughness]) b.close();
+        if (r) for (const b of [r.maps.albedo, r.maps.normal, r.maps.roughness, r.maps.detailWeights, ...r.maps.details.flatMap((d) => [d.albedo, d.normal])]) b?.close();
         return;
       }
       dropMaps();

@@ -96,12 +96,70 @@
           "type": "number",
           "format": "float",
           "default": 0.8999999761581421
+        },
+        "detail": {
+          "description": "Tileable detail (grain repeated every `tile_m` metres): baked into the macro maps and\nthe GLB by world position, returned as tiles for the viewport, written as tiles for\nthe engines.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DetailSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "additionalProperties": false,
       "required": [
         "albedo"
       ]
+    },
+    "DetailSpec": {
+      "description": "A layer's tileable detail.",
+      "type": "object",
+      "properties": {
+        "tile_m": {
+          "description": "Metres per repeat.",
+          "type": "number",
+          "format": "float",
+          "minimum": 0.01,
+          "maximum": 100000.0,
+          "default": 8.0
+        },
+        "bump": {
+          "description": "Normal strength 0..1.",
+          "type": "number",
+          "format": "float",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "default": 0.5
+        },
+        "contrast": {
+          "description": "Albedo variation 0..1.",
+          "type": "number",
+          "format": "float",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "default": 0.30000001192092896
+        },
+        "seed": {
+          "description": "Noise seed.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "px": {
+          "description": "Tile side in pixels (16..=2048).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 16,
+          "maximum": 2048,
+          "default": 512
+        }
+      },
+      "additionalProperties": false
     }
   }
 }

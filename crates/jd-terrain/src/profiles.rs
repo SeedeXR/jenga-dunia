@@ -80,6 +80,9 @@ pub struct ProfileMaterial<'a> {
     pub albedo: [f32; 3],
     /// Roughness 0..1.
     pub roughness: f32,
+    /// Tileable detail: written as `detail_<name>_albedo.png` / `detail_<name>_normal.png`
+    /// with `tile_m` in the manifest.
+    pub detail: Option<crate::detail::Detail>,
 }
 
 /// Write the profile for `height` with `masks` (name, 0..1 field) as weightmaps.
@@ -222,12 +225,32 @@ pub fn export_profile_with(
                     None
                 }
             };
-            layers.push(serde_json::json!({
+            let mut entry = serde_json::json!({
                 "name": m.name, "weightmap": weightmap, "albedo_srgb": m.albedo, "roughness": m.roughness,
                 "smoothness": 1.0 - m.roughness,
-            }));
+            });
+            if let Some(d) = &m.detail {
+                let tile = crate::detail::bake_detail(d, m.albedo)?;
+                let (fa, fn_) = (
+                    format!("detail_{}_albedo.png", m.name),
+                    format!("detail_{}_normal.png", m.name),
+                );
+                std::fs::write(dir.join(&fa), &tile.albedo)?;
+                std::fs::write(dir.join(&fn_), &tile.normal)?;
+                files.push(fa.clone());
+                files.push(fn_.clone());
+                entry["detail_albedo"] = serde_json::json!(fa);
+                entry["detail_normal"] = serde_json::json!(fn_);
+                entry["tile_m"] = serde_json::json!(d.tile_m);
+                entry["detail_px"] = serde_json::json!(tile.px);
+            }
+            layers.push(entry);
         }
-        loss.push("flat colours: both engines paint terrain layers with textures, not colours — assign a texture per layer and use `albedo_srgb` as its tint".to_owned());
+        if materials.iter().any(|m| m.detail.is_some()) {
+            loss.push("detail tiles: `detail_<name>_albedo.png` (the colour with its grain) and `detail_<name>_normal.png` (tangent space, +Y up) repeat every `tile_m` metres — Unity: TerrainLayer diffuse + normal with tileSize = tile_m (the headless importer does this); Unreal: the layer's material samples them with UV × extent ÷ tile_m".to_owned());
+        } else {
+            loss.push("flat colours: both engines paint terrain layers with textures, not colours — assign a texture per layer and use `albedo_srgb` as its tint, or give the layer a `detail`".to_owned());
+        }
         loss.push("blend order: the stack lerps layers in order; engine weightmaps blend by normalised weight, so overlapping masks mix instead of the later one winning — order your masks to overlap little or pre-multiply them in the graph".to_owned());
         loss.push("weights are 8-bit (256 steps) at the heightmap's resolution".to_owned());
         match profile {
@@ -338,12 +361,14 @@ mod tests {
                 mask: None,
                 albedo: [0.5, 0.5, 0.5],
                 roughness: 0.9,
+                detail: None,
             },
             ProfileMaterial {
                 name: "snow".into(),
                 mask: Some(&m),
                 albedo: [0.95, 0.96, 0.98],
                 roughness: 0.45,
+                detail: None,
             },
         ];
         let dir = tempfile::tempdir().expect("tmp");
@@ -385,6 +410,7 @@ mod tests {
             mask: None,
             albedo: [0.0; 3],
             roughness: 0.5,
+            detail: None,
         }];
         assert!(
             export_profile_with(

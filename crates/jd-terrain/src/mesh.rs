@@ -159,6 +159,7 @@ pub(crate) fn bake_albedo(
     max_h: f32,
     layers: &[MaterialLayer],
     cell: &dyn Fn(u32, u32) -> (u32, u32),
+    world_m: &dyn Fn(u32, u32) -> (f64, f64),
 ) -> JdResult<Vec<u8>> {
     let range = (max_h - min_h).max(1e-6);
     let mut px = Vec::with_capacity((gw * gh * 3) as usize);
@@ -185,6 +186,16 @@ pub(crate) fn bake_albedo(
                     .map_or(1.0, |m| m.get(cx, cz).clamp(0.0, 1.0));
                 for (ck, lk) in c.iter_mut().zip(&l.albedo) {
                     *ck += (lk - *ck) * wgt;
+                }
+                // Detail: the tile's relief at this texel's world position darkens and
+                // lightens the colour, as it does in the exported tile.
+                if let Some(d) = &l.detail {
+                    let (xm, zm) = world_m(gx, gz);
+                    let (r, _, _) = crate::detail::relief_at_world(d, xm, zm);
+                    let f = 1.0 + wgt * d.contrast * (r - 0.5) * 2.0;
+                    for ck in c.iter_mut() {
+                        *ck = (*ck * f).clamp(0.0, 1.0);
+                    }
                 }
             }
             px.extend(
@@ -225,6 +236,11 @@ pub struct BakedMaps {
     pub roughness: Vec<u8>,
     /// Texture size in pixels.
     pub px: [u32; 2],
+    /// Detail tiles of the layers that have one, with the layer's index in the stack.
+    pub details: Vec<(usize, crate::detail::DetailTile)>,
+    /// The masks of the first four detail layers packed into an RGBA PNG at the map size
+    /// (row 0 = south), for a viewport that blends the tiles itself; `None` without details.
+    pub detail_weights: Option<Vec<u8>>,
 }
 
 /// A material layer blended over the base maps by a 0..1 mask (the material graph's layer
@@ -238,6 +254,9 @@ pub struct MaterialLayer {
     pub albedo: [f32; 3],
     /// Roughness 0..1.
     pub roughness: f32,
+    /// Tileable detail (grain repeated every `tile_m`): baked into the macro maps by world
+    /// position and exported as tiles for the engines.
+    pub detail: Option<crate::detail::Detail>,
 }
 
 /// Bake albedo, normal and roughness maps from the full field, sampled every `ts` cells so no
@@ -277,6 +296,9 @@ fn validate_layers(hf: &Heightfield, layers: &[MaterialLayer]) -> JdResult<()> {
                 format!("layer {k}: albedo and roughness must be within 0..=1"),
             ));
         }
+        if let Some(d) = &l.detail {
+            d.validate(k)?;
+        }
     }
     Ok(())
 }
@@ -315,13 +337,58 @@ fn bake_maps_body(
         stats.max,
         layers,
         &|gx, gz| ((gx * ts).min(w - 1), (gz * ts).min(h - 1)),
+        &|gx, gz| ((gx * ts) as f64 * sx, (gz * ts) as f64 * sz),
     )?;
     let (normal, roughness, px) = bake_normal_roughness_with(hf, extent_m, max_px, layers)?;
+    let mut details = Vec::new();
+    for (k, l) in layers.iter().enumerate() {
+        if let Some(d) = &l.detail {
+            details.push((k, crate::detail::bake_detail(d, l.albedo)?));
+        }
+    }
+    let detail_weights = if details.is_empty() {
+        None
+    } else {
+        // RGBA = the first four detail layers' masks at the map's texels.
+        let mut rgba = Vec::with_capacity((tw * th * 4) as usize);
+        for gz in 0..th {
+            for gx in 0..tw {
+                let (cx, cz) = ((gx * ts).min(w - 1), (gz * ts).min(h - 1));
+                for ch in 0..4 {
+                    let v = details.get(ch).map_or(0.0, |(k, _)| {
+                        layers[*k]
+                            .mask
+                            .as_ref()
+                            .map_or(1.0, |m| m.get(cx, cz).clamp(0.0, 1.0))
+                    });
+                    rgba.push((v * 255.0).round() as u8);
+                }
+            }
+        }
+        let mut out = std::io::Cursor::new(Vec::new());
+        image::write_buffer_with_format(
+            &mut out,
+            &rgba,
+            tw,
+            th,
+            image::ExtendedColorType::Rgba8,
+            image::ImageFormat::Png,
+        )
+        .map_err(|e| {
+            JdError::new(
+                jd_types::ErrorCode::E_INTERNAL,
+                format!("PNG encode failed: {e}"),
+            )
+        })?;
+        Some(out.into_inner())
+    };
     Ok(BakedMaps {
         albedo,
         normal,
         roughness,
         px,
+        details,
+        detail_weights,
     })
 }
 
@@ -353,9 +420,23 @@ pub(crate) fn bake_normal_roughness_with(
         for tx in 0..tw {
             let (x, z) = ((tx * ts).min(w - 1) as i64, (ty * ts).min(h - 1) as i64);
             let d = ts as i64;
-            let dh_dx = (at(x + d, z) - at(x - d, z)) / (2.0 * d as f64 * sx);
+            let mut dh_dx = (at(x + d, z) - at(x - d, z)) / (2.0 * d as f64 * sx);
             // Row index grows northwards (−Z): the derivative along +Z (south) is the reverse.
-            let dh_dz = (at(x, z - d) - at(x, z + d)) / (2.0 * d as f64 * sz);
+            let mut dh_dz = (at(x, z - d) - at(x, z + d)) / (2.0 * d as f64 * sz);
+            // Detail: each layer's tile relief adds its slope here, weighted by the mask — the
+            // same `bump × 0.25 × ∂relief` the exported tile encodes.
+            for l in layers {
+                if let Some(dt) = &l.detail {
+                    let wgt = l
+                        .mask
+                        .as_ref()
+                        .map_or(1.0, |m| m.get(x as u32, z as u32).clamp(0.0, 1.0));
+                    let (_, du, dv) =
+                        crate::detail::relief_at_world(dt, x as f64 * sx, z as f64 * sz);
+                    dh_dx += f64::from(wgt * dt.bump * 0.25 * du);
+                    dh_dz -= f64::from(wgt * dt.bump * 0.25 * dv);
+                }
+            }
             let len = (dh_dx * dh_dx + 1.0 + dh_dz * dh_dz).sqrt();
             let (nx, ny, nz) = (-dh_dx / len, 1.0 / len, -dh_dz / len);
             // Tangent frame: T = +X, B = +V = north = −Z, N = +Y.
@@ -556,6 +637,12 @@ pub fn export_glb_with(
             max[1],
             materials,
             &|gx, gz| ((gx * step).min(fw - 1), (gz * step).min(fh - 1)),
+            &|gx, gz| {
+                (
+                    (gx * step) as f64 * extent_m[0] / fw as f64,
+                    (gz * step) as f64 * extent_m[1] / fh as f64,
+                )
+            },
         )?;
         let (normal_png, rough_png, px) =
             bake_normal_roughness_with(hf, extent_m, NORMAL_MAP_CAP, materials)?;
@@ -1634,6 +1721,69 @@ mod tests {
     }
 
     #[test]
+    fn a_detail_layer_changes_the_macro_maps_and_ships_its_tile_and_weights() {
+        let hf = Heightfield::new(64, 64, 64, 0).unwrap();
+        let mut hf = hf;
+        hf.fill_with(|x, _| x as f32);
+        let plain = MaterialLayer {
+            mask: None,
+            albedo: [0.5, 0.5, 0.5],
+            roughness: 0.8,
+            detail: None,
+        };
+        let grainy = MaterialLayer {
+            detail: Some(crate::detail::Detail {
+                tile_m: 8.0,
+                bump: 1.0,
+                contrast: 0.5,
+                seed: 3,
+                px: 64,
+            }),
+            ..plain.clone()
+        };
+        let a = bake_maps_with(&hf, [640.0, 640.0], 64, std::slice::from_ref(&plain)).unwrap();
+        let b = bake_maps_with(&hf, [640.0, 640.0], 64, std::slice::from_ref(&grainy)).unwrap();
+        assert!(a.details.is_empty() && a.detail_weights.is_none());
+        assert_eq!(b.details.len(), 1);
+        assert_eq!(b.details[0].0, 0);
+        let decode = |png: &[u8]| image::load_from_memory(png).unwrap().to_rgba8();
+        let (pa, pb) = (decode(&a.albedo), decode(&b.albedo));
+        let diff = pa
+            .pixels()
+            .zip(pb.pixels())
+            .filter(|(x, y)| x.0[0] != y.0[0])
+            .count();
+        assert!(
+            diff > pa.len() / 8,
+            "the grain shows in the albedo: {diff} texels differ"
+        );
+        let (na, nb) = (decode(&a.normal), decode(&b.normal));
+        let ndiff = na
+            .pixels()
+            .zip(nb.pixels())
+            .filter(|(x, y)| x.0[0] != y.0[0] || x.0[1] != y.0[1])
+            .count();
+        assert!(
+            ndiff > na.len() / 8,
+            "the grain shows in the normal map: {ndiff}"
+        );
+        let w = decode(b.detail_weights.as_ref().unwrap());
+        assert_eq!(w.dimensions(), (64, 64));
+        assert!(
+            w.pixels().all(|p| p.0[0] == 255 && p.0[1] == 0),
+            "layer 0 everywhere in R, nothing in G"
+        );
+        let bad = MaterialLayer {
+            detail: Some(crate::detail::Detail {
+                px: 4,
+                ..Default::default()
+            }),
+            ..plain
+        };
+        assert!(bake_maps_with(&hf, [640.0, 640.0], 64, &[bad]).is_err());
+    }
+
+    #[test]
     fn material_layers_blend_albedo_and_roughness_by_their_masks() {
         let mut h = Heightfield::new(32, 16, 64, 0).expect("hf");
         h.fill_with(|x, _| x as f32 * 10.0);
@@ -1643,6 +1793,7 @@ mod tests {
             mask: Some(west),
             albedo: [1.0, 0.0, 0.0],
             roughness: 0.3,
+            detail: None,
         };
         let plain = bake_maps(&h, [320.0, 160.0], 64).expect("plain");
         let layered =
@@ -1666,6 +1817,7 @@ mod tests {
             mask: None,
             albedo: [2.0, 0.0, 0.0],
             roughness: 0.5,
+            detail: None,
         };
         assert!(bake_maps_with(&h, [320.0, 160.0], 64, &[bad]).is_err());
     }

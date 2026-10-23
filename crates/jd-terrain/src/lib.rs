@@ -10,6 +10,7 @@ pub mod bathymetry;
 pub mod climate;
 pub mod coastal;
 pub mod decimate;
+pub mod detail;
 mod dist;
 pub mod droplet;
 pub mod export;

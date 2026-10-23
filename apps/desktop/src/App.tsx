@@ -599,7 +599,7 @@ export default function App() {
           </div>
           <h2 className="mt-4 mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Materials</h2>
           {s.materials.map((m, i) => (
-            <div className="mb-1 flex items-center gap-1" key={i} data-testid={`material-${i}`}>
+            <div className="mb-1 flex flex-wrap items-center gap-1" key={i} data-testid={`material-${i}`}>
               <select
                 className={`${inputCls} w-24 text-left`}
                 value={m.mask ?? ""}
@@ -630,6 +630,29 @@ export default function App() {
                 title="Roughness 0..1"
                 data-testid={`material-rough-${i}`}
               />
+              <input
+                type="checkbox"
+                checked={!!m.detail}
+                onChange={(e) => s.setMaterials(s.materials.map((x, k) => (k === i ? { ...x, detail: e.target.checked ? { tile_m: 8, bump: 0.5, contrast: 0.3, seed: i, px: 512 } : null } : x)))}
+                title="Tileable detail: a seamless grain tile repeated every tile_m metres, blended by this layer's mask in the viewport, baked into exported maps by world position, written as tiles for Unity and Unreal"
+                data-testid={`material-detail-${i}`}
+              />
+              {m.detail && (
+                <input
+                  className={`${inputCls} w-14`}
+                  type="number"
+                  min={0.1}
+                  step={1}
+                  key={`tile-${i}-${m.detail.tile_m}`}
+                  defaultValue={m.detail.tile_m}
+                  onBlur={(e) => {
+                    const v = Number(e.target.value);
+                    if (v > 0 && v !== m.detail?.tile_m) s.setMaterials(s.materials.map((x, k) => (k === i && x.detail ? { ...x, detail: { ...x.detail, tile_m: v } } : x)));
+                  }}
+                  title="Metres per repeat of the detail tile"
+                  data-testid={`material-tile-${i}`}
+                />
+              )}
               <button className="btn px-1.5" onClick={() => s.setMaterials(s.materials.filter((_, k) => k !== i))} title="Remove this layer" data-testid={`material-remove-${i}`}>
                 ×
               </button>

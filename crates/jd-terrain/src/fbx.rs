@@ -396,9 +396,17 @@ pub fn export_fbx(
         let [min_h, max_h] = mesh.height_range;
         let sample = |gx: u32, gz: u32| mesh.positions[((gz * gw + gx) * 3 + 1) as usize];
         let normal_y = |gx: u32, gz: u32| mesh.normals[((gz * gw + gx) * 3 + 1) as usize];
-        let png = bake_albedo(&sample, &normal_y, gw, gh, min_h, max_h, &[], &|gx, gz| {
-            (gx, gz)
-        })?; // FBX carries the base ramp only
+        let png = bake_albedo(
+            &sample,
+            &normal_y,
+            gw,
+            gh,
+            min_h,
+            max_h,
+            &[],
+            &|gx, gz| (gx, gz),
+            &|_, _| (0.0, 0.0),
+        )?; // FBX carries the base ramp only
         let file = "terrain-albedo.png";
         objects.push(N::tree(
             "Video",

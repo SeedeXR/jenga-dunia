@@ -1,6 +1,6 @@
 // Thin typed client over the Tauri commands. Mirrors docs/spec/json-api.md.
 import { invoke } from "@tauri-apps/api/core";
-import type { MaterialSpec } from "./ops.gen";
+import type { JdOps, MaterialSpec } from "./ops.gen";
 
 export const SCHEMA_VERSION = 1;
 
@@ -82,11 +82,22 @@ export async function layerPreview(layer: string, lod: number): Promise<{ previe
 }
 
 /** Material maps of a layer as decoded bitmaps (albedo, tangent-space normal, roughness). */
+export interface DetailTile {
+  layer: number;
+  tileM: number;
+  px: number;
+  albedo: ImageBitmap;
+  normal: ImageBitmap;
+}
+
 export interface LayerMaps {
   albedo: ImageBitmap;
   normal: ImageBitmap;
   roughness: ImageBitmap;
   px: [number, number];
+  /** Detail tiles of the layers that have one, and their masks packed RGBA at the map size. */
+  details: DetailTile[];
+  detailWeights: ImageBitmap | null;
 }
 
 /** The noise continued `scale` × beyond the world's border as a coarse preview (the horizon skirt). */
@@ -108,9 +119,13 @@ export async function skyPreview(sun: { sun_azimuth_deg: number; sun_elevation_d
 
 export async function layerTextures(layer: string, maxPx = 1024, materials: MaterialSpec[] = []): Promise<{ maps: LayerMaps; ms: number } | null> {
   const t0 = performance.now();
-  const r = await op<{ width: number; height: number; albedo_png_base64: string; normal_png_base64: string; roughness_png_base64: string }>("terrain.textures", { materials, layer, max_px: maxPx });
+  const r = await op<JdOps["terrain.textures"]["result"]>("terrain.textures", { materials, layer, max_px: maxPx });
   if (r.status !== "ok" || !r.result) return null;
   const decode = (b64: string) => createImageBitmap(new Blob([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], { type: "image/png" }));
   const [albedo, normal, roughness] = await Promise.all([decode(r.result.albedo_png_base64), decode(r.result.normal_png_base64), decode(r.result.roughness_png_base64)]);
-  return { maps: { albedo, normal, roughness, px: [r.result.width, r.result.height] }, ms: performance.now() - t0 };
+  const details: DetailTile[] = await Promise.all(
+    (r.result.details ?? []).map(async (d) => ({ layer: d.layer, tileM: d.tile_m, px: d.px, albedo: await decode(d.albedo_png_base64), normal: await decode(d.normal_png_base64) })),
+  );
+  const detailWeights = r.result.detail_weights_png_base64 ? await decode(r.result.detail_weights_png_base64) : null;
+  return { maps: { albedo, normal, roughness, px: [r.result.width, r.result.height], details, detailWeights }, ms: performance.now() - t0 };
 }

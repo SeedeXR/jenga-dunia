@@ -113,6 +113,8 @@ try:
         weights = {k: v for k, v in imported.items() if k.startswith("weight_")}
         report["heightmap_source_format"] = fmt(hm)
         report["weightmap_source_formats"] = sorted({fmt(v) for v in weights.values()})
+        details = {k: v for k, v in imported.items() if k.startswith("detail_")}
+        report["detail_textures"] = {k: {"size": v.get("size"), "source_format": fmt(v)} for k, v in details.items()}
         # The profile promises a 16-bit grayscale heightmap and 8-bit grayscale weightmaps.
         report["ok"] = (
             bool(hm.get("size"))

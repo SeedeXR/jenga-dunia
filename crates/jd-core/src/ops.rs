@@ -3989,6 +3989,74 @@ pub mod terrain {
         /// Roughness 0..1.
         #[serde(default = "default_roughness")]
         pub roughness: f32,
+        /// Tileable detail (grain repeated every `tile_m` metres): baked into the macro maps and
+        /// the GLB by world position, returned as tiles for the viewport, written as tiles for
+        /// the engines.
+        #[serde(default)]
+        pub detail: Option<DetailSpec>,
+    }
+
+    /// A layer's tileable detail.
+    #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct DetailSpec {
+        /// Metres per repeat.
+        #[serde(default = "default_tile_m")]
+        #[schemars(range(min = 0.01, max = 100000.0))]
+        pub tile_m: f32,
+        /// Normal strength 0..1.
+        #[serde(default = "default_bump")]
+        #[schemars(range(min = 0.0, max = 1.0))]
+        pub bump: f32,
+        /// Albedo variation 0..1.
+        #[serde(default = "default_contrast")]
+        #[schemars(range(min = 0.0, max = 1.0))]
+        pub contrast: f32,
+        /// Noise seed.
+        #[serde(default)]
+        pub seed: u64,
+        /// Tile side in pixels (16..=2048).
+        #[serde(default = "default_detail_px")]
+        #[schemars(range(min = 16, max = 2048))]
+        pub px: u32,
+    }
+    fn default_tile_m() -> f32 {
+        8.0
+    }
+    fn default_bump() -> f32 {
+        0.5
+    }
+    fn default_contrast() -> f32 {
+        0.3
+    }
+    fn default_detail_px() -> u32 {
+        512
+    }
+    fn detail_of(d: &Option<DetailSpec>) -> Option<jd_terrain::detail::Detail> {
+        d.as_ref().map(|d| jd_terrain::detail::Detail {
+            tile_m: d.tile_m,
+            bump: d.bump,
+            contrast: d.contrast,
+            seed: d.seed,
+            px: d.px,
+        })
+    }
+
+    /// One detail tile of a `terrain.textures` result.
+    #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct DetailOut {
+        /// Index of the layer in `materials`.
+        pub layer: usize,
+        /// Its mask layer name, if any.
+        pub mask: Option<String>,
+        /// Metres per repeat.
+        pub tile_m: f32,
+        /// Tile side, pixels.
+        pub px: u32,
+        /// The colour tile (sRGB PNG, base64).
+        pub albedo_png_base64: String,
+        /// The tangent-space normal tile (PNG, base64).
+        pub normal_png_base64: String,
     }
 
     fn default_roughness() -> f32 {
@@ -4012,6 +4080,7 @@ pub mod terrain {
                     mask,
                     albedo: m.albedo,
                     roughness: m.roughness,
+                    detail: detail_of(&m.detail),
                 })
             })
             .collect()
@@ -4034,6 +4103,13 @@ pub mod terrain {
         pub normal_png_base64: String,
         /// Roughness in G (0.92 flat → 0.62 steep rock, 0.6 above the snow line), metallic 0 in B.
         pub roughness_png_base64: String,
+        /// Detail tiles of the layers that have one.
+        #[serde(default)]
+        pub details: Vec<DetailOut>,
+        /// The first four detail layers' masks packed into an RGBA PNG at the map size (base64),
+        /// for blending the tiles in a viewport; empty without details.
+        #[serde(default)]
+        pub detail_weights_png_base64: String,
     }
 
     /// `terrain.preview` params.
@@ -4269,6 +4345,8 @@ pub mod terrain {
                             albedo_png_base64: b64(&maps.albedo),
                             normal_png_base64: b64(&maps.normal),
                             roughness_png_base64: b64(&maps.roughness),
+                            details: maps.details.iter().map(|(k, t)| DetailOut { layer: *k, mask: p.materials[*k].mask.clone(), tile_m: t.tile_m, px: t.px, albedo_png_base64: b64(&t.albedo), normal_png_base64: b64(&t.normal) }).collect(),
+                            detail_weights_png_base64: maps.detail_weights.as_deref().map(b64).unwrap_or_default(),
                         },
                         Vec::new(),
                     ))
@@ -4364,7 +4442,7 @@ pub mod terrain {
                     .iter()
                     .zip(&mat_fields)
                     .enumerate()
-                    .map(|(i, (m, f))| jd_terrain::ProfileMaterial { name: m.mask.clone().unwrap_or_else(|| format!("material_{i}")), mask: f.as_ref(), albedo: m.albedo, roughness: m.roughness })
+                    .map(|(i, (m, f))| jd_terrain::ProfileMaterial { name: m.mask.clone().unwrap_or_else(|| format!("material_{i}")), mask: f.as_ref(), albedo: m.albedo, roughness: m.roughness, detail: detail_of(&m.detail) })
                     .collect();
                 let geo = ctx.with_project(|proj| {
                     let w = &proj.doc.world;

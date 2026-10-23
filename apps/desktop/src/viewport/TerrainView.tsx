@@ -3,8 +3,9 @@ import type { OceanWavesResult, WaveComponent } from "../lib/ops.gen";
 // The mesh is a regular grid displaced on the CPU from the u16 preview; colours follow height.
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import { WebGPURenderer } from "three/webgpu";
-import type { Preview } from "../lib/api";
+import { MeshStandardNodeMaterial, WebGPURenderer, type Node } from "three/webgpu";
+import { float, mix, normalMap, texture, uv, vec2 } from "three/tsl";
+import type { LayerMaps, Preview } from "../lib/api";
 
 export interface ViewportInfo {
   backend: "webgpu" | "webgl2" | "none";
@@ -51,7 +52,7 @@ interface Props {
   /** Fog 0..1: 0 keeps the faint aerial perspective, 1 closes the view within a world's width. */
   fog?: number;
   /** Baked albedo/normal/roughness maps for the shown layer; textured when set and no overlay is active. */
-  maps?: { albedo: ImageBitmap; normal: ImageBitmap; roughness: ImageBitmap; px: [number, number] } | null;
+  maps?: LayerMaps | null;
   /** Scatter instances (layer metres: u east, v north from the south edge, z height, r 0..1) drawn as
    *  `sizeM`-tall cones — a preview marker, the exported GLB carries 1 m proxies. */
   instances?: { points: { u: number; v: number; z: number; r: number; age?: number }[]; sizeM: number } | null;
@@ -258,7 +259,9 @@ interface SceneState {
   renderer: WebGPURenderer;
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
-  mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | null;
+  mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial | MeshStandardNodeMaterial> | null;
+  /** Textures owned by the current mesh's material, disposed with it. */
+  meshTextures: THREE.Texture[];
   /** Brush ring shown under the pointer in sculpt mode. */
   brush: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
   frame: number;
@@ -393,6 +396,7 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
       scene,
       camera,
       mesh: null,
+      meshTextures: [],
       brush,
       frame: 0,
       backend: "none",
@@ -544,7 +548,8 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
     if (s.mesh) {
       s.scene.remove(s.mesh);
       s.mesh.geometry.dispose();
-      for (const t of [s.mesh.material.map, s.mesh.material.normalMap, s.mesh.material.roughnessMap]) t?.dispose();
+      for (const t of s.meshTextures) t.dispose();
+      s.meshTextures = [];
       s.mesh.material.dispose();
       s.mesh = null;
       s.triangles = 0;
@@ -554,15 +559,41 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
     // Baked maps texture the terrain like the exports (full-field relief at any preview LOD);
     // a colour overlay wins, and without maps the hypsometric vertex colours show.
     const textured = maps && !overlay;
-    const tex = (img: ImageBitmap, color: boolean) => {
+    const owned: THREE.Texture[] = [];
+    const tex = (img: ImageBitmap, color: boolean, repeat = false) => {
       const t = new THREE.Texture(img);
       if (color) t.colorSpace = THREE.SRGBColorSpace;
+      if (repeat) t.wrapS = t.wrapT = THREE.RepeatWrapping;
       t.needsUpdate = true;
+      owned.push(t);
       return t;
     };
-    const mat = textured
-      ? new THREE.MeshStandardMaterial({ map: tex(maps.albedo, true), normalMap: tex(maps.normal, false), roughnessMap: tex(maps.roughness, false), roughness: 1, metalness: 0 })
-      : new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
+    const details = textured ? maps.details.slice(0, 4) : [];
+    let mat: THREE.MeshStandardMaterial | MeshStandardNodeMaterial;
+    if (textured && details.length > 0 && maps.detailWeights) {
+      // Detail tiles blended by their masks on top of the macro maps (TSL on the WebGPU renderer):
+      // each tile repeats every tile_m metres across the world's extent.
+      const node = new MeshStandardNodeMaterial();
+      const weights = texture(tex(maps.detailWeights, false), uv());
+      let color: Node<"vec4"> = texture(tex(maps.albedo, true), uv());
+      let normalTex: Node<"vec3"> = texture(tex(maps.normal, false), uv()).xyz;
+      details.forEach((d, k) => {
+        const rep = uv().mul(vec2(extentM[0] / d.tileM, extentM[1] / d.tileM));
+        const w = [weights.r, weights.g, weights.b, weights.a][k] ?? float(0);
+        color = mix(color, texture(tex(d.albedo, true, true), rep), w);
+        normalTex = mix(normalTex, texture(tex(d.normal, false, true), rep).xyz, w);
+      });
+      node.colorNode = color;
+      node.normalNode = normalMap(normalTex);
+      node.roughnessNode = texture(tex(maps.roughness, false), uv()).g;
+      node.metalnessNode = float(0);
+      mat = node;
+    } else {
+      mat = textured
+        ? new THREE.MeshStandardMaterial({ map: tex(maps.albedo, true), normalMap: tex(maps.normal, false), roughnessMap: tex(maps.roughness, false), roughness: 1, metalness: 0 })
+        : new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
+    }
+    s.meshTextures = owned;
     s.pbrPx = textured ? maps.px : null;
     s.mesh = new THREE.Mesh(geo, mat);
     s.scene.add(s.mesh);

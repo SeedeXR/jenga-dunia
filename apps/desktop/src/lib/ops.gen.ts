@@ -1143,6 +1143,19 @@ export type TerrainExportHeightmapResult = {
   "bytes": number;
 };
 
+export type DetailSpec = {
+  /** Metres per repeat. */
+  "tile_m"?: number;
+  /** Normal strength 0..1. */
+  "bump"?: number;
+  /** Albedo variation 0..1. */
+  "contrast"?: number;
+  /** Noise seed. */
+  "seed"?: number;
+  /** Tile side in pixels (16..=2048). */
+  "px"?: number;
+};
+
 export type MaterialSpec = {
   /** 0..1 mask layer that weights this material (omit for everywhere). */
   "mask"?: string | null;
@@ -1150,6 +1163,10 @@ export type MaterialSpec = {
   "albedo": [number, number, number];
   /** Roughness 0..1. */
   "roughness"?: number;
+  /** Tileable detail (grain repeated every `tile_m` metres): baked into the macro maps and
+the GLB by world position, returned as tiles for the viewport, written as tiles for
+the engines. */
+  "detail"?: DetailSpec | null;
 };
 
 export type TerrainExportMeshRequest = {
@@ -1501,6 +1518,21 @@ export type TerrainTexturesRequest = {
   "materials"?: MaterialSpec[];
 };
 
+export type DetailOut = {
+  /** Index of the layer in `materials`. */
+  "layer": number;
+  /** Its mask layer name, if any. */
+  "mask"?: string | null;
+  /** Metres per repeat. */
+  "tile_m": number;
+  /** Tile side, pixels. */
+  "px": number;
+  /** The colour tile (sRGB PNG, base64). */
+  "albedo_png_base64": string;
+  /** The tangent-space normal tile (PNG, base64). */
+  "normal_png_base64": string;
+};
+
 export type TerrainTexturesResult = {
   /** Texture width in pixels. */
   "width": number;
@@ -1512,6 +1544,11 @@ export type TerrainTexturesResult = {
   "normal_png_base64": string;
   /** Roughness in G (0.92 flat → 0.62 steep rock, 0.6 above the snow line), metallic 0 in B. */
   "roughness_png_base64": string;
+  /** Detail tiles of the layers that have one. */
+  "details"?: DetailOut[];
+  /** The first four detail layers' masks packed into an RGBA PNG at the map size (base64),
+for blending the tiles in a viewport; empty without details. */
+  "detail_weights_png_base64"?: string;
 };
 
 export type TimelineExportRequest = {

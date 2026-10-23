@@ -15,14 +15,14 @@ namespace JengaDunia
     public static class Import
     {
         [Serializable] class Sidecar { public int[] size_px; public float[] range_m; public bool flip_y; public double[] spacing_m; }
-        [Serializable] class MaterialLayer { public string name; public string weightmap; public float[] albedo_srgb; public float roughness; }
+        [Serializable] class MaterialLayer { public string name; public string weightmap; public float[] albedo_srgb; public float roughness; public string detail_albedo; public string detail_normal; public float tile_m; }
         [Serializable] class Materials { public MaterialLayer[] layers; }
         [Serializable] class TreeInst { public float x, y, z, nx, nz, yaw_deg, scale; }
         [Serializable] class Trees { public int count; public TreeInst[] instances; }
         [Serializable] class Report
         {
             public string unity, dir; public int heightmap_resolution, source_px, alphamap_layers, trees;
-            public float[] terrain_size, sampled_height_min_max; public string[] layers; public float mean_height; public float[] layer_mean_height; public List<string> warnings = new List<string>(); public bool ok;
+            public float[] terrain_size, sampled_height_min_max; public string[] layers; public float mean_height; public float[] layer_mean_height; public string[] layer_detail; public float[] layer_tile_m; public List<string> warnings = new List<string>(); public bool ok;
         }
 
         static string Arg(string name, string fallback = null)
@@ -116,29 +116,51 @@ namespace JengaDunia
                 // Weightmaps → terrain layers (solid-colour textures tinted from materials.json when present).
                 var layerFiles = new List<string>();
                 var colours = new Dictionary<string, Color>();
+                var details = new Dictionary<string, MaterialLayer>();
                 var matPath = Path.Combine(dir, "materials.json");
                 if (File.Exists(matPath))
                     foreach (var m in JsonUtility.FromJson<Materials>(File.ReadAllText(matPath)).layers)
-                        if (!string.IsNullOrEmpty(m.weightmap)) colours[m.weightmap] = new Color(m.albedo_srgb[0], m.albedo_srgb[1], m.albedo_srgb[2]);
+                        if (!string.IsNullOrEmpty(m.weightmap)) { colours[m.weightmap] = new Color(m.albedo_srgb[0], m.albedo_srgb[1], m.albedo_srgb[2]); if (!string.IsNullOrEmpty(m.detail_albedo)) details[m.weightmap] = m; }
                 foreach (var f in Directory.GetFiles(dir, "weight_*.png")) layerFiles.Add(Path.GetFileName(f));
                 layerFiles.Sort();
                 AssetDatabase.CreateFolder("Assets", "JengaDunia");
                 var layers = new List<TerrainLayer>();
                 var weights = new List<Texture2D>();
+                var layerDetail = new List<string>(); var layerTile = new List<float>();
                 foreach (var f in layerFiles)
                 {
                     var tex = new Texture2D(2, 2);
                     if (!ImageConversion.LoadImage(tex, File.ReadAllBytes(Path.Combine(dir, f)))) throw new Exception($"cannot decode {f}");
                     if (tex.width != w || tex.height != h) report.warnings.Add($"{f} is {tex.width}×{tex.height}, heightmap is {w}×{h}");
                     weights.Add(tex);
-                    var diffuse = new Texture2D(2, 2);
-                    var c = colours.TryGetValue(f, out var cc) ? cc : Color.gray;
-                    diffuse.SetPixels(new[] { c, c, c, c }); diffuse.Apply();
-                    AssetDatabase.CreateAsset(diffuse, $"Assets/JengaDunia/{f}.diffuse.asset");
-                    var layer = new TerrainLayer { diffuseTexture = diffuse, tileSize = new Vector2(ex, ez), name = f };
+                    TerrainLayer layer;
+                    if (details.TryGetValue(f, out var d))
+                    {
+                        // Detail tiles: the colour tile as the diffuse, the tangent-space tile as the normal (linear), repeated every tile_m metres.
+                        var albedo = new Texture2D(2, 2);
+                        if (!ImageConversion.LoadImage(albedo, File.ReadAllBytes(Path.Combine(dir, d.detail_albedo)))) throw new Exception($"cannot decode {d.detail_albedo}");
+                        albedo.wrapMode = TextureWrapMode.Repeat;
+                        var normal = new Texture2D(2, 2, TextureFormat.RGBA32, true, true);
+                        if (!ImageConversion.LoadImage(normal, File.ReadAllBytes(Path.Combine(dir, d.detail_normal)))) throw new Exception($"cannot decode {d.detail_normal}");
+                        normal.wrapMode = TextureWrapMode.Repeat;
+                        AssetDatabase.CreateAsset(albedo, $"Assets/JengaDunia/{f}.detail-albedo.asset");
+                        AssetDatabase.CreateAsset(normal, $"Assets/JengaDunia/{f}.detail-normal.asset");
+                        layer = new TerrainLayer { diffuseTexture = albedo, normalMapTexture = normal, normalScale = 1f, tileSize = new Vector2(d.tile_m, d.tile_m), name = f };
+                        layerDetail.Add(d.detail_albedo); layerTile.Add(d.tile_m);
+                    }
+                    else
+                    {
+                        var diffuse = new Texture2D(2, 2);
+                        var c = colours.TryGetValue(f, out var cc) ? cc : Color.gray;
+                        diffuse.SetPixels(new[] { c, c, c, c }); diffuse.Apply();
+                        AssetDatabase.CreateAsset(diffuse, $"Assets/JengaDunia/{f}.diffuse.asset");
+                        layer = new TerrainLayer { diffuseTexture = diffuse, tileSize = new Vector2(ex, ez), name = f };
+                        layerDetail.Add(""); layerTile.Add(ex);
+                    }
                     AssetDatabase.CreateAsset(layer, $"Assets/JengaDunia/{f}.terrainlayer");
                     layers.Add(layer);
                 }
+                report.layer_detail = layerDetail.ToArray(); report.layer_tile_m = layerTile.ToArray();
                 if (layers.Count > 0)
                 {
                     data.terrainLayers = layers.ToArray();

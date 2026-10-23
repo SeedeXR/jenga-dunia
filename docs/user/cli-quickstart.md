@@ -1029,6 +1029,18 @@ $ jd --json op terrain.export_profile --project Bio.jdproj --params '{"profile":
 $ jd op terrain.export_profile --project Bio.jdproj --params '{"profile":"unity","dir":"unity","layer":"land","masks":["forest"]}'
 ```
 
+**Detail tiles: grain that repeats.**
+
+```
+$ jd --json op terrain.textures --project Bio.jdproj --params '{"layer":"height","max_px":1024,"materials":[{"mask":"mask_rock","albedo":[0.45,0.42,0.38],"roughness":0.85,"detail":{"tile_m":6,"bump":0.8,"contrast":0.45,"seed":7}}]}'
+{"width": 512, "height": 512, "albedo_png_base64": "…", "normal_png_base64": "…", "roughness_png_base64": "…",
+ "details": [{"layer": 0, "mask": "mask_rock", "tile_m": 6.0, "px": 512, "albedo_png_base64": "…", "normal_png_base64": "…"}], "detail_weights_png_base64": "…"}
+$ jd op terrain.export_profile --project Bio.jdproj --params '{"profile":"unity","dir":"unity","layer":"height","materials":[…the same stack…]}'
+exports/unity/  heightmap.r16  weight_mask_rock.png  detail_mask_rock_albedo.png  detail_mask_rock_normal.png  materials.json  README.md
+```
+
+A material layer's `detail` gives it grain: a seeded, seamless 512² tile (`px`) of fractal value noise — the layer's colour darkened and lightened by `contrast`, and a tangent-space normal tile whose slopes `bump` scales — meant to repeat every `tile_m` metres. It reaches every consumer the same way. The macro maps and the GLB carry it baked by **world position** (the albedo is modulated and the normal map's slope gets the tile's at each texel, so a 2048-texel map over 5 km shows the grain at the map's resolution — macro scale only); `terrain.textures` returns the tiles themselves plus `detail_weights` (the first four detail layers' masks packed RGBA) so a viewer can repeat them at full frequency — the desktop viewport does, blending each tile by its mask on the WebGPU renderer; the Unity and Unreal profiles write `detail_<name>_albedo.png` / `detail_<name>_normal.png` with `tile_m` in `materials.json`, and the headless Unity importer builds a TerrainLayer per weightmap with the tiles as its diffuse and normal maps and `tileSize = tile_m` (verified on Unity 6000.4: two layers at 3 m and 6 m; Unreal 5.8 imports the four tiles as `TSF BGRA8` textures — assigning them to a Landscape layer material is the editor's job). Where a tile's grain lands differs by a flip between engines and the bake (image row 0 is the top for Unity's sampler and the south edge for ours); the look is the same. Not done: a texture library (the tile is procedural; a swatch from ambientCG or Poly Haven would replace the generator, not the plumbing), triplanar projection on cliffs, stochastic tiling.
+
 **Materials across the bridge.** Give the profile the material stack and the translation layer does what it can and says what it could not:
 
 ```

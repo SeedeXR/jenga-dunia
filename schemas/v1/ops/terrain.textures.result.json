@@ -27,6 +27,19 @@
     "roughness_png_base64": {
       "description": "Roughness in G (0.92 flat → 0.62 steep rock, 0.6 above the snow line), metallic 0 in B.",
       "type": "string"
+    },
+    "details": {
+      "description": "Detail tiles of the layers that have one.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/DetailOut"
+      },
+      "default": []
+    },
+    "detail_weights_png_base64": {
+      "description": "The first four detail layers' masks packed into an RGBA PNG at the map size (base64),\nfor blending the tiles in a viewport; empty without details.",
+      "type": "string",
+      "default": ""
     }
   },
   "required": [
@@ -35,5 +48,52 @@
     "albedo_png_base64",
     "normal_png_base64",
     "roughness_png_base64"
-  ]
+  ],
+  "$defs": {
+    "DetailOut": {
+      "description": "One detail tile of a `terrain.textures` result.",
+      "type": "object",
+      "properties": {
+        "layer": {
+          "description": "Index of the layer in `materials`.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
+        "mask": {
+          "description": "Its mask layer name, if any.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tile_m": {
+          "description": "Metres per repeat.",
+          "type": "number",
+          "format": "float"
+        },
+        "px": {
+          "description": "Tile side, pixels.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "albedo_png_base64": {
+          "description": "The colour tile (sRGB PNG, base64).",
+          "type": "string"
+        },
+        "normal_png_base64": {
+          "description": "The tangent-space normal tile (PNG, base64).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "layer",
+        "tile_m",
+        "px",
+        "albedo_png_base64",
+        "normal_png_base64"
+      ]
+    }
+  }
 }
