@@ -67,26 +67,37 @@ fn main() {
     // libfbxsdk.dylib and every binary then needs the dylib at run time. A search directory that
     // holds nothing but a symlink to the archive makes the choice deterministic, and the search
     // path + lib propagate to every crate that links this one (a `rustc-link-arg` would not).
-    let Some(out) = std::env::var_os("OUT_DIR").map(PathBuf::from) else {
-        println!("cargo:warning=jd-fbxsdk: no OUT_DIR; building the stub");
-        return;
-    };
-    let link = out.join("libfbxsdk.a");
-    let _ = std::fs::remove_file(&link);
-    #[cfg(unix)]
-    if let Err(e) = std::os::unix::fs::symlink(libs.join("libfbxsdk.a"), &link) {
+    let archive = libs.join("libfbxsdk.a");
+    #[cfg(not(unix))]
+    {
         println!(
-            "cargo:warning=jd-fbxsdk: cannot link to the SDK archive ({e}); building the stub"
+            "cargo:warning=jd-fbxsdk: linking {} is wired for unix hosts only; building the stub",
+            archive.display()
         );
         return;
     }
-    println!("cargo:rustc-link-search=native={}", out.display());
-    println!("cargo:rustc-link-lib=static=fbxsdk");
-    for l in ["xml2", "z", "iconv", "c++"] {
-        println!("cargo:rustc-link-lib={l}");
+    #[cfg(unix)]
+    {
+        let Some(out) = std::env::var_os("OUT_DIR").map(PathBuf::from) else {
+            println!("cargo:warning=jd-fbxsdk: no OUT_DIR; building the stub");
+            return;
+        };
+        let link = out.join("libfbxsdk.a");
+        let _ = std::fs::remove_file(&link);
+        if let Err(e) = std::os::unix::fs::symlink(&archive, &link) {
+            println!(
+                "cargo:warning=jd-fbxsdk: cannot link to the SDK archive ({e}); building the stub"
+            );
+            return;
+        }
+        println!("cargo:rustc-link-search=native={}", out.display());
+        println!("cargo:rustc-link-lib=static=fbxsdk");
+        for l in ["xml2", "z", "iconv", "c++"] {
+            println!("cargo:rustc-link-lib={l}");
+        }
+        for f in ["CoreFoundation", "CoreServices", "SystemConfiguration"] {
+            println!("cargo:rustc-link-lib=framework={f}");
+        }
+        println!("cargo:rustc-cfg=fbxsdk");
     }
-    for f in ["CoreFoundation", "CoreServices", "SystemConfiguration"] {
-        println!("cargo:rustc-link-lib=framework={f}");
-    }
-    println!("cargo:rustc-cfg=fbxsdk");
 }
