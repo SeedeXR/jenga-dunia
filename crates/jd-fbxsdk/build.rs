@@ -39,13 +39,6 @@ fn main() {
         );
         return;
     };
-    let Some(libs) = lib_dir(&sdk) else {
-        println!(
-            "cargo:warning=jd-fbxsdk: {} has no release libfbxsdk; building the stub",
-            sdk.display()
-        );
-        return;
-    };
     let target = std::env::var("TARGET").unwrap_or_default();
     if !target.contains("apple-darwin") {
         println!(
@@ -53,6 +46,13 @@ fn main() {
         );
         return;
     }
+    let Some(libs) = lib_dir(&sdk) else {
+        println!(
+            "cargo:warning=jd-fbxsdk: {} has no release libfbxsdk; building the stub",
+            sdk.display()
+        );
+        return;
+    };
     let mut build = cc::Build::new();
     build
         .warnings(false)

@@ -61,6 +61,13 @@ test.describe("docking and preview detail", () => {
     await expect(page.getByTestId("panel-right")).toBeVisible();
 
     // Preview detail: the 2048² world previews at lod 1 (2 MB) by default and at lod 0 (8 MB) on 2048².
+    // An 8.4 M-triangle mesh is a GPU-class load: CI runners render in software and the page blocks for
+    // minutes, so this half runs on developer machines only (the capture below comes from one).
+    if (process.env.CI) {
+      expect(errors, "no uncaught page errors").toEqual([]);
+      await core.close();
+      return;
+    }
     await page.getByTestId("project-path").fill(proj);
     await page.getByTestId("open-project").click();
     await expect(page.locator("header")).toContainText("World — 2048²");
