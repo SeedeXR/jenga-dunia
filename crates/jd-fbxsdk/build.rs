@@ -74,7 +74,6 @@ fn main() {
             "cargo:warning=jd-fbxsdk: linking {} is wired for unix hosts only; building the stub",
             archive.display()
         );
-        return;
     }
     #[cfg(unix)]
     {
