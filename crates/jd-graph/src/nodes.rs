@@ -1131,6 +1131,41 @@ pub fn register_all(r: &mut Registry) {
             Ok(out("out", jd_terrain::wind_abrasion(field(i, "in")?, spacing_m(ctx), hardness.map(|k| &**k), &yp, Some(&ctx.cancel))?))
         },
     ).with_memory(8.0));
+    r.register(NodeDef::new::<jd_terrain::DebrisParams, _>(
+        "jd.erosion.debris@1",
+        "Rockfall debris: cliffs steeper than `source_slope_deg` shed `release_m` of rock as seeded blocks that roll down the fall line until the ground is gentler than the angle of repose and the energy line back to the cliff is flatter than `reach_deg` (Fahrböschung) — talus cones and boulder fields at the slope foot, big blocks running furthest (`sorting`); optional 0..1 `source` mask; outputs the terrain, a 0..1 `debris` cover mask for boulder scatter and the mean block `size` in metres",
+        vec![port("in", PortType::Heightfield, true), port("source", PortType::Heightfield, false)],
+        vec![port("out", PortType::Heightfield, false), port("debris", PortType::Heightfield, false), port("size", PortType::Heightfield, false)],
+        |ctx, p, i| {
+            let dp: jd_terrain::DebrisParams = params(p)?;
+            let source = i.get("source").map(|v| v.as_field());
+            let r = jd_terrain::rockfall(field(i, "in")?, spacing_m(ctx), source.map(|s| &**s), &dp, Some(&ctx.cancel))?;
+            Ok(BTreeMap::from([
+                ("out".to_owned(), Value::field(r.out)),
+                ("debris".to_owned(), Value::field(r.debris)),
+                ("size".to_owned(), Value::field(r.size)),
+            ]))
+        },
+    // Scratch: surface, block count, size sum, source mask (16 B/cell), the source list (≤ 12 B/cell)
+    // and the three outputs (12 B/cell).
+    ).with_memory(40.0));
+    r.register(NodeDef::new::<jd_terrain::LavaParams, _>(
+        "jd.volcanic.lava@1",
+        "Lava flows (MAGFLOW / GPUFLOW cellular automaton): `vents` (layer metres, m³/s; empty = one summit vent) effuse for `eruption_s`; the lava spreads as a Bingham fluid whose viscosity and yield strength rise as it cools by radiation, and freezes into new ground below `solid_temp_k`; `duration_s` of simulated time (keyable on the timeline). Outputs the terrain with the lava on it, the `lava` thickness in metres and a 0..1 `heat` glow of the still-molten lava for emissive materials",
+        vec![port("in", PortType::Heightfield, true)],
+        vec![port("out", PortType::Heightfield, false), port("lava", PortType::Heightfield, false), port("heat", PortType::Heightfield, false)],
+        |ctx, p, i| {
+            let lp: jd_terrain::LavaParams = params(p)?;
+            let r = jd_terrain::lava_flow(field(i, "in")?, spacing_m(ctx), &lp, Some(&ctx.cancel))?;
+            Ok(BTreeMap::from([
+                ("out".to_owned(), Value::field(r.out)),
+                ("lava".to_owned(), Value::field(r.lava)),
+                ("heat".to_owned(), Value::field(r.heat)),
+            ]))
+        },
+    // Scratch: terrain, ground, thickness and temperature twice (24 B/cell), eight fluxes (32 B/cell)
+    // and the three outputs (12 B/cell).
+    ).with_memory(68.0));
     r.register(NodeDef::new::<jd_terrain::SplineParams, _>(
         "jd.terrain.spline@1",
         "A road, path, canal or dyke along a polyline (`points` in layer metres): the corridor of `width_m` is flattened onto the line's smoothed grade, cut `profile_m` below it or raised above it, with a `falloff_m` shoulder; outputs the terrain and a 0..1 corridor `mask` for materials and scatter",

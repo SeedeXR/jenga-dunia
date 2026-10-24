@@ -1018,6 +1018,48 @@ depth_slid   min 0  max 14.85 m  mean 0.520 m     692 ms   (the default: slopes 
 
 `jd.climate.snowpack@1` is the time-stepped sibling of the static cover mask: every step snow falls (`accumulation_m`) where the local air is colder than +1 °C and holds in proportion to the slope (nothing above `max_slope_deg`), a degree-day melt (`melt_m_per_c` per degree above freezing) follows the lapse rate (`lapse_c_per_km`) and the sun (`sun_strength` × 5 °C on sun-facing slopes), and the wind drifts a share (`wind_strength`) of every windward face's snow one cell downwind — so lee slopes end up deeper (unit test: a north–south ridge under a westerly); slopes steeper than `avalanche_slope_deg` (38°) slide `avalanche_strength` (0.5) of their snow to the lowest neighbouring snow surface each step, so steep faces stay thin and cones build at their foot (unit test: a 45° face empties to under a third of its still depth, the foot holds 1.5× the plain, mass unchanged). `albedo` (0.4) is the feedback that makes a deep pack outlast a dusting: a full cover reflects that share of the melt energy away (unit test: at +0.9 °C, where it both snows and melts, albedo 0.8 keeps over 10 % more snow than albedo 0). `depth` is metres of snow, `cover` is 0..1 at `cover_depth_m`. The wind is the world's unless the node sets its own. Not modelled: snow density (ponytail).
 
+### Rockfall debris: talus aprons and boulder fields
+
+```
+$ jd new Mesa.jdproj --extent 1024 --resolution 512 --seed 5        # noise 0..160 m, feature 900 m
+$ jd op graph.add_node --project Mesa.jdproj --save --params '{"kind":"jd.filter.terrace@1","params":{"step_m":40,"softness":0.05}}'
+$ jd op graph.add_node --project Mesa.jdproj --save --params '{"kind":"jd.erosion.debris@1","params":{}}'
+# noise.out → terrace.in → debris.in; debris.out → height; debris.debris → `debris`; debris.size → `size`
+jd.erosion.debris@1  278 ms (512², 2 m cells, defaults)
+height  mean 55.771 m before and after (mass conserved)    deposits up to 6.8 m, cliffs lowered 0.5 m
+debris  cover 0..1, mean 0.043 (29 748 cells hold blocks)   size  0.3..3 m where blocks rest
+$ jd op terrain.scatter --project Mesa.jdproj --params '{"mask":"debris","height":"height","path":"boulders.glb","rock":{},"spacing_m":3,"jitter":1,"seed":1}'
+count 5005   (boulders.glb, 229 KB, one generated rock instanced)
+```
+
+![Three panels: terraced mesas with 40 m cliffs; the same after the debris node, with dotted aprons of blocks at every cliff foot; the mean block size per cell, coloured blue (0.3 m) to red (3 m)](images/cli-debris.png)
+
+`jd.erosion.debris@1` is World Creator's Debris layer done as a run-out model. Every cell steeper than `source_slope_deg` (45°) sheds `release_m` of rock (times the optional 0..1 `source` mask) as `blocks_per_cell` seeded blocks between `size_min_m` and `size_max_m`. A block rolls downhill while the ground ahead is steeper than the angle of repose (`repose_deg`, 35°) or the line back to its cliff is still steeper than its reach angle (`reach_deg`, 30°, the Fahrböschung of Heim and the shadow angle of Evans & Hungr). With `sorting` the smallest blocks stop at the repose angle and only the largest use the full reach, so boulders run out past the scree. Blocks deposit where they stop, and later blocks roll over earlier ones, so cones build up. Use `debris` as the `mask` of `terrain.scatter` with `rock` set to place boulders. The `size` layer records the mean block size per cell for materials or an engine's own scatter; `terrain.scatter` does not read it yet. Sources, references and measurements: `docs/research/simulation-debris-lava.md`. Not modelled: bouncing, fragmentation and a ballistic leg off overhangs.
+
+### Lava flows: vents, cooling and new ground
+
+```
+$ jd new Etna.jdproj --extent 12650 --resolution 1024
+$ jd op geo.fetch_dem --project Etna.jdproj --save --params '{"center":[15.03,37.738],"radius_m":5000,"res_m":20}'
+# set crs EPSG:3857 + origin, import the DEM (see "A terrain from the real world"), then:
+$ jd op graph.add_node --project Etna.jdproj --save --params '{"kind":"jd.volcanic.lava@1","params":{"vents":[{"at":[3528,7248],"rate_m3_s":30}],"eruption_s":86400,"duration_s":86400}}'
+# dem.out → lava.in; lava.out → height; lava.lava → `lava`; lava.heat → `heat`
+duration_s 86400 (end of eruption)   68 s debug build   lava max 11.2 m   heat max 1.0 (molten)
+duration_s 129600 (12 h later)       71 s               lava max 12.2 m   heat max 0.1 (nearly all frozen)
+volume on the ground = 2.592·10⁶ m³ = 30 m³/s × 24 h
+```
+
+![Two panels of the Etna DEM: a glowing orange lava tongue running east-south-east from a vent on the south-east flank at the end of the eruption, and the same tongue 12 hours later as dark frozen basalt](images/cli-lava.png)
+
+`jd.volcanic.lava@1` is the MAGFLOW / GPUFLOW cellular automaton. `vents` sit in layer metres with an effusion rate in m³/s; with no vents, one vent opens on the highest cell. Lava moves to every neighbour whose lava surface is lower, at the steady-state rate of a Bingham fluid on a slope: no flow until the lava is thicker than the critical thickness its yield strength allows. It cools by radiation with a temperature-dependent emissivity, and its viscosity and yield strength rise as it cools. Below `solid_temp_k` it freezes into new ground, which later lava flows over. Defaults are Etna basalt (2600 kg/m³, 1360 K at the vent, 1143 K solidus). Key `duration_s` on the timeline to watch a flow advance and freeze, and feed `heat` to an emissive material for the glow.
+
+Two things to know:
+
+- **Cell size changes the run-out.** The same eruption runs about 1.1 km at 25 m cells and 2.9 km at 12 m cells. Evaluate lava at the resolution you export, not at a coarse preview level.
+- **`cooling` defaults to 0.3.** A flow radiates from a crust cooler than its core. Radiating at the full core temperature froze this eruption into a 70 m tower. Raise it for short, thick flows and lower it for long, thin ones.
+
+A run that would need more than `max_steps` steps fails with the simulated time it reached, and says what to change. Sources, the changes we made to the published model and every measurement: `docs/research/simulation-debris-lava.md`.
+
 ### Export for Unity or Unreal
 
 ```

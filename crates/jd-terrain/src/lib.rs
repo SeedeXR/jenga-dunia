@@ -9,6 +9,7 @@ pub mod aeolian;
 pub mod bathymetry;
 pub mod climate;
 pub mod coastal;
+pub mod debris;
 pub mod decimate;
 pub mod detail;
 mod dist;
@@ -19,6 +20,7 @@ pub mod flow;
 pub mod heightfield;
 pub mod import;
 pub mod karst;
+pub mod lava;
 pub mod mesh;
 pub mod network;
 pub mod noise;
@@ -41,6 +43,7 @@ pub use aeolian::{AeolianParams, aeolian_transport, aeolian_transport_with};
 pub use bathymetry::{BathymetryParams, bathymetry, bathymetry_with};
 pub use climate::{SnowParams, snow_cover};
 pub use coastal::{CoastalParams, coastal_erode, coastal_erode_budget, coastal_erode_with};
+pub use debris::{DebrisParams, DebrisResult, rockfall};
 pub use decimate::decimate;
 pub use droplet::{DropletParams, DropletResult, droplet_erode};
 pub use export::{
@@ -57,6 +60,7 @@ pub use import::{
     resample_to_world_geo,
 };
 pub use karst::{KarstParams, Sinkhole, SinkholeProfile, karst_sinkholes};
+pub use lava::{LavaParams, LavaResult, LavaVent, lava_flow};
 pub use mesh::{
     BakedMaps, GridMesh, MaterialLayer, MeshExportReport, MeshTopology, auto_step, bake_maps,
     bake_maps_with, export_glb, export_mesh, export_mesh_lods, export_mesh_lods_with,

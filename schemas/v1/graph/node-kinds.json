@@ -811,6 +811,110 @@
     }
   },
   {
+    "kind": "jd.erosion.debris@1",
+    "description": "Rockfall debris: cliffs steeper than `source_slope_deg` shed `release_m` of rock as seeded blocks that roll down the fall line until the ground is gentler than the angle of repose and the energy line back to the cliff is flatter than `reach_deg` (Fahrböschung) — talus cones and boulder fields at the slope foot, big blocks running furthest (`sorting`); optional 0..1 `source` mask; outputs the terrain, a 0..1 `debris` cover mask for boulder scatter and the mean block `size` in metres",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      },
+      {
+        "name": "source",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "debris",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "size",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "DebrisParams",
+      "description": "Debris settings.",
+      "type": "object",
+      "properties": {
+        "seed": {
+          "description": "Block seed.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "source_slope_deg": {
+          "description": "Cells steeper than this shed rock, degrees (0, 90).",
+          "type": "number",
+          "format": "float",
+          "default": 45.0
+        },
+        "release_m": {
+          "description": "Depth of rock each source cell releases, metres (> 0).",
+          "type": "number",
+          "format": "float",
+          "default": 0.5
+        },
+        "blocks_per_cell": {
+          "description": "Blocks per source cell (1..=64).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 4
+        },
+        "reach_deg": {
+          "description": "Energy-line (Fahrböschung) angle of the largest blocks, degrees (0, 90): a block still\nrolls while the line back to its source is steeper than this.",
+          "type": "number",
+          "format": "float",
+          "default": 30.0
+        },
+        "repose_deg": {
+          "description": "Angle of repose of scree, degrees (0, 90): no block rests on ground steeper than this.",
+          "type": "number",
+          "format": "float",
+          "default": 35.0
+        },
+        "size_min_m": {
+          "description": "Smallest block, metres (> 0).",
+          "type": "number",
+          "format": "float",
+          "default": 0.30000001192092896
+        },
+        "size_max_m": {
+          "description": "Largest block, metres (≥ `size_min_m`).",
+          "type": "number",
+          "format": "float",
+          "default": 3.0
+        },
+        "sorting": {
+          "description": "Fall sorting 0..1: at 1 the smallest blocks stop at the repose angle and only the largest\nuse `reach_deg`; at 0 every block uses `reach_deg`.",
+          "type": "number",
+          "format": "float",
+          "default": 0.5
+        },
+        "max_run_m": {
+          "description": "Longest path a block may roll, metres (> 0).",
+          "type": "number",
+          "format": "float",
+          "default": 3000.0
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
     "kind": "jd.erosion.droplet@1",
     "description": "Particle (droplet) hydraulic erosion after Beyer: seeded droplets follow the slope with inertia, erode through a brush and deposit as they slow — gullies and fans; outputs the terrain and the signed `delta`",
     "inputs": [
@@ -2711,6 +2815,158 @@
         }
       },
       "additionalProperties": false
+    }
+  },
+  {
+    "kind": "jd.volcanic.lava@1",
+    "description": "Lava flows (MAGFLOW / GPUFLOW cellular automaton): `vents` (layer metres, m³/s; empty = one summit vent) effuse for `eruption_s`; the lava spreads as a Bingham fluid whose viscosity and yield strength rise as it cools by radiation, and freezes into new ground below `solid_temp_k`; `duration_s` of simulated time (keyable on the timeline). Outputs the terrain with the lava on it, the `lava` thickness in metres and a 0..1 `heat` glow of the still-molten lava for emissive materials",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "lava",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "heat",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "LavaParams",
+      "description": "Lava settings.",
+      "type": "object",
+      "properties": {
+        "vents": {
+          "description": "Vents; empty → one vent on the highest cell at `vent_rate_m3_s`.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/LavaVent"
+          },
+          "default": []
+        },
+        "vent_rate_m3_s": {
+          "description": "Effusion rate of the automatic summit vent, m³/s (> 0).",
+          "type": "number",
+          "format": "float",
+          "default": 20.0
+        },
+        "eruption_s": {
+          "description": "How long the vents effuse, seconds (> 0).",
+          "type": "number",
+          "format": "float",
+          "default": 21600.0
+        },
+        "duration_s": {
+          "description": "Simulated time, seconds (≥ 1); lava still molten at the end stays molten (see `heat`).",
+          "type": "number",
+          "format": "float",
+          "default": 43200.0
+        },
+        "density_kg_m3": {
+          "description": "Lava density, kg/m³ (> 0).",
+          "type": "number",
+          "format": "float",
+          "default": 2600.0
+        },
+        "specific_heat": {
+          "description": "Specific heat, J/(kg·K) (> 0).",
+          "type": "number",
+          "format": "float",
+          "default": 1150.0
+        },
+        "vent_temp_k": {
+          "description": "Temperature at the vent, kelvin.",
+          "type": "number",
+          "format": "float",
+          "default": 1360.0
+        },
+        "solid_temp_k": {
+          "description": "Solidification temperature, kelvin (< `vent_temp_k`).",
+          "type": "number",
+          "format": "float",
+          "default": 1143.0
+        },
+        "viscosity_pa_s": {
+          "description": "Viscosity at the vent, Pa·s (> 0).",
+          "type": "number",
+          "format": "float",
+          "default": 10000.0
+        },
+        "viscosity_decades": {
+          "description": "Orders of magnitude the viscosity rises between vent and solidus (0..=8).",
+          "type": "number",
+          "format": "float",
+          "default": 3.0
+        },
+        "yield_pa": {
+          "description": "Yield strength at the vent, Pa (> 0).",
+          "type": "number",
+          "format": "float",
+          "default": 1000.0
+        },
+        "yield_decades": {
+          "description": "Orders of magnitude the yield strength rises between vent and solidus (0..=8).",
+          "type": "number",
+          "format": "float",
+          "default": 2.0
+        },
+        "cooling": {
+          "description": "Share of the bulk-temperature radiation the surface really loses (> 0). A flow radiates\nfrom a crust cooler than its core, so 1 (MAGFLOW's rule) over-cools: on Etna's DEM a\n30 m³/s day-long flank eruption then freezes into a 70 m tower; 0.3 gives a 25 m-thick\nflow over twice the area. Higher → shorter, thicker flows.",
+          "type": "number",
+          "format": "float",
+          "default": 0.30000001192092896
+        },
+        "max_steps": {
+          "description": "Step budget (1..=2 000 000); a run that needs more fails and says how far it got.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 200000
+        }
+      },
+      "additionalProperties": false,
+      "$defs": {
+        "LavaVent": {
+          "description": "One vent.",
+          "type": "object",
+          "properties": {
+            "at": {
+              "description": "Position in layer metres: `[u east, v north]` from the south-west corner.",
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "rate_m3_s": {
+              "description": "Effusion rate, m³/s (> 0).",
+              "type": "number",
+              "format": "float"
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "at",
+            "rate_m3_s"
+          ]
+        }
+      }
     }
   }
 ]

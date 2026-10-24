@@ -1869,6 +1869,31 @@ the step that would exceed it is scaled down and the run stops there. Omit for n
   "budget_m3"?: number | null;
 };
 
+export type NodeParams_jd_erosion_debris_1 = {
+  /** Block seed. */
+  "seed"?: number;
+  /** Cells steeper than this shed rock, degrees (0, 90). */
+  "source_slope_deg"?: number;
+  /** Depth of rock each source cell releases, metres (> 0). */
+  "release_m"?: number;
+  /** Blocks per source cell (1..=64). */
+  "blocks_per_cell"?: number;
+  /** Energy-line (Fahrböschung) angle of the largest blocks, degrees (0, 90): a block still
+rolls while the line back to its source is steeper than this. */
+  "reach_deg"?: number;
+  /** Angle of repose of scree, degrees (0, 90): no block rests on ground steeper than this. */
+  "repose_deg"?: number;
+  /** Smallest block, metres (> 0). */
+  "size_min_m"?: number;
+  /** Largest block, metres (≥ `size_min_m`). */
+  "size_max_m"?: number;
+  /** Fall sorting 0..1: at 1 the smallest blocks stop at the repose angle and only the largest
+use `reach_deg`; at 0 every block uses `reach_deg`. */
+  "sorting"?: number;
+  /** Longest path a block may roll, metres (> 0). */
+  "max_run_m"?: number;
+};
+
 export type NodeParams_jd_erosion_droplet_1 = {
   /** Number of droplets (1..=5 000 000). Aim for 1–2 per cell: 512² wants ~400 000; fewer gives
 diffuse, unstructured lowering, more deepens the same gullies. */
@@ -2231,6 +2256,47 @@ export type NodeParams_jd_terrain_strata_1 = {
   "seed"?: number;
 };
 
+export type LavaVent = {
+  /** Position in layer metres: `[u east, v north]` from the south-west corner. */
+  "at": [number, number];
+  /** Effusion rate, m³/s (> 0). */
+  "rate_m3_s": number;
+};
+
+export type NodeParams_jd_volcanic_lava_1 = {
+  /** Vents; empty → one vent on the highest cell at `vent_rate_m3_s`. */
+  "vents"?: LavaVent[];
+  /** Effusion rate of the automatic summit vent, m³/s (> 0). */
+  "vent_rate_m3_s"?: number;
+  /** How long the vents effuse, seconds (> 0). */
+  "eruption_s"?: number;
+  /** Simulated time, seconds (≥ 1); lava still molten at the end stays molten (see `heat`). */
+  "duration_s"?: number;
+  /** Lava density, kg/m³ (> 0). */
+  "density_kg_m3"?: number;
+  /** Specific heat, J/(kg·K) (> 0). */
+  "specific_heat"?: number;
+  /** Temperature at the vent, kelvin. */
+  "vent_temp_k"?: number;
+  /** Solidification temperature, kelvin (< `vent_temp_k`). */
+  "solid_temp_k"?: number;
+  /** Viscosity at the vent, Pa·s (> 0). */
+  "viscosity_pa_s"?: number;
+  /** Orders of magnitude the viscosity rises between vent and solidus (0..=8). */
+  "viscosity_decades"?: number;
+  /** Yield strength at the vent, Pa (> 0). */
+  "yield_pa"?: number;
+  /** Orders of magnitude the yield strength rises between vent and solidus (0..=8). */
+  "yield_decades"?: number;
+  /** Share of the bulk-temperature radiation the surface really loses (> 0). A flow radiates
+from a crust cooler than its core, so 1 (MAGFLOW's rule) over-cools: on Etna's DEM a
+30 m³/s day-long flank eruption then freezes into a 70 m tower; 0.3 gives a 25 m-thick
+flow over twice the area. Higher → shorter, thicker flows. */
+  "cooling"?: number;
+  /** Step budget (1..=2 000 000); a run that needs more fails and says how far it got. */
+  "max_steps"?: number;
+};
+
 /** Request and result types of every core operation, keyed by op id. */
 export interface JdOps {
   /** Run a benchmark scene (S1: fBm + ridged + add + thermal×50) with the real kernels; per-stage wall time, peak RSS, content hash */
@@ -2353,6 +2419,7 @@ export interface NodeKinds {
   "jd.climate.snowpack@1": NodeParams_jd_climate_snowpack_1;
   "jd.erosion.aeolian@1": NodeParams_jd_erosion_aeolian_1;
   "jd.erosion.coastal@1": NodeParams_jd_erosion_coastal_1;
+  "jd.erosion.debris@1": NodeParams_jd_erosion_debris_1;
   "jd.erosion.droplet@1": NodeParams_jd_erosion_droplet_1;
   "jd.erosion.hydraulic@1": NodeParams_jd_erosion_hydraulic_1;
   "jd.erosion.karst@1": NodeParams_jd_erosion_karst_1;
@@ -2379,4 +2446,5 @@ export interface NodeKinds {
   "jd.sculpt.strokes@1": NodeParams_jd_sculpt_strokes_1;
   "jd.terrain.spline@1": NodeParams_jd_terrain_spline_1;
   "jd.terrain.strata@1": NodeParams_jd_terrain_strata_1;
+  "jd.volcanic.lava@1": NodeParams_jd_volcanic_lava_1;
 }
