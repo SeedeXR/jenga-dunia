@@ -180,6 +180,12 @@ interface State {
   openProject: (path: string) => Promise<void>;
   generate: () => Promise<void>;
   exportHeightmap: (path: string, format: HeightmapFormat) => Promise<void>;
+  /** `terrain.export_profile`: the height, every material mask as a weightmap and the material stack, for Unity or Unreal. */
+  exportProfile: (profile: "unity" | "unreal", dir: string) => Promise<void>;
+  /** `terrain.export_mesh` with the material stack baked in; the extension picks the format. */
+  exportMesh: (path: string, lods: number | null, targetTriangles: number | null) => Promise<void>;
+  /** `sky.bake`: the viewport's sun, turbidity and clouds as an equirectangular HDRI. */
+  exportSky: (path: string) => Promise<void>;
   /** Write exports/water/: depth, colour, foam and the wave normal tile for the graph's sea-level node (`ocean.bake`). */
   exportWater: () => Promise<void>;
   /** Write exports/frames/: one 16-bit heightmap per frame across the timeline (`timeline.export`). */
@@ -460,6 +466,27 @@ export const useStore = create<State>((set, get) => {
     return spliceBefore(layer, "jd.sculpt.strokes@1", clamp ? { clamp } : null);
   };
   type GraphView = GraphListResult;
+  // The look (materials, scatter, sun) lives in scene.json: restored from the project summary on
+  // open, written back (debounced, journaled) whenever a setter changes it.
+  const lookState = (p: { look?: { materials?: MaterialSpec[]; scatter?: { mask?: string | null; spacing_m: number; seed?: number; grow?: boolean } | null; sun?: { azimuth_deg: number; elevation_deg: number; turbidity?: number; clouds?: number; fog?: number } | null } }) => {
+    const look = p.look;
+    const sc = look?.scatter;
+    const su = look?.sun;
+    return {
+      materials: look?.materials ?? [],
+      ...(sc ? { scatter: { mask: sc.mask ?? null, spacing_m: sc.spacing_m, seed: sc.seed ?? 0, grow: sc.grow ?? false, points: null } } : {}),
+      ...(su ? { sun: { azimuth_deg: su.azimuth_deg, elevation_deg: su.elevation_deg, turbidity: su.turbidity ?? 3, clouds: su.clouds ?? 0, fog: su.fog ?? 0 } } : {}),
+    };
+  };
+  let lookTimer: ReturnType<typeof setTimeout> | undefined;
+  const pushLook = () => {
+    clearTimeout(lookTimer);
+    lookTimer = setTimeout(() => {
+      const { project, materials, scatter, sun } = get();
+      if (!project) return;
+      void run("project.set_look", { materials, scatter: { mask: scatter.mask, spacing_m: scatter.spacing_m, seed: scatter.seed, grow: scatter.grow }, sun: { azimuth_deg: sun.azimuth_deg, elevation_deg: sun.elevation_deg, turbidity: sun.turbidity, clouds: sun.clouds, fog: sun.fog } });
+    }, 400);
+  };
   // Autosave: a debounced project.save after any journaled edit, so `dirty` / `journal` return to
   // false / 0 on their own (the WAL already survives crashes; this is about never losing work on
   // quit). The delay is the project's `settings.autosave_interval_s` (project.json; 0 disables);
@@ -538,6 +565,7 @@ export const useStore = create<State>((set, get) => {
     materials: [],
     setMaterials: (materials) => {
       set({ materials });
+      pushLook();
       void refreshMaps();
     },
     pbr: true,
@@ -618,6 +646,7 @@ export const useStore = create<State>((set, get) => {
     sun: { azimuth_deg: 140, elevation_deg: 35, turbidity: 3, clouds: 0, fog: 0 },
     setSun: (patch) => {
       set((s) => ({ sun: { ...s.sun, ...patch } }));
+      pushLook();
       clearTimeout(skyTimer);
       skyTimer = setTimeout(() => void get().refreshSky(), 150); // a slider drag re-bakes once it settles
     },
@@ -650,7 +679,10 @@ export const useStore = create<State>((set, get) => {
       }
     },
     scatter: { mask: null, spacing_m: 40, seed: 1, grow: false, points: null },
-    setScatter: (patch) => set((s) => ({ scatter: { ...s.scatter, ...patch, points: null } })),
+    setScatter: (patch) => {
+      set((s) => ({ scatter: { ...s.scatter, ...patch, points: null } }));
+      pushLook();
+    },
     placeScatter: async () => {
       if (!get().scatter.mask) return;
       const r = await op<JdOps["terrain.scatter"]["result"]>("terrain.scatter", scatterReq());
@@ -827,8 +859,12 @@ export const useStore = create<State>((set, get) => {
         world: { extent_m: [extent, extent], resolution_px: [resolution, resolution], tile_size: 512, halo: 4, origin: [0, 0], seed: 42 },
       });
       if (r.status === "ok" && r.result) {
-        set({ project: r.result, layer: null, preview: null, lastEval: null }); // a new project publishes its own layers
+        // The graph first, then the project (as on open): the Noise panel mirrors the starter graph
+        // before anything is editable, so a preset chosen right away is never overwritten by the load.
+        set({ project: null, layer: null, preview: null, lastEval: null }); // a new project publishes its own layers
         await loadGraph();
+        set({ project: r.result, ...lookState(r.result) });
+        liveEvaluate();
       }
     },
     openProject: async (path) => {
@@ -838,7 +874,8 @@ export const useStore = create<State>((set, get) => {
         // before anything is editable, so a quick edit cannot be overwritten by the load.
         set({ project: null, layer: null, preview: null, lastEval: null });
         await loadGraph();
-        set({ project: r.result });
+        set({ project: r.result, ...lookState(r.result) });
+        void refreshMaps();
         liveEvaluate();
       }
     },
@@ -879,6 +916,18 @@ export const useStore = create<State>((set, get) => {
     },
     exportFrames: async (frames) => {
       await run("timeline.export", { frames, dir: "frames", format: "png16" });
+    },
+    exportProfile: async (profile, dir) => {
+      const materials = get().materials;
+      const masks = [...new Set(materials.map((m) => m.mask).filter((m): m is string => !!m))];
+      await run("terrain.export_profile", { profile, dir, layer: "height", masks, materials });
+    },
+    exportMesh: async (path, lods, targetTriangles) => {
+      await run("terrain.export_mesh", { layer: "height", path, materials: get().materials, ...(lods ? { lods } : {}), ...(targetTriangles ? { target_triangles: targetTriangles } : {}) });
+    },
+    exportSky: async (path) => {
+      const { sun } = get();
+      await run("sky.bake", { sun_azimuth_deg: sun.azimuth_deg, sun_elevation_deg: sun.elevation_deg, turbidity: sun.turbidity, cloud_cover: sun.clouds, path });
     },
     exportHeightmap: async (path, format) => {
       // A live preview only published `height#lod<N>`; exports always use the full-resolution layer.

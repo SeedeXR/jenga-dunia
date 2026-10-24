@@ -968,6 +968,65 @@ Default 4 GiB — the brief's ceiling (ADR-0008). */
   "memory_budget_bytes"?: number;
 };
 
+export type DetailSpec = {
+  /** Metres per repeat. */
+  "tile_m"?: number;
+  /** Normal strength 0..1. */
+  "bump"?: number;
+  /** Albedo variation 0..1. */
+  "contrast"?: number;
+  /** Noise seed. */
+  "seed"?: number;
+  /** Tile side in pixels (16..=2048). */
+  "px"?: number;
+};
+
+export type MaterialSpec = {
+  /** 0..1 mask layer that weights this material (omit for everywhere). */
+  "mask"?: string | null;
+  /** Base colour, sRGB 0..1. */
+  "albedo": [number, number, number];
+  /** Roughness 0..1. */
+  "roughness"?: number;
+  /** Tileable detail (grain repeated every `tile_m` metres): baked into the macro maps and
+the GLB by world position, returned as tiles for the viewport, written as tiles for
+the engines. */
+  "detail"?: DetailSpec | null;
+};
+
+export type ScatterLook = {
+  /** Density mask layer, or none. */
+  "mask"?: string | null;
+  /** Spacing between instances, metres (> 0). */
+  "spacing_m": number;
+  /** Seed. */
+  "seed"?: number;
+  /** The population follows the timeline. */
+  "grow"?: boolean;
+};
+
+export type SunLook = {
+  /** Sun azimuth, degrees clockwise from north. */
+  "azimuth_deg": number;
+  /** Sun elevation above the horizon, degrees (0, 90]. */
+  "elevation_deg": number;
+  /** Turbidity 2..=10. */
+  "turbidity"?: number;
+  /** Cloud cover 0..=1. */
+  "clouds"?: number;
+  /** Viewport fog 0..=1. */
+  "fog"?: number;
+};
+
+export type Look = {
+  /** Material layers, blended in order over the base (`terrain.textures` / `terrain.export_mesh`). */
+  "materials"?: MaterialSpec[];
+  /** Scatter settings. */
+  "scatter"?: ScatterLook | null;
+  /** Viewport sun and sky. */
+  "sun"?: SunLook | null;
+};
+
 export type ProjectCloseResult = {
   /** Project id. */
   "project_id": string;
@@ -985,6 +1044,8 @@ export type ProjectCloseResult = {
   "pending_journal": number;
   /** User-tunable settings (`project.json` → `settings`): autosave interval, cache limit, preview LOD. */
   "settings": ProjectSettings;
+  /** The project's look (`scene.json` → `look`): materials, scatter, sun. */
+  "look": Look;
 };
 
 export type ProjectCreateRequest = {
@@ -1013,6 +1074,8 @@ export type ProjectCreateResult = {
   "pending_journal": number;
   /** User-tunable settings (`project.json` → `settings`): autosave interval, cache limit, preview LOD. */
   "settings": ProjectSettings;
+  /** The project's look (`scene.json` → `look`): materials, scatter, sun. */
+  "look": Look;
 };
 
 export type ProjectImportAssetRequest = {
@@ -1063,6 +1126,8 @@ export type ProjectInfoResult = {
   "pending_journal": number;
   /** User-tunable settings (`project.json` → `settings`): autosave interval, cache limit, preview LOD. */
   "settings": ProjectSettings;
+  /** The project's look (`scene.json` → `look`): materials, scatter, sun. */
+  "look": Look;
 };
 
 export type ProjectOpenRequest = {
@@ -1087,6 +1152,8 @@ export type ProjectOpenResult = {
   "pending_journal": number;
   /** User-tunable settings (`project.json` → `settings`): autosave interval, cache limit, preview LOD. */
   "settings": ProjectSettings;
+  /** The project's look (`scene.json` → `look`): materials, scatter, sun. */
+  "look": Look;
 };
 
 export type ProjectRecoverRequest = {
@@ -1129,6 +1196,38 @@ export type ProjectSaveResult = {
   "pending_journal": number;
   /** User-tunable settings (`project.json` → `settings`): autosave interval, cache limit, preview LOD. */
   "settings": ProjectSettings;
+  /** The project's look (`scene.json` → `look`): materials, scatter, sun. */
+  "look": Look;
+};
+
+export type ProjectSetLookRequest = {
+  /** The whole material stack. */
+  "materials"?: MaterialSpec[] | null;
+  /** Scatter settings. */
+  "scatter"?: ScatterLook | null;
+  /** Sun and sky. */
+  "sun"?: SunLook | null;
+};
+
+export type ProjectSetLookResult = {
+  /** Project id. */
+  "project_id": string;
+  /** Name. */
+  "name": string;
+  /** Directory. */
+  "path": string;
+  /** World settings. */
+  "world": WorldSettings;
+  /** Document schema version. */
+  "schema_version": SchemaVersion;
+  /** Unsaved changes? */
+  "dirty": boolean;
+  /** Journal entries awaiting replay. */
+  "pending_journal": number;
+  /** User-tunable settings (`project.json` → `settings`): autosave interval, cache limit, preview LOD. */
+  "settings": ProjectSettings;
+  /** The project's look (`scene.json` → `look`): materials, scatter, sun. */
+  "look": Look;
 };
 
 export type ProjectSetNameRequest = {
@@ -1153,6 +1252,8 @@ export type ProjectSetNameResult = {
   "pending_journal": number;
   /** User-tunable settings (`project.json` → `settings`): autosave interval, cache limit, preview LOD. */
   "settings": ProjectSettings;
+  /** The project's look (`scene.json` → `look`): materials, scatter, sun. */
+  "look": Look;
 };
 
 export type ProjectSetSettingsRequest = {
@@ -1191,6 +1292,8 @@ export type ProjectSetSettingsResult = {
   "pending_journal": number;
   /** User-tunable settings (`project.json` → `settings`): autosave interval, cache limit, preview LOD. */
   "settings": ProjectSettings;
+  /** The project's look (`scene.json` → `look`): materials, scatter, sun. */
+  "look": Look;
 };
 
 export type SkyBakeRequest = {
@@ -1302,32 +1405,6 @@ export type TerrainExportHeightmapResult = {
   "flip_y": boolean;
   /** Bytes written to `path`. */
   "bytes": number;
-};
-
-export type DetailSpec = {
-  /** Metres per repeat. */
-  "tile_m"?: number;
-  /** Normal strength 0..1. */
-  "bump"?: number;
-  /** Albedo variation 0..1. */
-  "contrast"?: number;
-  /** Noise seed. */
-  "seed"?: number;
-  /** Tile side in pixels (16..=2048). */
-  "px"?: number;
-};
-
-export type MaterialSpec = {
-  /** 0..1 mask layer that weights this material (omit for everywhere). */
-  "mask"?: string | null;
-  /** Base colour, sRGB 0..1. */
-  "albedo": [number, number, number];
-  /** Roughness 0..1. */
-  "roughness"?: number;
-  /** Tileable detail (grain repeated every `tile_m` metres): baked into the macro maps and
-the GLB by world position, returned as tiles for the viewport, written as tiles for
-the engines. */
-  "detail"?: DetailSpec | null;
 };
 
 export type TerrainExportMeshRequest = {
@@ -2553,6 +2630,8 @@ export interface JdOps {
   "project.recover": { request: ProjectRecoverRequest; result: ProjectRecoverResult };
   /** Write the open project to disk */
   "project.save": { request: ProjectSaveRequest; result: ProjectSaveResult };
+  /** Save the project's look with the project — the material stack, the scatter settings and the viewport sun (scene.json → look); fields left out keep their value — journaled like every mutation, returned by project.open / project.info */
+  "project.set_look": { request: ProjectSetLookRequest; result: ProjectSetLookResult };
   /** Rename the open project */
   "project.set_name": { request: ProjectSetNameRequest; result: ProjectSetNameResult };
   /** Change project settings (autosave interval, cache limit, preview LOD, memory budget, the world's shared wind, the world origin and CRS); fields left out keep their value — journaled like every mutation */

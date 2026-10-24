@@ -547,6 +547,23 @@ pub mod builtin {
         pub pending_journal: usize,
         /// User-tunable settings (`project.json` → `settings`): autosave interval, cache limit, preview LOD.
         pub settings: crate::project::ProjectSettings,
+        /// The project's look (`scene.json` → `look`): materials, scatter, sun.
+        pub look: crate::project::Look,
+    }
+
+    /// `project.set_look` params: fields left out keep their value.
+    #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct ProjectSetLook {
+        /// The whole material stack.
+        #[serde(default)]
+        pub materials: Option<Vec<super::terrain::MaterialSpec>>,
+        /// Scatter settings.
+        #[serde(default)]
+        pub scatter: Option<crate::project::ScatterLook>,
+        /// Sun and sky.
+        #[serde(default)]
+        pub sun: Option<crate::project::SunLook>,
     }
 
     /// `project.import_asset` params.
@@ -616,6 +633,7 @@ pub mod builtin {
             dirty: p.is_dirty(),
             pending_journal: p.pending_journal.len(),
             settings: p.doc.settings.clone(),
+            look: p.scene.look.clone(),
         }
     }
 
@@ -636,6 +654,20 @@ pub mod builtin {
                     ));
                 }
                 Ok(())
+            }
+            "project.set_look" => {
+                let args: ProjectSetLook = serde_json::from_value(params.clone())?;
+                let mut look = p.scene.look.clone();
+                if let Some(m) = args.materials {
+                    look.materials = m;
+                }
+                if let Some(sc) = args.scatter {
+                    look.scatter = Some(sc);
+                }
+                if let Some(su) = args.sun {
+                    look.sun = Some(su);
+                }
+                look.validate().map_err(|e| JdError::invalid("params", e))
             }
             "project.set_settings" => {
                 let args: ProjectSetSettings = serde_json::from_value(params.clone())?;
@@ -697,6 +729,19 @@ pub mod builtin {
                 }
                 Ok(())
             }
+            "project.set_look" => {
+                let args: ProjectSetLook = serde_json::from_value(params.clone())?;
+                if let Some(m) = args.materials {
+                    p.scene.look.materials = m;
+                }
+                if let Some(sc) = args.scatter {
+                    p.scene.look.scatter = Some(sc);
+                }
+                if let Some(su) = args.sun {
+                    p.scene.look.sun = Some(su);
+                }
+                Ok(())
+            }
             "project.set_settings" => {
                 let args: ProjectSetSettings = serde_json::from_value(params.clone())?;
                 let merged = merged_settings(p, &args);
@@ -725,7 +770,12 @@ pub mod builtin {
         // how undo/redo themselves apply, so it must not be recorded as a new edit.
         let before = (op.starts_with("graph.") && op != "graph.restore").then(|| p.graph.clone());
         apply_mutation(p, op, &params)?;
-        p.revision += 1;
+        // Only what an evaluation reads can make a running one stale: the graph and the world
+        // settings. A rename, an attribution or the look (materials, scatter, sun) changes nothing
+        // the evaluator sees, so its layers still publish.
+        if op.starts_with("graph.") || op == "project.set_settings" {
+            p.revision += 1;
+        }
         if let Some(g) = before {
             p.history.record(g);
         }
@@ -805,6 +855,17 @@ pub mod builtin {
             |ctx, args| {
                 ctx.with_project(|p| {
                     mutate(p, "project.set_settings", serde_json::to_value(&args)?)?;
+                    Ok((summary(p), Vec::new()))
+                })
+            },
+        );
+        r.register::<ProjectSetLook, ProjectSummary, _>(
+            "project.set_look",
+            "Save the project's look with the project — the material stack, the scatter settings and the viewport sun (scene.json → look); fields left out keep their value — journaled like every mutation, returned by project.open / project.info",
+            Scope::ProjectWrite,
+            |ctx, args| {
+                ctx.with_project(|p| {
+                    mutate(p, "project.set_look", serde_json::to_value(&args)?)?;
                     Ok((summary(p), Vec::new()))
                 })
             },
@@ -2080,6 +2141,55 @@ pub mod graph {
 
         fn call(reg: &Registry, ctx: &Context, op: &str, params: Value) -> Response {
             reg.invoke(ctx, Request::new(op, params))
+        }
+
+        #[test]
+        fn only_graph_and_world_mutations_make_an_evaluation_stale() {
+            let dir = tempfile::tempdir().expect("tmp");
+            let reg = Registry::with_builtins();
+            let ctx = Context::default();
+            let r = call(
+                &reg,
+                &ctx,
+                "project.create",
+                serde_json::json!({ "path": dir.path().join("Rev.jdproj"), "name": "Rev" }),
+            );
+            assert_eq!(r.status, crate::envelope::Status::Ok, "{r:?}");
+            let rev = |ctx: &Context| ctx.with_project(|p| Ok(p.revision)).expect("open");
+            let r0 = rev(&ctx);
+            for (op, params) in [
+                (
+                    "project.set_look",
+                    serde_json::json!({ "sun": { "azimuth_deg": 200.0, "elevation_deg": 30.0 } }),
+                ),
+                ("project.set_name", serde_json::json!({ "name": "Renamed" })),
+            ] {
+                assert_eq!(
+                    call(&reg, &ctx, op, params).status,
+                    crate::envelope::Status::Ok,
+                    "{op}"
+                );
+                assert_eq!(rev(&ctx), r0, "{op} changes nothing an evaluation reads");
+            }
+            assert_eq!(
+                call(
+                    &reg,
+                    &ctx,
+                    "project.set_settings",
+                    serde_json::json!({ "wind": { "azimuth_deg": 90.0, "speed_mps": 5.0 } })
+                )
+                .status,
+                crate::envelope::Status::Ok
+            );
+            assert_eq!(rev(&ctx), r0 + 1, "the world wind feeds wind nodes");
+            assert_eq!(call(&reg, &ctx, "graph.set_param", serde_json::json!({ "id": "01JDGRAPH000000000000N01SE", "key": "seed", "value": 3 })).status, crate::envelope::Status::Ok);
+            assert_eq!(rev(&ctx), r0 + 2);
+            // The look is journaled and comes back from project.info.
+            let info = call(&reg, &ctx, "project.info", serde_json::json!({}));
+            assert_eq!(
+                info.result.expect("summary")["look"]["sun"]["azimuth_deg"],
+                200.0
+            );
         }
 
         fn wait_done(reg: &Registry, ctx: &Context, id: u64) -> Value {
@@ -4039,7 +4149,7 @@ pub mod terrain {
     }
 
     /// One material layer of the stack.
-    #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+    #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
     pub struct MaterialSpec {
         /// 0..1 mask layer that weights this material (omit for everywhere).
@@ -4058,7 +4168,7 @@ pub mod terrain {
     }
 
     /// A layer's tileable detail.
-    #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+    #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
     pub struct DetailSpec {
         /// Metres per repeat.

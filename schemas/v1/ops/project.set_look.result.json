@@ -1,0 +1,406 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ProjectSummary",
+  "description": "Summary returned by project ops.",
+  "type": "object",
+  "properties": {
+    "project_id": {
+      "description": "Project id.",
+      "type": "string"
+    },
+    "name": {
+      "description": "Name.",
+      "type": "string"
+    },
+    "path": {
+      "description": "Directory.",
+      "type": "string"
+    },
+    "world": {
+      "description": "World settings.",
+      "$ref": "#/$defs/WorldSettings"
+    },
+    "schema_version": {
+      "description": "Document schema version.",
+      "$ref": "#/$defs/SchemaVersion"
+    },
+    "dirty": {
+      "description": "Unsaved changes?",
+      "type": "boolean"
+    },
+    "pending_journal": {
+      "description": "Journal entries awaiting replay.",
+      "type": "integer",
+      "format": "uint",
+      "minimum": 0
+    },
+    "settings": {
+      "description": "User-tunable settings (`project.json` → `settings`): autosave interval, cache limit, preview LOD.",
+      "$ref": "#/$defs/ProjectSettings"
+    },
+    "look": {
+      "description": "The project's look (`scene.json` → `look`): materials, scatter, sun.",
+      "$ref": "#/$defs/Look"
+    }
+  },
+  "required": [
+    "project_id",
+    "name",
+    "path",
+    "world",
+    "schema_version",
+    "dirty",
+    "pending_journal",
+    "settings",
+    "look"
+  ],
+  "$defs": {
+    "WorldSettings": {
+      "description": "World extent, resolution and tiling (`docs/spec/project-format.md`).",
+      "type": "object",
+      "properties": {
+        "extent_m": {
+          "description": "Extent in metres, [x, y].",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "resolution_px": {
+          "description": "Heightfield resolution in pixels, [x, y].",
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "tile_size": {
+          "description": "Tile edge length in pixels (power of two).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "halo": {
+          "description": "Halo width in pixels around each tile.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "origin": {
+          "description": "World-space origin of pixel (0,0), metres.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "crs": {
+          "description": "Optional CRS identifier (e.g. \"EPSG:32637\") when georeferenced.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "seed": {
+          "description": "Master seed for all procedural randomness.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "wind": {
+          "description": "Prevailing wind shared by the wind-driven nodes.",
+          "$ref": "#/$defs/Wind",
+          "default": {
+            "azimuth_deg": 270.0,
+            "speed_mps": 8.0
+          }
+        }
+      },
+      "required": [
+        "extent_m",
+        "resolution_px",
+        "tile_size",
+        "halo",
+        "origin",
+        "seed"
+      ]
+    },
+    "Wind": {
+      "description": "Shared weather state: the prevailing wind. Every wind-driven node (dunes, yardangs, snow\nscour, the wind sea) follows it unless the node sets its own `wind_*` parameter.",
+      "type": "object",
+      "properties": {
+        "azimuth_deg": {
+          "description": "Direction the wind blows FROM, degrees clockwise from north (270 = westerly).",
+          "type": "number",
+          "format": "float"
+        },
+        "speed_mps": {
+          "description": "Speed 10 m above the ground, m/s (8 = a moderate breeze).",
+          "type": "number",
+          "format": "float"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "azimuth_deg",
+        "speed_mps"
+      ]
+    },
+    "SchemaVersion": {
+      "description": "A monotonically increasing document/API schema version.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "ProjectSettings": {
+      "description": "User-tunable project settings.",
+      "type": "object",
+      "properties": {
+        "autosave_interval_s": {
+          "description": "Autosave interval in seconds (0 disables).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "cache_limit_bytes": {
+          "description": "Cache size cap in bytes.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "preview_lod": {
+          "description": "Preview LOD (resolution divided by 2^lod).",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "memory_budget_bytes": {
+          "description": "Evaluations whose pre-flight memory estimate exceeds this are refused (`E_RESOURCE_MEMORY`).\nDefault 4 GiB — the brief's ceiling (ADR-0008).",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 4294967296
+        }
+      },
+      "required": [
+        "autosave_interval_s",
+        "cache_limit_bytes",
+        "preview_lod"
+      ]
+    },
+    "Look": {
+      "description": "The project's look: what the desktop shows on top of the layers — the material stack, the\nscatter settings and the viewport sun. The core keeps it with the project (`project.set_look`,\njournaled like every mutation) so a reopened project looks the way it was left; exports that\ntake materials or a sun are given these by the app.",
+      "type": "object",
+      "properties": {
+        "materials": {
+          "description": "Material layers, blended in order over the base (`terrain.textures` / `terrain.export_mesh`).",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MaterialSpec"
+          },
+          "default": []
+        },
+        "scatter": {
+          "description": "Scatter settings.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScatterLook"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sun": {
+          "description": "Viewport sun and sky.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SunLook"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false
+    },
+    "MaterialSpec": {
+      "description": "One material layer of the stack.",
+      "type": "object",
+      "properties": {
+        "mask": {
+          "description": "0..1 mask layer that weights this material (omit for everywhere).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "albedo": {
+          "description": "Base colour, sRGB 0..1.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "roughness": {
+          "description": "Roughness 0..1.",
+          "type": "number",
+          "format": "float",
+          "default": 0.8999999761581421
+        },
+        "detail": {
+          "description": "Tileable detail (grain repeated every `tile_m` metres): baked into the macro maps and\nthe GLB by world position, returned as tiles for the viewport, written as tiles for\nthe engines.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DetailSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "albedo"
+      ]
+    },
+    "DetailSpec": {
+      "description": "A layer's tileable detail.",
+      "type": "object",
+      "properties": {
+        "tile_m": {
+          "description": "Metres per repeat.",
+          "type": "number",
+          "format": "float",
+          "minimum": 0.01,
+          "maximum": 100000.0,
+          "default": 8.0
+        },
+        "bump": {
+          "description": "Normal strength 0..1.",
+          "type": "number",
+          "format": "float",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "default": 0.5
+        },
+        "contrast": {
+          "description": "Albedo variation 0..1.",
+          "type": "number",
+          "format": "float",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "default": 0.30000001192092896
+        },
+        "seed": {
+          "description": "Noise seed.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "px": {
+          "description": "Tile side in pixels (16..=2048).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 16,
+          "maximum": 2048,
+          "default": 512
+        }
+      },
+      "additionalProperties": false
+    },
+    "ScatterLook": {
+      "description": "Scatter settings of the look.",
+      "type": "object",
+      "properties": {
+        "mask": {
+          "description": "Density mask layer, or none.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "spacing_m": {
+          "description": "Spacing between instances, metres (> 0).",
+          "type": "number",
+          "format": "float"
+        },
+        "seed": {
+          "description": "Seed.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "grow": {
+          "description": "The population follows the timeline.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "spacing_m"
+      ]
+    },
+    "SunLook": {
+      "description": "Sun and sky of the look.",
+      "type": "object",
+      "properties": {
+        "azimuth_deg": {
+          "description": "Sun azimuth, degrees clockwise from north.",
+          "type": "number",
+          "format": "float"
+        },
+        "elevation_deg": {
+          "description": "Sun elevation above the horizon, degrees (0, 90].",
+          "type": "number",
+          "format": "float"
+        },
+        "turbidity": {
+          "description": "Turbidity 2..=10.",
+          "type": "number",
+          "format": "float",
+          "default": 3.0
+        },
+        "clouds": {
+          "description": "Cloud cover 0..=1.",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        },
+        "fog": {
+          "description": "Viewport fog 0..=1.",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "azimuth_deg",
+        "elevation_deg"
+      ]
+    }
+  }
+}

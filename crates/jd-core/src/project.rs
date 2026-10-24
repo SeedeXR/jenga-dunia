@@ -128,13 +128,106 @@ pub struct ProjectDocument {
 /// `graph.json` — the procedural graph (`jd-graph` owns the type).
 pub type GraphDocument = jd_graph::Graph;
 
-/// `scene.json` — Phase 1 header only.
+/// The project's look: what the desktop shows on top of the layers — the material stack, the
+/// scatter settings and the viewport sun. The core keeps it with the project (`project.set_look`,
+/// journaled like every mutation) so a reopened project looks the way it was left; exports that
+/// take materials or a sun are given these by the app.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Look {
+    /// Material layers, blended in order over the base (`terrain.textures` / `terrain.export_mesh`).
+    #[serde(default)]
+    pub materials: Vec<crate::ops::terrain::MaterialSpec>,
+    /// Scatter settings.
+    #[serde(default)]
+    pub scatter: Option<ScatterLook>,
+    /// Viewport sun and sky.
+    #[serde(default)]
+    pub sun: Option<SunLook>,
+}
+
+/// Scatter settings of the look.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScatterLook {
+    /// Density mask layer, or none.
+    #[serde(default)]
+    pub mask: Option<String>,
+    /// Spacing between instances, metres (> 0).
+    pub spacing_m: f32,
+    /// Seed.
+    #[serde(default)]
+    pub seed: u64,
+    /// The population follows the timeline.
+    #[serde(default)]
+    pub grow: bool,
+}
+
+/// Sun and sky of the look.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SunLook {
+    /// Sun azimuth, degrees clockwise from north.
+    pub azimuth_deg: f32,
+    /// Sun elevation above the horizon, degrees (0, 90].
+    pub elevation_deg: f32,
+    /// Turbidity 2..=10.
+    #[serde(default = "d_turbidity")]
+    pub turbidity: f32,
+    /// Cloud cover 0..=1.
+    #[serde(default)]
+    pub clouds: f32,
+    /// Viewport fog 0..=1.
+    #[serde(default)]
+    pub fog: f32,
+}
+fn d_turbidity() -> f32 {
+    3.0
+}
+
+impl Look {
+    /// Reject out-of-range values before they are journaled.
+    pub fn validate(&self) -> Result<(), String> {
+        for (i, m) in self.materials.iter().enumerate() {
+            if !m.albedo.iter().all(|c| (0.0..=1.0).contains(c))
+                || !(0.0..=1.0).contains(&m.roughness)
+            {
+                return Err(format!(
+                    "materials[{i}]: albedo and roughness must be within 0..1"
+                ));
+            }
+        }
+        if let Some(sc) = &self.scatter
+            && !(sc.spacing_m > 0.0 && sc.spacing_m.is_finite())
+        {
+            return Err("scatter.spacing_m must be positive".into());
+        }
+        if let Some(su) = &self.sun {
+            if !su.azimuth_deg.is_finite() || !(0.0 < su.elevation_deg && su.elevation_deg <= 90.0)
+            {
+                return Err("sun: azimuth must be finite and elevation within (0, 90]".into());
+            }
+            if !(2.0..=10.0).contains(&su.turbidity)
+                || !(0.0..=1.0).contains(&su.clouds)
+                || !(0.0..=1.0).contains(&su.fog)
+            {
+                return Err("sun: turbidity 2..10, clouds and fog 0..1".into());
+            }
+        }
+        Ok(())
+    }
+}
+
+/// `scene.json` — the units header and the project's look.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SceneDocument {
     /// Document schema version.
     pub schema_version: SchemaVersion,
     /// Scene units (canonical frame declared explicitly).
     pub units: Units,
+    /// The project's look (materials, scatter, sun); absent in older files.
+    #[serde(default)]
+    pub look: Look,
     /// Preserved unknown keys.
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
@@ -145,6 +238,7 @@ impl Default for SceneDocument {
         Self {
             schema_version: SchemaVersion::CURRENT,
             units: Units::default(),
+            look: Look::default(),
             extra: BTreeMap::new(),
         }
     }
@@ -175,8 +269,9 @@ pub struct Project {
     pub pending_journal: Vec<JournalEntry>,
     /// Undo/redo stacks of graph snapshots (session-only; the journal is the durable record).
     pub history: History,
-    /// Bumped by every journaled mutation (session-only): an evaluation that started on an older
-    /// revision publishes nothing, so a slow run can never overwrite a newer graph's layers.
+    /// Bumped by every journaled mutation an evaluation reads — graph edits and the world
+    /// settings (session-only): an evaluation that started on an older revision publishes
+    /// nothing, so a slow run can never overwrite a newer graph's layers.
     pub revision: u64,
     dirty: bool,
     lock_nonce: String,

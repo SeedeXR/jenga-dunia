@@ -122,6 +122,9 @@ export default function App() {
   const [extent, setExtent] = useState(4096);
   const [resolution, setResolution] = useState(2048);
   const [exportPath, setExportPath] = useState("height.exr");
+  const [engine, setEngine] = useState<"unity" | "unreal">("unity");
+  const [meshPath, setMeshPath] = useState("terrain.glb");
+  const [skyPath, setSkyPath] = useState("sky.exr");
   const [vp, setVp] = useState<ViewportInfo>({ backend: "none", triangles: 0 });
   const [showGraph, setShowGraph] = useState(true);
   const onInfo = useCallback((i: ViewportInfo) => setVp(i), []);
@@ -895,6 +898,33 @@ export default function App() {
           >
             <Upload size={14} /> Export heightmap
           </button>
+          <Field label="Engine">
+            <span className="flex gap-1">
+              <select className={`${inputCls} w-20`} value={engine} onChange={(e) => setEngine(e.target.value as "unity" | "unreal")} title="Unity Terrain (RAW 16-bit + weightmaps) or Unreal Landscape (PNG16 + weightmaps), with the material stack as materials.json" data-testid="export-engine">
+                <option value="unity">Unity</option>
+                <option value="unreal">Unreal</option>
+              </select>
+              <button className="btn" disabled={!s.layer || s.busy} onClick={() => void s.exportProfile(engine, engine)} title="Write exports/<engine>/: heightmap, one weightmap per material mask, README with the import numbers, materials.json" data-testid="export-profile">
+                <Upload size={14} /> Export
+              </button>
+            </span>
+          </Field>
+          <Field label="Mesh">
+            <span className="flex gap-1">
+              <input className={`${inputCls} w-24`} value={meshPath} onChange={(e) => setMeshPath(e.target.value)} title="exports/<file>: .glb (materials baked into its textures), .fbx, .obj, .stl, .ply, .usda, .usdz" data-testid="export-mesh-path" />
+              <button className="btn" disabled={!s.layer || s.busy} onClick={() => void s.exportMesh(meshPath, null, null)} data-testid="export-mesh">
+                <Upload size={14} /> Export
+              </button>
+            </span>
+          </Field>
+          <Field label="HDRI">
+            <span className="flex gap-1">
+              <input className={`${inputCls} w-24`} value={skyPath} onChange={(e) => setSkyPath(e.target.value)} title="exports/<file>.exr: the viewport's sun, turbidity and clouds as an equirectangular HDRI (a .png preview beside it)" data-testid="export-sky-path" />
+              <button className="btn" disabled={!s.project || s.busy} onClick={() => void s.exportSky(skyPath)} data-testid="export-sky">
+                <Upload size={14} /> Bake
+              </button>
+            </span>
+          </Field>
           <button
             className="btn mt-1 w-full justify-center"
             disabled={!seaNode || s.busy}

@@ -185,6 +185,11 @@
     "scope": "project-write"
   },
   {
+    "id": "project.set_look",
+    "description": "Save the project's look with the project — the material stack, the scatter settings and the viewport sun (scene.json → look); fields left out keep their value — journaled like every mutation, returned by project.open / project.info",
+    "scope": "project-write"
+  },
+  {
     "id": "project.set_name",
     "description": "Rename the open project",
     "scope": "project-write"
