@@ -1,0 +1,424 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MediaMetadataResult",
+  "description": "`media.metadata` result: the facts in the file and what to feed the other ops.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "The file read.",
+      "type": "string"
+    },
+    "kind": {
+      "description": "`photo`, `photo360`, `video` or `video360`.",
+      "type": "string"
+    },
+    "format": {
+      "description": "Container: `jpeg`, `png`, `tiff`, `heif`, `webp`, `mp4` or `mov`.",
+      "type": "string"
+    },
+    "px": {
+      "description": "Displayed width and height in pixels (after the EXIF orientation).",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "integer",
+        "format": "uint32",
+        "minimum": 0
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "orientation": {
+      "description": "EXIF orientation 1..8 (6 and 8 are portrait shots stored sideways).",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint16",
+      "minimum": 0,
+      "maximum": 65535
+    },
+    "captured_at_utc": {
+      "description": "Capture instant, UTC, RFC 3339.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "captured_at_source": {
+      "description": "Where the instant came from: `gps` (satellite UTC), `exif_offset` (camera clock + its UTC\noffset), `gpano_first_photo_date` (a photo sphere's first source photo, UTC),\n`exif_local_assumed_utc` (camera clock, no offset — may be hours off), `mvhd` or\n`quicktime_creationdate`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "local_offset": {
+      "description": "The camera's UTC offset at capture, `±HH:MM`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "gps": {
+      "description": "Position, WGS 84.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Gps"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "heading_deg": {
+      "description": "Compass direction the camera faced, degrees clockwise from north.",
+      "type": [
+        "number",
+        "null"
+      ],
+      "format": "double"
+    },
+    "heading_ref": {
+      "description": "`true` or `magnetic` (a magnetic heading is not corrected for declination).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "heading_source": {
+      "description": "Where the heading came from.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "pitch_deg": {
+      "description": "Camera pitch, degrees above the horizon (Apple video `direction.facing`).",
+      "type": [
+        "number",
+        "null"
+      ],
+      "format": "double"
+    },
+    "fov_x_deg": {
+      "description": "Horizontal field of view, degrees (flat photos only).",
+      "type": [
+        "number",
+        "null"
+      ],
+      "format": "double"
+    },
+    "fov_source": {
+      "description": "`sensor` (focal length + focal-plane resolution), `f35_diag` (35 mm equivalent by the\ndiagonal) or null.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "camera": {
+      "description": "Camera make, model and lens.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Camera"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "exposure": {
+      "description": "Exposure settings.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Exposure"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "projection": {
+      "description": "Panorama / 360° video projection, when the file declares one.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Projection"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "duration_s": {
+      "description": "Video duration, seconds.",
+      "type": [
+        "number",
+        "null"
+      ],
+      "format": "double"
+    },
+    "sun": {
+      "description": "The sun at the capture place and instant (needs `gps` and `captured_at_utc`).",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Sun"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "hints": {
+      "description": "Things the file suggests but does not state (e.g. a 2:1 image with no panorama tags).",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "suggest": {
+      "description": "Ready-made params for the ops these facts drive.",
+      "$ref": "#/$defs/MediaSuggest"
+    },
+    "notes": {
+      "description": "How far to trust the facts above (assumed time zones, magnetic headings, phone compasses).",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "path",
+    "kind",
+    "format",
+    "hints",
+    "suggest",
+    "notes"
+  ],
+  "$defs": {
+    "Gps": {
+      "description": "A WGS 84 position.",
+      "type": "object",
+      "properties": {
+        "lat": {
+          "description": "Latitude, degrees north.",
+          "type": "number",
+          "format": "double"
+        },
+        "lon": {
+          "description": "Longitude, degrees east.",
+          "type": "number",
+          "format": "double"
+        },
+        "alt_m": {
+          "description": "Altitude above sea level, metres.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        }
+      },
+      "required": [
+        "lat",
+        "lon"
+      ]
+    },
+    "Camera": {
+      "description": "Camera identity and optics.",
+      "type": "object",
+      "properties": {
+        "make": {
+          "description": "Manufacturer.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "description": "Model.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "focal_mm": {
+          "description": "Real focal length, mm.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "focal_35mm": {
+          "description": "35 mm equivalent focal length, mm.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        }
+      }
+    },
+    "Exposure": {
+      "description": "Exposure settings.",
+      "type": "object",
+      "properties": {
+        "exposure_s": {
+          "description": "Shutter time, seconds.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "f_number": {
+          "description": "Aperture f-number.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "iso": {
+          "description": "ISO sensitivity.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "ev100": {
+          "description": "Exposure value at ISO 100: log2(N²/t) − log2(ISO/100). Bright sunlight ≈ 15, overcast ≈ 12.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        }
+      }
+    },
+    "Projection": {
+      "description": "A declared projection.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "`equirectangular` or `cubemap`.",
+          "type": "string"
+        },
+        "pose_heading_deg": {
+          "description": "Heading of the full panorama's centre column, degrees clockwise from north.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "pose_pitch_deg": {
+          "description": "Pitch, degrees.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "pose_roll_deg": {
+          "description": "Roll, degrees.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "full_px": {
+          "description": "Full panorama size (GPano), pixels.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "crop_left_top": {
+          "description": "Left and top of the stored crop inside the full panorama, pixels.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "north_column_px": {
+          "description": "Column of the stored image that faces true north (needs a heading).",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "stereo": {
+          "description": "`mono`, `top-bottom`, `left-right`, `custom` or `right-left` (video).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "type"
+      ]
+    },
+    "Sun": {
+      "description": "The sun's position.",
+      "type": "object",
+      "properties": {
+        "azimuth_deg": {
+          "description": "Azimuth, degrees clockwise from true north.",
+          "type": "number",
+          "format": "double"
+        },
+        "elevation_deg": {
+          "description": "Elevation above the horizon with atmospheric refraction, degrees.",
+          "type": "number",
+          "format": "double"
+        },
+        "below_horizon": {
+          "description": "True when the sun was below the horizon (night or twilight).",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "azimuth_deg",
+        "elevation_deg",
+        "below_horizon"
+      ]
+    },
+    "MediaSuggest": {
+      "description": "Params for other ops, from a file's metadata.",
+      "type": "object",
+      "properties": {
+        "geo_fetch_dem": {
+          "description": "`geo.fetch_dem` around the camera: `{center: [lon, lat], radius_m}`."
+        },
+        "sky": {
+          "description": "`sky.preview` / `sky.bake` sun: `{sun_azimuth_deg, sun_elevation_deg}` (sun above the horizon only)."
+        },
+        "vision_depth": {
+          "description": "`vision.depth` field of view: `{fov_x_deg}` (flat photos only)."
+        }
+      }
+    }
+  }
+}

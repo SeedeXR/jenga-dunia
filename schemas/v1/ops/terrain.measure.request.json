@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TerrainMeasure",
+  "description": "`terrain.measure` params.",
+  "type": "object",
+  "properties": {
+    "layer": {
+      "description": "Layer to measure.",
+      "type": "string",
+      "default": "height"
+    },
+    "search_m": {
+      "description": "How far the geomorphons look along each direction, metres; default 20 cells. Use the\nsame distance when comparing two terrains (a real DEM and its generated twin).",
+      "type": [
+        "number",
+        "null"
+      ],
+      "format": "float",
+      "default": null
+    },
+    "flat_deg": {
+      "description": "Lines of sight within this angle of horizontal count as flat, degrees.",
+      "type": "number",
+      "format": "float",
+      "minimum": 0.0,
+      "maximum": 44.0,
+      "default": 1.0
+    }
+  },
+  "additionalProperties": false
+}

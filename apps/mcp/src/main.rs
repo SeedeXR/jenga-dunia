@@ -4,6 +4,11 @@
 //! schemas) over stdio. Tools are filtered by the scopes granted at launch;
 //! project paths are confined to `--workspace` when given. Results are returned
 //! as structured content: the full `jd-core` response envelope.
+//!
+//! Beyond the tools: read-only resources (the guides an agent needs to build a believable world —
+//! `jd://guide/reading-a-landscape`, `jd://guide/environments` — and the node-kind and op
+//! catalogues) and the `terrain_from_reference` prompt, which walks an agent from a reference
+//! photo, panorama or video to a measured world.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -12,8 +17,11 @@ use clap::Parser;
 use jd_core::{Context, Registry, Request, Scope};
 use jd_types::{ErrorCode, JdError};
 use rmcp::model::{
-    CallToolRequestParams, CallToolResponse, CallToolResult, Implementation, JsonObject,
-    ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig, Tool,
+    CallToolRequestParams, CallToolResponse, CallToolResult, GetPromptRequestParams,
+    GetPromptResponse, GetPromptResult, Implementation, JsonObject, ListPromptsResult,
+    ListResourcesResult, ListToolsResult, PaginatedRequestParams, Prompt, PromptArgument,
+    PromptMessage, ReadResourceRequestParams, ReadResourceResponse, ReadResourceResult, Resource,
+    ResourceContents, Role, ServerCapabilities, ServerConfig, Tool,
 };
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, ServiceExt, transport::stdio};
@@ -31,6 +39,71 @@ struct Cli {
     /// Log level filter for stderr.
     #[arg(long, default_value = "info", env = "JD_LOG")]
     log: String,
+}
+
+/// Read-only resources: (uri, name, description, mime type, text). Compiled in, so they always
+/// match the build that serves them.
+const RESOURCES: [(&str, &str, &str, &str, &str); 4] = [
+    (
+        "jd://guide/reading-a-landscape",
+        "Reading a landscape",
+        "From a reference photo, 360° panorama or video to a believable world: what a picture can and cannot tell, the steps, the reading sheet, landform recipes as node graphs, measured real-terrain exemplars and the realism checks.",
+        "text/markdown",
+        include_str!("../../../docs/user/reading-a-landscape.md"),
+    ),
+    (
+        "jd://guide/environments",
+        "Environments",
+        "Soil, weather and climate, sand deserts, snow-capped mountains, volcanoes and lava: which nodes, which settings, what is not modelled.",
+        "text/markdown",
+        include_str!("../../../docs/user/environments.md"),
+    ),
+    (
+        "jd://schema/node-kinds",
+        "Node kinds",
+        "Every graph node kind with its ports, description and parameter JSON schema (defaults included).",
+        "application/json",
+        include_str!("../../../schemas/v1/graph/node-kinds.json"),
+    ),
+    (
+        "jd://schema/ops",
+        "Operations",
+        "Every operation (tool) id with its description and scope.",
+        "application/json",
+        include_str!("../../../schemas/v1/ops/index.json"),
+    ),
+];
+
+const PROMPT_REFERENCE: &str = "terrain_from_reference";
+
+fn reference_prompt_text(args: &JsonObject) -> String {
+    let get = |k: &str| {
+        args.get(k)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+    };
+    let image = get("image").unwrap_or("<the reference image or video>");
+    let mut text = format!(
+        "Build a believable Jenga Dunia world from the reference `{image}`.\n\n\
+         Work through these steps with the jd tools, and follow the guide below (also the resource `jd://guide/reading-a-landscape`):\n\
+         1. `media.metadata {{path}}` on the reference: GPS, UTC time, heading, field of view, projection, and the sun. Use its `suggest` params and read its `notes`.\n\
+         2. Look at the image and fill the reading sheet from the guide. Put every guess in `unknowns`; do not invent scale.\n\
+         3. If the place is known, fetch real elevation with `geo.fetch_dem` (scope network:geo), set the world `crs` to the UTM zone and `origin`, and import it with `jd.input.heightmap@1 {{georeference: true}}`. Otherwise start from the landform recipe.\n\
+         4. Add the processes the image shows (erosion, wind, snow, water, lava, debris) as graph nodes; shape the visible foreground with `vision.depth` (scope vision) and `jd.sculpt.strokes@1` when useful.\n\
+         5. Set the sky and the snow nodes' sun from `suggest.sky`, and the climate from the reading sheet.\n\
+         6. Run `terrain.measure` on the result and on the guide's exemplar for this landform at the same `search_m`, and adjust until slope distribution, geomorphon shares and hypsometric integral are close.\n\
+         7. Report what you built and every assumption (the sheet's `unknowns`, scale, heading)."
+    );
+    if let Some(place) = get("place") {
+        text.push_str(&format!("\n\nThe user says the place is: {place}."));
+    }
+    if let Some(intent) = get("intent") {
+        text.push_str(&format!("\n\nWhat the user wants: {intent}."));
+    }
+    text.push_str("\n\n---\n\n");
+    text.push_str(RESOURCES[0].4);
+    text
 }
 
 #[derive(Clone)]
@@ -114,14 +187,102 @@ fn envelope_error(op: &str, err: JdError) -> Value {
 
 impl ServerHandler for JdServer {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().enable_prompts().enable_resources().build())
             .with_server_info(Implementation::new("jenga-dunia", jd_core::APP_VERSION).with_title("Jenga Dunia"))
             .with_instructions(
-                "Jenga Dunia procedural world generation. Tools mirror the `jd` CLI operations: create/open a project \
-                 (project.create / project.open), inspect it (project.info), mutate it (project.set_name), save \
-                 (project.save), recover after a crash (project.recover), and inspect the host (diag.env). Every result \
-                 is a JSON envelope {status, result|error, warnings}; errors carry stable E_* codes with `why` and `next`.",
+                "Jenga Dunia procedural world generation. Tools mirror the `jd` CLI operations: projects (project.*), the \
+                 node graph (graph.add_node / connect / set_param / evaluate — node kinds in the resource jd://schema/node-kinds), \
+                 layers and exports (terrain.*), real-world data (geo.fetch_dem, scope network:geo), photo depth (vision.depth, \
+                 scope vision), image and video metadata with the sun's position (media.metadata) and landform measures \
+                 (terrain.measure). To build from a reference picture use the prompt `terrain_from_reference` and the guide \
+                 jd://guide/reading-a-landscape; jd://guide/environments covers soil, weather, deserts, snow and lava. Every \
+                 result is a JSON envelope {status, result|error, warnings}; errors carry stable E_* codes with `why` and `next`.",
             )
+    }
+
+    fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> impl Future<Output = Result<ListPromptsResult, McpError>> + Send + '_ {
+        let prompt = Prompt::new(
+            PROMPT_REFERENCE,
+            Some("Build a believable world from a reference photo, 360° panorama or video: read its metadata and the sun, read the landform, ground it in a real DEM when the place is known, simulate the processes it shows, and measure the result against a real terrain of the same kind."),
+            Some(vec![
+                PromptArgument::new("image").with_description("Path of the photo, panorama or video (absolute, or relative to the project's assets/).").with_required(true),
+                PromptArgument::new("place").with_description("Where it was taken, if the file has no GPS (a place name or lon, lat).").with_required(false),
+                PromptArgument::new("intent").with_description("What the world is for, or what to change from the reference.").with_required(false),
+            ]),
+        );
+        std::future::ready(Ok(ListPromptsResult::with_all_items(vec![prompt])))
+    }
+
+    fn get_prompt(
+        &self,
+        request: GetPromptRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> impl Future<Output = Result<GetPromptResponse, McpError>> + Send + '_ {
+        let result = if request.name == PROMPT_REFERENCE {
+            let args = request.arguments.unwrap_or_default();
+            if args
+                .get("image")
+                .and_then(Value::as_str)
+                .is_none_or(|v| v.trim().is_empty())
+            {
+                Err(McpError::invalid_params("`image` is required", None))
+            } else {
+                Ok(GetPromptResponse::Complete(
+                    GetPromptResult::new(vec![PromptMessage::new_text(
+                        Role::User,
+                        reference_prompt_text(&args),
+                    )])
+                    .with_description("From a reference image to a measured world"),
+                ))
+            }
+        } else {
+            Err(McpError::invalid_params(
+                format!("unknown prompt `{}`", request.name),
+                None,
+            ))
+        };
+        std::future::ready(result)
+    }
+
+    fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> impl Future<Output = Result<ListResourcesResult, McpError>> + Send + '_ {
+        let items = RESOURCES
+            .iter()
+            .map(|(uri, name, desc, mime, text)| {
+                let mut r = Resource::new(*uri, *name)
+                    .with_description(*desc)
+                    .with_mime_type(*mime);
+                r.size = Some(text.len() as u64);
+                r
+            })
+            .collect();
+        std::future::ready(Ok(ListResourcesResult::with_all_items(items)))
+    }
+
+    fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> impl Future<Output = Result<ReadResourceResponse, McpError>> + Send + '_ {
+        let result = match RESOURCES.iter().find(|r| r.0 == request.uri) {
+            Some((uri, _, _, mime, text)) => {
+                Ok(ReadResourceResponse::Complete(ReadResourceResult::new(
+                    vec![ResourceContents::text(*text, *uri).with_mime_type(*mime)],
+                )))
+            }
+            None => Err(McpError::resource_not_found(
+                format!("unknown resource `{}`", request.uri),
+                None,
+            )),
+        };
+        std::future::ready(result)
     }
 
     fn list_tools(

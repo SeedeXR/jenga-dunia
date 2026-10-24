@@ -51,6 +51,17 @@ Tools the server was not granted are **not listed**; calling one anyway returns 
 
 Errors carry `code`, `message`, `why`, `next` and `details`, so an agent can self-correct (e.g. fix parameters against the schema, or call `project.recover`).
 
+**Resources and a prompt.** Beyond the tools, the server offers read-only resources and one prompt, so an agent can learn the craft as well as the API:
+
+| Resource | What it holds |
+|---|---|
+| `jd://guide/reading-a-landscape` | From a reference photo, panorama or video to a believable world: the steps, the reading sheet, landform recipes as node graphs, measured real-terrain exemplars and realism checks ([the same guide](reading-a-landscape.md)) |
+| `jd://guide/environments` | Soil, weather, sand deserts, snow-capped mountains and lava: which nodes and settings ([the same guide](environments.md)) |
+| `jd://schema/node-kinds` | Every node kind with ports, description and parameter schema |
+| `jd://schema/ops` | Every operation with its description and scope |
+
+The prompt `terrain_from_reference {image, place?, intent?}` walks the agent through `media.metadata`, reading the image, `geo.fetch_dem` when the place is known, the simulation nodes, the sky, and `terrain.measure` against an exemplar, and ends with a report of every assumption. It needs the scopes of the tools it names: `network:geo` for the DEM and `vision` for photo depth. The resources are compiled into the binary, so they always match the build. Integration test: `apps/mcp/tests/stdio.rs` lists and reads them and gets the prompt through a real MCP client.
+
 ## Example session (Claude Code)
 
 > "Create a 4 km world called Savannah in my workspace, rename it to Serengeti, save, and tell me the project id."

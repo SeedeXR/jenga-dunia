@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Fingerprint",
+  "description": "A terrain's fingerprint.",
+  "type": "object",
+  "properties": {
+    "cell_m": {
+      "description": "Sample spacing, metres.",
+      "type": "array",
+      "items": {
+        "type": "number",
+        "format": "float"
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "relief_m": {
+      "description": "Highest minus lowest, metres.",
+      "type": "number",
+      "format": "double"
+    },
+    "hypsometric_integral": {
+      "description": "(mean − min) / (max − min): ~0.2–0.4 for old, eroded uplands, ~0.6+ for young plateaus\n(Strahler's hypsometric integral via Pike & Wilson's elevation–relief ratio).",
+      "type": "number",
+      "format": "double"
+    },
+    "slope": {
+      "description": "Slope statistics, degrees.",
+      "$ref": "#/$defs/SlopeStats"
+    },
+    "geomorphons": {
+      "description": "Share of interior cells in each geomorphon class.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "format": "double"
+      }
+    },
+    "search_m": {
+      "description": "The `search_m` the geomorphons used.",
+      "type": "number",
+      "format": "float"
+    }
+  },
+  "required": [
+    "cell_m",
+    "relief_m",
+    "hypsometric_integral",
+    "slope",
+    "geomorphons",
+    "search_m"
+  ],
+  "$defs": {
+    "SlopeStats": {
+      "description": "Slope statistics.",
+      "type": "object",
+      "properties": {
+        "mean_deg": {
+          "description": "Mean slope, degrees.",
+          "type": "number",
+          "format": "double"
+        },
+        "p50_deg": {
+          "description": "Median, degrees.",
+          "type": "number",
+          "format": "double"
+        },
+        "p90_deg": {
+          "description": "90th percentile, degrees.",
+          "type": "number",
+          "format": "double"
+        },
+        "histogram_5deg": {
+          "description": "Share of cells per 5° band: 0–5, 5–10, …, 85–90.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "required": [
+        "mean_deg",
+        "p50_deg",
+        "p90_deg",
+        "histogram_5deg"
+      ]
+    }
+  }
+}

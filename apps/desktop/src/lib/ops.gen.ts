@@ -666,6 +666,133 @@ export type JobsResultResult = {
   "response"?: unknown;
 };
 
+export type MediaMetadataRequest = {
+  /** Photo (JPEG, PNG, TIFF, HEIF, WebP — flat or a 360° photo sphere) or video (MP4, MOV,
+360° included): absolute, or relative to the open project's `assets/`. */
+  "path": string;
+};
+
+export type Gps = {
+  /** Latitude, degrees north. */
+  "lat": number;
+  /** Longitude, degrees east. */
+  "lon": number;
+  /** Altitude above sea level, metres. */
+  "alt_m"?: number | null;
+};
+
+export type Camera = {
+  /** Manufacturer. */
+  "make"?: string | null;
+  /** Model. */
+  "model"?: string | null;
+  /** Real focal length, mm. */
+  "focal_mm"?: number | null;
+  /** 35 mm equivalent focal length, mm. */
+  "focal_35mm"?: number | null;
+};
+
+export type Exposure = {
+  /** Shutter time, seconds. */
+  "exposure_s"?: number | null;
+  /** Aperture f-number. */
+  "f_number"?: number | null;
+  /** ISO sensitivity. */
+  "iso"?: number | null;
+  /** Exposure value at ISO 100: log2(N²/t) − log2(ISO/100). Bright sunlight ≈ 15, overcast ≈ 12. */
+  "ev100"?: number | null;
+};
+
+export type Projection = {
+  /** `equirectangular` or `cubemap`. */
+  "type": string;
+  /** Heading of the full panorama's centre column, degrees clockwise from north. */
+  "pose_heading_deg"?: number | null;
+  /** Pitch, degrees. */
+  "pose_pitch_deg"?: number | null;
+  /** Roll, degrees. */
+  "pose_roll_deg"?: number | null;
+  /** Full panorama size (GPano), pixels. */
+  "full_px"?: [number, number] | null;
+  /** Left and top of the stored crop inside the full panorama, pixels. */
+  "crop_left_top"?: [number, number] | null;
+  /** Column of the stored image that faces true north (needs a heading). */
+  "north_column_px"?: number | null;
+  /** `mono`, `top-bottom`, `left-right`, `custom` or `right-left` (video). */
+  "stereo"?: string | null;
+};
+
+export type Sun = {
+  /** Azimuth, degrees clockwise from true north. */
+  "azimuth_deg": number;
+  /** Elevation above the horizon with atmospheric refraction, degrees. */
+  "elevation_deg": number;
+  /** True when the sun was below the horizon (night or twilight). */
+  "below_horizon": boolean;
+};
+
+export type MediaSuggest = {
+  /** `geo.fetch_dem` around the camera: `{center: [lon, lat], radius_m}`. */
+  "geo_fetch_dem"?: unknown;
+  /** `sky.preview` / `sky.bake` sun: `{sun_azimuth_deg, sun_elevation_deg}` (sun above the horizon only). */
+  "sky"?: unknown;
+  /** `vision.depth` field of view: `{fov_x_deg}` (flat photos only). */
+  "vision_depth"?: unknown;
+};
+
+export type MediaMetadataResult = {
+  /** The file read. */
+  "path": string;
+  /** `photo`, `photo360`, `video` or `video360`. */
+  "kind": string;
+  /** Container: `jpeg`, `png`, `tiff`, `heif`, `webp`, `mp4` or `mov`. */
+  "format": string;
+  /** Displayed width and height in pixels (after the EXIF orientation). */
+  "px"?: [number, number] | null;
+  /** EXIF orientation 1..8 (6 and 8 are portrait shots stored sideways). */
+  "orientation"?: number | null;
+  /** Capture instant, UTC, RFC 3339. */
+  "captured_at_utc"?: string | null;
+  /** Where the instant came from: `gps` (satellite UTC), `exif_offset` (camera clock + its UTC
+offset), `gpano_first_photo_date` (a photo sphere's first source photo, UTC),
+`exif_local_assumed_utc` (camera clock, no offset — may be hours off), `mvhd` or
+`quicktime_creationdate`. */
+  "captured_at_source"?: string | null;
+  /** The camera's UTC offset at capture, `±HH:MM`. */
+  "local_offset"?: string | null;
+  /** Position, WGS 84. */
+  "gps"?: Gps | null;
+  /** Compass direction the camera faced, degrees clockwise from north. */
+  "heading_deg"?: number | null;
+  /** `true` or `magnetic` (a magnetic heading is not corrected for declination). */
+  "heading_ref"?: string | null;
+  /** Where the heading came from. */
+  "heading_source"?: string | null;
+  /** Camera pitch, degrees above the horizon (Apple video `direction.facing`). */
+  "pitch_deg"?: number | null;
+  /** Horizontal field of view, degrees (flat photos only). */
+  "fov_x_deg"?: number | null;
+  /** `sensor` (focal length + focal-plane resolution), `f35_diag` (35 mm equivalent by the
+diagonal) or null. */
+  "fov_source"?: string | null;
+  /** Camera make, model and lens. */
+  "camera"?: Camera | null;
+  /** Exposure settings. */
+  "exposure"?: Exposure | null;
+  /** Panorama / 360° video projection, when the file declares one. */
+  "projection"?: Projection | null;
+  /** Video duration, seconds. */
+  "duration_s"?: number | null;
+  /** The sun at the capture place and instant (needs `gps` and `captured_at_utc`). */
+  "sun"?: Sun | null;
+  /** Things the file suggests but does not state (e.g. a 2:1 image with no panorama tags). */
+  "hints": string[];
+  /** Ready-made params for the ops these facts drive. */
+  "suggest": MediaSuggest;
+  /** How far to trust the facts above (assumed time zones, magnetic headings, phone compasses). */
+  "notes": string[];
+};
+
 export type OceanBakeRequest = {
   /** Height layer the sea floods. */
   "layer"?: string;
@@ -1392,6 +1519,43 @@ standard base64 with padding. One decoder serves both transports. */
   "bytes_base64": string;
 };
 
+export type TerrainMeasureRequest = {
+  /** Layer to measure. */
+  "layer"?: string;
+  /** How far the geomorphons look along each direction, metres; default 20 cells. Use the
+same distance when comparing two terrains (a real DEM and its generated twin). */
+  "search_m"?: number | null;
+  /** Lines of sight within this angle of horizontal count as flat, degrees. */
+  "flat_deg"?: number;
+};
+
+export type SlopeStats = {
+  /** Mean slope, degrees. */
+  "mean_deg": number;
+  /** Median, degrees. */
+  "p50_deg": number;
+  /** 90th percentile, degrees. */
+  "p90_deg": number;
+  /** Share of cells per 5° band: 0–5, 5–10, …, 85–90. */
+  "histogram_5deg": number[];
+};
+
+export type TerrainMeasureResult = {
+  /** Sample spacing, metres. */
+  "cell_m": [number, number];
+  /** Highest minus lowest, metres. */
+  "relief_m": number;
+  /** (mean − min) / (max − min): ~0.2–0.4 for old, eroded uplands, ~0.6+ for young plateaus
+(Strahler's hypsometric integral via Pike & Wilson's elevation–relief ratio). */
+  "hypsometric_integral": number;
+  /** Slope statistics, degrees. */
+  "slope": SlopeStats;
+  /** Share of interior cells in each geomorphon class. */
+  "geomorphons": Record<string, number>;
+  /** The `search_m` the geomorphons used. */
+  "search_m": number;
+};
+
 export type TerrainPreviewRequest = {
   /** Layer name. */
   "layer"?: string;
@@ -1702,6 +1866,13 @@ export type NodeParams_jd_analysis_flow_1 = {
   "log_scale"?: boolean;
   /** Routing: `d8` (single steepest neighbour), `dinf` (Tarboton facets, smoother streams) or `mfd` (Freeman, most diffuse). */
   "method"?: FlowMethod;
+};
+
+export type NodeParams_jd_analysis_geomorphon_1 = {
+  /** How far to look along each direction, metres; 0 = 20 cells. */
+  "search_m"?: number;
+  /** Lines of sight within this angle of horizontal count as flat, degrees [0, 45). */
+  "flat_deg"?: number;
 };
 
 export type NodeParams_jd_analysis_slope_1 = {
@@ -2349,6 +2520,8 @@ export interface JdOps {
   "jobs.list": { request: JobsListRequest; result: JobsListResult };
   /** State of a job: running (progress), done (the finished op's envelope, handed over once) or unknown */
   "jobs.result": { request: JobsResultRequest; result: JobsResultResult };
+  /** What a photo, 360° photo sphere or video states about where, when and how it was taken — GPS position, UTC capture time, compass heading, field of view, exposure, panorama / 360° video projection and the north column — and the sun's azimuth and elevation then; suggests params for geo.fetch_dem, sky and vision.depth */
+  "media.metadata": { request: MediaMetadataRequest; result: MediaMetadataResult };
   /** Write the water textures of a sea at `level_m`: depth (16-bit), the water's colour through its clarity and tint (sRGB), the shoreline + surf foam, and a tileable Gerstner wave normal map for the wind sea */
   "ocean.bake": { request: OceanBakeRequest; result: OceanBakeResult };
   /** Wind sea for a wind speed and fetch (JONSWAP growth capped at the fully developed Pierson–Moskowitz sea): significant height, peak period and wavelength, breaking depth, and the Gerstner components the viewport animates */
@@ -2389,6 +2562,8 @@ export interface JdOps {
   "terrain.generate": { request: TerrainGenerateRequest; result: TerrainGenerateResult };
   /** The world's noise continued beyond its border: the graph's noise node evaluated over `scale` × the extent (same seed and origin, so it matches at the edge) at a coarse `px`, as a u16 preview — a horizon skirt for viewers; erosion and the rest of the graph are not continued */
   "terrain.horizon": { request: TerrainHorizonRequest; result: TerrainHorizonResult };
+  /** A layer's landform fingerprint — relief, hypsometric integral, slope mean / median / 90th percentile and 5° histogram, and the share of each geomorphon (flat, peak, ridge, shoulder, spur, slope, hollow, footslope, valley, pit) — to compare a generated world with a real DEM of the same landform */
+  "terrain.measure": { request: TerrainMeasureRequest; result: TerrainMeasureResult };
   /** Downsampled u16 preview of a layer (base64) for agents and viewers */
   "terrain.preview": { request: TerrainPreviewRequest; result: TerrainPreviewResult };
   /** Generate seeded, faceted boulders as .glb meshes (icosphere squashed and displaced by value noise, flat base, flat shading) — scatter proxies and props */
@@ -2411,6 +2586,7 @@ export type OpId = keyof JdOps;
 export interface NodeKinds {
   "jd.analysis.curvature@1": NodeParams_jd_analysis_curvature_1;
   "jd.analysis.flow@1": NodeParams_jd_analysis_flow_1;
+  "jd.analysis.geomorphon@1": NodeParams_jd_analysis_geomorphon_1;
   "jd.analysis.slope@1": NodeParams_jd_analysis_slope_1;
   "jd.biome.classify@1": NodeParams_jd_biome_classify_1;
   "jd.biome.seabed@1": NodeParams_jd_biome_seabed_1;

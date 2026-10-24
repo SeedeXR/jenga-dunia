@@ -125,6 +125,11 @@
     "scope": "none"
   },
   {
+    "id": "media.metadata",
+    "description": "What a photo, 360° photo sphere or video states about where, when and how it was taken — GPS position, UTC capture time, compass heading, field of view, exposure, panorama / 360° video projection and the north column — and the sun's azimuth and elevation then; suggests params for geo.fetch_dem, sky and vision.depth",
+    "scope": "project-read"
+  },
+  {
     "id": "ocean.bake",
     "description": "Write the water textures of a sea at `level_m`: depth (16-bit), the water's colour through its clarity and tint (sRGB), the shoreline + surf foam, and a tileable Gerstner wave normal map for the wind sea",
     "scope": "export"
@@ -222,6 +227,11 @@
   {
     "id": "terrain.horizon",
     "description": "The world's noise continued beyond its border: the graph's noise node evaluated over `scale` × the extent (same seed and origin, so it matches at the edge) at a coarse `px`, as a u16 preview — a horizon skirt for viewers; erosion and the rest of the graph are not continued",
+    "scope": "project-read"
+  },
+  {
+    "id": "terrain.measure",
+    "description": "A layer's landform fingerprint — relief, hypsometric integral, slope mean / median / 90th percentile and 5° histogram, and the share of each geomorphon (flat, peak, ridge, shoulder, spur, slope, hollow, footslope, valley, pit) — to compare a generated world with a real DEM of the same landform",
     "scope": "project-read"
   },
   {

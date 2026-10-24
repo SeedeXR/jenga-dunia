@@ -195,6 +195,20 @@ fn terrace(h: f32, step_m: f32, softness: f32, offset_m: f32) -> f32 {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct GeomorphonParams {
+    /// How far to look along each direction, metres; 0 = 20 cells.
+    #[serde(default)]
+    search_m: f32,
+    /// Lines of sight within this angle of horizontal count as flat, degrees [0, 45).
+    #[serde(default = "flat_one_deg")]
+    flat_deg: f32,
+}
+fn flat_one_deg() -> f32 {
+    1.0
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct CurvatureParams {
     /// Curvature (1/m) that maps to ±1; smaller values exaggerate.
     #[serde(default = "curvature_scale")]
@@ -813,6 +827,18 @@ pub fn register_all(r: &mut Registry) {
     )
     // Local: the kernel reads `radius` cells around a cell, so a change re-runs on its tiles only.
     .local(|p| p.get("radius").and_then(|v| v.as_u64()).unwrap_or(1) as u32));
+    r.register(NodeDef::new::<GeomorphonParams, _>(
+        "jd.analysis.geomorphon@1",
+        "Landform class per cell (geomorphons, Jasiewicz & Stepinski 2013): 1 flat, 2 peak, 3 ridge, 4 shoulder, 5 spur, 6 slope, 7 hollow, 8 footslope, 9 valley, 10 pit (0 on the border) from lines of sight up to `search_m` along the 8 compass directions — feed `jd.mask.class@1` for ridge, valley or footslope masks",
+        vec![port("in", PortType::Heightfield, true)],
+        vec![port("out", PortType::Heightfield, false)],
+        |ctx, p, i| {
+            let gp: GeomorphonParams = params(p)?;
+            let spacing = spacing_m(ctx);
+            let search = if gp.search_m > 0.0 { gp.search_m } else { 20.0 * spacing[0].max(spacing[1]) };
+            Ok(out("out", jd_terrain::geomorphons(field(i, "in")?, spacing, search, gp.flat_deg)?))
+        },
+    ).with_memory(8.0));
     r.register(NodeDef::new::<CurvatureParams, _>(
         "jd.analysis.curvature@1",
         "Curvature (Laplacian of height, 1/m) mapped to −1..1: positive on ridges and convex breaks, negative in valleys and hollows — for rock exposure, soil and sediment masks",

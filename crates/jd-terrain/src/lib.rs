@@ -20,6 +20,7 @@ pub mod flow;
 pub mod heightfield;
 pub mod import;
 pub mod karst;
+pub mod landform;
 pub mod lava;
 pub mod mesh;
 pub mod network;
@@ -60,6 +61,7 @@ pub use import::{
     resample_to_world_geo,
 };
 pub use karst::{KarstParams, Sinkhole, SinkholeProfile, karst_sinkholes};
+pub use landform::{Fingerprint, GEOMORPHON_NAMES, SlopeStats, fingerprint, geomorphons};
 pub use lava::{LavaParams, LavaResult, LavaVent, lava_flow};
 pub use mesh::{
     BakedMaps, GridMesh, MaterialLayer, MeshExportReport, MeshTopology, auto_step, bake_maps,

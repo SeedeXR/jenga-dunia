@@ -3806,6 +3806,64 @@ pub mod terrain {
         PathBuf::from("sky.exr")
     }
 
+    /// `media.metadata` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct MediaMetadataParams {
+        /// Photo (JPEG, PNG, TIFF, HEIF, WebP — flat or a 360° photo sphere) or video (MP4, MOV,
+        /// 360° included): absolute, or relative to the open project's `assets/`.
+        pub path: PathBuf,
+    }
+
+    /// `media.metadata` result: the facts in the file and what to feed the other ops.
+    #[derive(Debug, Serialize, schemars::JsonSchema)]
+    pub struct MediaMetadataResult {
+        /// The file read.
+        pub path: PathBuf,
+        /// What the file states (absent facts are null, never guessed).
+        #[serde(flatten)]
+        pub metadata: jd_media::MediaMetadata,
+        /// Ready-made params for the ops these facts drive.
+        pub suggest: MediaSuggest,
+        /// How far to trust the facts above (assumed time zones, magnetic headings, phone compasses).
+        pub notes: Vec<String>,
+    }
+
+    /// Params for other ops, from a file's metadata.
+    #[derive(Debug, Default, Serialize, schemars::JsonSchema)]
+    pub struct MediaSuggest {
+        /// `geo.fetch_dem` around the camera: `{center: [lon, lat], radius_m}`.
+        pub geo_fetch_dem: Option<serde_json::Value>,
+        /// `sky.preview` / `sky.bake` sun: `{sun_azimuth_deg, sun_elevation_deg}` (sun above the horizon only).
+        pub sky: Option<serde_json::Value>,
+        /// `vision.depth` field of view: `{fov_x_deg}` (flat photos only).
+        pub vision_depth: Option<serde_json::Value>,
+    }
+
+    /// `terrain.measure` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct TerrainMeasure {
+        /// Layer to measure.
+        #[serde(default = "default_height_layer")]
+        pub layer: String,
+        /// How far the geomorphons look along each direction, metres; default 20 cells. Use the
+        /// same distance when comparing two terrains (a real DEM and its generated twin).
+        #[serde(default)]
+        pub search_m: Option<f32>,
+        /// Lines of sight within this angle of horizontal count as flat, degrees.
+        #[serde(default = "default_flat_deg")]
+        #[schemars(range(min = 0.0, max = 44.0))]
+        pub flat_deg: f32,
+    }
+
+    fn default_height_layer() -> String {
+        "height".into()
+    }
+    fn default_flat_deg() -> f32 {
+        1.0
+    }
+
     /// `sky.preview` params.
     #[derive(Debug, Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
@@ -4234,6 +4292,42 @@ pub mod terrain {
                 Ok((SkyPreviewResult { width: p.width, height: p.width / 2, png_base64: base64::engine::general_purpose::STANDARD.encode(png) }, Vec::new()))
             },
         );
+        r.register::<MediaMetadataParams, MediaMetadataResult, _>(
+            "media.metadata",
+            "What a photo, 360° photo sphere or video states about where, when and how it was taken — GPS position, UTC capture time, compass heading, field of view, exposure, panorama / 360° video projection and the north column — and the sun's azimuth and elevation then; suggests params for geo.fetch_dem, sky and vision.depth",
+            Scope::ProjectRead,
+            |ctx, p| {
+                let path = if p.path.is_absolute() { p.path.clone() } else { ctx.with_project(|proj| Ok(proj.root().join("assets").join(&p.path)))? };
+                let m = jd_media::read_metadata(&path)?;
+                let mut suggest = MediaSuggest::default();
+                let mut notes = Vec::new();
+                if let Some(g) = m.gps {
+                    suggest.geo_fetch_dem = Some(serde_json::json!({"center": [g.lon, g.lat], "radius_m": 5000.0}));
+                } else {
+                    notes.push("No GPS position: ask for the place, or match the skyline by eye; the DEM and the sun need it.".into());
+                }
+                if let Some(sun) = m.sun.filter(|s| !s.below_horizon) {
+                    suggest.sky = Some(serde_json::json!({"sun_azimuth_deg": sun.azimuth_deg, "sun_elevation_deg": sun.elevation_deg}));
+                } else if m.sun.is_some() {
+                    notes.push("The sun was below the horizon at capture (night or twilight).".into());
+                }
+                if let Some(fov) = m.fov_x_deg {
+                    suggest.vision_depth = Some(serde_json::json!({"fov_x_deg": fov}));
+                }
+                match m.captured_at_source.as_deref() {
+                    Some("exif_local_assumed_utc") => notes.push("The capture time is the camera clock with no UTC offset, read as UTC: it may be hours off, and so may the sun.".into()),
+                    Some("mvhd") => notes.push("Video creation times are meant to be UTC but some cameras write local time.".into()),
+                    _ => {}
+                }
+                if m.heading_ref.as_deref() == Some("magnetic") {
+                    notes.push("The heading is magnetic: add the local magnetic declination for true north.".into());
+                }
+                if m.kind == "photo360" || m.kind == "video360" {
+                    notes.push("A phone's panorama heading comes from its compass and can be off by tens of degrees: check it against the sun in the image when both are known. vision.depth needs perspective crops of a panorama, not the equirectangular image.".into());
+                }
+                Ok((MediaMetadataResult { path, metadata: m, suggest, notes }, Vec::new()))
+            },
+        );
         r.register::<SkyBake, SkyBakeResult, _>(
             "sky.bake",
             "Bake a physical sky (Preetham daylight model: sun azimuth/elevation, turbidity) as an equirectangular HDRI — OpenEXR RGB f32 for engines and renderers, with a tonemapped PNG preview beside it",
@@ -4395,6 +4489,20 @@ pub mod terrain {
             "Statistics and content hash of a layer",
             Scope::ProjectRead,
             |ctx, p| ctx.with_layer(&p.layer, |hf| Ok((info(&p.layer, hf, 0), Vec::new()))),
+        );
+        r.register::<TerrainMeasure, jd_terrain::Fingerprint, _>(
+            "terrain.measure",
+            "A layer's landform fingerprint — relief, hypsometric integral, slope mean / median / 90th percentile and 5° histogram, and the share of each geomorphon (flat, peak, ridge, shoulder, spur, slope, hollow, footslope, valley, pit) — to compare a generated world with a real DEM of the same landform",
+            Scope::ProjectRead,
+            |ctx, p| {
+                let extent = ctx.with_project(|proj| Ok(proj.doc.world.extent_m))?;
+                let fp = ctx.with_layer(&p.layer, |hf| {
+                    let spacing = [extent[0] as f32 / hf.width() as f32, extent[1] as f32 / hf.height() as f32];
+                    let search = p.search_m.unwrap_or(20.0 * spacing[0].max(spacing[1]));
+                    jd_terrain::fingerprint(hf, spacing, search, p.flat_deg)
+                })?;
+                Ok((fp, Vec::new()))
+            },
         );
         r.register::<TerrainExportMesh, jd_terrain::MeshExportReport, _>(
             "terrain.export_mesh",

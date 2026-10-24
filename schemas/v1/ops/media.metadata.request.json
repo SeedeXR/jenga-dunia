@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MediaMetadataParams",
+  "description": "`media.metadata` params.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "Photo (JPEG, PNG, TIFF, HEIF, WebP — flat or a 360° photo sphere) or video (MP4, MOV,\n360° included): absolute, or relative to the open project's `assets/`.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path"
+  ]
+}
