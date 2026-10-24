@@ -3,6 +3,7 @@ import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialo
 import { Brush, FolderOpen, FolderPlus, FolderSearch, Globe, Grid3x3, Mountain, PanelBottom, PanelLeftClose, PanelLeftOpen, PanelRight, PanelRightClose, PanelRightOpen, Route, Save, Upload, Workflow } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import GraphPanel from "./graph/GraphPanel";
+import LayerStack from "./graph/LayerStack";
 import TerrainView, { type ViewportInfo } from "./viewport/TerrainView";
 import { type Brush as BrushTool, type NoiseSettings, useStore } from "./state";
 import type { FractalKind, HeightmapFormat, NoiseKind } from "./lib/ops.gen";
@@ -417,6 +418,7 @@ export default function App() {
           )}
           {s.project && (
             <>
+              {s.project && <LayerStack />}
               <h2 className="mt-4 mb-2 text-[11px] font-semibold tracking-wide text-jd-fg-2 uppercase">Settings</h2>
               <label className="mb-1 flex items-center justify-between gap-2 text-xs text-jd-fg-1" title="Seconds after the last edit before the project autosaves; 0 disables">
                 Autosave (s)

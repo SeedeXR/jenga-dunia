@@ -170,6 +170,14 @@ interface State {
   connectNodes: (from: string, fromPort: string, to: string, toPort: string) => Promise<void>;
   disconnectNodes: (from: string, fromPort: string, to: string, toPort: string) => Promise<void>;
   setParam: (id: string, key: string, value: unknown) => Promise<void>;
+  /** `graph.set_bypass`: pass a node's input through unchanged (the layer stack's eye). */
+  setBypass: (id: string, bypass: boolean) => Promise<void>;
+  /** Splice `kind` in front of the height output (the layer stack's +). */
+  insertLayer: (kind: string) => Promise<void>;
+  /** Remove a chain node and reconnect what fed it to what it fed. */
+  unsplice: (id: string) => Promise<void>;
+  /** Move a chain node one step later (`up`, nearer the output) or earlier (`down`) by re-wiring its neighbours. */
+  swapInChain: (id: string, dir: "up" | "down") => Promise<void>;
   evaluateGraph: (lod?: number) => Promise<void>;
   /** Evaluate (and live-preview) only this output layer and what feeds it — the gate pattern; null = everything. */
   evalOutput: string | null;
@@ -826,6 +834,36 @@ export const useStore = create<State>((set, get) => {
     connectNodes: async (from, fromPort, to, toPort) => mutate("graph.connect", { from, from_port: fromPort, to, to_port: toPort }),
     disconnectNodes: async (from, fromPort, to, toPort) => mutate("graph.disconnect", { from, from_port: fromPort, to, to_port: toPort }),
     setParam: async (id, key, value) => mutate("graph.set_param", { id, key, value }),
+    setBypass: async (id, bypass) => mutate("graph.set_bypass", { id, bypass }),
+    insertLayer: async (kind) => {
+      const id = await spliceBefore("height", kind, null);
+      if (id) set({ selectedNode: id });
+    },
+    unsplice: async (id) => {
+      const g = get().graph;
+      const feed = g.edges.find((e) => e.to.node === id && e.to.port === "in");
+      const outs = g.edges.filter((e) => e.from.node === id && e.from.port === "out");
+      // graph.connect replaces the edge an input holds, so each consumer is simply re-pointed at the feeder.
+      if (feed) for (const o of outs) await get().connectNodes(feed.from.node, feed.from.port, o.to.node, o.to.port);
+      await mutate("graph.remove_node", { id });
+      if (get().selectedNode === id) set({ selectedNode: null });
+    },
+    swapInChain: async (id, dir) => {
+      const g = get().graph;
+      const feedOf = (n: string) => g.edges.find((e) => e.to.node === n && e.to.port === "in");
+      const nextOf = (n: string) => g.edges.find((e) => e.from.node === n && e.from.port === "out");
+      // P → A → B → N; moving A up makes it P → B → A → N (and moving B down is the same swap).
+      const a = dir === "up" ? id : feedOf(id)?.from.node;
+      const b = dir === "up" ? nextOf(id)?.to.node : id;
+      if (!a || !b) return;
+      const p = feedOf(a);
+      const n = nextOf(b);
+      if (!n) return;
+      if (p) await get().connectNodes(p.from.node, p.from.port, b, "in");
+      else await get().disconnectNodes(a, "out", b, "in");
+      await get().connectNodes(b, "out", a, "in");
+      await get().connectNodes(a, "out", n.to.node, n.to.port);
+    },
     setTime: (time) => {
       set((s) => ({ graph: { ...s.graph, time } })); // the slider follows the pointer; the journal gets the settled value
       clearTimeout(timeTimer);

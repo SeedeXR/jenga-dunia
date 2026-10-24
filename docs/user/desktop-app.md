@@ -108,6 +108,14 @@ Undo and redo are operations like everything else (`graph.undo` / `graph.redo`, 
 
 **Screen recording:** [`videos/graph-editor.mp4`](videos/graph-editor.mp4) (17 s, 1440×900) — the whole flow above: edit the seed, add a blur node, connect it by dragging the handles, move a node, evaluate, delete with the keyboard, undo and redo. It is the UI-driven test `apps/desktop/e2e/graph.spec.ts` running against the real core, recorded with `JD_VIDEO=1 pnpm exec playwright test e2e/graph.spec.ts` (actions slowed to human pace), so it is regenerated whenever the editor changes.
 
+## Layer stack
+
+World Creator's layer stack, as a view over the same graph: the **Layers** section in the project panel lists the chain that feeds the height output, top = last applied, each row a node with its category (shape, filter, simulation, mask), and the nodes off that chain — climate, classification, analysis — as **side branches**. The eye bypasses a layer (`graph.set_bypass`: the input passes through unchanged, the row dims), the arrows apply it later or earlier by re-wiring its neighbours, the bin removes it and closes the gap, **+** splices the chosen kind in front of the height output, and a click selects the node for the graph inspector. The graph editor and the stack show the same thing; use whichever reads better.
+
+![Layer stack: terrace on top of the noise in the chain, the snowpack node as a side branch, each row with its eye, category badge and arrows](images/desktop-stack.png)
+
+What the stack does not do yet: blend operations between layers (World Creator's overwrite / add / min / max with opacity need min, max and lerp nodes the core does not have) and reordering across side branches. The UI-driven test `e2e/stack.spec.ts` adds terrace and thermal from the stack, bypasses and restores thermal, moves terrace above it, removes thermal and checks the core's edges after every step.
+
 ## Tasks and diagnostics
 
 ![Project panel: Tasks (no running jobs) and Diagnostics with host, cache and bench results](images/desktop-diagnostics.png)
@@ -284,6 +292,7 @@ Every button calls the same operation the CLI and MCP server expose (`jd schema 
 | Component (jsdom) | the real `App` with `invoke` mocked at the Tauri boundary: create → generate → stats → preview → export warning; error display | `apps/desktop/src/App.test.tsx` (`pnpm test`) |
 | End-to-end (Chromium) | the real frontend driven by Playwright with `invoke` bridged to the **real Rust core** via `jd-mcp` (MCP over stdio): project files appear on disk, the viewport reports its backend and triangle count, a 16-bit PNG is written | `apps/desktop/e2e/terrain.spec.ts` (`pnpm test:e2e`) |
 | End-to-end, node graph | starter graph drawn from `graph.json`; edit a parameter, add a node, connect it by dragging handles, drag a node, evaluate, delete with the keyboard; the project's `journal/ops.ndjson` is read back and must list exactly `set_param, add_node, connect, move_node, remove_node` | `apps/desktop/e2e/graph.spec.ts` |
+| End-to-end, tools and layers | the grid tool, the brush modifiers, the simulation layers, the saved look with the three exports, and the layer stack, each against the real core | `apps/desktop/e2e/grid.spec.ts`, `sculpt.spec.ts`, `simlayers.spec.ts`, `look.spec.ts`, `stack.spec.ts` |
 | Native window | screenshots of the real Tauri app on macOS; interaction recording requires Accessibility permission for the automating process | this page |
 
-Known limits of this build: no layer-stack view yet (every node is reached through the graph editor), and the viewport draws scatter instances as cones. The tutorial images are the real app annotated by `scripts/annotate.mjs`; the Figma file linked in the brief is the design reference and receives the same screenshots once the connector is authorised.
+Known limits of this build: the layer stack has no blend operations (overwrite / add / min / max), the viewport draws scatter instances as cones, and the heat layer of a lava flow is coloured with the generic mask gradient. The tutorial images are the real app annotated by `scripts/annotate.mjs`; the Figma file linked in the brief is the design reference and receives the same screenshots once the connector is authorised.
