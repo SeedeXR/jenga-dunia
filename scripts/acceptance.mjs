@@ -311,8 +311,9 @@ if (existsSync("scripts/unreal-import-check.sh") && (process.env.UNREAL || exist
     const sm = Object.values(rep.static_meshes ?? {})[0] ?? {};
     const widthM = sm.bounds_cm ? (sm.bounds_cm.max[0] - sm.bounds_cm.min[0]) / 100 : NaN;
     const footprint = (extent * (res - 1)) / res; // cell centres, as the GLB check above
-    unrealMesh = Boolean(rep.ok) && Math.abs(widthM - footprint) < 1;
-    mark(13, unrealMesh ? "VERIFIED" : "FAILED", `terrain_lod0.glb through Unreal ${rep.unreal}'s Interchange importer: StaticMesh ${sm.triangles} triangles, ${sm.vertices} vertices, ${sm.sections} section, UV channels ${sm.uv_channels}, bounds ${widthM.toFixed(0)} m wide (expected ${footprint} m), ${(rep.other_assets ?? []).join(" + ")} alongside; EXT_mesh_gpu_instancing is not read by UE 5.8, so the scatter GLB would import un-instanced`);
+    // Interchange builds the mesh as Nanite: `triangles` is the Nanite mesh, `nanite.fallback_triangles` the reduced fallback.
+    unrealMesh = Boolean(rep.ok) && Math.abs(widthM - footprint) < 1 && sm.triangles === full.triangles;
+    mark(13, unrealMesh ? "VERIFIED" : "FAILED", `terrain_lod0.glb through Unreal ${rep.unreal}'s Interchange importer: StaticMesh ${sm.triangles} triangles (exported ${full.triangles}; Nanite ${sm.nanite?.enabled ? `on, fallback ${sm.nanite.fallback_triangles}` : "off"}), ${sm.vertices} vertices, ${sm.sections} section, UV channels ${sm.uv_channels}, bounds ${widthM.toFixed(0)} m wide (expected ${footprint} m), ${(rep.other_assets ?? []).join(" + ")} alongside; EXT_mesh_gpu_instancing is not read by UE 5.8, so the scatter GLB would import un-instanced`);
   } catch (e) {
     mark(13, "FAILED", `terrain_lod0.glb: Unreal import did not complete: ${String(e).slice(0, 300)}`);
   }

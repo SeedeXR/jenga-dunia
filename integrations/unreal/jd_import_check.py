@@ -67,10 +67,25 @@ def texture_info(asset):
 def mesh_info(asset):
     info = {"class": asset.get_class().get_name()}
     try:
-        info["triangles"] = asset.get_num_triangles(0)
-        info["vertices"] = asset.get_num_vertices(0)
         info["lods"] = asset.get_num_lods()
         info["sections"] = asset.get_num_sections(0)
+        # Interchange builds glTF/FBX meshes as Nanite by default (UE 5.8: InterchangeGenericMeshPipeline
+        # bBuildNanite = true). LOD0 render data is then the Nanite *fallback* (FallbackRelativeError
+        # 1.0 by default), not the mesh: the full mesh is what the asset registry's Nanite tags count.
+        reg = unreal.AssetRegistryHelpers.get_asset_registry()
+        data = reg.get_asset_by_object_path(asset.get_path_name())
+        tag = lambda t: (lambda v: int(v) if v and str(v).isdigit() else None)(data.get_tag_value(t))
+        nanite = str(data.get_tag_value("NaniteEnabled") or "").lower() == "true"
+        info["nanite"] = {"enabled": nanite, "triangles": tag("NaniteTriangles"), "vertices": tag("NaniteVertices"),
+                          "fallback_triangles": asset.get_num_triangles(0), "fallback_vertices": asset.get_num_vertices(0)}
+        try:
+            ns = asset.get_editor_property("nanite_settings")
+            info["nanite"]["fallback_relative_error"] = float(ns.get_editor_property("fallback_relative_error"))
+        except Exception:
+            pass
+        # The mesh as imported: Nanite's counts when Nanite is on, LOD0 otherwise.
+        info["triangles"] = info["nanite"]["triangles"] if nanite and info["nanite"]["triangles"] else asset.get_num_triangles(0)
+        info["vertices"] = info["nanite"]["vertices"] if nanite and info["nanite"]["vertices"] else asset.get_num_vertices(0)
     except Exception as e:
         info["error"] = repr(e)
     try:

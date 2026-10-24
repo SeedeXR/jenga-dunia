@@ -10,6 +10,12 @@ renderer) and reports, as JSON next to the input, what Unreal made of a Jenga Du
 - `JD_MESH=<file>` — a `.glb` or `.fbx` from `terrain.export_mesh`: the Interchange importer;
   the report carries the StaticMesh's triangles, vertices, sections, UV channels, bounds in
   centimetres and materials, plus whatever came alongside (textures, a material instance).
+  Interchange builds imported meshes as **Nanite** by default (UE 5.8
+  `InterchangeGenericMeshPipeline::bBuildNanite = true`), and a Nanite mesh's LOD0 render data
+  is its *fallback* — reduced to `FallbackRelativeError` 1.0 (a 524 288-triangle terrain gets a
+  1 026-triangle fallback). The report's `triangles` / `vertices` are therefore the asset
+  registry's `NaniteTriangles` / `NaniteVertices` (the mesh Unreal keeps and renders), with the
+  fallback under `nanite`; acceptance requires them to equal what the exporter wrote.
 
 `scripts/unreal-import-check.sh` is the wrapper: it writes a Blueprint-only `.uproject` under
 `target/scratch/UnrealJD` (`DisableEnginePluginsByDefault`: only Python, Interchange and
