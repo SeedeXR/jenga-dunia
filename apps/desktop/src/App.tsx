@@ -722,6 +722,22 @@ export default function App() {
             </button>
             <span className="text-xs text-jd-fg-2" data-testid="scatter-count">{s.scatter.points ? `${s.scatter.points.length.toLocaleString()} instances` : ""}</span>
           </div>
+          <h2 className="mt-4 mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Simulation layers</h2>
+          <div className="mb-1 flex flex-wrap gap-1">
+            {(["snow", "debris", "sand", "lava"] as const).map((k) => (
+              <button
+                key={k}
+                className="btn"
+                onClick={() => void s.addSimulation(k)}
+                disabled={!s.project || s.busy}
+                title={{ snow: "A season of snow on the terrain (jd.climate.snowpack): the cover becomes the `snow` layer, a snow material and the viewport colour", debris: "Rockfall debris (jd.erosion.debris) in front of the height output: boulder aprons, the `debris` layer and a rock material", sand: "Wind-blown sand (jd.erosion.aeolian) in front of the height output: dunes along the world wind", lava: "A lava flow from the summit (jd.volcanic.lava) in front of the height output: the `heat` glow and `lava` thickness layers, a basalt material" }[k]}
+                data-testid={`sim-${k}`}
+              >
+                + {k}
+              </button>
+            ))}
+          </div>
+          <p className="mb-2 text-xs text-jd-fg-2">One click adds the node, publishes its masks as layers and a material; tune it in the graph inspector.</p>
           <h2 className="mt-4 mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Materials</h2>
           {s.materials.map((m, i) => (
             <div className="mb-1 flex flex-wrap items-center gap-1" key={i} data-testid={`material-${i}`}>

@@ -23,6 +23,8 @@ export interface Brush {
   target_m: number | null;
 }
 
+export type SimulationKind = "snow" | "debris" | "sand" | "lava";
+
 /** The grid tool's state: `selected` holds `"ix,iy"` keys; `smoothness` 0..1 softens the selection's edge. */
 export interface GridTool {
   on: boolean;
@@ -144,6 +146,10 @@ interface State {
   setBrush: (patch: Partial<Brush>) => void;
   /** Insert a sculpt node in front of the first output (or select the existing one) and enter sculpt mode. */
   startSculpting: () => Promise<void>;
+  /** One click, one simulation layer (World Creator's Snow / Debris / Sand / Fluid): the node goes in front of
+   *  the height output (or beside it for snow, which does not move the terrain), its masks are published
+   *  as layers, a material row takes the first mask, and the viewport colours by it. */
+  addSimulation: (which: SimulationKind) => Promise<void>;
   /** Paint the scatter mask: a clamped (0..1) stroke node in front of the mask's output, brush strength 0.5, sculpt mode on. */
   paintDensity: () => Promise<void>;
   /** What the next viewport drag draws: a road (a spline node in front of the height output), or nothing (brush strokes). */
@@ -315,8 +321,16 @@ export const useStore = create<State>((set, get) => {
   };
   // The colour layer is fetched at the same LOD as the shown layer; a layer that vanished from
   // the last evaluation drops back to the height ramp.
+  // A colour layer chosen before it exists (a simulation layer just added) waits for the
+  // evaluation that publishes it instead of being dropped.
+  let pendingColor: string | null = null;
   const refreshColor = async (lod: number) => {
-    const { colorLayer, lastEval } = get();
+    const { lastEval } = get();
+    if (pendingColor && lastEval && pendingColor in lastEval.layers) {
+      set({ colorLayer: pendingColor });
+      pendingColor = null;
+    }
+    const { colorLayer } = get();
     if (!colorLayer) return;
     if (lastEval && !(colorLayer in lastEval.layers)) return set({ colorLayer: null, colorPreview: null });
     try {
@@ -652,6 +666,48 @@ export const useStore = create<State>((set, get) => {
     startSculpting: async () => {
       const id = await strokesNodeFor("height", null);
       if (id) set((s) => ({ selectedNode: id, sculpting: true, grid: { ...s.grid, on: false } }));
+    },
+    addSimulation: async (which) => {
+      const g = get().graph;
+      const output = g.nodes.find((n) => n.kind.startsWith("jd.output.height@") && String(n.params?.layer ?? "height") === "height");
+      if (!output) return;
+      // Snow needs a snow line inside the world: with the 6.5 °C/km lapse, a sea-level temperature of
+      // 6.5 × 0.6 × (max height in km) puts it at six tenths of the highest ground.
+      const maxM = get().layer?.stats.max ?? 500;
+      const snowTemp = Math.round(6.5 * 0.6 * (maxM / 1000) * 10) / 10;
+      const sims: Record<SimulationKind, { kind: string; params: Record<string, unknown> | null; through: boolean; publish: [string, string][]; material: MaterialSpec | null }> = {
+        snow: { kind: "jd.climate.snowpack@1", params: { steps: 40, temperature_c: snowTemp }, through: false, publish: [["cover", "snow"]], material: { mask: "snow", albedo: [0.93, 0.95, 0.98], roughness: 0.6 } },
+        debris: { kind: "jd.erosion.debris@1", params: null, through: true, publish: [["debris", "debris"]], material: { mask: "debris", albedo: [0.33, 0.3, 0.27], roughness: 0.95 } },
+        sand: { kind: "jd.erosion.aeolian@1", params: { iterations: 60 }, through: true, publish: [], material: null },
+        lava: { kind: "jd.volcanic.lava@1", params: { eruption_s: 1800, duration_s: 1800 }, through: true, publish: [["heat", "heat"], ["lava", "lava"]], material: { mask: "lava", albedo: [0.16, 0.15, 0.15], roughness: 0.8 } },
+      };
+      const sim = sims[which];
+      let id: string | null;
+      if (sim.through) {
+        id = await spliceBefore("height", sim.kind, sim.params);
+      } else {
+        const feed = g.edges.find((e) => e.to.node === output.id && e.to.port === "in");
+        if (!feed) return;
+        const pos = output.ui?.position ?? [0, 0];
+        graphGen++;
+        const r = await run("graph.add_node", { kind: sim.kind, position: [pos[0], pos[1] + 140 * (1 + g.nodes.filter((n) => Math.abs((n.ui?.position?.[0] ?? 0) - pos[0]) < 1).length)], ...(sim.params ? { params: sim.params } : {}) });
+        if (r.status !== "ok" || !r.result) return;
+        id = r.result.id;
+        await get().connectNodes(feed.from.node, feed.from.port, id, "in");
+      }
+      if (!id) return;
+      const node = get().graph.nodes.find((n) => n.id === id);
+      const at = node?.ui?.position ?? [0, 0];
+      for (const [k, [port, layer]] of sim.publish.entries()) {
+        graphGen++;
+        const r = await run("graph.add_node", { kind: "jd.output.height@1", position: [at[0] + 320, at[1] + 140 * (k + 1)], params: { layer } });
+        if (r.status === "ok" && r.result) await get().connectNodes(id, port, r.result.id, "in");
+      }
+      await loadGraph();
+      if (sim.material && !get().materials.some((m) => m.mask === sim.material?.mask)) get().setMaterials([...get().materials, sim.material]);
+      // Colour by the first mask once the (live or explicit) evaluation has published it.
+      pendingColor = sim.publish[0]?.[1] ?? null;
+      set({ selectedNode: id });
     },
     paintDensity: async () => {
       const mask = get().scatter.mask;

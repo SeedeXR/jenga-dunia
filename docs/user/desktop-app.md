@@ -212,6 +212,14 @@ The Project panel's **Real world** row fetches a digital elevation model around 
 
 *Roads: click **Road** (1) and the next drag on the terrain becomes a `jd.terrain.spline@1` node (2) spliced in front of the height output — the corridor is flattened onto the line's smoothed grade with soft shoulders, exactly what the CLI node does (quickstart, "Roads, paths and canals") — and the button returns to orbiting, so each drag is one road. The node's width, falloff, mode (flatten, cut, raise) and the point list are ordinary parameters in the inspector (3); its `mask` output can be published and used for the road surface and the verges' scatter. The UI-driven test `apps/desktop/e2e/road.spec.ts` draws one road and checks the published height changes.*
 
+## Simulation layers
+
+World Creator's Simulation Layers (Snow, Debris, Sand, Fluid) as one click each, on the node graph: the **Simulation layers** row on the right has **+ snow**, **+ debris**, **+ sand** and **+ lava**. Each button adds the node — snowpack beside the height output (snow does not move the terrain, so it reads the same height the output does), debris, sand and lava spliced in front of it — publishes the node's masks as layers (`snow`, `debris`, `heat` and `lava`), adds a material row keyed by the first mask (snow white, rock grey, basalt black) and colours the viewport by it once the evaluation has published it. The snow preset picks its sea-level temperature from the terrain's height so the snow line lands at six tenths of the highest ground; lava erupts from the summit for half an hour of simulated time so the first look is quick. Everything after the click is ordinary graph editing: select the node and tune it in the inspector.
+
+![Simulation layers: the row of four buttons, snow and lava material rows, the lava node selected in the inspector and the viewport coloured by the lava's heat](images/desktop-simlayers.png)
+
+The UI-driven test `e2e/simlayers.spec.ts` adds all four on a 128² world and checks the graph's wiring, the material rows, that the snow cover has a snow line inside the world and that the lava is still molten at the end of its eruption. The heat layer is coloured with the generic mask gradient for now; a glow ramp and an emissive material are open items.
+
 ## Materials
 
 ![Right panel with the Materials section: one layer row with mask snow, a near-white colour swatch and roughness 0.9, and a + layer button; the textured viewport behind](images/desktop-materials.png)
@@ -258,7 +266,7 @@ World Creator's grid selection, on the node graph: **Grid** (top of the viewport
 
 ![Grid tool: nine cells of a 16 × 16 grid selected across the terrain and levelled to 600 m — above the 0..500 m noise, so they stand as flat-topped towers with soft edges (smoothness 0.25); the grid and the selection are drawn in blue over the surface](images/desktop-grid.png)
 
-Each operation is **one stroke** on the same `jd.sculpt.strokes` node sculpting uses: `shape: "square"` stamps a square at every selected cell's centre (so the stroke is the selection, not a path through it), `hardness` = 1 − smoothness, and either `mode: "flatten"` with `target_m` or `mode: "raise"` with a signed `strength_m`. One stroke means one undo step, one journal entry, and a result the CLI and MCP replay identically. The UI-driven test `e2e/grid.spec.ts` selects cells by click and drag, orbits with the right button without touching the selection, levels the cells to 300 m, raises them 25 m and undoes the last step, checking the journal for exactly those two strokes.
+Each operation is **one stroke** on the same `jd.sculpt.strokes` node sculpting uses: `shape: "square"` stamps a square at every selected cell's centre (so the stroke is the selection, not a path through it), `hardness` = 1 − smoothness, and either `mode: "flatten"` with `target_m` or `mode: "raise"` with a signed `strength_m`. One stroke means one undo step, one journal entry, and a result the CLI and MCP replay identically. The UI-driven test `e2e/grid.spec.ts` selects cells by click and drag, orbits with the right button without touching the selection, levels the cells to 600 m, raises them 25 m and undoes the last step, checking the journal for exactly those two strokes.
 
 ## Workflow
 
@@ -278,4 +286,4 @@ Every button calls the same operation the CLI and MCP server expose (`jd schema 
 | End-to-end, node graph | starter graph drawn from `graph.json`; edit a parameter, add a node, connect it by dragging handles, drag a node, evaluate, delete with the keyboard; the project's `journal/ops.ndjson` is read back and must list exactly `set_param, add_node, connect, move_node, remove_node` | `apps/desktop/e2e/graph.spec.ts` |
 | Native window | screenshots of the real Tauri app on macOS; interaction recording requires Accessibility permission for the automating process | this page |
 
-Known limits of this build: no sculpting, one output layer, no undo of graph edits yet (the journal records them). The tutorial images are the real app annotated by `scripts/annotate.mjs`; the Figma file linked in the brief is the design reference and receives the same screenshots once the connector is authorised.
+Known limits of this build: no export panel yet (mesh and engine exports run from the CLI), and the material stack, scatter settings and sun live in the UI only until they are saved with the project. The tutorial images are the real app annotated by `scripts/annotate.mjs`; the Figma file linked in the brief is the design reference and receives the same screenshots once the connector is authorised.
