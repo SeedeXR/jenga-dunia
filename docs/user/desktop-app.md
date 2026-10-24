@@ -244,13 +244,21 @@ The Project panel's **Real world** row fetches a digital elevation model around 
 
 ## Tutorial: sculpting
 
-1. Click **Sculpt** (top of the viewport). If the graph has no stroke node yet, a `jd.sculpt.strokes` node is inserted in front of the output and selected; the button reads **Sculpting…** and a **Brush** panel appears on the right: **mode** (raise/lower by a strength in metres — negative digs; **smooth** blends towards the local mean; **flatten** pulls towards the height under the first point of the stroke), radius, and strength or amount (0–1).
-2. Move over the terrain: a red ring the size of the brush follows the pointer on the surface. Drag to paint. The pointer is projected onto the surface and the path becomes one stroke (`points` in layer metres, radius, strength) appended to the node's `strokes` parameter — a journaled `graph.set_param`, so the live preview updates and **Undo** removes the whole stroke.
+1. Click **Sculpt** (top of the viewport). If the graph has no stroke node yet, a `jd.sculpt.strokes` node is inserted in front of the output and selected; the button reads **Sculpting…** and a **Brush** panel appears on the right: **mode** (**raise** or **lower** by a strength in metres; **smooth** blends towards the local mean; **flatten** pulls towards a **Height** you type, or the height under the first point of the stroke when the field is empty), radius, strength or amount (0–1), and **Hardness** (0 = a soft falloff across the whole radius, 1 = a hard edge). The shortcut card under the panel says the rest: the left button strokes, the **right button orbits** so the camera is never locked while sculpting, **Ctrl + wheel** sizes the brush and **Shift + wheel** sets its strength.
+2. Move over the terrain: a red ring the size of the brush follows the pointer on the surface. Drag to paint. The pointer is projected onto the surface and the path becomes one stroke (`points` in layer metres, radius, strength, mode, hardness and, for flatten, `target_m`) appended to the node's `strokes` parameter — a journaled `graph.append_param`, so the live preview updates and **Undo** removes the whole stroke.
 3. Click **Sculpting…** to go back to orbiting. Strokes are data in `graph.json`: the CLI and MCP see the same node, and re-evaluating anywhere replays them identically.
 
 ![Sculpt mode: Sculpt button, brush panel, stroke node](images/tutorial-04-sculpt.png)
 
 *This capture is the UI-driven test (`e2e/sculpt.spec.ts`, Chromium + the real core) rather than the native window; the native screenshots are re-shot when the display is available.*
+
+## Grid tools
+
+World Creator's grid selection, on the node graph: **Grid** (top of the viewport) divides the world into cells (8–64 per side) draped over the terrain. **Click** a cell to toggle it, **drag** to add every cell you cross, **Alt + drag** to remove; the right button orbits. The **Grid** panel on the right shows the count and three operations on the selection — **Set height** levels the cells to the metres you type, **Raise** and **Lower** move them by a step — with a **Smoothness** slider that blends the selection's edge into its surroundings (0 = hard cell edges). World Creator's demo sets a coastline's cells to −60 m this way; the capture below sets nine cells to 600 m, above the noise, so the result reads at a glance.
+
+![Grid tool: nine cells of a 16 × 16 grid selected across the terrain and levelled to 600 m — above the 0..500 m noise, so they stand as flat-topped towers with soft edges (smoothness 0.25); the grid and the selection are drawn in blue over the surface](images/desktop-grid.png)
+
+Each operation is **one stroke** on the same `jd.sculpt.strokes` node sculpting uses: `shape: "square"` stamps a square at every selected cell's centre (so the stroke is the selection, not a path through it), `hardness` = 1 − smoothness, and either `mode: "flatten"` with `target_m` or `mode: "raise"` with a signed `strength_m`. One stroke means one undo step, one journal entry, and a result the CLI and MCP replay identically. The UI-driven test `e2e/grid.spec.ts` selects cells by click and drag, orbits with the right button without touching the selection, levels the cells to 300 m, raises them 25 m and undoes the last step, checking the journal for exactly those two strokes.
 
 ## Workflow
 

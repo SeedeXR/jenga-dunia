@@ -2,7 +2,11 @@
 //! A stroke is a polyline in layer metres (`u` east from the west edge, `v` north from the south
 //! edge, i.e. row 0 — the field convention), a radius and a signed strength. Height changes by `strength · falloff(d/r)`
 //! where `d` is the distance to the polyline, so strokes are order-independent and undo removes a
-//! whole stroke by dropping it from the node's params.
+//! whole stroke by dropping it from the node's params. `hardness` widens the flat core of the
+//! falloff (1 = a hard edge); a `square` stroke stamps a square of side 2·radius at every point
+//! instead of sweeping a round brush along the polyline — one grid selection of cells is one
+//! stroke, so one undo step; `target_m` flattens to a given height instead of the height under
+//! the first point.
 //!
 //! Each pixel only tests the strokes whose bounding box (polyline ± radius) contains it; the
 //! smooth brush blurs via a summed-area table, so cost is O(pixels) regardless of brush size.
@@ -29,6 +33,20 @@ pub enum StrokeMode {
     Flatten,
 }
 
+/// The brush's footprint.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum StrokeShape {
+    /// A round brush swept along the polyline (distance to the nearest segment).
+    #[default]
+    Round,
+    /// A square of side 2·radius stamped at each point (Chebyshev distance to the nearest point);
+    /// grid selections.
+    Square,
+}
+
 /// One brush stroke.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -46,9 +64,34 @@ pub struct Stroke {
     /// Blend factor 0..1 for `smooth` / `flatten` (default 0.5).
     #[serde(default = "half")]
     pub amount: f32,
+    /// Edge hardness 0..1: the share of the radius that gets the full effect before the falloff
+    /// starts (0 = the falloff spans the whole radius, 1 = a hard edge).
+    #[serde(default)]
+    pub hardness: f32,
+    /// Footprint (default `round`).
+    #[serde(default)]
+    pub shape: StrokeShape,
+    /// `flatten` only: the height to flatten to, metres; unset = the height under the first point.
+    #[serde(default)]
+    pub target_m: Option<f32>,
 }
 fn half() -> f32 {
     0.5
+}
+
+impl Default for Stroke {
+    fn default() -> Self {
+        Self {
+            points: Vec::new(),
+            radius_m: 1.0,
+            strength_m: 0.0,
+            mode: StrokeMode::Raise,
+            amount: 0.5,
+            hardness: 0.0,
+            shape: StrokeShape::Round,
+            target_m: None,
+        }
+    }
 }
 
 /// Box-filtered copy of `h` (radius in pixels, edge-clamped) for smooth strokes.
@@ -123,6 +166,12 @@ pub fn apply_strokes(
                 format!("stroke {i}: non-finite point"),
             ));
         }
+        if !(0.0..=1.0).contains(&s.hardness) || s.target_m.is_some_and(|t| !t.is_finite()) {
+            return Err(JdError::invalid(
+                "strokes",
+                format!("stroke {i}: hardness must be within 0..=1 and target_m finite"),
+            ));
+        }
     }
     let mut out = h.clone();
     if strokes.is_empty() {
@@ -156,7 +205,7 @@ pub fn apply_strokes(
         .iter()
         .map(|s| {
             if s.mode == StrokeMode::Flatten {
-                sample(s.points[0])
+                s.target_m.unwrap_or_else(|| sample(s.points[0]))
             } else {
                 0.0
             }
@@ -188,18 +237,31 @@ pub fn apply_strokes(
             if p[0] < b[0] || p[1] < b[1] || p[0] > b[2] || p[1] > b[3] {
                 continue;
             }
-            let d = s
-                .points
-                .windows(2)
-                .map(|w| dist_to_segment(p, w[0], w[1]))
-                .chain(std::iter::once(dist_to_segment(
-                    p,
-                    s.points[0],
-                    s.points[0],
-                )))
-                .fold(f32::MAX, f32::min);
+            let d = match s.shape {
+                StrokeShape::Round => s
+                    .points
+                    .windows(2)
+                    .map(|w| dist_to_segment(p, w[0], w[1]))
+                    .chain(std::iter::once(dist_to_segment(
+                        p,
+                        s.points[0],
+                        s.points[0],
+                    )))
+                    .fold(f32::MAX, f32::min),
+                StrokeShape::Square => s
+                    .points
+                    .iter()
+                    .map(|q| (p[0] - q[0]).abs().max((p[1] - q[1]).abs()))
+                    .fold(f32::MAX, f32::min),
+            };
             let t = (d / s.radius_m).min(1.0);
-            // Smooth falloff: 1 at the centre, 0 at the radius, zero slope at both ends.
+            // Smooth falloff over the ring outside the hard core: 1 at the centre, 0 at the
+            // radius, zero slope at both ends.
+            let t = if s.hardness >= 1.0 {
+                if t < 1.0 { 0.0 } else { 1.0 }
+            } else {
+                ((t - s.hardness) / (1.0 - s.hardness)).clamp(0.0, 1.0)
+            };
             let w = 1.0 - t * t * (3.0 - 2.0 * t);
             match s.mode {
                 StrokeMode::Raise => v += s.strength_m * w,
@@ -253,6 +315,7 @@ mod tests {
                 strength_m: 10.0,
                 mode: StrokeMode::Raise,
                 amount: 0.0,
+                ..Default::default()
             }],
         )
         .expect("strokes");
@@ -274,6 +337,7 @@ mod tests {
                 strength_m: 0.0,
                 mode: StrokeMode::Flatten,
                 amount: 1.0,
+                ..Default::default()
             }],
         )
         .expect("flatten");
@@ -295,6 +359,7 @@ mod tests {
                 strength_m: 0.0,
                 mode: StrokeMode::Smooth,
                 amount: 1.0,
+                ..Default::default()
             }],
         )
         .expect("smooth");
@@ -315,7 +380,8 @@ mod tests {
                     radius_m: 2.0,
                     strength_m: 0.0,
                     mode: StrokeMode::Smooth,
-                    amount: 1.5
+                    amount: 1.5,
+                    ..Default::default()
                 }]
             )
             .is_err()
@@ -333,6 +399,7 @@ mod tests {
             strength_m: 0.0,
             mode: StrokeMode::Smooth,
             amount: 1.0,
+            ..Default::default()
         };
         let out = apply_strokes(&h, [2.0, 0.5], &[s]).expect("smooth");
         // The spike's mass spreads over a (2·2+1)×(2·8+1) = 85-cell box: ~1.18 m each at the centre.
@@ -364,6 +431,7 @@ mod tests {
             strength_m: 20.0,
             mode: StrokeMode::Raise,
             amount: 0.5,
+            ..Default::default()
         };
         let out = apply_strokes(&flat, [1.0, 1.0], &[stroke]).expect("sculpt");
         // Pixel centres sit 0.5 m off the line, so the crest is just under full strength.
@@ -405,6 +473,7 @@ mod tests {
             strength_m: -4.0,
             mode: StrokeMode::Raise,
             amount: 0.5,
+            ..Default::default()
         };
         let out = apply_strokes(&h, [2.0, 2.0], &[dig.clone(), dig.clone()]).expect("sculpt");
         let single = apply_strokes(&h, [2.0, 2.0], &[dig]).expect("sculpt");
@@ -423,7 +492,8 @@ mod tests {
                     radius_m: 1.0,
                     strength_m: 1.0,
                     mode: StrokeMode::Raise,
-                    amount: 0.5
+                    amount: 0.5,
+                    ..Default::default()
                 }]
             )
             .is_err()
@@ -437,7 +507,71 @@ mod tests {
                     radius_m: 0.0,
                     strength_m: 1.0,
                     mode: StrokeMode::Raise,
-                    amount: 0.5
+                    amount: 0.5,
+                    ..Default::default()
+                }]
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn hard_square_stamps_level_their_cells_to_a_target_and_nothing_between_them() {
+        // Two cells of a grid selection, 20 m apart, levelled to 300 m with a hard edge: every
+        // pixel inside either square lands on the target, the gap between them stays untouched.
+        let mut h = Heightfield::new(64, 64, 32, 4).expect("hf");
+        h.fill_with(|x, y| (x + y) as f32);
+        let out = apply_strokes(
+            &h,
+            [1.0, 1.0],
+            &[Stroke {
+                points: vec![[10.0, 10.0], [30.0, 10.0]],
+                radius_m: 4.0,
+                mode: StrokeMode::Flatten,
+                amount: 1.0,
+                hardness: 1.0,
+                shape: StrokeShape::Square,
+                target_m: Some(300.0),
+                ..Default::default()
+            }],
+        )
+        .expect("stamps");
+        for (x, y) in [(6u32, 6u32), (13, 13), (26, 7), (33, 13)] {
+            assert_eq!(out.get(x, y), 300.0, "inside a stamp ({x},{y})");
+        }
+        assert_eq!(
+            out.get(20, 10),
+            h.get(20, 10),
+            "between the stamps (a round stroke would sweep it)"
+        );
+        assert_eq!(out.get(10, 15), h.get(10, 15), "outside the square");
+        // Hardness 0.5 keeps the full effect over the inner half of the radius and fades after it.
+        let soft = apply_strokes(
+            &h,
+            [1.0, 1.0],
+            &[Stroke {
+                points: vec![[32.5, 32.5]],
+                radius_m: 10.0,
+                strength_m: 10.0,
+                hardness: 0.5,
+                ..Default::default()
+            }],
+        )
+        .expect("soft");
+        assert!(
+            (soft.get(36, 32) - h.get(36, 32) - 10.0).abs() < 1e-4,
+            "4 m out, inside the hard core"
+        );
+        let edge = soft.get(39, 32) - h.get(39, 32);
+        assert!(edge > 0.0 && edge < 9.0, "7 m out: in the falloff ({edge})");
+        assert!(
+            apply_strokes(
+                &h,
+                [1.0, 1.0],
+                &[Stroke {
+                    points: vec![[1.0, 1.0]],
+                    hardness: 1.5,
+                    ..Default::default()
                 }]
             )
             .is_err()

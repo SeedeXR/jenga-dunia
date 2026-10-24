@@ -78,6 +78,26 @@ test.describe("sculpting against the real core", () => {
     // viewport is nearer the camera = south = small v (layer row 0 is south).
     await page.getByTestId("sculpt-toggle").click(); // back to orbit…
     await page.getByTestId("sculpt-toggle").click(); // …and sculpt again (node already exists)
+    // Ctrl + wheel sizes the brush, Shift + wheel sets its strength; the right button orbits
+    // without painting (the journal below shows exactly one more stroke).
+    await page.mouse.move(cx, cy);
+    const radius0 = Number(await page.getByTestId("brush-radius").inputValue());
+    await page.keyboard.down("Control");
+    await page.mouse.wheel(0, -120);
+    await page.keyboard.up("Control");
+    await expect(page.getByTestId("brush-radius")).toHaveValue(String(Math.round(radius0 * 1.1)));
+    await page.keyboard.down("Shift");
+    await page.mouse.wheel(0, 120);
+    await page.keyboard.up("Shift");
+    expect(Number(await page.getByTestId("brush-strength").inputValue())).toBeLessThan(120);
+    await page.mouse.down({ button: "right" });
+    await page.mouse.move(cx + 50, cy + 10, { steps: 5 });
+    await page.mouse.up({ button: "right" });
+    // Lower mode records a negative strength; hardness travels with the stroke.
+    await page.getByTestId("brush-mode").selectOption("lower");
+    await page.getByTestId("brush-strength").fill("30");
+    await page.getByTestId("brush-hardness").fill("0.5");
+    const strokesBefore = readFileSync(path.join(proj, "journal", "ops.ndjson"), "utf8").split("\n").filter((l) => l.includes('"strokes"')).length;
     await page.mouse.move(cx - 40, cy + vp.height * 0.28);
     await page.mouse.down();
     await page.mouse.move(cx + 40, cy + vp.height * 0.28, { steps: 8 });
@@ -87,9 +107,12 @@ test.describe("sculpting against the real core", () => {
       .trim()
       .split("\n")
       .map((l) => JSON.parse(l) as { op: string; params: { key?: string; value?: unknown } });
-    const southStroke = journal2.filter((e) => e.op === "graph.append_param" && e.params.key === "strokes").pop()!;
+    const allStrokes = journal2.filter((e) => e.op === "graph.append_param" && e.params.key === "strokes");
+    expect(allStrokes.length, "the right-button orbit painted nothing").toBe(strokesBefore + 1);
+    const southStroke = allStrokes.pop()!;
     const south = (southStroke.params.value as { points: [number, number][] }).points;
     for (const [, v] of south) expect(v, "lower half of the screen is south → v < extent/2").toBeLessThan(512);
+    expect(southStroke.params.value).toMatchObject({ mode: "raise", strength_m: -30, hardness: 0.5 });
     await page.screenshot({ path: testInfo.outputPath("sculpt.png") });
     expect(errors, "no uncaught page errors").toEqual([]);
     await core.close();

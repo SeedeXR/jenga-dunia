@@ -20,7 +20,7 @@ Jenga Dunia models soil as **a thickness of loose material lying on rock**. It d
 | Rockfall debris and boulder fields | `jd.erosion.debris@1` | `source_slope_deg`, `reach_deg`, `sorting` |
 | Soil and ground-cover classes for materials | `jd.biome.classify@1` with slope and wetness | Ordered rules, see "Sand deserts" below |
 
-A constant soil layer comes from `jd.math.remap@1` mapping any field to a fixed value, such as 1.5 m everywhere. A varied layer can be a biome mask or the `soil` output of an earlier run. On hard rock a 1.5 m soil layer keeps gullies under 1.6 m deep, against 3.7 m on bare rock. The flow loads up with loose material on the way and deposits the difference in the hollows ([A soil layer on the rock](cli-quickstart.md#orographic-rain-windward-slopes-wet-the-lee-in-a-rain-shadow)).
+A constant soil layer comes from `jd.math.remap@1` mapping any field to a fixed value, such as 1.5 m everywhere. A varied layer can be a biome mask or the `soil` output of an earlier run. On hard rock a 1.5 m soil layer keeps gullies under 1.6 m deep, against 3.7 m on bare rock. The flow loads up with loose material on the way and deposits the difference in the hollows (the paragraph "A soil layer on the rock" in [Orographic rain](cli-quickstart.md#orographic-rain-windward-slopes-wet-the-lee-in-a-rain-shadow)).
 
 ![Four panels: the height field, the height change on bare hard rock, the same with a soil layer, and the soil thickness afterwards](images/cli-soil.png)
 

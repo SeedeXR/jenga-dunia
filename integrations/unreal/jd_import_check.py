@@ -83,9 +83,10 @@ def mesh_info(asset):
             info["nanite"]["fallback_relative_error"] = float(ns.get_editor_property("fallback_relative_error"))
         except Exception:
             pass
-        # The mesh as imported: Nanite's counts when Nanite is on, LOD0 otherwise.
-        info["triangles"] = info["nanite"]["triangles"] if nanite and info["nanite"]["triangles"] else asset.get_num_triangles(0)
-        info["vertices"] = info["nanite"]["vertices"] if nanite and info["nanite"]["vertices"] else asset.get_num_vertices(0)
+        # The mesh as imported: Nanite's counts when Nanite is on (None when the registry tag could
+        # not be read — never the fallback, which would masquerade as the mesh), LOD0 otherwise.
+        info["triangles"] = info["nanite"]["triangles"] if nanite else asset.get_num_triangles(0)
+        info["vertices"] = info["nanite"]["vertices"] if nanite else asset.get_num_vertices(0)
     except Exception as e:
         info["error"] = repr(e)
     try:

@@ -303,11 +303,22 @@ fn read_photo(f: File, path: &Path) -> JdResult<MediaMetadata> {
         }
         _ => None,
     };
-    m.local_offset = text(Tag::OffsetTimeOriginal).filter(|o| parse_offset(o).is_some());
-    let clock = text(Tag::DateTimeOriginal)
-        .or_else(|| text(Tag::DateTime))
-        .and_then(|s| parse_exif_datetime(&s));
-    let sub = text(Tag::SubSecTimeOriginal)
+    // The camera clock: DateTimeOriginal with its own offset and sub-seconds; the plain DateTime
+    // (file modification) with *its* offset and sub-seconds when the original is missing.
+    let (clock, off_tag, sub_tag) = match text(Tag::DateTimeOriginal) {
+        Some(d) => (
+            parse_exif_datetime(&d),
+            Tag::OffsetTimeOriginal,
+            Tag::SubSecTimeOriginal,
+        ),
+        None => (
+            text(Tag::DateTime).and_then(|d| parse_exif_datetime(&d)),
+            Tag::OffsetTime,
+            Tag::SubSecTime,
+        ),
+    };
+    m.local_offset = text(off_tag).filter(|o| parse_offset(o).is_some());
+    let sub = text(sub_tag)
         .and_then(|s| format!("0.{s}").parse::<f64>().ok())
         .unwrap_or(0.0);
     let (t, src) = match (
@@ -450,6 +461,8 @@ fn fov_x(
     let unit_mm = match get(Tag::FocalPlaneResolutionUnit).and_then(|v| v.get_uint(0)) {
         Some(3) => Some(10.0),
         Some(2) | None => Some(25.4),
+        Some(4) => Some(1.0),   // mm (ExifTool's extension)
+        Some(5) => Some(0.001), // µm
         _ => None,
     };
     let zoom = zoom.filter(|z| *z > 1.0).unwrap_or(1.0);
@@ -670,7 +683,19 @@ fn read_video(f: &mut File, path: &Path) -> JdResult<MediaMetadata> {
         if !is_video || w == 0 {
             continue;
         }
-        m.px.get_or_insert([w, h]);
+        // tkhd's matrix turns a phone's sideways frame upright: a 90° rotation (a ≈ 0, |b| ≈ 1) swaps
+        // the displayed width and height. Version 1 of the box has 64-bit times before the matrix.
+        let rotated = child(trak, b"tkhd").is_some_and(|tk| {
+            let at = if tk.first() == Some(&1) { 52 } else { 40 };
+            match (be32(tk, at), be32(tk, at + 4)) {
+                (Some(a), Some(b)) => {
+                    (a as i32 as f64 / 65536.0).abs() < 0.5
+                        && (b as i32 as f64 / 65536.0).abs() > 0.5
+                }
+                _ => false,
+            }
+        });
+        m.px.get_or_insert(if rotated { [h, w] } else { [w, h] });
         let kids = entry.get(78..).unwrap_or(&[]);
         let stereo = child(kids, b"st3d")
             .and_then(|b| b.get(4))
@@ -954,7 +979,7 @@ pub fn sun_position(unix_s: f64, lat_deg: f64, lon_deg: f64) -> (f64, f64) {
             - 1.25 * e * e * sin(2.0 * rad(m)));
     let tst = (unix_s.rem_euclid(86_400.0) / 60.0 + eot_min + 4.0 * lon_deg).rem_euclid(1440.0);
     let ha = tst / 4.0 - 180.0;
-    let phi = rad(lat_deg);
+    let phi = rad(lat_deg.clamp(-89.9999, 89.9999)); // the azimuth is undefined at a pole
     let zen = (sin(phi) * sin(decl) + cos(phi) * cos(decl) * cos(rad(ha)))
         .clamp(-1.0, 1.0)
         .acos();
@@ -1179,6 +1204,25 @@ mod tests {
             ),
             (Some("2026-03-20T09:00:00Z"), Some("exif_offset"))
         );
+        // No DateTimeOriginal at all: the plain DateTime pairs with OffsetTime, not the Original's offset.
+        let plain = vec![
+            f(
+                Tag::DateTime,
+                Value::Ascii(vec![b"2026:03:20 14:00:00".to_vec()]),
+            ),
+            f(Tag::OffsetTime, Value::Ascii(vec![b"+05:00".to_vec()])),
+            f(
+                Tag::OffsetTimeOriginal,
+                Value::Ascii(vec![b"+03:00".to_vec()]),
+            ),
+        ];
+        let p = write_tmp("plain.jpg", &jpeg(&plain, None, 64, 48));
+        let m = read_metadata(&p).expect("read");
+        std::fs::remove_file(&p).ok();
+        assert_eq!(
+            (m.captured_at_utc.as_deref(), m.local_offset.as_deref()),
+            (Some("2026-03-20T09:00:00Z"), Some("+05:00"))
+        );
     }
 
     #[test]
@@ -1263,7 +1307,12 @@ mod tests {
         hdlr.extend([0u8; 13]);
         let stbl = bx(b"stbl", &bx(b"stsd", &stsd));
         let mdia = bx(b"mdia", &[bx(b"hdlr", &hdlr), bx(b"minf", &stbl)].concat());
-        let trak = bx(b"trak", &mdia);
+        // tkhd v0 with a 90° rotation matrix (a = 0, b = 1): the frame is stored sideways.
+        let mut tkhd = vec![0u8; 40];
+        tkhd.extend(0i32.to_be_bytes());
+        tkhd.extend((1i32 << 16).to_be_bytes());
+        tkhd.extend([0u8; 36]);
+        let trak = bx(b"trak", &[bx(b"tkhd", &tkhd), mdia].concat());
         let mut xyz = vec![0, 18, 0x15, 0xc7];
         xyz.extend(b"-01.2921+036.8219/");
         let udta = bx(b"udta", &bx(b"\xa9xyz", &xyz));
@@ -1278,7 +1327,7 @@ mod tests {
         std::fs::remove_file(&p).ok();
         assert_eq!(
             (m.kind.as_str(), m.format.as_str(), m.px),
-            ("video360", "mp4", Some([3840, 1920]))
+            ("video360", "mp4", Some([1920, 3840])) // upright: tkhd rotates the sideways frame
         );
         assert_eq!(m.duration_s, Some(37.3));
         assert_eq!(m.captured_at_utc.as_deref(), Some("2026-10-24T12:00:00Z"));

@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const calls: { cmd: string; args: unknown }[] = [];
 let sculptAdded = false;
+let noiseNodeParams: Record<string, unknown> = {};
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(async (cmd: string, args: { request?: { op: string; params: Record<string, unknown> } }) => {
@@ -26,7 +27,7 @@ vi.mock("@tauri-apps/api/core", () => ({
         return { ...base, status: "ok", result: [{ kind: "jd.noise.fbm@1", description: "", inputs: [], outputs: [{ name: "out", ty: "heightfield", required: false }], param_schema: {} }] };
       case "graph.list": {
         const nodes = [
-          { id: "01N", kind: "jd.noise.fbm@1", params: {}, bypass: false, ui: { position: [0, 0], label: "Noise" } },
+          { id: "01N", kind: "jd.noise.fbm@1", params: noiseNodeParams, bypass: false, ui: { position: [0, 0], label: "Noise" } },
           { id: "01O", kind: "jd.output.height@1", params: { layer: "height" }, bypass: false, ui: { position: [320, 0], label: "Height" } },
         ];
         if (sculptAdded) nodes.push({ id: "01SCULPT00000000000000000A", kind: "jd.sculpt.strokes@1", params: {}, bypass: false, ui: { position: [320, 140], label: "Strokes" } });
@@ -110,6 +111,7 @@ describe("App", () => {
   beforeEach(() => {
     calls.length = 0;
     sculptAdded = false;
+    noiseNodeParams = {};
     dialog.open = null;
     dialog.save = null;
     // The store is module-global; reset the mirrored state between tests.
@@ -208,6 +210,25 @@ describe("App", () => {
     const waterStats = calls.filter((c) => (c.args as { request?: { op: string; params: { layer?: string } } }).request?.op === "terrain.stats" && (c.args as { request: { params: { layer?: string } } }).request.params.layer === "water");
     expect(waterStats.length).toBeGreaterThan(0);
     expect(screen.getByTestId("viewport")).toHaveTextContent("preview 2");
+  });
+
+  it("the Noise panel mirrors the graph's noise node, so Generate never reverts an edit made in the graph", async () => {
+    noiseNodeParams = { seed: 5, feature_size_m: 900, height_range_m: [0, 160], octaves: { keys: [[0, 3], [1, 6]] } };
+    render(<App />);
+    fireEvent.change(screen.getByTestId("project-path"), { target: { value: "/tmp/N.jdproj" } });
+    fireEvent.click(screen.getByTestId("new-project"));
+    await waitFor(() => expect(screen.getByTestId("graph-panel")).toHaveTextContent("jd.noise.fbm@1"));
+    // The panel shows the node's values; a keyed (timeline) octaves stays at the panel default.
+    expect(screen.getByTestId("seed")).toHaveValue(5);
+    expect(screen.getByLabelText("Feature size (m)")).toHaveValue(900);
+    expect(screen.getByLabelText("Octaves")).toHaveValue(6);
+    fireEvent.click(screen.getByTestId("generate"));
+    await waitFor(() => expect(screen.getByTestId("layer-stats")).toBeInTheDocument());
+    // Generate wrote only what the panel changed relative to the node — nothing for the mirrored keys.
+    const written = calls.map((c) => (c.args as { request?: { op: string; params: { key?: string } } }).request).filter((r) => r?.op === "graph.set_param").map((r) => r?.params.key);
+    expect(written).not.toContain("seed");
+    expect(written).not.toContain("height_range_m");
+    expect(written).not.toContain("feature_size_m");
   });
 
   it("Sculpt wires a stroke node in front of the output and enters sculpt mode", async () => {

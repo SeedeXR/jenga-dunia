@@ -48,7 +48,7 @@ pub struct DebrisParams {
     /// Angle of repose of scree, degrees (0, 90): no block rests on ground steeper than this.
     #[serde(default = "d_repose")]
     pub repose_deg: f32,
-    /// Smallest block, metres (> 0).
+    /// Smallest block, metres (≥ 0.01).
     #[serde(default = "d_size_min")]
     pub size_min_m: f32,
     /// Largest block, metres (≥ `size_min_m`).
@@ -167,11 +167,15 @@ pub fn rockfall(
     if !(1..=64).contains(&p.blocks_per_cell) {
         return Err(JdError::invalid("blocks_per_cell", "must be within 1..=64"));
     }
-    if !(p.size_min_m > 0.0 && p.size_max_m >= p.size_min_m && p.size_max_m.is_finite()) {
+    if !(p.size_min_m >= 0.01 && p.size_max_m >= p.size_min_m && p.size_max_m.is_finite()) {
         return Err(JdError::invalid(
             "size_max_m",
-            "need 0 < size_min_m ≤ size_max_m",
+            "need 0.01 ≤ size_min_m ≤ size_max_m",
         ));
+    }
+    if p.reach_deg > p.repose_deg {
+        return Err(JdError::invalid("reach_deg", "must not exceed repose_deg")
+            .why("The energy line of a rockfall is flatter than the angle of repose of the scree it lands on; otherwise `sorting` would send the smallest blocks furthest."));
     }
     if !(0.0..=1.0).contains(&p.sorting) {
         return Err(JdError::invalid("sorting", "must be within 0..=1"));
@@ -379,6 +383,21 @@ mod tests {
                 .expect("masked")
                 .blocks,
             0
+        );
+        assert!(
+            rockfall(
+                &h,
+                [2.0, 2.0],
+                None,
+                &DebrisParams {
+                    reach_deg: 40.0,
+                    repose_deg: 35.0,
+                    ..p.clone()
+                },
+                None
+            )
+            .is_err(),
+            "an energy line steeper than the repose angle inverts the sorting"
         );
         assert!(
             rockfall(

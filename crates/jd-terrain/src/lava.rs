@@ -72,13 +72,13 @@ pub struct LavaParams {
     /// Solidification temperature, kelvin (< `vent_temp_k`).
     #[serde(default = "d_solid_t")]
     pub solid_temp_k: f32,
-    /// Viscosity at the vent, Pa·s (> 0).
+    /// Viscosity at the vent, Pa·s (≥ 0.01).
     #[serde(default = "d_visc")]
     pub viscosity_pa_s: f32,
     /// Orders of magnitude the viscosity rises between vent and solidus (0..=8).
     #[serde(default = "d_visc_dec")]
     pub viscosity_decades: f32,
-    /// Yield strength at the vent, Pa (> 0).
+    /// Yield strength at the vent, Pa (≥ 0.01).
     #[serde(default = "d_yield")]
     pub yield_pa: f32,
     /// Orders of magnitude the yield strength rises between vent and solidus (0..=8).
@@ -206,12 +206,18 @@ pub fn lava_flow(
 ) -> JdResult<LavaResult> {
     let pos = |v: f32| v > 0.0 && v.is_finite();
     for (name, v) in [
+        ("viscosity_pa_s", p.viscosity_pa_s),
+        ("yield_pa", p.yield_pa),
+    ] {
+        if !(v >= 0.01 && v.is_finite()) {
+            return Err(JdError::invalid(name, "must be at least 0.01"));
+        }
+    }
+    for (name, v) in [
         ("vent_rate_m3_s", p.vent_rate_m3_s),
         ("eruption_s", p.eruption_s),
         ("density_kg_m3", p.density_kg_m3),
         ("specific_heat", p.specific_heat),
-        ("viscosity_pa_s", p.viscosity_pa_s),
-        ("yield_pa", p.yield_pa),
         ("cooling", p.cooling),
     ] {
         if !pos(v) {
@@ -367,7 +373,14 @@ pub fn lava_flow(
             })
             .reduce(|| MAX_DT, f32::min);
         let erupting = t < p.eruption_s as f64;
-        let mut dt = dt_flux.min((p.duration_s as f64 - t) as f32).max(1e-3);
+        // Never above the stable step: a floor here would let a cell hand out more than it holds.
+        let mut dt = dt_flux.min((p.duration_s as f64 - t) as f32);
+        if !dt.is_finite() || dt <= 0.0 {
+            return Err(
+                JdError::invalid("viscosity_pa_s", "the lava flux is not finite")
+                    .why("A vanishing yield strength or viscosity makes the Bingham flux blow up."),
+            );
+        }
         if erupting {
             dt = dt
                 .min(CFL * area / total_rate)
@@ -456,8 +469,8 @@ pub fn lava_flow(
     }
     if t + 1e-3 < p.duration_s as f64 {
         return Err(JdError::invalid("max_steps", format!("the step budget ran out after {t:.0} of {:.0} simulated seconds", p.duration_s))
-            .why("Runny lava on fine cells needs short steps: each step may move at most a quarter of a cell's lava.")
-            .next("Raise `max_steps`, shorten `duration_s`, raise `viscosity_pa_s`, or evaluate at a coarser preview level."));
+            .why("Each step may move at most a quarter of a cell's lava and a vent may add at most a quarter of a cell's area in metres, so runny lava on fine cells, or a high effusion rate on small cells, needs very short steps.")
+            .next("Raise `max_steps`, shorten `duration_s`, raise `viscosity_pa_s` or lower the vent rate, or evaluate at a coarser preview level."));
     }
     let mk = |f: &(dyn Fn(usize) -> f32 + Sync)| -> JdResult<Heightfield> {
         let mut o = Heightfield::new(h.width(), h.height(), h.tile_size(), h.halo())?;
@@ -576,6 +589,19 @@ mod tests {
                 .iter()
                 .all(|&(x, y)| r.out.get(x, y).is_finite()
                     && (0.0..=1.0).contains(&r.heat.get(x, y)))
+        );
+        assert!(
+            lava_flow(
+                &h,
+                [10.0, 10.0],
+                &LavaParams {
+                    viscosity_pa_s: 0.001,
+                    ..p.clone()
+                },
+                None
+            )
+            .is_err(),
+            "water-thin lava is refused, not stepped at 1 ms"
         );
         assert!(
             lava_flow(

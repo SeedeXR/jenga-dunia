@@ -39,11 +39,17 @@ test.describe("node graph editor against the real core", () => {
     await noise.click();
     const inspector = page.getByTestId("graph-inspector");
     await expect(inspector).toContainText("jd.noise.fbm@1");
+    // Leaving a field unchanged is not an edit: nothing is journaled (the exact op list below proves it).
+    const feature = inspector.locator("label", { hasText: "feature_size_m" }).locator("input");
+    await feature.focus();
+    await feature.blur();
     const seed = inspector.locator("label", { hasText: "seed" }).locator("input");
     await seed.fill("9");
     await seed.blur();
     await expect(page.getByTestId("log")).toContainText("graph.set_param: ok");
     await expect(noise).toContainText("seed=9");
+    // The Noise panel mirrors the node, so Generate will not revert this edit.
+    await expect(page.getByTestId("seed")).toHaveValue("9");
     // Live preview: the edit re-evaluates the (complete) starter graph without pressing Evaluate.
     await expect(page.getByTestId("viewport-info")).toContainText(/ [1-9][\d,]* tris/);
 

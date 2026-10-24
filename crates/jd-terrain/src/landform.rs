@@ -5,8 +5,7 @@
 //!
 //! Geomorphons: from each cell, look along the 8 compass directions up to `search_m`; the
 //! highest line of sight (zenith elevation) and the lowest one (nadir elevation) decide whether
-//! that direction is higher (+, their sum > 0), lower (−, sum < 0) or flat (both within
-//! `flat_deg`). The counts of + and −
+//! that direction is higher (their sum above `flat_deg`), lower (below −`flat_deg`) or flat. The counts of + and −
 //! pick one of ten forms from the lookup table of the paper as implemented in WhiteboxTools
 //! (MIT, `geomorphons.rs`): 1 flat, 2 peak, 3 ridge, 4 shoulder, 5 spur, 6 slope, 7 hollow,
 //! 8 footslope, 9 valley, 10 pit; 0 on the border ring.
@@ -74,6 +73,13 @@ pub fn geomorphons(
             "sample spacing must be positive",
         ));
     }
+    if search_m < spacing_m[0].max(spacing_m[1]) {
+        return Err(
+            JdError::invalid("search_m", "must reach at least one neighbouring cell").why(
+                "A search shorter than a cell sees nothing and classifies everything as flat.",
+            ),
+        );
+    }
     let (w, hh) = (h.width() as i64, h.height() as i64);
     let z = h.to_vec();
     let flat = flat_deg.to_radians();
@@ -106,16 +112,13 @@ pub fn geomorphons(
                     if k == 1 {
                         continue; // nothing in reach that way: flat
                     }
-                    // Steeper than flat either way: the sign of zenith + nadir elevation decides. This is
-                    // WhiteboxTools' |nadir| vs |zenith| test except on an exactly straight line of
-                    // sight (zenith = nadir), which it leaves flat and this calls higher or lower.
-                    if zen.abs() > flat || nad.abs() > flat {
-                        let d = zen + nad;
-                        if d > 0.0 {
-                            higher += 1;
-                        } else if d < 0.0 {
-                            lower += 1;
-                        }
+                    // Jasiewicz & Stepinski: the nadir angle minus the zenith angle, which in
+                    // elevation terms is zenith + nadir; within ±flat the direction is flat.
+                    let d = zen + nad;
+                    if d > flat {
+                        higher += 1;
+                    } else if d < -flat {
+                        lower += 1;
                     }
                 }
                 row[x as usize] = CLASSES[lower][higher] as f32;
@@ -263,6 +266,13 @@ mod tests {
             0.0
         );
         assert!(geomorphons(&field(|_, _| 0.0), [10.0, 10.0], 0.0, 1.0).is_err());
+        assert!(
+            geomorphons(&field(|_, _| 0.0), [10.0, 10.0], 5.0, 1.0).is_err(),
+            "shorter than a cell"
+        );
+        // A 0.5° tilt stays flat inside a 1° band (the paper's |nadir − zenith| ≤ t rule), not "slope".
+        let tilt = field(|x, _| x * 10.0 * 0.5f32.to_radians().tan());
+        assert_eq!(GEOMORPHON_NAMES[at(&tilt) - 1], "flat");
     }
 
     #[test]

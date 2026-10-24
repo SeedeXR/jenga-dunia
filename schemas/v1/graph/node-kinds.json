@@ -925,7 +925,7 @@
           "default": 35.0
         },
         "size_min_m": {
-          "description": "Smallest block, metres (> 0).",
+          "description": "Smallest block, metres (≥ 0.01).",
           "type": "number",
           "format": "float",
           "default": 0.30000001192092896
@@ -2562,7 +2562,7 @@
   },
   {
     "kind": "jd.sculpt.strokes@1",
-    "description": "Brush strokes (raise/lower with smooth falloff) recorded as data: non-destructive, replayable, undo removes a whole stroke",
+    "description": "Brush strokes recorded as data — raise/lower, smooth, flatten (to the height under the first point or `target_m`), with a soft or hard (`hardness`) edge, round along the polyline or `square` stamps at each point (grid selections): non-destructive, replayable, undo removes a whole stroke",
     "inputs": [
       {
         "name": "in",
@@ -2645,6 +2645,26 @@
               "type": "number",
               "format": "float",
               "default": 0.5
+            },
+            "hardness": {
+              "description": "Edge hardness 0..1: the share of the radius that gets the full effect before the falloff\nstarts (0 = the falloff spans the whole radius, 1 = a hard edge).",
+              "type": "number",
+              "format": "float",
+              "default": 0.0
+            },
+            "shape": {
+              "description": "Footprint (default `round`).",
+              "$ref": "#/$defs/StrokeShape",
+              "default": "round"
+            },
+            "target_m": {
+              "description": "`flatten` only: the height to flatten to, metres; unset = the height under the first point.",
+              "type": [
+                "number",
+                "null"
+              ],
+              "format": "float",
+              "default": null
             }
           },
           "additionalProperties": false,
@@ -2670,6 +2690,21 @@
               "description": "Blend towards the height under the first point by `amount`.",
               "type": "string",
               "const": "flatten"
+            }
+          ]
+        },
+        "StrokeShape": {
+          "description": "The brush's footprint.",
+          "oneOf": [
+            {
+              "description": "A round brush swept along the polyline (distance to the nearest segment).",
+              "type": "string",
+              "const": "round"
+            },
+            {
+              "description": "A square of side 2·radius stamped at each point (Chebyshev distance to the nearest point);\ngrid selections.",
+              "type": "string",
+              "const": "square"
             }
           ]
         }
@@ -2939,7 +2974,7 @@
           "default": 1143.0
         },
         "viscosity_pa_s": {
-          "description": "Viscosity at the vent, Pa·s (> 0).",
+          "description": "Viscosity at the vent, Pa·s (≥ 0.01).",
           "type": "number",
           "format": "float",
           "default": 10000.0
@@ -2951,7 +2986,7 @@
           "default": 3.0
         },
         "yield_pa": {
-          "description": "Yield strength at the vent, Pa (> 0).",
+          "description": "Yield strength at the vent, Pa (≥ 0.01).",
           "type": "number",
           "format": "float",
           "default": 1000.0

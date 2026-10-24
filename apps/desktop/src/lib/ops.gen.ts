@@ -2054,7 +2054,7 @@ rolls while the line back to its source is steeper than this. */
   "reach_deg"?: number;
   /** Angle of repose of scree, degrees (0, 90): no block rests on ground steeper than this. */
   "repose_deg"?: number;
-  /** Smallest block, metres (> 0). */
+  /** Smallest block, metres (≥ 0.01). */
   "size_min_m"?: number;
   /** Largest block, metres (≥ `size_min_m`). */
   "size_max_m"?: number;
@@ -2368,6 +2368,8 @@ export type NodeParams_jd_output_height_1 = {
 
 export type StrokeMode = "raise" | "smooth" | "flatten";
 
+export type StrokeShape = "round" | "square";
+
 export type Stroke = {
   /** Polyline in layer metres: `[u east, v north]` from the south-west corner (row 0 = south). */
   "points": ([number, number])[];
@@ -2379,6 +2381,13 @@ export type Stroke = {
   "mode"?: StrokeMode;
   /** Blend factor 0..1 for `smooth` / `flatten` (default 0.5). */
   "amount"?: number;
+  /** Edge hardness 0..1: the share of the radius that gets the full effect before the falloff
+starts (0 = the falloff spans the whole radius, 1 = a hard edge). */
+  "hardness"?: number;
+  /** Footprint (default `round`). */
+  "shape"?: StrokeShape;
+  /** `flatten` only: the height to flatten to, metres; unset = the height under the first point. */
+  "target_m"?: number | null;
 };
 
 export type NodeParams_jd_sculpt_strokes_1 = {
@@ -2451,11 +2460,11 @@ export type NodeParams_jd_volcanic_lava_1 = {
   "vent_temp_k"?: number;
   /** Solidification temperature, kelvin (< `vent_temp_k`). */
   "solid_temp_k"?: number;
-  /** Viscosity at the vent, Pa·s (> 0). */
+  /** Viscosity at the vent, Pa·s (≥ 0.01). */
   "viscosity_pa_s"?: number;
   /** Orders of magnitude the viscosity rises between vent and solidus (0..=8). */
   "viscosity_decades"?: number;
-  /** Yield strength at the vent, Pa (> 0). */
+  /** Yield strength at the vent, Pa (≥ 0.01). */
   "yield_pa"?: number;
   /** Orders of magnitude the yield strength rises between vent and solidus (0..=8). */
   "yield_decades"?: number;

@@ -12,6 +12,28 @@ export type LayerInfo = TerrainStatsResult;
 /** The noise inspector's fields: every generator parameter except the sampling offset. */
 export type NoiseSettings = Required<Omit<NoiseParams, "offset_m">>;
 
+/** The viewport brush. `lower` is `raise` with a negative strength; `target_m` is flatten's height (null = under the first point). */
+export interface Brush {
+  radius_m: number;
+  strength_m: number;
+  mode: "raise" | "lower" | "smooth" | "flatten";
+  amount: number;
+  /** Edge hardness 0..1 (0 = soft falloff over the whole radius, 1 = hard edge). */
+  hardness: number;
+  target_m: number | null;
+}
+
+/** The grid tool's state: `selected` holds `"ix,iy"` keys; `smoothness` 0..1 softens the selection's edge. */
+export interface GridTool {
+  on: boolean;
+  /** Cells per side of the world. */
+  cells: number;
+  selected: string[];
+  smoothness: number;
+  height_m: number;
+  step_m: number;
+}
+
 export interface LogEntry {
   ts: number;
   level: "info" | "warn" | "error";
@@ -90,7 +112,19 @@ interface State {
   /** Sculpt mode: viewport drags paint strokes into the selected sculpt node. */
   sculpting: boolean;
   setSculpting: (on: boolean) => void;
-  brush: { radius_m: number; strength_m: number; mode: "raise" | "smooth" | "flatten"; amount: number };
+  brush: Brush;
+  /** Multiply the brush radius or strength by `factor` (Ctrl/Shift + wheel in the viewport). */
+  adjustBrush: (what: "radius" | "strength", factor: number) => void;
+  /** Grid tool: cells of the world selected in the viewport and levelled, raised or lowered as one square-stamp stroke. */
+  grid: GridTool;
+  setGrid: (patch: Partial<Pick<GridTool, "cells" | "smoothness" | "height_m" | "step_m">>) => void;
+  /** Turn the grid tool on (leaves sculpt mode) or off. */
+  toggleGrid: (on: boolean) => void;
+  /** Add, remove or toggle cells (`[ix, iy]` from the south-west corner) in the selection. */
+  gridSelect: (cells: [number, number][], op: "add" | "remove" | "toggle") => void;
+  gridClear: () => void;
+  /** One journaled stroke over the selected cells: `set` flattens them to `height_m`, `raise` / `lower` move them by `step_m`. */
+  gridApply: (kind: "set" | "raise" | "lower") => Promise<void>;
   /** Viewport sun direction (not part of the project). */
   sun: { azimuth_deg: number; elevation_deg: number; turbidity: number; clouds: number; fog: number };
   setSun: (patch: Partial<{ azimuth_deg: number; elevation_deg: number; turbidity: number; clouds: number; fog: number }>) => void;
@@ -107,7 +141,7 @@ interface State {
   setScatter: (patch: Partial<{ mask: string | null; spacing_m: number; seed: number; grow: boolean }>) => void;
   placeScatter: () => Promise<void>;
   exportScatter: () => Promise<void>;
-  setBrush: (patch: Partial<{ radius_m: number; strength_m: number; mode: "raise" | "smooth" | "flatten"; amount: number }>) => void;
+  setBrush: (patch: Partial<Brush>) => void;
   /** Insert a sculpt node in front of the first output (or select the existing one) and enter sculpt mode. */
   startSculpting: () => Promise<void>;
   /** Paint the scatter mask: a clamped (0..1) stroke node in front of the mask's output, brush strength 0.5, sculpt mode on. */
@@ -432,9 +466,29 @@ export const useStore = create<State>((set, get) => {
     log(r);
     if (r.status === "ok" && r.result) set({ project: r.result });
   };
+  // The Noise panel mirrors the graph's noise node: whenever the node's params change (a project
+  // opened, an inspector edit, undo) the panel adopts them, so Generate — which writes the panel
+  // into the node — never reverts an edit made elsewhere. Keyed (timeline) values stay as they are.
+  let syncedNoise = "";
+  const syncNoise = (g: GraphView) => {
+    const node = g.nodes.find((n) => n.kind.startsWith("jd.noise."));
+    if (!node) return;
+    const json = JSON.stringify(node.params ?? {});
+    if (json === syncedNoise) return;
+    syncedNoise = json;
+    const patch: Partial<NoiseSettings> = {};
+    for (const key of Object.keys(defaultNoise) as (keyof NoiseSettings)[]) {
+      const v = node.params?.[key];
+      const d = defaultNoise[key];
+      const plain = Array.isArray(d) ? Array.isArray(v) && v.length === 2 && v.every((x) => typeof x === "number") : typeof v === typeof d;
+      (patch as Record<string, unknown>)[key] = plain ? v : d;
+    }
+    set((s) => ({ noise: { ...s.noise, ...patch } }));
+  };
   const applyGraph = (r: Response<GraphView>) => {
     if (r.status === "ok" && r.result) {
       set({ graph: r.result });
+      syncNoise(r.result);
       liveEvaluate();
       scheduleAutosave();
     }
@@ -514,7 +568,39 @@ export const useStore = create<State>((set, get) => {
     setSelectedNode: (id) => set({ selectedNode: id }),
     sculpting: false,
     setSculpting: (on) => set({ sculpting: on, ...(on ? {} : { drawing: null }) }),
-    brush: { radius_m: 150, strength_m: 40, mode: "raise", amount: 0.5 },
+    brush: { radius_m: 150, strength_m: 40, mode: "raise", amount: 0.5, hardness: 0, target_m: null },
+    adjustBrush: (what, factor) =>
+      set((s) => ({
+        brush: what === "radius" ? { ...s.brush, radius_m: Math.max(1, Math.round(s.brush.radius_m * factor)) } : { ...s.brush, strength_m: Math.round(s.brush.strength_m * factor * 10) / 10 },
+      })),
+    grid: { on: false, cells: 32, selected: [], smoothness: 0.25, height_m: 0, step_m: 10 },
+    setGrid: (patch) => set((s) => ({ grid: { ...s.grid, ...patch } })),
+    toggleGrid: (on) => set((s) => ({ grid: { ...s.grid, on }, ...(on ? { sculpting: false, drawing: null } : {}) })),
+    gridSelect: (cells, op) =>
+      set((s) => {
+        const sel = new Set(s.grid.selected);
+        for (const [ix, iy] of cells) {
+          const k = `${ix},${iy}`;
+          if (op === "add" || (op === "toggle" && !sel.has(k))) sel.add(k);
+          else sel.delete(k);
+        }
+        return { grid: { ...s.grid, selected: [...sel] } };
+      }),
+    gridClear: () => set((s) => ({ grid: { ...s.grid, selected: [] } })),
+    gridApply: async (kind) => {
+      const { grid, project } = get();
+      if (!project || grid.selected.length === 0) return;
+      const id = await strokesNodeFor("height", null);
+      if (!id) return;
+      // One square stamp per cell, hard-edged at smoothness 0; one stroke, so one undo step.
+      const ext = project.world.extent_m;
+      const [cw, ch] = [ext[0] / grid.cells, ext[1] / grid.cells];
+      const points = grid.selected.map((k) => k.split(",").map(Number)).map(([ix = 0, iy = 0]) => [Math.round((ix + 0.5) * cw * 10) / 10, Math.round((iy + 0.5) * ch * 10) / 10]);
+      const base = { points, radius_m: Math.round((Math.max(cw, ch) / 2) * 10) / 10, shape: "square", hardness: Math.round((1 - grid.smoothness) * 100) / 100, amount: 1 };
+      const value = kind === "set" ? { ...base, mode: "flatten", target_m: grid.height_m } : { ...base, mode: "raise", strength_m: kind === "raise" ? grid.step_m : -grid.step_m };
+      set({ selectedNode: id });
+      await mutate("graph.append_param", { id, key: "strokes", value });
+    },
     sun: { azimuth_deg: 140, elevation_deg: 35, turbidity: 3, clouds: 0, fog: 0 },
     setSun: (patch) => {
       set((s) => ({ sun: { ...s.sun, ...patch } }));
@@ -565,7 +651,7 @@ export const useStore = create<State>((set, get) => {
     setBrush: (patch) => set((s) => ({ brush: { ...s.brush, ...patch } })),
     startSculpting: async () => {
       const id = await strokesNodeFor("height", null);
-      if (id) set({ selectedNode: id, sculpting: true });
+      if (id) set((s) => ({ selectedNode: id, sculpting: true, grid: { ...s.grid, on: false } }));
     },
     paintDensity: async () => {
       const mask = get().scatter.mask;
@@ -591,7 +677,20 @@ export const useStore = create<State>((set, get) => {
       const node = graph.nodes.find((n) => n.id === selectedNode && n.kind.startsWith("jd.sculpt.strokes@"));
       if (!node || points.length === 0) return;
       // One journal entry per stroke (graph.append_param), not the whole array each time.
-      await mutate("graph.append_param", { id: node.id, key: "strokes", value: { points: points.map(([u, v]) => [Math.round(u * 10) / 10, Math.round(v * 10) / 10]), radius_m: brush.radius_m, strength_m: brush.strength_m, mode: brush.mode, amount: brush.amount } });
+      const lower = brush.mode === "lower";
+      await mutate("graph.append_param", {
+        id: node.id,
+        key: "strokes",
+        value: {
+          points: points.map(([u, v]) => [Math.round(u * 10) / 10, Math.round(v * 10) / 10]),
+          radius_m: brush.radius_m,
+          strength_m: lower ? -Math.abs(brush.strength_m) : brush.strength_m,
+          mode: lower ? "raise" : brush.mode,
+          amount: brush.amount,
+          hardness: brush.hardness,
+          ...(brush.mode === "flatten" && brush.target_m != null ? { target_m: brush.target_m } : {}),
+        },
+      });
     },
     setLive: (on) => {
       set({ live: on });
@@ -679,8 +778,12 @@ export const useStore = create<State>((set, get) => {
     openProject: async (path) => {
       const r = await run("project.open", { path });
       if (r.status === "ok" && r.result) {
-        set({ project: r.result, layer: null, preview: null, lastEval: null }); // a new project publishes its own layers
+        // The graph first, then the project: the Noise panel shows the opened graph's values
+        // before anything is editable, so a quick edit cannot be overwritten by the load.
+        set({ project: null, layer: null, preview: null, lastEval: null });
         await loadGraph();
+        set({ project: r.result });
+        liveEvaluate();
       }
     },
     generate: async () => {

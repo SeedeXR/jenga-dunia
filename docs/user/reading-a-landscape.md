@@ -75,26 +75,26 @@ Fetch one with `geo.fetch_dem {center: [lon, lat], radius_m: 7500, res_m: 40}` i
 
 | Exemplar | lon, lat | Relief m | HI | Slope mean / p90 ° | Main geomorphons |
 |---|---|---|---|---|---|
-| Namib dunes (Sossusvlei) | 15.35, −24.75 | 342 | 0.30 | 10.7 / 23.8 | slope 0.26, valley 0.18, hollow 0.17, spur 0.14, ridge 0.13 |
-| Monument Valley | −110.11, 36.98 | 485 | 0.26 | 6.7 / 17.5 | slope 0.45, hollow 0.15, spur 0.11, valley 0.09, flat 0.06 |
-| Grand Canyon (Bright Angel) | −112.11, 36.10 | 1505 | 0.39 | 29.2 / 53.2 | slope 0.30, spur 0.21, hollow 0.16, ridge 0.15, valley 0.13 |
-| Guilin karst (Yangshuo) | 110.49, 24.78 | 485 | 0.24 | 16.7 / 36.7 | valley 0.25, slope 0.21, spur 0.15, hollow 0.15, pit 0.09 |
-| Matterhorn | 7.658, 45.976 | 2499 | 0.40 | 24.5 / 46.0 | slope 0.49, hollow 0.21, spur 0.16, valley 0.08 |
-| Badlands (South Dakota) | −101.95, 43.75 | 180 | 0.30 | 3.4 / 8.9 | slope 0.21, valley 0.17, flat 0.13, ridge 0.12, hollow 0.10 |
-| Salar de Uyuni | −67.49, −20.13 | 14 | 0.54 | 1.2 / 2.2 | flat 0.29, footslope 0.17, shoulder 0.17, slope 0.12 |
-| Mauna Loa (shield) | −155.608, 19.475 | 1183 | 0.68 | 7.4 / 11.5 | slope 0.66, spur 0.14, hollow 0.08 |
-| Etna (stratovolcano) | 14.993, 37.751 | 1790 | 0.38 | 15.7 / 27.0 | slope 0.65, spur 0.19, hollow 0.13 |
-| Raw fBm noise, for contrast | — | 1220 | 0.49 | 31.7 / 48.7 | slope 0.30, hollow 0.20, spur 0.20, valley 0.13, ridge 0.12 |
-| The same after stream power + thermal | — | 1200 | 0.50 | 30.3 / 38.9 | slope 0.36, hollow 0.20, spur 0.19, valley 0.11 |
+| Namib dunes (Sossusvlei) | 15.35, −24.75 | 342 | 0.30 | 10.7 / 23.8 | slope 0.31, valley 0.17, hollow 0.14, ridge 0.11, spur 0.11 |
+| Monument Valley | −110.11, 36.98 | 485 | 0.26 | 6.7 / 17.5 | slope 0.54, hollow 0.15, spur 0.10, valley 0.08, ridge 0.05 |
+| Grand Canyon (Bright Angel) | −112.11, 36.10 | 1505 | 0.39 | 29.2 / 53.2 | slope 0.33, spur 0.21, hollow 0.16, ridge 0.14, valley 0.12 |
+| Guilin karst (Yangshuo) | 110.49, 24.78 | 485 | 0.24 | 16.7 / 36.7 | valley 0.25, slope 0.24, spur 0.14, hollow 0.13, ridge 0.10, pit 0.07 |
+| Matterhorn | 7.658, 45.976 | 2499 | 0.40 | 24.5 / 46.0 | slope 0.53, hollow 0.20, spur 0.14, valley 0.07 |
+| Badlands (South Dakota) | −101.95, 43.75 | 180 | 0.30 | 3.4 / 8.9 | slope 0.21, flat 0.15, valley 0.14, footslope 0.13, ridge 0.11 |
+| Salar de Uyuni | −67.49, −20.13 | 14 | 0.54 | 1.2 / 2.2 | flat 0.46, footslope 0.16, shoulder 0.16, ridge 0.07, valley 0.07 |
+| Mauna Loa (shield) | −155.608, 19.475 | 1183 | 0.68 | 7.4 / 11.5 | slope 0.75, spur 0.10, hollow 0.05 |
+| Etna (stratovolcano) | 14.993, 37.751 | 1790 | 0.38 | 15.7 / 27.0 | slope 0.73, spur 0.15, hollow 0.10 |
+| Raw fBm noise, for contrast | — | 1220 | 0.49 | 31.7 / 48.7 | slope 0.33, hollow 0.19, spur 0.19, ridge 0.12, valley 0.12 |
+| The same after stream power + thermal | — | 1200 | 0.50 | 30.3 / 38.9 | slope 0.40, hollow 0.19, spur 0.18, ridge 0.10, valley 0.10 |
 
 What the numbers say:
 
 - **Real mountains are gentler on average than raw noise.** The Matterhorn's 24.5° mean against noise's 31.7° is typical. Erosion brings the steep tail down first (p90 48.7° → 38.9°).
-- **Pits are rare in eroded country.** Water drains them. Noise and karst have pits (0.03 and 0.09); the Alps and volcanoes have none.
-- **Flat ground marks deposition or a pan:** Uyuni 0.29, the Badlands' tables 0.13.
+- **Pits are rare in eroded country.** Water drains them. Noise and karst have pits (0.03 and 0.07); the Alps and volcanoes have none.
+- **Flat ground marks deposition or a pan:** Uyuni 0.46, the Badlands' tables 0.15; mountains and noise have none.
 - **The hypsometric integral separates young from old.** Mauna Loa's broad summit gives 0.68; dissected plateaus and dunes sit near 0.3.
 
-The numbers depend on cell size and `search_m`, so compare at the same settings. The Perceived Terrain Realism Metric (Rajasekaran et al. 2022) maps geomorphon shares to a realism score. We have not shipped it, because its input normalisation is defined only in the paper's supplementary data, which we could not read.
+The numbers depend on cell size, `search_m` and `flat_deg` (1° here: a direction whose up and down lines of sight cancel within a degree counts as flat, the paper's rule), so compare at the same settings. The Perceived Terrain Realism Metric (Rajasekaran et al. 2022) maps geomorphon shares to a realism score. We have not shipped it, because its input normalisation is defined only in the paper's supplementary data, which we could not read.
 
 ## Realism checks before you finish
 

@@ -66,7 +66,7 @@ const nodeTypes = { jd: JdNode };
 
 /** A column of a structured (array-of-objects) parameter: scalar, or a 2-number range, possibly nullable. */
 type ItemProp = { kind: "string" | "number" | "boolean" | "range2"; nullable: boolean; description?: string };
-type Prop = { type?: string; enum?: string[]; description?: string; default?: unknown; structured?: boolean; items?: Record<string, ItemProp> };
+type Prop = { type?: string; enum?: string[]; description?: string; default?: unknown; structured?: boolean; nested?: boolean; items?: Record<string, ItemProp> };
 type RawProp = { type?: string | string[]; description?: string; items?: { type?: string }; minItems?: number; maxItems?: number };
 type Schema = {
   properties?: Record<string, Prop & { $ref?: string; items?: { type?: string; $ref?: string } }>;
@@ -102,7 +102,9 @@ function resolveProps(schema: unknown): Record<string, Prop> {
     // as a count (recorded strokes are data, not something to type into a field).
     const structured = prop.type === "array" && (prop.items?.$ref !== undefined || prop.items?.type === "object");
     const items = structured && prop.items?.$ref ? itemColumns(sc.$defs?.[prop.items.$ref.split("/").pop() ?? ""]) : undefined;
-    out[key] = { type: prop.type, description: prop.description, default: prop.default, structured, ...(items ? { items } : {}), ...(en ? { enum: en } : {}) };
+    // Arrays of arrays (a spline's points) are geometry, drawn with their own tools: shown, not typed.
+    const nested = prop.type === "array" && prop.items?.type === "array";
+    out[key] = { type: prop.type, description: prop.description, default: prop.default, structured, nested, ...(items ? { items } : {}), ...(en ? { enum: en } : {}) };
   }
   return out;
 }
@@ -328,9 +330,9 @@ function Inner() {
                       testId={`param-${key}`}
                       onChange={(rows) => void s.setParam(sel.id, key, rows.length === 0 ? null : rows)}
                     />
-                  ) : prop.structured ? (
+                  ) : prop.structured || prop.nested ? (
                     <span className="text-jd-fg-2" data-testid={`param-${key}-count`}>
-                      {Array.isArray(current) ? `${current.length} recorded` : "none"}
+                      {Array.isArray(current) ? `${current.length} ${prop.nested ? "points" : "recorded"}` : "none"}
                     </span>
                   ) : prop.enum ? (
                     <select className="w-28 rounded border border-jd-line bg-jd-bg-2 px-1 text-xs" value={String(current ?? prop.default ?? prop.enum[0])} onChange={(e) => void s.setParam(sel.id, key, e.target.value)}>
@@ -346,9 +348,10 @@ function Inner() {
                       title={`${prop.description ?? ""}\nKeyframes: t:v, t:v (0:1, 1:300) resolve at the timeline position`.trim()}
                       onBlur={(e) => {
                         const raw = e.target.value.trim();
-                        if (raw === "") return void s.setParam(sel.id, key, null);
-                        const keyed = parseKeys(raw, isNum);
-                        const value: unknown = keyed ?? (raw.includes(",") ? raw.split(",").map(Number) : isNum ? Number(raw) : raw === "true" ? true : raw === "false" ? false : raw);
+                        const keyed = raw === "" ? null : parseKeys(raw, isNum);
+                        const value: unknown = raw === "" ? null : (keyed ?? (raw.includes(",") ? raw.split(",").map(Number) : isNum ? Number(raw) : raw === "true" ? true : raw === "false" ? false : raw));
+                        // Leaving a field is not an edit: an unchanged value writes nothing (no undo step, no re-evaluation).
+                        if (JSON.stringify(value) === JSON.stringify(current ?? null)) return;
                         void s.setParam(sel.id, key, value);
                       }}
                     />

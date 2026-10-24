@@ -36,7 +36,10 @@ interface Props {
   onInfo?: (info: ViewportInfo) => void;
   /** Sculpt mode: pointer drags paint a stroke on the terrain instead of orbiting. Points are
    *  reported in layer metres (u east from the west edge, v north from the south edge = row 0). */
-  sculpt?: { enabled: boolean; radiusM: number; onStroke: (points: [number, number][]) => void };
+  sculpt?: { enabled: boolean; radiusM: number; onStroke: (points: [number, number][]) => void; onAdjust?: (what: "radius" | "strength", factor: number) => void };
+  /** Grid tool: the world divided into `cells` per side; a left drag selects cells (Alt removes, a
+   *  click toggles one), reported as `[ix, iy]` from the south-west corner; `selected` cells are drawn. */
+  grid?: { cells: number; selected: string[]; onSelect: (cells: [number, number][], op: "add" | "remove" | "toggle") => void } | null;
   /** Draw a translucent water plane at this height (metres); null hides it. */
   seaLevelM?: number | null;
   /** Water clarity and tint (from the sea-level node); defaults to open-ocean water. */
@@ -264,6 +267,9 @@ interface SceneState {
   meshTextures: THREE.Texture[];
   /** Brush ring shown under the pointer in sculpt mode. */
   brush: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
+  /** Grid tool overlay: the cell lines draped on the terrain and the selected cells. */
+  gridLines: THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial> | null;
+  gridSel: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial> | null;
   frame: number;
   backend: ViewportInfo["backend"];
   triangles: number;
@@ -331,12 +337,21 @@ function animateSea(s: SceneState, tS: number): void {
   s.sea.geometry.computeVertexNormals();
 }
 
-export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevelM = null, water = null, waves = null, sky = null, horizon = null, sun, overlay = null, instances = null, maps = null, fog }: Props) {
+/** Height of the preview at layer metres (u east, v north; preview row 0 = south). */
+function sampleHeight(p: Preview, ext: [number, number], u: number, v: number): number {
+  const x = Math.min(p.width - 1, Math.max(0, Math.round((u / ext[0]) * (p.width - 1))));
+  const y = Math.min(p.height - 1, Math.max(0, Math.round((v / ext[1]) * (p.height - 1))));
+  return p.min + ((p.data[y * p.width + x] ?? 0) / 65535) * (p.max - p.min);
+}
+
+export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = null, seaLevelM = null, water = null, waves = null, sky = null, horizon = null, sun, overlay = null, instances = null, maps = null, fog }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<SceneState | null>(null);
   // Latest sculpt props without re-creating the renderer effect.
   const sculptRef = useRef(sculpt);
   sculptRef.current = sculpt;
+  const gridRef = useRef(grid);
+  gridRef.current = grid;
   const extentRef = useRef(extentM);
   extentRef.current = extentM;
 
@@ -409,6 +424,8 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
       sunDeg: { azimuthDeg: 140, elevationDeg: 35 },
       orbit: { theta: 0.6, phi: 1.0, radius: 5200, minR: 200, maxR: 100000 },
       instances: null,
+      gridLines: null,
+      gridSel: null,
       pbrPx: null,
       skyPx: null,
       worldSize: 1,
@@ -419,9 +436,21 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
     placeCamera(state);
 
     // Simple orbit: drag to rotate, wheel to zoom (no OrbitControls dependency so it works on both backends).
-    // In sculpt mode the drag is a brush stroke: the pointer is raycast onto the terrain mesh.
-    let dragging = false;
+    // In sculpt mode a left drag is a brush stroke and in grid mode a cell selection (the pointer is
+    // raycast onto the terrain mesh); the right or middle button always orbits, so a tool never
+    // locks the camera.
+    let dragging: "orbit" | "stroke" | "grid" | null = null;
     let stroke: [number, number][] | null = null;
+    let gridCells: Set<string> | null = null;
+    let gridOp: "add" | "remove" = "add";
+    let gridMoved = false;
+    const cellOf = (p: [number, number]): [number, number] | null => {
+      const g = gridRef.current;
+      const ext = extentRef.current;
+      if (!g || !ext) return null;
+      const clampCell = (q: number, size: number) => Math.min(g.cells - 1, Math.max(0, Math.floor((q / size) * g.cells)));
+      return [clampCell(p[0], ext[0]), clampCell(p[1], ext[1])];
+    };
     const raycaster = new THREE.Raycaster();
     const hit = (e: PointerEvent): [number, number] | null => {
       const ext = extentRef.current;
@@ -438,6 +467,12 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
     const showBrush = (e: PointerEvent) => {
       const sc = sculptRef.current;
       const ext = extentRef.current;
+      if (gridRef.current && state.mesh && ext) {
+        const p = hit(e);
+        const c = p && cellOf(p);
+        if (c) el.setAttribute("data-cell", `${c[0]},${c[1]}`);
+        else el.removeAttribute("data-cell");
+      } else el.removeAttribute("data-cell");
       if (!sc?.enabled || !state.mesh || !ext) {
         state.brush.visible = false;
         el.removeAttribute("data-brush");
@@ -459,27 +494,61 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
       el.setAttribute("data-brush", `${p[0].toFixed(1)},${p[1].toFixed(1)}`);
     };
     const onDown = (e: PointerEvent) => {
-      dragging = true;
+      if (e.button === 1 || e.button === 2) {
+        dragging = "orbit";
+        return;
+      }
+      if (e.button !== 0) return;
+      if (gridRef.current) {
+        dragging = "grid";
+        gridOp = e.altKey ? "remove" : "add";
+        gridCells = new Set();
+        gridMoved = false;
+        const p = hit(e);
+        const c = p && cellOf(p);
+        if (c) gridCells.add(`${c[0]},${c[1]}`);
+        return;
+      }
       if (sculptRef.current?.enabled) {
+        dragging = "stroke";
         const p = hit(e);
         stroke = p ? [p] : [];
+        return;
       }
+      dragging = "orbit";
     };
     const onUp = () => {
-      dragging = false;
-      if (stroke) {
+      if (dragging === "stroke" && stroke) {
         if (stroke.length > 0) sculptRef.current?.onStroke(stroke);
-        stroke = null;
+      } else if (dragging === "grid" && gridCells) {
+        const cells = [...gridCells].map((k) => k.split(",").map(Number) as [number, number]);
+        // A click on one cell toggles it; a drag adds (or, with Alt, removes) every cell it crossed.
+        if (cells.length > 0) gridRef.current?.onSelect(cells, gridMoved || cells.length !== 1 ? gridOp : "toggle");
       }
+      dragging = null;
+      stroke = null;
+      gridCells = null;
     };
     const onMove = (e: PointerEvent) => {
       showBrush(e);
       if (!dragging) return;
-      if (stroke) {
+      if (dragging === "stroke" && stroke) {
         const p = hit(e);
         const last = stroke[stroke.length - 1];
         // Coalesce samples closer than a few metres so a stroke stays a few dozen points.
         if (p && (!last || Math.hypot(p[0] - last[0], p[1] - last[1]) > (extentRef.current?.[0] ?? 1000) * 0.005)) stroke.push(p);
+        return;
+      }
+      if (dragging === "grid" && gridCells) {
+        const p = hit(e);
+        const c = p && cellOf(p);
+        if (c) {
+          const k = `${c[0]},${c[1]}`;
+          if (!gridCells.has(k)) {
+            gridCells.add(k);
+            gridMoved = true;
+          }
+        }
         return;
       }
       state.orbit.theta -= e.movementX * 0.005;
@@ -487,15 +556,23 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
       placeCamera(state);
     };
     const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      // Over the brush, Ctrl (or ⌘) + wheel sizes it and Shift + wheel sets its strength; plain wheel zooms.
+      const sc = sculptRef.current;
+      if (sc?.enabled && sc.onAdjust && (e.ctrlKey || e.metaKey || e.shiftKey)) {
+        sc.onAdjust(e.shiftKey ? "strength" : "radius", e.deltaY < 0 ? 1.1 : 1 / 1.1);
+        return;
+      }
       const o = state.orbit;
       o.radius = Math.min(o.maxR, Math.max(o.minR, o.radius * (1 + e.deltaY * 0.001)));
       placeCamera(state);
-      e.preventDefault();
     };
+    const onContextMenu = (e: MouseEvent) => e.preventDefault(); // the right button orbits
     el.addEventListener("pointerdown", onDown);
     window.addEventListener("pointerup", onUp);
     el.addEventListener("pointermove", onMove);
     el.addEventListener("wheel", onWheel, { passive: false });
+    el.addEventListener("contextmenu", onContextMenu);
     const onResize = () => {
       renderer.setSize(el.clientWidth, el.clientHeight);
       camera.aspect = el.clientWidth / Math.max(1, el.clientHeight);
@@ -526,6 +603,13 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
       window.removeEventListener("pointerup", onUp);
       el.removeEventListener("pointermove", onMove);
       el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("contextmenu", onContextMenu);
+      for (const o of [state.gridLines, state.gridSel]) {
+        if (o) {
+          o.geometry.dispose();
+          o.material.dispose();
+        }
+      }
       state.brush.geometry.dispose();
       state.brush.material.dispose();
       if (state.mesh) {
@@ -612,6 +696,58 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, seaLevel
     placeCamera(s);
     onInfo?.(infoOf(s));
   }, [preview, extentM, overlay, maps, onInfo]);
+
+  // Grid tool overlay: cell lines draped on the preview and the selected cells as translucent
+  // quads (a fan around each cell's centre, so a cell follows a slope). Rebuilt when the
+  // selection, the cell count or the terrain changes; nothing is drawn when the tool is off.
+  useEffect(() => {
+    const s = sceneRef.current;
+    if (!s) return;
+    for (const key of ["gridLines", "gridSel"] as const) {
+      const o = s[key];
+      if (o) {
+        s.scene.remove(o);
+        o.geometry.dispose();
+        o.material.dispose();
+        s[key] = null;
+      }
+    }
+    if (!grid || !preview || !extentM) return;
+    const [ex, ez] = extentM;
+    const lift = Math.max(ex, ez) * 0.002;
+    const at = (u: number, v: number, extra = 0): [number, number, number] => [u - ex / 2, sampleHeight(preview, extentM, u, v) + lift + extra, ez / 2 - v];
+    const lines: number[] = [];
+    const n = Math.max(2, Math.min(preview.width, preview.height));
+    for (let i = 0; i <= grid.cells; i++) {
+      const u = (i / grid.cells) * ex;
+      const v = (i / grid.cells) * ez;
+      for (let k = 0; k < n - 1; k++) {
+        const [a, b] = [k / (n - 1), (k + 1) / (n - 1)];
+        lines.push(...at(u, a * ez), ...at(u, b * ez), ...at(a * ex, v), ...at(b * ex, v));
+      }
+    }
+    const lg = new THREE.BufferGeometry();
+    lg.setAttribute("position", new THREE.Float32BufferAttribute(lines, 3));
+    s.gridLines = new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: 0x8fb0ff, transparent: true, opacity: 0.55 }));
+    s.gridLines.renderOrder = 5;
+    s.scene.add(s.gridLines);
+    const quads: number[] = [];
+    const [cw, ch] = [ex / grid.cells, ez / grid.cells];
+    for (const key of grid.selected) {
+      const [ix = 0, iy = 0] = key.split(",").map(Number);
+      const c = at((ix + 0.5) * cw, (iy + 0.5) * ch, lift);
+      const sw = at(ix * cw, iy * ch, lift);
+      const se = at((ix + 1) * cw, iy * ch, lift);
+      const ne = at((ix + 1) * cw, (iy + 1) * ch, lift);
+      const nw = at(ix * cw, (iy + 1) * ch, lift);
+      quads.push(...c, ...sw, ...se, ...c, ...se, ...ne, ...c, ...ne, ...nw, ...c, ...nw, ...sw);
+    }
+    const qg = new THREE.BufferGeometry();
+    qg.setAttribute("position", new THREE.Float32BufferAttribute(quads, 3));
+    s.gridSel = new THREE.Mesh(qg, new THREE.MeshBasicMaterial({ color: 0x5b8cff, transparent: true, opacity: 0.45, side: THREE.DoubleSide, depthWrite: false }));
+    s.gridSel.renderOrder = 6;
+    s.scene.add(s.gridSel);
+  }, [grid, preview, extentM]);
 
   // Fog: the slider pulls the fog planes in from the faint aerial-perspective default.
   useEffect(() => {

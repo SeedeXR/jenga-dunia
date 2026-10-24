@@ -1,10 +1,10 @@
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { Brush, FolderOpen, FolderPlus, FolderSearch, Globe, Mountain, PanelBottom, PanelLeftClose, PanelLeftOpen, PanelRight, PanelRightClose, PanelRightOpen, Route, Save, Upload, Workflow } from "lucide-react";
+import { Brush, FolderOpen, FolderPlus, FolderSearch, Globe, Grid3x3, Mountain, PanelBottom, PanelLeftClose, PanelLeftOpen, PanelRight, PanelRightClose, PanelRightOpen, Route, Save, Upload, Workflow } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import GraphPanel from "./graph/GraphPanel";
 import TerrainView, { type ViewportInfo } from "./viewport/TerrainView";
-import { type NoiseSettings, useStore } from "./state";
+import { type Brush as BrushTool, type NoiseSettings, useStore } from "./state";
 import type { FractalKind, HeightmapFormat, NoiseKind } from "./lib/ops.gen";
 
 /** A resizable panel's size, kept in the browser store (`jd.layout.<key>`) and restored on launch: the
@@ -512,7 +512,7 @@ export default function App() {
         {/* Center: viewport (top) + node graph (bottom, toggle) */}
         <main className={`relative grid min-w-0 overflow-hidden bg-jd-bg-0 ${showGraph ? (dock.graph === "right" ? "grid-cols-[1fr_auto]" : "grid-rows-[1fr_auto]") : "grid-rows-[1fr]"}`}>
           <div className="relative min-h-0 min-w-0">
-            <TerrainView fog={s.sun.fog} preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} sculpt={{ enabled: s.sculpting && (sculptNode !== undefined || s.drawing !== null), radiusM: s.drawing === "road" ? s.roadWidthM / 2 : s.brush.radius_m, onStroke: (pts) => void s.addStroke(pts) }} seaLevelM={seaLevelM} water={water} waves={s.waves} sky={s.sky} horizon={s.horizon} sun={{ azimuthDeg: s.sun.azimuth_deg, elevationDeg: s.sun.elevation_deg }} overlay={s.colorPreview} instances={s.scatter.points ? { points: s.scatter.points, sizeM: Math.max(s.scatter.spacing_m * 0.35, (s.project?.world.extent_m[0] ?? 0) * 0.012) } : null} maps={s.maps} />
+            <TerrainView fog={s.sun.fog} preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} sculpt={{ enabled: s.sculpting && (sculptNode !== undefined || s.drawing !== null), radiusM: s.drawing === "road" ? s.roadWidthM / 2 : s.brush.radius_m, onStroke: (pts) => void s.addStroke(pts), onAdjust: s.adjustBrush }} grid={s.grid.on ? { cells: s.grid.cells, selected: s.grid.selected, onSelect: s.gridSelect } : null} seaLevelM={seaLevelM} water={water} waves={s.waves} sky={s.sky} horizon={s.horizon} sun={{ azimuthDeg: s.sun.azimuth_deg, elevationDeg: s.sun.elevation_deg }} overlay={s.colorPreview} instances={s.scatter.points ? { points: s.scatter.points, sizeM: Math.max(s.scatter.spacing_m * 0.35, (s.project?.world.extent_m[0] ?? 0) * 0.012) } : null} maps={s.maps} />
             <button
               className={`btn absolute top-2 right-28 ${s.sculpting ? "text-jd-accent" : ""}`}
               title={s.sculpting ? "Sculpting: drag on the terrain to paint a stroke (click to stop)" : "Sculpt: adds a stroke node before the output and paints with the brush"}
@@ -532,6 +532,16 @@ export default function App() {
               data-testid="road-draw"
             >
               <Route size={14} /> {s.drawing === "road" ? "Drawing road…" : "Road"}
+            </button>
+            <button
+              className={`btn absolute top-2 right-[23.5rem] ${s.grid.on ? "text-jd-accent" : ""}`}
+              title={s.grid.on ? "Grid: drag over cells to select them (Alt removes, click toggles); the Grid panel levels, raises or lowers them" : "Grid tool: select cells of the world and set their height, World Creator style"}
+              onClick={() => s.toggleGrid(!s.grid.on)}
+              disabled={!s.project || s.busy}
+              aria-pressed={s.grid.on}
+              data-testid="grid-toggle"
+            >
+              <Grid3x3 size={14} /> Grid
             </button>
             <button
               className={`btn absolute top-2 right-72 ${s.showHorizon ? "text-jd-accent" : ""}`}
@@ -585,8 +595,9 @@ export default function App() {
             <>
               <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Brush</h2>
               <Field label="Mode">
-                <select className={`${inputCls} w-36`} value={s.brush.mode} onChange={(e) => s.setBrush({ mode: e.target.value as "raise" | "smooth" | "flatten" })} data-testid="brush-mode">
-                  <option value="raise">raise / lower</option>
+                <select className={`${inputCls} w-36`} value={s.brush.mode} onChange={(e) => s.setBrush({ mode: e.target.value as BrushTool["mode"] })} data-testid="brush-mode">
+                  <option value="raise">raise</option>
+                  <option value="lower">lower</option>
                   <option value="smooth">smooth</option>
                   <option value="flatten">flatten</option>
                 </select>
@@ -594,7 +605,7 @@ export default function App() {
               <Field label="Radius (m)">
                 <input className={inputCls} type="number" value={s.brush.radius_m} onChange={(e) => s.setBrush({ radius_m: Number(e.target.value) })} data-testid="brush-radius" />
               </Field>
-              {s.brush.mode === "raise" ? (
+              {s.brush.mode === "raise" || s.brush.mode === "lower" ? (
                 <Field label="Strength (m)">
                   <input className={inputCls} type="number" value={s.brush.strength_m} onChange={(e) => s.setBrush({ strength_m: Number(e.target.value) })} data-testid="brush-strength" />
                 </Field>
@@ -603,9 +614,61 @@ export default function App() {
                   <input className={inputCls} type="number" step="0.1" min="0" max="1" value={s.brush.amount} onChange={(e) => s.setBrush({ amount: Number(e.target.value) })} data-testid="brush-amount" />
                 </Field>
               )}
-              <p className="mb-4 text-xs text-jd-fg-2">
-                {s.brush.mode === "raise" ? "Drag on the terrain to raise it; negative strength lowers." : s.brush.mode === "smooth" ? "Drag to blend heights towards their local mean." : "Drag to pull heights towards the height under the first point."} Each stroke is one undo step.
+              {s.brush.mode === "flatten" && (
+                <Field label="Height (m)">
+                  <input className={inputCls} type="number" value={s.brush.target_m ?? ""} placeholder="under 1st point" onChange={(e) => s.setBrush({ target_m: e.target.value === "" ? null : Number(e.target.value) })} title="Flatten to this height; empty = the height under the first point of the stroke" data-testid="brush-target" />
+                </Field>
+              )}
+              <Field label={`Hardness ${s.brush.hardness.toFixed(2)}`}>
+                <input type="range" min={0} max={1} step={0.05} value={s.brush.hardness} onChange={(e) => s.setBrush({ hardness: Number(e.target.value) })} className="w-28" title="0 = soft falloff over the whole radius, 1 = hard edge" data-testid="brush-hardness" />
+              </Field>
+              <p className="mb-2 text-xs text-jd-fg-2">
+                {s.brush.mode === "raise" ? "Drag on the terrain to raise it." : s.brush.mode === "lower" ? "Drag on the terrain to lower it." : s.brush.mode === "smooth" ? "Drag to blend heights towards their local mean." : "Drag to pull heights towards the target height."} Each stroke is one undo step.
               </p>
+              <dl className="mb-4 grid grid-cols-[auto_1fr] gap-x-2 text-[11px] text-jd-fg-2" data-testid="brush-shortcuts">
+                <dt>Left drag</dt><dd>stroke</dd>
+                <dt>Right drag</dt><dd>orbit</dd>
+                <dt>Ctrl + wheel</dt><dd>radius</dd>
+                <dt>Shift + wheel</dt><dd>strength</dd>
+              </dl>
+            </>
+          )}
+          {s.grid.on && (
+            <>
+              <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Grid</h2>
+              <Field label="Cells per side">
+                <select className={`${inputCls} w-20`} value={s.grid.cells} onChange={(e) => { s.setGrid({ cells: Number(e.target.value) }); s.gridClear(); }} data-testid="grid-cells">
+                  {[8, 16, 32, 64].map((n) => (
+                    <option key={n} value={n}>{n}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Selected">
+                <span className="text-xs" data-testid="grid-count">{s.grid.selected.length} cell{s.grid.selected.length === 1 ? "" : "s"}</span>
+              </Field>
+              <Field label={`Smoothness ${s.grid.smoothness.toFixed(2)}`}>
+                <input type="range" min={0} max={1} step={0.05} value={s.grid.smoothness} onChange={(e) => s.setGrid({ smoothness: Number(e.target.value) })} className="w-28" title="How far the selection's edge blends into its surroundings (0 = hard cell edges)" data-testid="grid-smoothness" />
+              </Field>
+              <Field label="Height (m)">
+                <input className={inputCls} type="number" value={s.grid.height_m} onChange={(e) => s.setGrid({ height_m: Number(e.target.value) })} data-testid="grid-height" />
+              </Field>
+              <div className="mb-2 flex gap-2">
+                <button className="btn" onClick={() => void s.gridApply("set")} disabled={s.grid.selected.length === 0 || s.busy} title="Level the selected cells to the height above (one undoable stroke)" data-testid="grid-set">Set height</button>
+                <button className="btn" onClick={() => s.gridClear()} disabled={s.grid.selected.length === 0} data-testid="grid-clear">Clear</button>
+              </div>
+              <Field label="Step (m)">
+                <input className={inputCls} type="number" value={s.grid.step_m} onChange={(e) => s.setGrid({ step_m: Number(e.target.value) })} data-testid="grid-step" />
+              </Field>
+              <div className="mb-2 flex gap-2">
+                <button className="btn" onClick={() => void s.gridApply("raise")} disabled={s.grid.selected.length === 0 || s.busy} data-testid="grid-raise">Raise</button>
+                <button className="btn" onClick={() => void s.gridApply("lower")} disabled={s.grid.selected.length === 0 || s.busy} data-testid="grid-lower">Lower</button>
+              </div>
+              <dl className="mb-4 grid grid-cols-[auto_1fr] gap-x-2 text-[11px] text-jd-fg-2" data-testid="grid-shortcuts">
+                <dt>Click</dt><dd>toggle a cell</dd>
+                <dt>Left drag</dt><dd>add cells</dd>
+                <dt>Alt + drag</dt><dd>remove cells</dd>
+                <dt>Right drag</dt><dd>orbit</dd>
+              </dl>
             </>
           )}
           <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Sun</h2>

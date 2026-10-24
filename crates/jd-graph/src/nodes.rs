@@ -994,7 +994,7 @@ pub fn register_all(r: &mut Registry) {
     ).with_memory(48.0));
     r.register(NodeDef::new::<SculptParams, _>(
         "jd.sculpt.strokes@1",
-        "Brush strokes (raise/lower with smooth falloff) recorded as data: non-destructive, replayable, undo removes a whole stroke",
+        "Brush strokes recorded as data — raise/lower, smooth, flatten (to the height under the first point or `target_m`), with a soft or hard (`hardness`) edge, round along the polyline or `square` stamps at each point (grid selections): non-destructive, replayable, undo removes a whole stroke",
         vec![port("in", PortType::Heightfield, true)],
         vec![port("out", PortType::Heightfield, false)],
         |ctx, p, i| {
