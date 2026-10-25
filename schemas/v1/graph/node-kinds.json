@@ -1,5 +1,43 @@
 [
   {
+    "kind": "jd.analysis.aspect@1",
+    "description": "Sun-direction / aspect mask 0..1: 1 where the slope faces the light from `azimuth_deg`, 0 where it faces away, 0.5 on flat ground — snow that melts on the sunny side, moss on the shaded one, World Creator's Sun Direction distribution",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "AspectParams",
+      "type": "object",
+      "properties": {
+        "azimuth_deg": {
+          "description": "Compass direction the light comes from, degrees clockwise from north (180 = a southern sun).",
+          "type": "number",
+          "format": "float",
+          "default": 180.0
+        },
+        "strength": {
+          "description": "How fast the mask saturates with slope (0..1): at 1 a 45° slope facing the light is fully 1.",
+          "type": "number",
+          "format": "float",
+          "default": 0.5
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
     "kind": "jd.analysis.curvature@1",
     "description": "Curvature (Laplacian of height, 1/m) mapped to −1..1: positive on ridges and convex breaks, negative in valleys and hollows — for rock exposure, soil and sediment masks",
     "inputs": [
@@ -129,6 +167,38 @@
           "type": "number",
           "format": "float",
           "default": 1.0
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "kind": "jd.analysis.occlusion@1",
+    "description": "Sky occlusion 0..1 from the highest terrain seen along 8 directions within `reach_m`: 0 on an open plain, high at the bottom of a gorge — an ambient-occlusion, cavity and shelter mask (1 − it is the sky view)",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "OcclusionParams",
+      "type": "object",
+      "properties": {
+        "reach_m": {
+          "description": "How far terrain can hide the sky, metres (0 = 20 cells).",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
         }
       },
       "additionalProperties": false
@@ -1563,6 +1633,44 @@
           "format": "uint32",
           "minimum": 0,
           "default": 1
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "kind": "jd.filter.edge_fade@1",
+    "description": "Border fade: within `width_m` of the world's edge the heights blend smoothly to `edge_m`, so the terrain tiles or sits in an engine without a cliff at its border (World Creator's Zero Edge / Border Blend)",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "EdgeFadeParams",
+      "type": "object",
+      "properties": {
+        "width_m": {
+          "description": "Width of the fade inside the border, metres (> 0).",
+          "type": "number",
+          "format": "float",
+          "default": 200.0
+        },
+        "edge_m": {
+          "description": "Height the border fades to, metres.",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
         }
       },
       "additionalProperties": false

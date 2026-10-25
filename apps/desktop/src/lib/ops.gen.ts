@@ -1945,6 +1945,13 @@ canonical units. */
   "infer_ms": number;
 };
 
+export type NodeParams_jd_analysis_aspect_1 = {
+  /** Compass direction the light comes from, degrees clockwise from north (180 = a southern sun). */
+  "azimuth_deg"?: number;
+  /** How fast the mask saturates with slope (0..1): at 1 a 45° slope facing the light is fully 1. */
+  "strength"?: number;
+};
+
 export type NodeParams_jd_analysis_curvature_1 = {
   /** Curvature (1/m) that maps to ±1; smaller values exaggerate. */
   "scale"?: number;
@@ -1967,6 +1974,11 @@ export type NodeParams_jd_analysis_geomorphon_1 = {
   "search_m"?: number;
   /** Lines of sight within this angle of horizontal count as flat, degrees [0, 45). */
   "flat_deg"?: number;
+};
+
+export type NodeParams_jd_analysis_occlusion_1 = {
+  /** How far terrain can hide the sky, metres (0 = 20 cells). */
+  "reach_m"?: number;
 };
 
 export type NodeParams_jd_analysis_slope_1 = {
@@ -2277,6 +2289,13 @@ graph, unset → the world's shared wind. */
 export type NodeParams_jd_filter_blur_1 = {
   /** Box-blur radius in pixels (1..=4; must not exceed the world's tile halo). */
   "radius"?: number;
+};
+
+export type NodeParams_jd_filter_edge_fade_1 = {
+  /** Width of the fade inside the border, metres (> 0). */
+  "width_m"?: number;
+  /** Height the border fades to, metres. */
+  "edge_m"?: number;
 };
 
 export type NodeParams_jd_filter_terrace_1 = {
@@ -2759,9 +2778,11 @@ export type OpId = keyof JdOps;
 
 /** Parameter types of every built-in node kind. */
 export interface NodeKinds {
+  "jd.analysis.aspect@1": NodeParams_jd_analysis_aspect_1;
   "jd.analysis.curvature@1": NodeParams_jd_analysis_curvature_1;
   "jd.analysis.flow@1": NodeParams_jd_analysis_flow_1;
   "jd.analysis.geomorphon@1": NodeParams_jd_analysis_geomorphon_1;
+  "jd.analysis.occlusion@1": NodeParams_jd_analysis_occlusion_1;
   "jd.analysis.slope@1": NodeParams_jd_analysis_slope_1;
   "jd.biome.classify@1": NodeParams_jd_biome_classify_1;
   "jd.biome.seabed@1": NodeParams_jd_biome_seabed_1;
@@ -2778,6 +2799,7 @@ export interface NodeKinds {
   "jd.erosion.thermal@1": NodeParams_jd_erosion_thermal_1;
   "jd.erosion.yardang@1": NodeParams_jd_erosion_yardang_1;
   "jd.filter.blur@1": NodeParams_jd_filter_blur_1;
+  "jd.filter.edge_fade@1": NodeParams_jd_filter_edge_fade_1;
   "jd.filter.terrace@1": NodeParams_jd_filter_terrace_1;
   "jd.hydrology.fill@1": NodeParams_jd_hydrology_fill_1;
   "jd.hydrology.network@1": NodeParams_jd_hydrology_network_1;

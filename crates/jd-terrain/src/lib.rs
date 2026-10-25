@@ -22,6 +22,7 @@ pub mod import;
 pub mod karst;
 pub mod landform;
 pub mod lava;
+pub mod masks;
 pub mod mesh;
 pub mod network;
 pub mod noise;
@@ -64,6 +65,7 @@ pub use import::{
 pub use karst::{KarstParams, Sinkhole, SinkholeProfile, karst_sinkholes};
 pub use landform::{Fingerprint, GEOMORPHON_NAMES, SlopeStats, fingerprint, geomorphons};
 pub use lava::{LavaParams, LavaResult, LavaVent, lava_flow};
+pub use masks::{aspect_mask, edge_fade, occlusion_mask};
 pub use mesh::{
     BakedMaps, GridMesh, MaterialLayer, MeshExportReport, MeshTopology, auto_step, bake_maps,
     bake_maps_with, export_glb, export_mesh, export_mesh_lods, export_mesh_lods_with,

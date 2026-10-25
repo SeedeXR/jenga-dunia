@@ -331,6 +331,45 @@ struct ScaleParams {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct AspectParams {
+    /// Compass direction the light comes from, degrees clockwise from north (180 = a southern sun).
+    #[serde(default = "south")]
+    azimuth_deg: f32,
+    /// How fast the mask saturates with slope (0..1): at 1 a 45° slope facing the light is fully 1.
+    #[serde(default = "half_f")]
+    strength: f32,
+}
+fn south() -> f32 {
+    180.0
+}
+fn half_f() -> f32 {
+    0.5
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct OcclusionParams {
+    /// How far terrain can hide the sky, metres (0 = 20 cells).
+    #[serde(default)]
+    reach_m: f32,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct EdgeFadeParams {
+    /// Width of the fade inside the border, metres (> 0).
+    #[serde(default = "edge_width")]
+    width_m: f32,
+    /// Height the border fades to, metres.
+    #[serde(default)]
+    edge_m: f32,
+}
+fn edge_width() -> f32 {
+    200.0
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct StampParams {
     /// Heightmap file in the project's assets/ (PNG 16-bit, EXR, TIFF, RAW; row 0 = north unless `north_up` is false).
     path: String,
@@ -749,6 +788,39 @@ pub fn register_all(r: &mut Registry) {
             0
         }),
     );
+    // Masks and filters from World Creator's distribution and filter lists.
+    r.register(NodeDef::new::<AspectParams, _>(
+        "jd.analysis.aspect@1",
+        "Sun-direction / aspect mask 0..1: 1 where the slope faces the light from `azimuth_deg`, 0 where it faces away, 0.5 on flat ground — snow that melts on the sunny side, moss on the shaded one, World Creator's Sun Direction distribution",
+        vec![port("in", PortType::Heightfield, true)],
+        vec![port("out", PortType::Heightfield, false)],
+        |ctx, p, i| {
+            let ap: AspectParams = params(p)?;
+            Ok(out("out", jd_terrain::aspect_mask(field(i, "in")?, spacing_m(ctx), ap.azimuth_deg, ap.strength)?))
+        },
+    ).with_memory(4.0));
+    r.register(NodeDef::new::<OcclusionParams, _>(
+        "jd.analysis.occlusion@1",
+        "Sky occlusion 0..1 from the highest terrain seen along 8 directions within `reach_m`: 0 on an open plain, high at the bottom of a gorge — an ambient-occlusion, cavity and shelter mask (1 − it is the sky view)",
+        vec![port("in", PortType::Heightfield, true)],
+        vec![port("out", PortType::Heightfield, false)],
+        |ctx, p, i| {
+            let op: OcclusionParams = params(p)?;
+            let sp = spacing_m(ctx);
+            let reach = if op.reach_m > 0.0 { op.reach_m } else { 20.0 * sp[0].max(sp[1]) };
+            Ok(out("out", jd_terrain::occlusion_mask(field(i, "in")?, sp, reach)?))
+        },
+    ).with_memory(4.0));
+    r.register(NodeDef::new::<EdgeFadeParams, _>(
+        "jd.filter.edge_fade@1",
+        "Border fade: within `width_m` of the world's edge the heights blend smoothly to `edge_m`, so the terrain tiles or sits in an engine without a cliff at its border (World Creator's Zero Edge / Border Blend)",
+        vec![port("in", PortType::Heightfield, true)],
+        vec![port("out", PortType::Heightfield, false)],
+        |ctx, p, i| {
+            let ep: EdgeFadeParams = params(p)?;
+            Ok(out("out", jd_terrain::edge_fade(field(i, "in")?, spacing_m(ctx), ep.width_m, ep.edge_m)?))
+        },
+    ).with_memory(4.0));
     // Placed shapes: World Creator's stamp and primitive layers.
     r.register(NodeDef::new::<jd_terrain::PrimitiveParams, _>(
         "jd.shape.primitive@1",
