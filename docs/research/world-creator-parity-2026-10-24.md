@@ -21,7 +21,14 @@
 > Image-based materials (1) closed the same afternoon: `texture {albedo, normal, tile_m, px}` per
 > layer on the detail-tile path (PNG only; triplanar / stochastic blending stay the engine's job).
 > The Godot / Houdini / C4D bridges (6) are out of scope: the owner's rule (2026-10-25) is Unreal,
-> Unity and Blender only. Still open: spline I/O (9); workflow conveniences (12); rendering (13).
+> Unity and Blender only. Spline I/O (9) closed the same day (`terrain.export_splines` → GeoJSON,
+> Blender `jd.import_splines`). Workflow conveniences (12) partly: per-node presets, hover
+> thumbnails, arithmetic in number fields, a layer tree with search, a layer-type icon strip.
+> Rendering (13) partly: HDRI import, ACES exposure / bloom / vignette, stills, flythrough frames;
+> no path tracer (none for WebGPU in three 0.186). The World Creator video's own tools (brush and
+> grid transforms, brush alphas, sculpt-layer settings, terrain actions, framed block, compass /
+> ruler, octave bars) also landed on 2026-10-25. Still open: localisation and a crash reporter
+> (12), a path tracer and camera-path editing beyond linear keys (13).
 
 # Jenga Dunia vs World Creator: feature parity audit (2026-10-24)
 
