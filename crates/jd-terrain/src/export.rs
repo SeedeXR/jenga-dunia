@@ -30,6 +30,13 @@ pub enum HeightmapFormat {
     RawR32,
     /// TIFF, single 32-bit float sample per pixel (GIS and DCC tools read it directly). Exact.
     Tiff32,
+    /// ESRI ASCII grid (`.asc`): a six-line header (ncols, nrows, xllcorner, yllcorner, cellsize,
+    /// NODATA_value) then rows north to south — GIS tools and World Machine read it. Square cells
+    /// only; the cell size and corner come from the georeference when given, else 1 m at (0, 0).
+    Asc,
+    /// XYZ points (`.xyz`): one `x y z` line per sample in metres (the georeference's origin and
+    /// spacing when given, else cells of 1 m from (0, 0)), row 0 first. Exact, large.
+    Xyz,
 }
 
 impl HeightmapFormat {
@@ -41,6 +48,8 @@ impl HeightmapFormat {
             HeightmapFormat::RawR16 => "r16",
             HeightmapFormat::RawR32 => "r32",
             HeightmapFormat::Tiff32 => "tif",
+            HeightmapFormat::Asc => "asc",
+            HeightmapFormat::Xyz => "xyz",
         }
     }
     /// True when values are quantised to 16 bits.
@@ -194,6 +203,7 @@ pub fn export_heightmap_geo(
     let stats = hf.stats();
     let format = opts.format;
     let spacing_m = geo.map(|g| g.spacing); // every format's sidecar carries the spacing; only TIFF gets tags
+    let geo_origin = geo.map(|g| g.origin); // ASC / XYZ write the corner and cell size as plain numbers
     let geo = geo.filter(|_| opts.georeference && format == HeightmapFormat::Tiff32);
     if let Some(g) = geo
         && !(g.spacing[0] > 0.0 && g.spacing[1] > 0.0 && g.origin.iter().all(|v| v.is_finite()))
@@ -273,6 +283,46 @@ pub fn export_heightmap_geo(
                 }
                 Ok(())
             })?;
+            finish(out)?;
+            fs::metadata(path)?.len()
+        }
+        HeightmapFormat::Asc | HeightmapFormat::Xyz => {
+            let (origin, cell) = spacing_m.map_or(([0.0, 0.0], [1.0, 1.0]), |sp| {
+                (geo_origin.unwrap_or([0.0, 0.0]), sp)
+            });
+            let mut out = std::io::BufWriter::with_capacity(1 << 20, fs::File::create(path)?);
+            let mut row = vec![0.0f32; w as usize];
+            if format == HeightmapFormat::Asc {
+                if (cell[0] - cell[1]).abs() > 1e-6 * cell[0].abs() {
+                    return Err(
+                        JdError::invalid("format", "the ASC grid needs square cells")
+                            .next("Export with equal x and y spacing, or use XYZ / TIFF."),
+                    );
+                }
+                writeln!(
+                    out,
+                    "ncols {w}\nnrows {h}\nxllcorner {}\nyllcorner {}\ncellsize {}\nNODATA_value -9999",
+                    origin[0], origin[1], cell[0]
+                )?;
+                for y in (0..h).rev() {
+                    // ASC rows run north to south: the field's last row first.
+                    hf.row(y, &mut row);
+                    let line: Vec<String> = row.iter().map(|v| format!("{v}")).collect();
+                    writeln!(out, "{}", line.join(" "))?;
+                }
+            } else {
+                for y in 0..h {
+                    hf.row(y, &mut row);
+                    for (x, v) in row.iter().enumerate() {
+                        writeln!(
+                            out,
+                            "{} {} {v}",
+                            origin[0] + (x as f64 + 0.5) * cell[0],
+                            origin[1] + (y as f64 + 0.5) * cell[1]
+                        )?;
+                    }
+                }
+            }
             finish(out)?;
             fs::metadata(path)?.len()
         }
@@ -440,6 +490,10 @@ pub fn import_heightmap(path: &Path, tile_size: u32, halo: u32) -> JdResult<Heig
                 .collect();
             dequantise(&q, lo, hi)
         }
+        HeightmapFormat::Asc | HeightmapFormat::Xyz => {
+            return Err(JdError::new(ErrorCode::E_FORMAT_UNSUPPORTED, "ASC / XYZ exports are write-only here")
+                .next("Re-export as TIFF or EXR to round-trip, or import the ASC through a GIS tool's GeoTIFF."));
+        }
         HeightmapFormat::RawR32 => fs::read(path)?
             .as_chunks::<4>()
             .0
@@ -500,6 +554,89 @@ fn dequantise(q: &[u16], lo: f32, hi: f32) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn asc_and_xyz_write_plain_text_grids_with_the_georeference() {
+        let mut h = Heightfield::new(4, 3, 4, 0).expect("hf");
+        h.fill_with(|x, y| (x + 10 * y) as f32);
+        let dir = tempfile::tempdir().expect("tmp");
+        let geo = GeoRef {
+            origin: [1000.0, 2000.0],
+            spacing: [5.0, 5.0],
+            crs: None,
+        };
+        let asc = dir.path().join("g.asc");
+        export_heightmap_geo(
+            &h,
+            &asc,
+            &ExportOptions {
+                format: HeightmapFormat::Asc,
+                flip_y: None,
+                range_m: None,
+                georeference: true,
+            },
+            Some(&geo),
+        )
+        .expect("asc");
+        let text = std::fs::read_to_string(&asc).expect("read");
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(
+            &lines[..6],
+            &[
+                "ncols 4",
+                "nrows 3",
+                "xllcorner 1000",
+                "yllcorner 2000",
+                "cellsize 5",
+                "NODATA_value -9999"
+            ]
+        );
+        assert_eq!(
+            lines[6], "20 21 22 23",
+            "the north row (field row 2) comes first"
+        );
+        assert_eq!(lines[8], "0 1 2 3");
+        let xyz = dir.path().join("g.xyz");
+        export_heightmap_geo(
+            &h,
+            &xyz,
+            &ExportOptions {
+                format: HeightmapFormat::Xyz,
+                flip_y: None,
+                range_m: None,
+                georeference: true,
+            },
+            Some(&geo),
+        )
+        .expect("xyz");
+        let first = std::fs::read_to_string(&xyz)
+            .expect("read")
+            .lines()
+            .next()
+            .expect("line")
+            .to_owned();
+        assert_eq!(first, "1002.5 2002.5 0", "sample centres in world metres");
+        let aniso = GeoRef {
+            origin: [0.0, 0.0],
+            spacing: [5.0, 2.0],
+            crs: None,
+        };
+        assert!(
+            export_heightmap_geo(
+                &h,
+                &asc,
+                &ExportOptions {
+                    format: HeightmapFormat::Asc,
+                    flip_y: None,
+                    range_m: None,
+                    georeference: true
+                },
+                Some(&aniso)
+            )
+            .is_err(),
+            "ASC needs square cells"
+        );
+    }
 
     #[test]
     fn geotiff_export_writes_scale_tiepoint_and_epsg_keys_north_up() {

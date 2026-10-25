@@ -1826,13 +1826,7 @@ pub mod graph {
                 });
                 let opts = jd_terrain::ExportOptions { range_m: Some(range_m), ..p.options.clone() };
                 let geo = jd_terrain::GeoRef { origin: world.origin, spacing: world.spacing_m(), crs: world.crs.clone() };
-                let ext = match p.options.format {
-                    jd_terrain::HeightmapFormat::Exr => "exr",
-                    jd_terrain::HeightmapFormat::Png16 => "png",
-                    jd_terrain::HeightmapFormat::RawR16 => "r16",
-                    jd_terrain::HeightmapFormat::RawR32 => "r32",
-                    jd_terrain::HeightmapFormat::Tiff32 => "tif",
-                };
+                let ext = p.options.format.extension();
                 let width = (p.frames - 1).to_string().len().max(4);
                 let mut frames = Vec::with_capacity(fields.len());
                 for (k, ((time, hf), (min, max, mean))) in fields.iter().zip(&per).enumerate() {

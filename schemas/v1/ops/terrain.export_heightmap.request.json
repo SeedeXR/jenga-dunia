@@ -78,6 +78,16 @@
           "description": "TIFF, single 32-bit float sample per pixel (GIS and DCC tools read it directly). Exact.",
           "type": "string",
           "const": "tiff32"
+        },
+        {
+          "description": "ESRI ASCII grid (`.asc`): a six-line header (ncols, nrows, xllcorner, yllcorner, cellsize,\nNODATA_value) then rows north to south — GIS tools and World Machine read it. Square cells\nonly; the cell size and corner come from the georeference when given, else 1 m at (0, 0).",
+          "type": "string",
+          "const": "asc"
+        },
+        {
+          "description": "XYZ points (`.xyz`): one `x y z` line per sample in metres (the georeference's origin and\nspacing when given, else cells of 1 m from (0, 0)), row 0 first. Exact, large.",
+          "type": "string",
+          "const": "xyz"
         }
       ]
     }

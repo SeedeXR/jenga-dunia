@@ -358,7 +358,35 @@ pub fn export_profile_with(
             EngineProfile::Unity => loss.push("roughness: a Unity Terrain Layer takes smoothness (= 1 − roughness, listed) through its mask map's alpha, not a scalar".to_owned()),
             EngineProfile::Unreal => loss.push("roughness: the Landscape material must expose a roughness input per layer; the scalar is listed, not applied".to_owned()),
         }
-        let manifest = serde_json::json!({ "engine": match profile { EngineProfile::Unity => "unity", EngineProfile::Unreal => "unreal" }, "layers": layers, "loss": loss });
+        // Packed splat maps: four weightmaps per RGBA PNG in layer order (Unity's alphamap, Unreal's
+        // weight-blended layer packs), named splat_<k>.png with the layer names in the manifest.
+        let mut splats = Vec::new();
+        let weights: Vec<(&str, &Heightfield)> = materials
+            .iter()
+            .filter_map(|m| m.mask.map(|f| (m.name.as_str(), f)))
+            .collect();
+        for (k, chunk) in weights.chunks(4).enumerate() {
+            let mut img = image::RgbaImage::new(w, h);
+            for y in 0..h {
+                for x in 0..w {
+                    let mut px = [0u8; 4];
+                    for (c, (_, f)) in chunk.iter().enumerate() {
+                        px[c] = (f.get(x, y).clamp(0.0, 1.0) * 255.0).round() as u8;
+                    }
+                    img.put_pixel(x, h - 1 - y, image::Rgba(px));
+                }
+            }
+            let file = format!("splat_{k}.png");
+            img.save(dir.join(&file)).map_err(|e| {
+                JdError::new(
+                    jd_types::ErrorCode::E_INTERNAL,
+                    format!("PNG write failed: {e}"),
+                )
+            })?;
+            files.push(file.clone());
+            splats.push(serde_json::json!({ "file": file, "channels": chunk.iter().map(|(n, _)| *n).collect::<Vec<_>>() }));
+        }
+        let manifest = serde_json::json!({ "engine": match profile { EngineProfile::Unity => "unity", EngineProfile::Unreal => "unreal" }, "layers": layers, "splatmaps": splats, "loss": loss });
         std::fs::write(
             dir.join("materials.json"),
             serde_json::to_vec_pretty(&manifest)?,
@@ -383,7 +411,7 @@ pub fn export_profile_with(
     };
     let mut readme = readme(profile, w, h, &settings, masks, &notes);
     if !materials.is_empty() {
-        readme.push_str("\nMaterials: `materials.json` lists one entry per layer of the material stack (weightmap, albedo_srgb, roughness/smoothness). Lost in translation:\n");
+        readme.push_str("\nMaterials: `materials.json` lists one entry per layer of the material stack (weightmap, albedo_srgb, roughness/smoothness, emissive) and the RGBA-packed `splat_<k>.png` maps (four layers per image, in order). Lost in translation:\n");
         for l in &loss {
             readme.push_str(&format!("- {l}\n"));
         }
@@ -554,6 +582,11 @@ mod tests {
         .expect("json");
         assert_eq!(manifest["engine"], "unity");
         assert_eq!(manifest["layers"][1]["weightmap"], "weight_snow.png");
+        assert_eq!(
+            manifest["splatmaps"][0]["channels"][0], "snow",
+            "the masked layers are packed four per RGBA splat map"
+        );
+        assert!(dir.path().join("u/splat_0.png").exists());
         assert!(manifest["layers"][0]["weightmap"].is_null());
         assert!((manifest["layers"][1]["smoothness"].as_f64().expect("s") - 0.55).abs() < 1e-6);
         assert!(

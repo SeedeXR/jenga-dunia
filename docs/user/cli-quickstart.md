@@ -1191,7 +1191,16 @@ What this proves: the profile's heightmap reaches Unreal as 16-bit grayscale (`T
 
 The acceptance scenario runs this check when an Unreal engine is installed under `/Users/Shared/Epic Games` (and the Unity check when a Unity editor is found) and marks its item 13 from the reports; without them it stays PARTIAL.
 
-`terrain.export_profile` writes one folder an engine importer can take as-is: **Unreal** gets a 16-bit PNG heightmap with row 0 = north, one 8-bit grayscale weightmap per mask layer at the same resolution, and a README with the Landscape numbers computed from the data — Z scale = (max − min) × 100 / 512 (201.771 here for 52…1085 m) and the Z location that puts mid-grey at the mid height; **Unity** gets `heightmap.r16` (16-bit little-endian, row 0 = south, so *Flip Vertically: off*, Byte Order *Windows*), the weightmaps, and the Terrain Height (1033.07 m) plus the y offset (51.98 m). Sizes an engine does not like are reported as `W_ENGINE_SIZE` (Unity wants 2ⁿ+1 squares, Unreal 1009/2017/4033/8129 — use the world presets). The engine-side steps follow the Unity 6 manual and the Unreal 5 Landscape guide but are **UNVERIFIED** until someone imports once; the README says so.
+`terrain.export_profile` writes one folder an engine importer can take as-is (plus `splat_<k>.png`: the material masks packed four per RGBA image, in layer order, for Unity's alphamaps and Unreal weight packs — `materials.json` lists which layer sits in which channel): **Unreal** gets a 16-bit PNG heightmap with row 0 = north, one 8-bit grayscale weightmap per mask layer at the same resolution, and a README with the Landscape numbers computed from the data — Z scale = (max − min) × 100 / 512 (201.771 here for 52…1085 m) and the Z location that puts mid-grey at the mid height; **Unity** gets `heightmap.r16` (16-bit little-endian, row 0 = south, so *Flip Vertically: off*, Byte Order *Windows*), the weightmaps, and the Terrain Height (1033.07 m) plus the y offset (51.98 m). Sizes an engine does not like are reported as `W_ENGINE_SIZE` (Unity wants 2ⁿ+1 squares, Unreal 1009/2017/4033/8129 — use the world presets). The engine-side steps follow the Unity 6 manual and the Unreal 5 Landscape guide but are **UNVERIFIED** until someone imports once; the README says so.
+
+### GIS text formats: ASC and XYZ
+
+```
+$ jd op terrain.export_heightmap --project Hills.jdproj --params '{"layer":"height","path":"hills.asc","format":"asc"}'
+$ jd op terrain.export_heightmap --project Hills.jdproj --params '{"layer":"height","path":"hills.xyz","format":"xyz"}'
+```
+
+`asc` writes an ESRI ASCII grid — the six-line header (`ncols`, `nrows`, `xllcorner`, `yllcorner`, `cellsize`, `NODATA_value`) and the rows north to south — which QGIS, GDAL and World Machine read as-is; it needs square cells, and takes the corner and cell size from the world's georeference when the project has one (else 1 m cells from 0, 0). `xyz` writes one `x y z` line per sample at its centre in world metres, row 0 (south) first. Both are exact and large (text). Unit test: a 4 × 3 field with a 5 m georeference writes the header, the north row first, and sample centres at half a cell; anisotropic cells are refused for ASC.
 
 ### Tiled engine export
 

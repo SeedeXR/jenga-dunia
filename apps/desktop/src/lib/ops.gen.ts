@@ -1372,7 +1372,7 @@ export type SkyPreviewResult = {
   "png_base64": string;
 };
 
-export type HeightmapFormat = "exr" | "png16" | "raw_r16" | "raw_r32" | "tiff32";
+export type HeightmapFormat = "exr" | "png16" | "raw_r16" | "raw_r32" | "tiff32" | "asc" | "xyz";
 
 export type TerrainExportHeightmapRequest = {
   /** Layer name. */
