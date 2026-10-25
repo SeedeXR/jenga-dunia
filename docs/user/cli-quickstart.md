@@ -1254,7 +1254,7 @@ $ jd op graph.add_node --project K.jdproj --save \
     --params '{"kind":"jd.input.heightmap@1","params":{"path":"srtm_tile.tif"}}'
 ```
 
-The input node reads from the project's `assets/` only (no absolute paths, no `..`), accepts PNG 16-bit, EXR, TIFF (f32/u16/u8) and headerless RAW (`size_px` required), maps quantised files through `range_m`, and resamples bilinearly onto the world grid. Wire it to filters, erosion or an output like any generator.
+The input node reads from the project's `assets/` only (no absolute paths, no `..`), accepts PNG 16-bit, EXR, TIFF (f32/u16/u8) and headerless RAW (`size_px` required), maps quantised files through `range_m`, and resamples bilinearly onto the world grid. A heightmap Jenga Dunia exported needs none of that: `project.import_asset` copies its `.jd-height.json` sidecar along, and the node takes the range, size and row order from it (your own `range_m` / `size_px` still win; a sidecar whose size does not match the file is refused). Tests: PNG16 and r16 exports re-import to the exported heights at default options; export → import → node preview returns the exported range. Wire it to filters, erosion or an output like any generator.
 
 **GeoTIFF DEMs.** `project.import_asset` reports what a GeoTIFF says about itself — `geo.pixel_scale` (ground size of a pixel in the file's CRS units), `geo.tiepoint` (raster → model coordinates) and `geo.nodata` (`GDAL_NODATA`) — so you can size the world to match (64 px × 30 m = 1 920 m here):
 

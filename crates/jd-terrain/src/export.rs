@@ -408,7 +408,21 @@ pub fn export_heightmap_geo(
     })
 }
 
-fn sidecar_path(path: &Path) -> PathBuf {
+/// The sidecar next to `path` when there is one (`None` for files Jenga Dunia did not write).
+pub(crate) fn read_sidecar(path: &Path) -> JdResult<Option<Sidecar>> {
+    let p = sidecar_path(path);
+    if !p.exists() {
+        return Ok(None);
+    }
+    let bytes = fs::read(&p)?;
+    serde_json::from_slice(&bytes).map(Some).map_err(|e| {
+        JdError::new(ErrorCode::E_FORMAT_CORRUPT, format!("unreadable sidecar {}: {e}", p.display()))
+            .next("Fix or delete the .jd-height.json next to the file, or pass range_m / size_px yourself.")
+    })
+}
+
+/// `<file>.jd-height.json`.
+pub fn sidecar_path(path: &Path) -> PathBuf {
     let mut s = path.as_os_str().to_owned();
     s.push(".jd-height.json");
     PathBuf::from(s)

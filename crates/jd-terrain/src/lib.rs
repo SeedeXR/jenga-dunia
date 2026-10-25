@@ -56,6 +56,7 @@ pub use decimate::decimate;
 pub use droplet::{DropletParams, DropletResult, droplet_erode};
 pub use export::{
     ExportOptions, GeoRef, HeightmapFormat, epsg_code, export_heightmap, export_heightmap_geo,
+    sidecar_path,
 };
 pub use flow::{
     FlowMethod, carve_rivers, carve_rivers_sourced, carve_rivers_with, d8_receivers,

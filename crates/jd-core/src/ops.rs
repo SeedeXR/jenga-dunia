@@ -1020,6 +1020,11 @@ pub mod builtin {
                 }
                 std::fs::create_dir_all(dest.parent().unwrap_or(&dest))?;
                 let bytes = std::fs::copy(&a.path, &dest)?;
+                // A heightmap Jenga Dunia exported travels with its sidecar (range, size, row order).
+                let side = jd_terrain::sidecar_path(&a.path);
+                if side.is_file() {
+                    std::fs::copy(&side, jd_terrain::sidecar_path(&dest))?;
+                }
                 // Informational: a corrupt TIFF still imports (the input node reports the error later).
                 let geo = jd_terrain::geotiff_tags(&dest).ok().flatten();
                 Ok((ImportedAsset { name, bytes, geo }, Vec::new()))
@@ -3497,6 +3502,63 @@ pub mod graph {
                 .find(|n| n["id"] == noise_id)
                 .expect("noise");
             assert_eq!(moved["ui"]["position"], serde_json::json!([10.0, 20.0]));
+        }
+
+        #[test]
+        fn our_own_png16_reimports_through_the_heightmap_node_without_a_range() {
+            // The desktop flow: export PNG16, import it as an asset (the sidecar travels with it),
+            // add a heightmap node with only the path — it evaluates to the exported heights.
+            let reg = Registry::with_builtins();
+            let dir = tempfile::tempdir().expect("tmp");
+            let ctx = Context::default();
+            call(
+                &reg,
+                &ctx,
+                "project.create",
+                serde_json::json!({ "path": dir.path().join("r.jdproj"), "name": "R" }),
+            );
+            let eval = call(&reg, &ctx, "graph.evaluate", serde_json::json!({}));
+            assert_eq!(eval.status, crate::envelope::Status::Ok, "{:?}", eval.error);
+            let png = dir.path().join("h.png");
+            let ex = call(
+                &reg,
+                &ctx,
+                "terrain.export_heightmap",
+                serde_json::json!({ "layer": "height", "path": png, "format": "png16" }),
+            );
+            let range = ex.result.as_ref().expect("export")["range_m"].clone();
+            let r = call(
+                &reg,
+                &ctx,
+                "project.import_asset",
+                serde_json::json!({ "path": png }),
+            );
+            assert_eq!(r.status, crate::envelope::Status::Ok, "{:?}", r.error);
+            assert!(
+                dir.path()
+                    .join("r.jdproj/assets/h.png.jd-height.json")
+                    .is_file(),
+                "sidecar copied"
+            );
+            let id = call(&reg, &ctx, "graph.add_node", serde_json::json!({ "kind": "jd.input.heightmap@1", "params": { "path": "h.png" } })).result.expect("add")["id"].clone();
+            let pv = call(
+                &reg,
+                &ctx,
+                "graph.node_preview",
+                serde_json::json!({ "id": id, "port": "out", "lod": 0 }),
+            );
+            assert_eq!(pv.status, crate::envelope::Status::Ok, "{:?}", pv.error);
+            let pv = pv.result.expect("preview");
+            let (lo, hi) = (
+                range[0].as_f64().expect("lo"),
+                range[1].as_f64().expect("hi"),
+            );
+            let tol = (hi - lo) * 0.01;
+            assert!(
+                (pv["min"].as_f64().expect("min") - lo).abs() < tol
+                    && (pv["max"].as_f64().expect("max") - hi).abs() < tol,
+                "{pv:?} vs {range}"
+            );
         }
 
         #[test]

@@ -1503,7 +1503,7 @@ pub fn register_all(r: &mut Registry) {
     ).with_memory(20.0));
     r.register(NodeDef::new::<InputParams, _>(
         "jd.input.heightmap@1",
-        "Load a heightmap from the project's assets/ (PNG 16-bit, EXR, TIFF, RAW, or a binary FBX mesh rasterised over its footprint) and resample it onto the world grid — a GeoTIFF with a tie point is placed by it and reprojected when its EPSG code differs from the world's CRS (`georeference: false` stretches instead)",
+        "Load a heightmap from the project's assets/ (PNG 16-bit, EXR, TIFF, RAW, or a binary FBX mesh rasterised over its footprint) and resample it onto the world grid — a file Jenga Dunia exported brings its range, size and row order from its `.jd-height.json` sidecar; a GeoTIFF with a tie point is placed by it and reprojected when its EPSG code differs from the world's CRS (`georeference: false` stretches instead)",
         vec![],
         vec![port("out", PortType::Heightfield, false)],
         |ctx, p, _| {

@@ -181,7 +181,38 @@ pub fn read_foreign_with_tags(
     path: &Path,
     opts: &ForeignImport,
 ) -> JdResult<(Vec<f32>, u32, u32, Option<GeoTags>)> {
+    // A heightmap Jenga Dunia exported carries a sidecar with its range, size and row order:
+    // use it, so our own PNG16 / r16 files re-import without typing the range.
+    let side = crate::export::read_sidecar(path)?;
+    let filled;
+    let opts = match &side {
+        Some(sc) => {
+            filled = ForeignImport {
+                range_m: opts.range_m.or(Some(sc.range_m)),
+                size_px: opts.size_px.or(Some(sc.size_px)),
+                ..opts.clone()
+            };
+            &filled
+        }
+        None => opts,
+    };
     let (mut data, w, h) = decode(path, opts)?;
+    if let Some(sc) = &side {
+        if sc.size_px != [w, h] {
+            return Err(corrupt(
+                "sidecar",
+                format!(
+                    "says {}×{} but the file is {w}×{h}",
+                    sc.size_px[0], sc.size_px[1]
+                ),
+            ));
+        }
+        // Row 0 of a RAW export is south (flip_y false); hand back north-first rows like every
+        // other file so the default north_up reads it the right way round.
+        if opts.north_up && !sc.flip_y {
+            data = data.chunks(w as usize).rev().flatten().copied().collect();
+        }
+    }
     let tags = geotiff_tags(path)?;
     let nodata = opts.nodata.or_else(|| tags.as_ref().and_then(|t| t.nodata));
     fill_nodata(&mut data, nodata)?;
@@ -567,6 +598,51 @@ mod tests {
             halo: 2,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn our_own_png16_and_r16_reimport_from_their_sidecars() {
+        // A field with distinct north/south and east/west: exported as PNG16 (rows flipped) and
+        // r16 (rows not flipped), each re-imported with default options lands where it was.
+        let dir = tempfile::tempdir().expect("tmp");
+        let mut hf = Heightfield::new(32, 32, 64, 2).expect("hf");
+        hf.fill_with(|x, y| 100.0 + 3.0 * x as f32 + 7.0 * y as f32);
+        for (name, format) in [
+            ("h.png", crate::export::HeightmapFormat::Png16),
+            ("h.r16", crate::export::HeightmapFormat::RawR16),
+        ] {
+            let p = dir.path().join(name);
+            let opts = crate::export::ExportOptions {
+                format,
+                flip_y: None,
+                range_m: None,
+                georeference: true,
+            };
+            crate::export::export_heightmap(&hf, &p, &opts).expect("export");
+            let (data, w, h) = read_foreign(
+                &p,
+                &ForeignImport {
+                    north_up: true,
+                    ..Default::default()
+                },
+            )
+            .expect(name);
+            let back = resample_to_world(&data, w, h, true, &world(32)).expect("resample");
+            for (x, y) in [(0, 0), (31, 0), (0, 31), (31, 31), (12, 20)] {
+                assert!(
+                    (back.get(x, y) - hf.get(x, y)).abs() < 0.01,
+                    "{name} ({x},{y}): {} vs {}",
+                    back.get(x, y),
+                    hf.get(x, y)
+                );
+            }
+        }
+        // A sidecar that does not describe the file is refused, not trusted.
+        let p = dir.path().join("h.png");
+        let side = crate::export::sidecar_path(&p);
+        let text = std::fs::read_to_string(&side).expect("sidecar");
+        std::fs::write(&side, text.replacen("32", "33", 1)).expect("write");
+        assert!(read_foreign(&p, &ForeignImport::default()).is_err());
     }
 
     #[test]
