@@ -97,6 +97,8 @@ interface State {
   setTime: (time: number) => void;
   graphKinds: GraphKind[];
   lastEval: EvalReport | null;
+  /** Depth preview (metres) of a published `lakes` layer (`jd.hydrology.fill@1`), drawn as standing water; null when none. */
+  lakesPreview: Preview | null;
   /** Re-evaluate at preview LOD after every graph change (World Creator-style live preview). */
   live: boolean;
   setLive: (on: boolean) => void;
@@ -305,6 +307,17 @@ export const useStore = create<State>((set, get) => {
     try {
       const { preview, bytes, ms } = await layerPreview(layer.layer, lod);
       set({ preview, previewStats: { bytes, ms, lod } });
+      // Standing water: a published layer named `lakes` (or `lakes#lod<N>` from a live preview) is
+      // the fill node's depth map; shown as water lying on the terrain wherever it is above zero.
+      const names = Object.keys(get().lastEval?.layers ?? {});
+      const lakes = names.find((n) => n.split("#")[0] === "lakes" && n.includes("#") === layer.layer.includes("#")) ?? names.find((n) => n.split("#")[0] === "lakes");
+      if (lakes) {
+        try {
+          set({ lakesPreview: (await layerPreview(lakes, lod)).preview });
+        } catch (e) {
+          logFailure("layer_preview (lakes)", e);
+        }
+      } else if (get().lakesPreview) set({ lakesPreview: null });
       await refreshColor(lod);
       await refreshMaps();
     } catch (e) {
@@ -589,6 +602,7 @@ export const useStore = create<State>((set, get) => {
     project: null,
     layer: null,
     preview: null,
+    lakesPreview: null,
     maps: null,
     mapsMs: 0,
     waves: null,

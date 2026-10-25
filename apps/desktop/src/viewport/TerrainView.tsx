@@ -16,6 +16,8 @@ export interface ViewportInfo {
   sun?: { azimuthDeg: number; elevationDeg: number };
   /** Scatter instances drawn, when any. */
   instances?: number;
+  /** Cells under standing water from a `lakes` layer, when any are drawn. */
+  lakes?: number;
   /** Baked material maps applied (texture size), when any. */
   pbrPx?: [number, number];
   /** Wind sea being animated: significant height and peak wavelength, metres. */
@@ -44,6 +46,8 @@ interface Props {
   grid?: { cells: number; selected: string[]; onSelect: (cells: [number, number][], op: "add" | "remove" | "toggle") => void } | null;
   /** Draw a translucent water plane at this height (metres); null hides it. */
   seaLevelM?: number | null;
+  /** Lake depths (metres, same grid as `preview`): water drawn on the terrain where the depth is above zero. */
+  lakes?: Preview | null;
   /** Water clarity and tint (from the sea-level node); defaults to open-ocean water. */
   water?: WaterLook | null;
   /** Wind sea (`ocean.waves` for the sea-level node's wind): the sea surface is animated as a Gerstner sum of its components. */
@@ -285,6 +289,55 @@ export function buildSeaGeometry(p: Preview, extent: [number, number], seaM: num
   return geo;
 }
 
+/**
+ * Standing water from a depth map: each vertex sits `depth` above the terrain where the depth is
+ * positive and hides under it elsewhere, coloured like the sea by depth, so one mesh shows every
+ * lake the fill node found (World Creator's lakes drawn as water). Returns null when nothing is
+ * wet or the grids differ (a live preview mid-swap).
+ */
+export function buildLakesGeometry(terrain: Preview, lakes: Preview, extent: [number, number], look: WaterLook = DEFAULT_WATER): { geometry: THREE.BufferGeometry; cells: number } | null {
+  if (terrain.width !== lakes.width || terrain.height !== lakes.height) return null;
+  const { width, height } = terrain;
+  const geo = new THREE.PlaneGeometry(extent[0], extent[1], width - 1, height - 1);
+  geo.rotateX(-Math.PI / 2);
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  const colors = new Float32Array(pos.count * 4);
+  const tRange = terrain.max - terrain.min || 1;
+  const lRange = lakes.max - lakes.min || 1;
+  const c = new THREE.Color();
+  let cells = 0;
+  for (let j = 0; j < height; j++) {
+    for (let i = 0; i < width; i++) {
+      const vi = j * width + i;
+      const src = (height - 1 - j) * width + i;
+      const ground = terrain.min + ((terrain.data[src] ?? 0) / 65535) * tRange;
+      const depth = lakes.min + ((lakes.data[src] ?? 0) / 65535) * lRange;
+      let alpha = 0;
+      let y = ground - tRange * 0.01 - 1; // dry: tucked under the terrain
+      if (depth > 0.05) {
+        y = ground + depth;
+        alpha = waterColour(depth, look, c).alpha;
+        cells++;
+      } else {
+        waterColour(0, look, c);
+      }
+      pos.setY(vi, y);
+      colors[vi * 4] = c.r;
+      colors[vi * 4 + 1] = c.g;
+      colors[vi * 4 + 2] = c.b;
+      colors[vi * 4 + 3] = alpha;
+    }
+  }
+  if (cells === 0) {
+    geo.dispose();
+    return null;
+  }
+  pos.needsUpdate = true;
+  geo.setAttribute("color", new THREE.BufferAttribute(colors, 4));
+  geo.computeVertexNormals();
+  return { geometry: geo, cells };
+}
+
 interface SceneState {
   renderer: WebGPURenderer;
   scene: THREE.Scene;
@@ -301,6 +354,9 @@ interface SceneState {
   backend: ViewportInfo["backend"];
   triangles: number;
   sea: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | null;
+  /** Standing water from a `lakes` depth layer, and how many cells it covers. */
+  lakes: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | null;
+  lakeCells: number;
   /** Rest positions of the sea vertices and the wind sea displacing them each frame. */
   seaWaves: { base: Float32Array; components: WaveComponent[]; heightM: number; lengthM: number } | null;
   sun: THREE.DirectionalLight;
@@ -335,6 +391,7 @@ function infoOf(s: SceneState): ViewportInfo {
     ...(s.sea && s.seaWaves ? { waves: { heightM: s.seaWaves.heightM, lengthM: s.seaWaves.lengthM } } : {}),
     sun: s.sunDeg,
     ...(s.instances ? { instances: s.instances.count } : {}),
+    ...(s.lakes ? { lakes: s.lakeCells } : {}),
     ...(s.pbrPx ? { pbrPx: s.pbrPx } : {}),
     ...(s.skyPx ? { skyPx: s.skyPx } : {}),
     ...(s.fogAmount > 0 ? { fog: s.fogAmount } : {}),
@@ -371,7 +428,7 @@ function sampleHeight(p: Preview, ext: [number, number], u: number, v: number): 
   return p.min + ((p.data[y * p.width + x] ?? 0) / 65535) * (p.max - p.min);
 }
 
-export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = null, seaLevelM = null, water = null, waves = null, sky = null, horizon = null, sun, overlay = null, overlayName = null, instances = null, maps = null, fog }: Props) {
+export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = null, seaLevelM = null, lakes = null, water = null, waves = null, sky = null, horizon = null, sun, overlay = null, overlayName = null, instances = null, maps = null, fog }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<SceneState | null>(null);
   // Latest sculpt props without re-creating the renderer effect.
@@ -444,6 +501,8 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = n
       backend: "none",
       triangles: 0,
       sea: null,
+      lakes: null,
+      lakeCells: 0,
       seaWaves: null,
       sun,
       hemi,
@@ -900,6 +959,30 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = n
     onInfo?.(infoOf(s));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seaLevelM, water?.visibilityM, water?.tint?.[0], water?.tint?.[1], water?.tint?.[2], water?.breakingDepthM, waves, extentM, preview, onInfo]);
+
+  // Lakes: standing water from the fill node's depth layer, rebuilt with the preview it lies on.
+  useEffect(() => {
+    const s = sceneRef.current;
+    if (!s) return;
+    if (s.lakes) {
+      s.scene.remove(s.lakes);
+      s.lakes.geometry.dispose();
+      s.lakes.material.dispose();
+      s.lakes = null;
+      s.lakeCells = 0;
+    }
+    if (lakes && extentM && preview) {
+      const built = buildLakesGeometry(preview, lakes, extentM, water ?? DEFAULT_WATER);
+      if (built) {
+        const mat = new THREE.MeshStandardMaterial({ vertexColors: true, transparent: true, roughness: 0.2, metalness: 0.05, depthWrite: false });
+        s.lakes = new THREE.Mesh(built.geometry, mat);
+        s.lakeCells = built.cells;
+        s.scene.add(s.lakes);
+      }
+    }
+    onInfo?.(infoOf(s));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lakes, preview, extentM, water?.visibilityM, water?.tint?.[0], water?.tint?.[1], water?.tint?.[2], onInfo]);
 
   // Scatter instances: one InstancedMesh of cones in the terrain frame (x = u − extent/2, z = extent/2 − v),
   // yaw and a 0.75..1.25 scale from `r` exactly as the GLB export writes them.

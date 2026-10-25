@@ -142,6 +142,8 @@ Blend operations are nodes like everything else: **min**, **max** and **lerp** (
 
 ## Hydrology layers in the viewport
 
+**Lakes as water.** Publish the fill node's `lakes` output (`jd.hydrology.fill@1` → a `jd.output.height@1` whose `layer` is `lakes`) and the viewport draws standing water on the terrain wherever that depth is above zero — every basin the fill found, each at its own level, coloured by depth like the sea; the header reads `lakes N cells`. Nothing to switch on: the preview is fetched beside the height preview whenever a `lakes` layer exists. UI-driven test: `apps/desktop/e2e/lakes.spec.ts`.
+
 ![Rivers project: carved terrain with the layer picker showing height, rivers and wetness](images/desktop-rivers.png)
 
 *Native capture (v0.0.1): a `noise → rivers → height` graph with two extra outputs (`rivers`, `wetness`) built from the CLI (see the hydrology recipe in the CLI quickstart) and opened in the app. The header's **layer** picker lists every published layer; the viewport shows the carved terrain, and picking `rivers` or `wetness` shows those masks with their own stats.*
