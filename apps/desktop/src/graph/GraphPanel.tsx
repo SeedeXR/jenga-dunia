@@ -226,6 +226,19 @@ export const PRESETS: Record<string, { name: string; params: Record<string, unkn
     { name: "rice paddies", params: { step_m: 5, softness: 0.1 } },
     { name: "mesa caps", params: { step_m: 40, softness: 0.05 } },
   ],
+  "jd.shape.primitive@1": [
+    { name: "table plateau", params: { shape: "plateau", ratio: 0.85, falloff_m: 20, op: "max", opacity: 1 } },
+    { name: "mesa (steep sides)", params: { shape: "plateau", ratio: 0.6, falloff_m: 5, op: "max", opacity: 1 } },
+    { name: "volcano cone", params: { shape: "crater", ratio: 0.3, floor: -0.4, op: "max", opacity: 1 } },
+  ],
+  "jd.shape.polygon@1": [
+    { name: "building pad (flatten)", params: { op: "lerp", falloff_m: 8, opacity: 1 } },
+    { name: "raised field", params: { op: "add", falloff_m: 15, opacity: 1 } },
+  ],
+  "jd.erosion.coastal@1": [
+    { name: "sandy beach", params: { band_m: 6, iterations: 120, rate_m: 0.5, drift: 0.3 } },
+    { name: "cliff coast", params: { band_m: 25, iterations: 60, rate_m: 1.5, drift: 0.1 } },
+  ],
   "jd.erosion.karst@1": [
     { name: "doline plain", params: { density_per_km2: 3, profile: "bowl" } },
     { name: "collapse field", params: { density_per_km2: 6, profile: "collapse", depth_m: [6, 25] } },

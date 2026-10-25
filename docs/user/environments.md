@@ -78,6 +78,43 @@ Full runs: [Wind: dunes from a sand sheet](cli-quickstart.md#wind-dunes-from-a-s
 
 **Not modelled:** grain-size sorting in dunes, flash-flood timing, salt-crust growth, desert varnish ageing and dust storms.
 
+## Plateaus, mesas and flat land
+
+Flat land is not "no noise": a plateau has a level top, a shoulder and a slope, and the surface of
+the top still carries small relief. Three tools make it, and they stack.
+
+| Landform | Nodes | Notes |
+|---|---|---|
+| Table plateau, mesa, butte | `jd.shape.primitive@1` (shape `plateau`, `op: max`) | `ratio` is the flat share of the radius (0.85 = a wide table, 0.6 = a steep-sided mesa); `falloff_m` softens the rim. Preset: *table plateau*, *mesa (steep sides)*. |
+| Stepped country, canyon benches | `jd.filter.terrace@1` → `jd.terrain.strata@1` → thermal / stream-power erosion | Hard caps hold cliffs while soft beds retreat (see "Sand deserts"). Preset: *mesa caps*. |
+| A flattened pad of any outline | `jd.shape.polygon@1` (`op: lerp`) | A town site, an airfield, a terraced field: the outline takes one height, fading over `falloff_m`. Preset: *building pad (flatten)*. |
+| Grid levelling by hand | the desktop **Grid** tool | Select cells and *Set height*: one square stamp per operation. |
+| Low-relief plains | `jd.noise.fbm@1` with a small `height_range_m`, or `jd.math.curve@1` (gamma > 1) on a mountain field | Curves flatten the lowlands and keep the peaks. |
+
+Keep some texture on the top: a `jd.noise.fbm@1` of a few metres added after the plateau, or a
+material `detail` tile, keeps a mesa from reading as a CAD extrusion.
+
+## Coasts and beaches
+
+A beach is a shelf the waves cut and a sheet of sand they leave; the sand is soft because it is
+fine and dry above the swash. The recipe:
+
+| Step | Nodes | Notes |
+|---|---|---|
+| Set the sea | `jd.hydrology.sea_level@1` (`level_m`) | Border-connected water becomes `ocean`; `exposure` says where waves arrive. |
+| Cut the shore | `jd.erosion.coastal@1` with the sea node's `exposure` on its input | `band_m` is how high above the sea the waves reach (a beach: 4–8 m; a cliff coast: 20–30 m), `rate_m` the cut per iteration, `drift` the share carried alongshore. Presets: *sandy beach*, *cliff coast*. The `shore` output is the wet band. |
+| Lay the sand | `jd.biome.seabed@1` (sand / rock / mud / reef below the water) and a `jd.biome.classify@1` rule `elevation ≤ sea + band` → `beach` above it | The beach rule sits before the grass rule so the strand stays bare. |
+| Soften it | `jd.erosion.aeolian@1` with the `beach` mask as its `sand` input, a few dozen iterations, the world's wind | Fore-dunes rise just inland of the strand; a `vegetation` field anchors them. |
+| Colour it | a material layer on the `beach` mask: albedo ≈ 0.76 / 0.70 / 0.55, roughness 0.9, `detail` tile 2 m low bump | Wet sand darker: a second layer on the `shore` mask at 0.6 / 0.55 / 0.45. |
+
+Measured on a 2 048 m / 256² noise world (0..500 m) with the sea at 250 m, 45.7 % of it ocean
+(`jd.hydrology.sea_level@1` → `jd.erosion.coastal@1` with the sea node's `exposure`, 2026-10-25):
+the *sandy beach* preset leaves a `shore` band covering 0.27 % of the world after 120 iterations;
+the *cliff coast* preset 0.30 % (a band four times higher cut three times faster wets only a
+little more: exposure, not the band, decides where waves work). Soft sand: the aeolian node needs
+a sand slab comparable to `cell × tan(shadow_deg)` to form fore-dunes — on 8 m cells that is a
+2–3 m sheet, which the beach rule's band provides.
+
 ## Snow-capped mountains
 
 Two nodes make snow, depending on whether you want a quick mask or a season.
