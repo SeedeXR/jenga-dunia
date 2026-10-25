@@ -99,7 +99,7 @@ pub use sim::{
     hydraulic_erode_layered, hydraulic_erode_with, slope_mask, stream_power_erode,
     stream_power_erode_with, thermal_erode, thermal_erode_tiled, thermal_erode_with,
 };
-pub use sky::{Sky, SkyParams, bake_sky_hdri, sky_preview_png};
+pub use sky::{HdriPreview, Sky, SkyParams, bake_sky_hdri, load_hdri_preview, sky_preview_png};
 pub use snowpack::{SnowpackParams, snowpack};
 pub use spline::{SplineMode, SplineParams, apply_spline};
 pub use stamp::{

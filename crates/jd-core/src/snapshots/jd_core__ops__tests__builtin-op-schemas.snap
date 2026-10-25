@@ -9533,6 +9533,87 @@ expression: list
     }
   },
   {
+    "id": "sky.load_hdri",
+    "description": "Read an equirectangular EXR (an HDRI, or `sky.bake`'s output) for the viewport dome: a tonemapped PNG, the brightest texel as a sun direction (azimuth clockwise from north, elevation) and the mean luminance",
+    "scope": "project-read",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "SkyLoadHdri",
+      "description": "`sky.load_hdri` params.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "Equirectangular OpenEXR in the project's assets/ (or an absolute path) — `sky.bake`'s own output, or any 2:1 lat-long HDRI.",
+          "type": "string"
+        },
+        "width": {
+          "description": "Preview width (even, 16..=2048); height is half.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 512
+        },
+        "exposure": {
+          "description": "Exposure applied before tonemapping (the viewport uses 0.15 for its own sky).",
+          "type": "number",
+          "format": "float",
+          "default": 0.15000000596046448
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "SkyHdriResult",
+      "description": "`sky.load_hdri` result.",
+      "type": "object",
+      "properties": {
+        "width": {
+          "description": "Preview width.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "height": {
+          "description": "Preview height.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "png_base64": {
+          "description": "Tonemapped sRGB PNG, base64.",
+          "type": "string"
+        },
+        "sun_azimuth_deg": {
+          "description": "The brightest texel's direction: azimuth clockwise from north, degrees.",
+          "type": "number",
+          "format": "float"
+        },
+        "sun_elevation_deg": {
+          "description": "Its elevation above the horizon, degrees.",
+          "type": "number",
+          "format": "float"
+        },
+        "mean_luminance": {
+          "description": "Mean linear luminance of the map.",
+          "type": "number",
+          "format": "float"
+        }
+      },
+      "required": [
+        "width",
+        "height",
+        "png_base64",
+        "sun_azimuth_deg",
+        "sun_elevation_deg",
+        "mean_luminance"
+      ]
+    }
+  },
+  {
     "id": "sky.preview",
     "description": "The physical sky (Preetham) as a small tonemapped equirectangular PNG for viewports — same model as `sky.bake`, no project needed",
     "scope": "none",

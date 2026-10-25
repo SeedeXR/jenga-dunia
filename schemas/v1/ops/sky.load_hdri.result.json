@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SkyHdriResult",
+  "description": "`sky.load_hdri` result.",
+  "type": "object",
+  "properties": {
+    "width": {
+      "description": "Preview width.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "height": {
+      "description": "Preview height.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "png_base64": {
+      "description": "Tonemapped sRGB PNG, base64.",
+      "type": "string"
+    },
+    "sun_azimuth_deg": {
+      "description": "The brightest texel's direction: azimuth clockwise from north, degrees.",
+      "type": "number",
+      "format": "float"
+    },
+    "sun_elevation_deg": {
+      "description": "Its elevation above the horizon, degrees.",
+      "type": "number",
+      "format": "float"
+    },
+    "mean_luminance": {
+      "description": "Mean linear luminance of the map.",
+      "type": "number",
+      "format": "float"
+    }
+  },
+  "required": [
+    "width",
+    "height",
+    "png_base64",
+    "sun_azimuth_deg",
+    "sun_elevation_deg",
+    "mean_luminance"
+  ]
+}

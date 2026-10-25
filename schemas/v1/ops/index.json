@@ -210,6 +210,11 @@
     "scope": "export"
   },
   {
+    "id": "sky.load_hdri",
+    "description": "Read an equirectangular EXR (an HDRI, or `sky.bake`'s output) for the viewport dome: a tonemapped PNG, the brightest texel as a sun direction (azimuth clockwise from north, elevation) and the mean luminance",
+    "scope": "project-read"
+  },
+  {
     "id": "sky.preview",
     "description": "The physical sky (Preetham) as a small tonemapped equirectangular PNG for viewports — same model as `sky.bake`, no project needed",
     "scope": "none"

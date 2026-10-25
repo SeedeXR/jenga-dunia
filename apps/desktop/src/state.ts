@@ -1,7 +1,7 @@
 // Frontend store: a mirror of what the core reports, never the source of truth (docs/architecture/12-ui-workspace.md).
 import { create } from "zustand";
 import type { Edge, GraphEvaluateResult, GraphListResult, HeightmapFormat, JdOps, JobInfo as JobInfoGen, NodeDefInfo, NodeView, NoiseParams, OceanWavesRequest, OceanWavesResult, OpId, ProjectOpenResult, ProjectSaveResult, ScatterPoint, TerrainStatsResult } from "./lib/ops.gen";
-import { horizonPreview, layerPreview, layerTextures, op, skyPreview, type JdError, type LayerMaps, type Preview, type Response, type Warning } from "./lib/api";
+import { horizonPreview, layerPreview, layerTextures, op, skyPreview, type JdError, type LayerMaps, type Preview, type Response, type Warning, hdriPreview } from "./lib/api";
 import { adaptLodBias } from "./lib/previewLod";
 import type { MaterialSpec, MediaMetadataResult, TerrainMeasureResult } from "./lib/ops.gen";
 
@@ -139,6 +139,10 @@ interface State {
   refreshHorizon: () => Promise<void>;
   /** The physical sky (`sky.preview`) for the viewport dome, re-baked when the sun moves. */
   sky: { bitmap: ImageBitmap; px: [number, number] } | null;
+  /** An imported HDRI on the dome (wins over the physical sky until cleared) and the sun it implies. */
+  hdri: { path: string; bitmap: ImageBitmap; px: [number, number]; sun: { azimuth_deg: number; elevation_deg: number } } | null;
+  loadHdri: (path: string) => Promise<void>;
+  clearHdri: () => void;
   refreshSky: () => Promise<void>;
   /** Scatter preview: instances placed from a 0..1 mask layer and drawn in the viewport; export writes a GLB. */
   scatter: { mask: string | null; spacing_m: number; seed: number; grow: boolean; points: ScatterPoint[] | null };
@@ -717,6 +721,20 @@ export const useStore = create<State>((set, get) => {
       }
     },
     sky: null,
+    hdri: null,
+    loadHdri: async (path) => {
+      const r = await hdriPreview(path).catch((e: unknown) => (logFailure("sky.load_hdri", e), null));
+      const old = get().hdri;
+      if (!r) return log({ op: "sky.load_hdri", schema_version: 1, request_id: "", status: "error", error: { code: "E_INPUT_INVALID", message: `could not read ${path}` } });
+      set({ hdri: { path, bitmap: r.bitmap, px: r.px, sun: r.sun } });
+      old?.bitmap.close();
+      set((st) => ({ log: [...st.log.slice(-199), { ts: Date.now(), level: "info", text: `sky.load_hdri: ok ${r.px[0]}×${r.px[1]} sun ${Math.round(r.sun.elevation_deg)}°/${Math.round(r.sun.azimuth_deg)}° luminance ${r.luminance.toFixed(2)}` }] }));
+    },
+    clearHdri: () => {
+      const old = get().hdri;
+      set({ hdri: null });
+      old?.bitmap.close();
+    },
     refreshSky: async () => {
       const { azimuth_deg, elevation_deg, turbidity, clouds } = get().sun;
       try {

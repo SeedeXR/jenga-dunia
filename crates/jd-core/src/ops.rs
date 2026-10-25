@@ -4046,6 +4046,42 @@ pub mod terrain {
         PathBuf::from("sky.exr")
     }
 
+    /// `sky.load_hdri` params.
+    #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct SkyLoadHdri {
+        /// Equirectangular OpenEXR in the project's assets/ (or an absolute path) — `sky.bake`'s own output, or any 2:1 lat-long HDRI.
+        pub path: PathBuf,
+        /// Preview width (even, 16..=2048); height is half.
+        #[serde(default = "sky_preview_width")]
+        pub width: u32,
+        /// Exposure applied before tonemapping (the viewport uses 0.15 for its own sky).
+        #[serde(default = "hdri_exposure")]
+        pub exposure: f32,
+    }
+    fn sky_preview_width() -> u32 {
+        512
+    }
+    fn hdri_exposure() -> f32 {
+        0.15
+    }
+    /// `sky.load_hdri` result.
+    #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct SkyHdriResult {
+        /// Preview width.
+        pub width: u32,
+        /// Preview height.
+        pub height: u32,
+        /// Tonemapped sRGB PNG, base64.
+        pub png_base64: String,
+        /// The brightest texel's direction: azimuth clockwise from north, degrees.
+        pub sun_azimuth_deg: f32,
+        /// Its elevation above the horizon, degrees.
+        pub sun_elevation_deg: f32,
+        /// Mean linear luminance of the map.
+        pub mean_luminance: f32,
+    }
+
     /// `media.metadata` params.
     #[derive(Debug, Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
@@ -4644,6 +4680,27 @@ pub mod terrain {
                 use base64::Engine as _;
                 let png = jd_terrain::sky_preview_png(&p.sky, p.width)?;
                 Ok((SkyPreviewResult { width: p.width, height: p.width / 2, png_base64: base64::engine::general_purpose::STANDARD.encode(png) }, Vec::new()))
+            },
+        );
+        r.register::<SkyLoadHdri, SkyHdriResult, _>(
+            "sky.load_hdri",
+            "Read an equirectangular EXR (an HDRI, or `sky.bake`'s output) for the viewport dome: a tonemapped PNG, the brightest texel as a sun direction (azimuth clockwise from north, elevation) and the mean luminance",
+            Scope::ProjectRead,
+            |ctx, p| {
+                use base64::Engine as _;
+                let path = if p.path.is_absolute() { p.path.clone() } else { ctx.with_project(|proj| Ok(proj.root().join("assets").join(&p.path)))? };
+                let h = jd_terrain::load_hdri_preview(&path, p.width, p.exposure)?;
+                Ok((
+                    SkyHdriResult {
+                        width: h.width,
+                        height: h.height,
+                        png_base64: base64::engine::general_purpose::STANDARD.encode(&h.png),
+                        sun_azimuth_deg: h.sun_azimuth_deg,
+                        sun_elevation_deg: h.sun_elevation_deg,
+                        mean_luminance: h.mean_luminance,
+                    },
+                    Vec::new(),
+                ))
             },
         );
         r.register::<MediaMetadataParams, MediaMetadataResult, _>(

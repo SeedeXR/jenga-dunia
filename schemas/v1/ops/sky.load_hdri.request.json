@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SkyLoadHdri",
+  "description": "`sky.load_hdri` params.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "Equirectangular OpenEXR in the project's assets/ (or an absolute path) — `sky.bake`'s own output, or any 2:1 lat-long HDRI.",
+      "type": "string"
+    },
+    "width": {
+      "description": "Preview width (even, 16..=2048); height is half.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0,
+      "default": 512
+    },
+    "exposure": {
+      "description": "Exposure applied before tonemapping (the viewport uses 0.15 for its own sky).",
+      "type": "number",
+      "format": "float",
+      "default": 0.15000000596046448
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path"
+  ]
+}

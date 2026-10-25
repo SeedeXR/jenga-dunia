@@ -391,9 +391,173 @@ pub fn sky_preview_png(p: &SkyParams, width: u32) -> JdResult<Vec<u8>> {
     Ok(out.into_inner())
 }
 
+/// An HDRI (equirectangular EXR) read for the viewport: a tonemapped PNG at `width` × `width / 2`,
+/// the brightest texel as a sun estimate, and the mean luminance.
+#[derive(Debug, Clone)]
+pub struct HdriPreview {
+    /// PNG width (the requested `width`).
+    pub width: u32,
+    /// PNG height (`width / 2`).
+    pub height: u32,
+    /// Tonemapped sRGB PNG bytes.
+    pub png: Vec<u8>,
+    /// Azimuth of the brightest texel, degrees clockwise from north (columns north → east → south → west, as `sky.bake` writes).
+    pub sun_azimuth_deg: f32,
+    /// Elevation of the brightest texel above the horizon, degrees (row 0 = zenith).
+    pub sun_elevation_deg: f32,
+    /// Mean linear luminance of the map.
+    pub mean_luminance: f32,
+}
+
+/// Read an equirectangular EXR (`R`, `G`, `B` channels, or a single `Y`), box-downsample it to
+/// `width` × `width / 2`, tonemap it like [`sky_preview_png`] at `exposure`, and locate the sun.
+pub fn load_hdri_preview(
+    path: &std::path::Path,
+    width: u32,
+    exposure: f32,
+) -> JdResult<HdriPreview> {
+    use exr::prelude::*;
+    if !(16..=2048).contains(&width) || !width.is_multiple_of(2) {
+        return Err(JdError::invalid(
+            "width",
+            "must be even and within 16..=2048",
+        ));
+    }
+    if !(exposure > 0.0 && exposure.is_finite()) {
+        return Err(JdError::invalid("exposure", "must be positive"));
+    }
+    let img = read_all_flat_layers_from_file(path).map_err(|e| {
+        JdError::new(jd_types::ErrorCode::E_FORMAT_CORRUPT, format!("EXR read failed: {e}"))
+            .next("HDRIs are equirectangular (2:1) OpenEXR files; `.hdr` is not read — convert with Blender or oiiotool.")
+    })?;
+    let layer = img
+        .layer_data
+        .first()
+        .ok_or_else(|| JdError::new(jd_types::ErrorCode::E_FORMAT_CORRUPT, "EXR has no layers"))?;
+    let (sw, sh) = (layer.size.width() as u32, layer.size.height() as u32);
+    if sw < 2 || sh < 1 {
+        return Err(JdError::new(
+            jd_types::ErrorCode::E_FORMAT_CORRUPT,
+            "EXR is empty",
+        ));
+    }
+    let channel = |name: &str| {
+        layer
+            .channel_data
+            .list
+            .iter()
+            .find(|c| c.name.eq(name))
+            .map(|c| c.sample_data.values_as_f32().collect::<Vec<f32>>())
+    };
+    let (r, g, b) = match (channel("R"), channel("G"), channel("B")) {
+        (Some(r), Some(g), Some(b)) => (r, g, b),
+        _ => {
+            let y = channel("Y").ok_or_else(|| {
+                JdError::new(
+                    jd_types::ErrorCode::E_FORMAT_CORRUPT,
+                    "EXR has no R/G/B or Y channels",
+                )
+            })?;
+            (y.clone(), y.clone(), y)
+        }
+    };
+    let (w, h) = (width, width / 2);
+    let mut out = image::RgbImage::new(w, h);
+    let enc = |v: f32| {
+        (((v * exposure) / (1.0 + v * exposure))
+            .clamp(0.0, 1.0)
+            .powf(1.0 / 2.2)
+            * 255.0)
+            .round() as u8
+    };
+    let (mut best, mut best_at, mut sum) = (f32::NEG_INFINITY, (0u32, 0u32), 0.0f64);
+    for y in 0..h {
+        let (y0, y1) = (
+            (y * sh / h) as usize,
+            (((y + 1) * sh).div_ceil(h) as usize)
+                .min(sh as usize)
+                .max((y * sh / h) as usize + 1),
+        );
+        for x in 0..w {
+            let (x0, x1) = (
+                (x * sw / w) as usize,
+                (((x + 1) * sw).div_ceil(w) as usize)
+                    .min(sw as usize)
+                    .max((x * sw / w) as usize + 1),
+            );
+            let (mut acc, mut n) = ([0.0f32; 3], 0.0f32);
+            for sy in y0..y1 {
+                for sx in x0..x1 {
+                    let i = sy * sw as usize + sx;
+                    acc[0] += r[i];
+                    acc[1] += g[i];
+                    acc[2] += b[i];
+                    n += 1.0;
+                }
+            }
+            let c = [acc[0] / n, acc[1] / n, acc[2] / n];
+            let lum = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+            sum += f64::from(lum);
+            if lum > best {
+                best = lum;
+                best_at = (x, y);
+            }
+            out.put_pixel(x, y, image::Rgb([enc(c[0]), enc(c[1]), enc(c[2])]));
+        }
+    }
+    let mut png = std::io::Cursor::new(Vec::new());
+    out.write_to(&mut png, image::ImageFormat::Png)
+        .map_err(|e| {
+            JdError::new(
+                jd_types::ErrorCode::E_INTERNAL,
+                format!("PNG encode failed: {e}"),
+            )
+        })?;
+    Ok(HdriPreview {
+        width: w,
+        height: h,
+        png: png.into_inner(),
+        sun_azimuth_deg: (best_at.0 as f32 + 0.5) / w as f32 * 360.0,
+        sun_elevation_deg: 90.0 - (best_at.1 as f32 + 0.5) / h as f32 * 180.0,
+        mean_luminance: (sum / f64::from(w * h)) as f32,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_baked_sky_read_back_as_an_hdri_points_at_its_own_sun() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let path = dir.path().join("sky.exr");
+        let p = SkyParams {
+            sun_azimuth_deg: 140.0,
+            sun_elevation_deg: 35.0,
+            ..SkyParams::default()
+        };
+        bake_sky_hdri(&p, 256, &path).expect("bake");
+        let h = load_hdri_preview(&path, 128, 0.15).expect("load");
+        assert_eq!((h.width, h.height), (128, 64));
+        assert!(
+            (h.sun_azimuth_deg - 140.0).abs() < 8.0,
+            "azimuth {}",
+            h.sun_azimuth_deg
+        );
+        assert!(
+            (h.sun_elevation_deg - 35.0).abs() < 8.0,
+            "elevation {}",
+            h.sun_elevation_deg
+        );
+        assert!(h.mean_luminance > 0.0);
+        let img = image::load_from_memory(&h.png).expect("png").into_rgb8();
+        assert_eq!((img.width(), img.height()), (128, 64));
+        assert!(
+            load_hdri_preview(&path, 101, 0.15).is_err(),
+            "width must be even and ≥ 16"
+        );
+        assert!(load_hdri_preview(&dir.path().join("missing.exr"), 128, 0.15).is_err());
+    }
 
     #[test]
     fn clouds_brighten_the_sky_only_when_asked() {

@@ -1377,6 +1377,30 @@ export type SkyBakeResult = {
   "horizon_rgb": [number, number, number];
 };
 
+export type SkyLoadHdriRequest = {
+  /** Equirectangular OpenEXR in the project's assets/ (or an absolute path) — `sky.bake`'s own output, or any 2:1 lat-long HDRI. */
+  "path": string;
+  /** Preview width (even, 16..=2048); height is half. */
+  "width"?: number;
+  /** Exposure applied before tonemapping (the viewport uses 0.15 for its own sky). */
+  "exposure"?: number;
+};
+
+export type SkyLoadHdriResult = {
+  /** Preview width. */
+  "width": number;
+  /** Preview height. */
+  "height": number;
+  /** Tonemapped sRGB PNG, base64. */
+  "png_base64": string;
+  /** The brightest texel's direction: azimuth clockwise from north, degrees. */
+  "sun_azimuth_deg": number;
+  /** Its elevation above the horizon, degrees. */
+  "sun_elevation_deg": number;
+  /** Mean linear luminance of the map. */
+  "mean_luminance": number;
+};
+
 export type SkyPreviewRequest = {
   /** Sun azimuth, degrees clockwise from north. */
   "sun_azimuth_deg"?: number;
@@ -2888,6 +2912,8 @@ export interface JdOps {
   "project.set_settings": { request: ProjectSetSettingsRequest; result: ProjectSetSettingsResult };
   /** Bake a physical sky (Preetham daylight model: sun azimuth/elevation, turbidity) as an equirectangular HDRI — OpenEXR RGB f32 for engines and renderers, with a tonemapped PNG preview beside it */
   "sky.bake": { request: SkyBakeRequest; result: SkyBakeResult };
+  /** Read an equirectangular EXR (an HDRI, or `sky.bake`'s output) for the viewport dome: a tonemapped PNG, the brightest texel as a sun direction (azimuth clockwise from north, elevation) and the mean luminance */
+  "sky.load_hdri": { request: SkyLoadHdriRequest; result: SkyLoadHdriResult };
   /** The physical sky (Preetham) as a small tonemapped equirectangular PNG for viewports — same model as `sky.bake`, no project needed */
   "sky.preview": { request: SkyPreviewRequest; result: SkyPreviewResult };
   /** Write a layer as EXR (f32), PNG16, RAW r16 or r32 with a JSON sidecar */

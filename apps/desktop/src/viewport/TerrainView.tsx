@@ -26,6 +26,8 @@ export interface ViewportInfo {
   fog?: number;
   /** Physical sky texture on the dome (equirectangular preview size), when one is applied. */
   skyPx?: [number, number];
+  /** The dome shows an imported HDRI. */
+  hdri?: boolean;
   /** Horizon skirt resolution per side, when one is drawn. */
   horizonPx?: number;
 }
@@ -54,6 +56,8 @@ interface Props {
   waves?: OceanWavesResult | null;
   /** Physical sky (`sky.preview`, equirectangular, row 0 = zenith, column 0 = north) drawn on the dome; null keeps the gradient. */
   sky?: { bitmap: ImageBitmap; px: [number, number] } | null;
+  /** An imported HDRI (`sky.load_hdri`, same layout): drawn instead of the physical sky while set. */
+  hdri?: { bitmap: ImageBitmap; px: [number, number] } | null;
   /** The noise continued `scale` × beyond the border: a coarse skirt drawn under the terrain with a hole for the world. */
   horizon?: { preview: Preview; scale: number } | null;
   /** Sun direction: azimuth clockwise from north (0 = light from the north), elevation above the horizon. */
@@ -374,6 +378,8 @@ interface SceneState {
   fogAmount: number;
   /** Horizon skirt mesh, when drawn. */
   skirt: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | null;
+  /** An imported HDRI is on the dome. */
+  hdriOn: boolean;
 }
 
 function placeCamera(s: SceneState) {
@@ -394,6 +400,7 @@ function infoOf(s: SceneState): ViewportInfo {
     ...(s.lakes ? { lakes: s.lakeCells } : {}),
     ...(s.pbrPx ? { pbrPx: s.pbrPx } : {}),
     ...(s.skyPx ? { skyPx: s.skyPx } : {}),
+    ...(s.hdriOn ? { hdri: true } : {}),
     ...(s.fogAmount > 0 ? { fog: s.fogAmount } : {}),
     ...(s.skirt ? { horizonPx: Math.round(Math.sqrt((s.skirt.geometry.attributes.position?.count ?? 0))) } : {}),
   };
@@ -428,7 +435,7 @@ function sampleHeight(p: Preview, ext: [number, number], u: number, v: number): 
   return p.min + ((p.data[y * p.width + x] ?? 0) / 65535) * (p.max - p.min);
 }
 
-export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = null, seaLevelM = null, lakes = null, water = null, waves = null, sky = null, horizon = null, sun, overlay = null, overlayName = null, instances = null, maps = null, fog }: Props) {
+export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = null, seaLevelM = null, lakes = null, hdri = null, water = null, waves = null, sky = null, horizon = null, sun, overlay = null, overlayName = null, instances = null, maps = null, fog }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<SceneState | null>(null);
   // Latest sculpt props without re-creating the renderer effect.
@@ -517,6 +524,7 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = n
       worldSize: 1,
       fogAmount: 0,
       skirt: null,
+      hdriOn: false,
     };
     sceneRef.current = state;
     placeCamera(state);
@@ -915,8 +923,10 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = n
     if (!s) return;
     const mat = s.sky.material;
     mat.map?.dispose();
-    if (sky) {
-      const tex = new THREE.CanvasTexture(sky.bitmap);
+    const dome = hdri ?? sky;
+    s.hdriOn = !!hdri;
+    if (dome) {
+      const tex = new THREE.CanvasTexture(dome.bitmap);
       tex.colorSpace = THREE.SRGBColorSpace;
       tex.wrapS = THREE.RepeatWrapping;
       tex.wrapT = THREE.ClampToEdgeWrapping;
@@ -925,7 +935,7 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = n
       tex.needsUpdate = true;
       mat.map = tex;
       mat.vertexColors = false;
-      s.skyPx = sky.px;
+      s.skyPx = dome.px;
     } else {
       mat.map = null;
       mat.vertexColors = true;
@@ -933,7 +943,7 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = n
     }
     mat.needsUpdate = true;
     onInfo?.(infoOf(s));
-  }, [sky, onInfo]);
+  }, [sky, hdri, onInfo]);
 
   // Sea: follows the graph's sea-level node; a flat surface whose colour and opacity follow the
   // depth of the terrain under it (shoreline foam, translucent shallows, opaque deep water).

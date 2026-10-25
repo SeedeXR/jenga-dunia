@@ -129,6 +129,14 @@ export async function skyPreview(sun: { sun_azimuth_deg: number; sun_elevation_d
   return { bitmap, px: [r.result.width, r.result.height] };
 }
 
+/** An HDRI for the dome (`sky.load_hdri`): the tonemapped bitmap plus the sun it implies. */
+export async function hdriPreview(path: string, width = 512): Promise<{ bitmap: ImageBitmap; px: [number, number]; sun: { azimuth_deg: number; elevation_deg: number }; luminance: number } | null> {
+  const r = await op<{ width: number; height: number; png_base64: string; sun_azimuth_deg: number; sun_elevation_deg: number; mean_luminance: number }>("sky.load_hdri", { path, width });
+  if (r.status !== "ok" || !r.result) return null;
+  const bitmap = await createImageBitmap(new Blob([Uint8Array.from(atob(r.result.png_base64), (c) => c.charCodeAt(0))], { type: "image/png" }));
+  return { bitmap, px: [r.result.width, r.result.height], sun: { azimuth_deg: r.result.sun_azimuth_deg, elevation_deg: r.result.sun_elevation_deg }, luminance: r.result.mean_luminance };
+}
+
 export async function layerTextures(layer: string, maxPx = 1024, materials: MaterialSpec[] = []): Promise<{ maps: LayerMaps; ms: number } | null> {
   const t0 = performance.now();
   const r = await op<JdOps["terrain.textures"]["result"]>("terrain.textures", { materials, layer, max_px: maxPx });

@@ -127,7 +127,8 @@ export default function App() {
   const [meshPath, setMeshPath] = useState("terrain.glb");
   const [tiles, setTiles] = useState(1); // 1 = one folder; 2..16 = tiles × tiles folders with tiles.json
   const [scatterModel, setScatterModel] = useState(""); // an FBX in assets/ to instance; empty = the proxy
-  const [holesLayer, setHolesLayer] = useState(""); // a 0..1 layer whose cells ≥ 0.5 are holes in the exports; "" = none
+  const [holesLayer, setHolesLayer] = useState("");
+  const [hdriPath, setHdriPath] = useState("sky.exr"); // an EXR in assets/ (or an absolute path) for the dome // a 0..1 layer whose cells ≥ 0.5 are holes in the exports; "" = none
   const [skyPath, setSkyPath] = useState("sky.exr");
   const [vp, setVp] = useState<ViewportInfo>({ backend: "none", triangles: 0 });
   const [showGraph, setShowGraph] = useState(true);
@@ -309,7 +310,7 @@ export default function App() {
           </label>
         )}
         <span className={`${s.lastEval && Object.keys(s.lastEval.layers).length > 1 ? "" : "ml-auto "}text-xs text-jd-fg-2`} data-testid="viewport-info">
-          viewport: {vp.backend} · {vp.triangles.toLocaleString()} tris{vp.seaM !== undefined ? ` · sea ${vp.seaM} m` : ""}{vp.waves ? ` · waves ${vp.waves.heightM.toFixed(1)} m / ${Math.round(vp.waves.lengthM)} m` : ""}{vp.fog ? ` · fog ${Math.round(vp.fog * 100)} %` : ""}{vp.sun ? ` · sun ${vp.sun.elevationDeg}°/${vp.sun.azimuthDeg}°` : ""}{s.colorLayer && s.colorPreview ? ` · colour ${s.colorLayer}` : ""}{vp.instances ? ` · ${vp.instances.toLocaleString()} instances` : ""}{vp.lakes ? ` · lakes ${vp.lakes.toLocaleString()} cells` : ""}{vp.pbrPx ? ` · pbr ${vp.pbrPx[0]}×${vp.pbrPx[1]}` : ""}{vp.skyPx ? ` · sky ${vp.skyPx[0]}×${vp.skyPx[1]}` : ""}{vp.horizonPx ? ` · horizon ${vp.horizonPx}²` : ""}
+          viewport: {vp.backend} · {vp.triangles.toLocaleString()} tris{vp.seaM !== undefined ? ` · sea ${vp.seaM} m` : ""}{vp.waves ? ` · waves ${vp.waves.heightM.toFixed(1)} m / ${Math.round(vp.waves.lengthM)} m` : ""}{vp.fog ? ` · fog ${Math.round(vp.fog * 100)} %` : ""}{vp.sun ? ` · sun ${vp.sun.elevationDeg}°/${vp.sun.azimuthDeg}°` : ""}{s.colorLayer && s.colorPreview ? ` · colour ${s.colorLayer}` : ""}{vp.instances ? ` · ${vp.instances.toLocaleString()} instances` : ""}{vp.lakes ? ` · lakes ${vp.lakes.toLocaleString()} cells` : ""}{vp.pbrPx ? ` · pbr ${vp.pbrPx[0]}×${vp.pbrPx[1]}` : ""}{vp.skyPx ? ` · sky ${vp.skyPx[0]}×${vp.skyPx[1]}` : ""}{vp.hdri ? " · hdri" : ""}{vp.horizonPx ? ` · horizon ${vp.horizonPx}²` : ""}
           {s.previewStats ? ` · preview lod ${s.previewStats.lod}, ${(s.previewStats.bytes / 1048576).toFixed(2)} MB in ${s.previewStats.ms.toFixed(0)} ms` : ""}
         </span>
         {(s.busy || s.jobs.length > 0) &&
@@ -575,7 +576,7 @@ export default function App() {
         {/* Center: viewport (top) + node graph (bottom, toggle) */}
         <main className={`relative grid min-w-0 overflow-hidden bg-jd-bg-0 ${showGraph ? (dock.graph === "right" ? "grid-cols-[1fr_auto]" : "grid-rows-[1fr_auto]") : "grid-rows-[1fr]"}`}>
           <div className="relative min-h-0 min-w-0">
-            <TerrainView fog={s.sun.fog} preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} sculpt={{ enabled: s.sculpting && (sculptNode !== undefined || s.drawing !== null), radiusM: s.drawing === "road" ? s.roadWidthM / 2 : s.brush.radius_m, onStroke: (pts) => void s.addStroke(pts), onAdjust: s.adjustBrush }} grid={s.grid.on ? { cells: s.grid.cells, selected: s.grid.selected, onSelect: s.gridSelect } : null} seaLevelM={seaLevelM} lakes={s.lakesPreview} water={water} waves={s.waves} sky={s.sky} horizon={s.horizon} sun={{ azimuthDeg: s.sun.azimuth_deg, elevationDeg: s.sun.elevation_deg }} overlay={s.colorPreview} overlayName={s.colorLayer} instances={s.scatter.points ? { points: s.scatter.points, sizeM: Math.max(s.scatter.spacing_m * 0.35, (s.project?.world.extent_m[0] ?? 0) * 0.012), shape: /debris|rock|boulder|scree|talus/i.test(s.scatter.mask ?? "") ? "rock" : "cone" } : null} maps={s.maps} />
+            <TerrainView fog={s.sun.fog} preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} sculpt={{ enabled: s.sculpting && (sculptNode !== undefined || s.drawing !== null), radiusM: s.drawing === "road" ? s.roadWidthM / 2 : s.brush.radius_m, onStroke: (pts) => void s.addStroke(pts), onAdjust: s.adjustBrush }} grid={s.grid.on ? { cells: s.grid.cells, selected: s.grid.selected, onSelect: s.gridSelect } : null} seaLevelM={seaLevelM} lakes={s.lakesPreview} water={water} waves={s.waves} sky={s.sky} hdri={s.hdri} horizon={s.horizon} sun={{ azimuthDeg: s.sun.azimuth_deg, elevationDeg: s.sun.elevation_deg }} overlay={s.colorPreview} overlayName={s.colorLayer} instances={s.scatter.points ? { points: s.scatter.points, sizeM: Math.max(s.scatter.spacing_m * 0.35, (s.project?.world.extent_m[0] ?? 0) * 0.012), shape: /debris|rock|boulder|scree|talus/i.test(s.scatter.mask ?? "") ? "rock" : "cone" } : null} maps={s.maps} />
             <button
               className={`btn absolute top-2 right-28 ${s.sculpting ? "text-jd-accent" : ""}`}
               title={s.sculpting ? "Sculpting: drag on the terrain to paint a stroke (click to stop)" : "Sculpt: adds a stroke node before the output and paints with the brush"}
@@ -746,6 +747,20 @@ export default function App() {
           </Field>
           <Field label={`Turbidity ${s.sun.turbidity}`}>
             <input className="w-28" type="range" min={2} max={10} step={0.5} value={s.sun.turbidity} onChange={(e) => s.setSun({ turbidity: Number(e.target.value) })} title="Atmospheric haze for the sky dome: 2 clear mountain air, 3 clear, 6 hazy, 10 thick haze (Preetham daylight model)" data-testid="sun-turbidity" />
+          </Field>
+          <Field label="HDRI">
+            <span className="flex gap-1">
+              <input className={`${inputCls} w-24`} value={hdriPath} onChange={(e) => setHdriPath(e.target.value)} title="An equirectangular EXR — sky.bake's output or any 2:1 HDRI — in the project's assets/ (import it with ⌘I) or an absolute path; drawn on the dome instead of the physical sky" data-testid="hdri-path" />
+              <button className="btn px-1.5" disabled={!s.project || s.busy || !hdriPath.trim()} onClick={() => void s.loadHdri(hdriPath.trim())} title="Load the HDRI onto the dome (sky.load_hdri)" data-testid="hdri-load">
+                Load
+              </button>
+              <button className="btn px-1.5" disabled={!s.hdri} onClick={() => s.setSun({ azimuth_deg: Math.round(s.hdri!.sun.azimuth_deg), elevation_deg: Math.max(3, Math.min(90, Math.round(s.hdri!.sun.elevation_deg))) })} title="Point the sun where the HDRI is brightest" data-testid="hdri-sun">
+                Use sun
+              </button>
+              <button className="btn px-1.5" disabled={!s.hdri} onClick={() => s.clearHdri()} title="Back to the physical sky" data-testid="hdri-clear">
+                ×
+              </button>
+            </span>
           </Field>
           <Field label={`Clouds ${Math.round(s.sun.clouds * 100)} %`}>
             <input className="w-28" type="range" min={0} max={1} step={0.05} value={s.sun.clouds} onChange={(e) => s.setSun({ clouds: Number(e.target.value) })} title="Cloud cover on the sky dome and in the HDRI bake: a seeded cumulus-like noise layer, brighter on the sun side" data-testid="sky-clouds" />
