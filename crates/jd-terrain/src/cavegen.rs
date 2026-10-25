@@ -320,7 +320,7 @@ pub fn generate_cave(p: &CaveParams, g: &Ground) -> JdResult<Generated> {
             0.2,
             SpeleothemParams {
                 per_100m2: 2.0,
-                max_length_m: 0.25,
+                max_length_m: 0.6, // lavacicles: up to about a metre (Allred & Allred 1998)
                 stalagmite_share: 0.15,
             },
         ),
@@ -345,7 +345,24 @@ pub fn generate_cave(p: &CaveParams, g: &Ground) -> JdResult<Generated> {
         .flat_map(|q| q.half_width_m.iter().copied())
         .fold(0.0f32, f32::max)
         .max(1.0);
-    sys.roughness_m = natural_rough * typical_w.min(4.0) * p.roughness;
+    // Noise on the walls stays under 0.3 of the narrowest radius, so no passage pinches shut and no
+    // loose blobs float in the rock (research: put the roughness in the radius, not anywhere).
+    let narrow = sys
+        .passages
+        .iter()
+        .flat_map(|q| {
+            let slot = if q.profile == Profile::Keyhole {
+                0.45
+            } else {
+                1.0
+            };
+            q.half_width_m
+                .iter()
+                .zip(&q.half_height_m)
+                .map(move |(w, h)| (w * slot).min(*h))
+        })
+        .fold(f32::MAX, f32::min);
+    sys.roughness_m = (natural_rough * typical_w.min(4.0)).min(0.3 * narrow) * p.roughness;
     let spel = SpeleothemParams {
         per_100m2: if p.speleothems >= 0.0 {
             p.speleothems
@@ -420,6 +437,12 @@ pub fn cave_in_terrain(
             water,
         },
     )
+}
+
+/// A standard normal sample (Box–Muller).
+fn gauss(rng: &mut Rng) -> f32 {
+    let (a, b) = (rng.f().max(1e-7), rng.f());
+    (-2.0 * a.ln()).sqrt() * (std::f32::consts::TAU * b).cos()
 }
 
 fn passage(points: Vec<[f32; 3]>, w: f32, h: f32, profile: Profile) -> Passage {
@@ -839,7 +862,9 @@ fn karst(p: &CaveParams, g: &Ground, notes: &mut Vec<String>) -> JdResult<CaveSy
             chains.push((chain, q));
         }
     }
-    let base_w = 1.4 * p.size;
+    // Passage size from 49 surveyed networks (Frantz et al. 2021): median equivalent radius 1.22 m,
+    // width/height ≈ 1, log-normal, correlated along a conduit over 50–200 m, not bigger downstream.
+    let base_w = 1.22 * p.size;
     let mut sys = CaveSystem {
         water_level_m: Some(water_level),
         ..Default::default()
@@ -847,18 +872,43 @@ fn karst(p: &CaveParams, g: &Ground, notes: &mut Vec<String>) -> JdResult<CaveSy
     for (ci, (chain, q)) in chains.iter().enumerate() {
         let pts: Vec<[f32; 3]> = chain.iter().map(|&i| nodes[i]).collect();
         let pts = meander(&pts, 6.0, 0.25 * gstep, p.seed ^ ci as u64);
-        let w = base_w * (*q as f32).powf(0.4);
+        let _ = q; // discharge does not set size (no downstream growth)
+        let w = base_w * (0.45 * gauss(&mut rng)).exp();
         let mean_z = pts.iter().map(|x| x[2]).sum::<f32>() / pts.len() as f32;
         let vertical = {
             let (a, b) = (pts[0], pts[pts.len() - 1]);
             (a[2] - b[2]).abs() > 1.5 * (a[0] - b[0]).hypot(a[1] - b[1])
         };
-        let ps = if vertical {
-            passage(pts, w * 0.9, w * 0.9, Profile::Tube) // a shaft
+        let (profile, kw, kh) = if vertical {
+            (Profile::Tube, 0.9, 0.9) // a shaft, roughly circular
         } else if mean_z > water_level + 3.0 {
-            passage(pts, w * 0.9, w * 2.2, Profile::Keyhole) // vadose: a stream cut a slot under the tube
+            (Profile::Keyhole, 0.9, 2.2) // vadose: a stream cut a slot under the old tube
         } else {
-            passage(pts, w * 1.3, w * 0.8, Profile::Tube) // phreatic: wider than tall
+            (Profile::Tube, 1.05, 0.95) // phreatic: circular to elliptical, W/H ≈ 1.1
+        };
+        // Size wanders along the passage with a ~100 m correlation length.
+        let mut s_along = 0.0f32;
+        let along: Vec<f32> = pts
+            .iter()
+            .enumerate()
+            .map(|(i, q)| {
+                if i > 0 {
+                    s_along += ((q[0] - pts[i - 1][0]).powi(2)
+                        + (q[1] - pts[i - 1][1]).powi(2)
+                        + (q[2] - pts[i - 1][2]).powi(2))
+                    .sqrt();
+                }
+                (0.35 * value_noise(p.seed ^ 0x51 ^ ci as u64, [s_along / 100.0, 0.0, 0.0])).exp()
+            })
+            .collect();
+        let ps = Passage {
+            half_width_m: along.iter().map(|f| (w * kw * f).clamp(0.4, 8.0)).collect(),
+            half_height_m: along
+                .iter()
+                .map(|f| (w * kh * f).clamp(0.4, 12.0))
+                .collect(),
+            points: pts,
+            profile,
         };
         sys.passages.push(ps);
     }
@@ -921,7 +971,8 @@ fn lava_tube(p: &CaveParams, g: &Ground, notes: &mut Vec<String>) -> JdResult<Ca
             .max_by(|a, b| g.z(a[0], a[1]).total_cmp(&g.z(b[0], b[1])))
             .ok_or_else(|| JdError::invalid("entrances", "empty terrain"))?,
     };
-    let (w, h) = (4.0 * p.size, 2.6 * p.size);
+    // Sauro et al. 2020: 0.5–30 m wide, typically 7–20 m for big tubes; an oval on gentle slopes.
+    let (w, h) = (5.0 * p.size, 4.0 * p.size);
     let depth = if p.cover_m > 0.0 {
         p.cover_m + h
     } else {
@@ -1226,7 +1277,7 @@ fn mountain(p: &CaveParams, g: &Ground, notes: &mut Vec<String>) -> JdResult<Cav
         let mut yaw = dir0[1].atan2(dir0[0]);
         let mut pitch = -0.12f32;
         let mut pts = vec![pos];
-        let mut ws = vec![2.4 * p.size];
+        let mut ws = vec![1.4 * p.size];
         let step = 3.0f32;
         let mut s = 0.0;
         while s < length {
@@ -1253,7 +1304,7 @@ fn mountain(p: &CaveParams, g: &Ground, notes: &mut Vec<String>) -> JdResult<Cav
             }
             pos = next;
             pts.push(pos);
-            ws.push(p.size * (2.4 + 1.2 * value_noise(seed ^ 11, [s / 25.0, 0.0, 0.0])).max(0.8));
+            ws.push(p.size * (1.4 + 0.6 * value_noise(seed ^ 11, [s / 25.0, 0.0, 0.0])).max(0.6));
             if s > 30.0 && r.f() < 0.012 * p.complexity as f32 {
                 let side = if r.f() < 0.5 { 1.0 } else { -1.0 };
                 let a = yaw + side * r.range(0.6, 1.4);
@@ -1274,12 +1325,13 @@ fn mountain(p: &CaveParams, g: &Ground, notes: &mut Vec<String>) -> JdResult<Cav
         }
         if pts.len() >= 3 {
             let n = pts.len();
-            let hs = ws.iter().map(|w| w * 0.8).collect();
+            // In granite, gneiss or sandstone a cave is a crevice along a fracture: tall and narrow.
+            let hs = ws.iter().map(|w| w * 2.2).collect();
             sys.passages.push(Passage {
                 points: pts,
                 half_width_m: ws[..n].to_vec(),
                 half_height_m: hs,
-                profile: Profile::Tube,
+                profile: Profile::Arch,
             });
         }
     }
@@ -1315,9 +1367,11 @@ fn mine(p: &CaveParams, g: &Ground, notes: &mut Vec<String>) -> JdResult<CaveSys
     } else {
         [1.0, 0.0]
     };
-    let (w, h) = (1.2 * p.size, 1.3 * p.size);
+    // Hoover (1909): the smallest drift about 2.0 × 1.8 m inside the timbers.
+    let (w, h) = (1.0 * p.size, 0.9 * p.size);
     let z0 = g.z(portal[0], portal[1]) + h; // floor at the portal's ground
-    let grade = 1.0 / 200.0; // rises inward so water drains out
+    // Le Neve Foster (1894): levels rise 1 in 216 to 1 in 288 (1910: 1 in 144 to 288) to drain.
+    let grade = 1.0 / 250.0;
     let len = p.reach_m.min(2000.0);
     let mut sys = CaveSystem::default();
     let adit = |d: f32| {
@@ -1406,8 +1460,8 @@ fn mine(p: &CaveParams, g: &Ground, notes: &mut Vec<String>) -> JdResult<CaveSys
     let bottom = end[2] - (levels - 1) as f32 * level_gap - h;
     sys.passages.push(passage(
         vec![[end[0], end[1], zs + 3.0], [end[0], end[1], bottom]],
-        1.1 * p.size,
-        1.1 * p.size,
+        2.25 * p.size, // a three-compartment shaft, about 4.5 × 2 m (Hoover 1909)
+        1.0 * p.size,
         Profile::Rect,
     ));
     sys.entrances.push(Entrance {
@@ -1432,7 +1486,8 @@ fn tunnel(p: &CaveParams, g: &Ground, notes: &mut Vec<String>) -> JdResult<CaveS
                 .next("Place one portal on each side of the hill."));
         }
     };
-    let (w, h) = (5.0 * p.size, 3.8 * p.size);
+    // FHWA-NHI-10-034: two lanes at least 9 m wall to wall, 4.9 m clearance under the arch.
+    let (w, h) = (4.5 * p.size, 3.5 * p.size);
     let (za, zb) = (g.z(a[0], a[1]), g.z(b[0], b[1]));
     let horiz = (b[0] - a[0]).hypot(b[1] - a[1]);
     if horiz < 10.0 {
@@ -1496,7 +1551,10 @@ fn catacombs(p: &CaveParams, g: &Ground, _notes: &mut Vec<String>) -> JdResult<C
     let side = p.reach_m.min(600.0);
     let cell = 8.0 * p.size;
     let n = ((side / cell) as usize).clamp(3, 80);
-    let depth = if p.cover_m > 0.0 { p.cover_m } else { 15.0 };
+    // Roman catacombs (International Catacomb Society): galleries about 1 m wide and 2–3 m high,
+    // the first level 3–8 m down, up to four or five levels reaching 20–25 m.
+    let first = if p.cover_m > 0.0 { p.cover_m } else { 6.0 };
+    let level_gap = 5.0 * p.size;
     let o = [
         stair[0] - n as f32 * cell / 2.0,
         stair[1] - n as f32 * cell / 2.0,
@@ -1514,80 +1572,101 @@ fn catacombs(p: &CaveParams, g: &Ground, _notes: &mut Vec<String>) -> JdResult<C
             g.z(q[0], q[1])
         })
         .fold(f32::MAX, f32::min);
-    let (w, h) = (0.6 * p.size, 1.1 * p.size);
-    let z = ground_min - depth + h;
-    // A perfect maze (randomised depth-first search) plus a few loops.
-    let mut seen = vec![false; n * n];
-    let mut stack = vec![(n / 2, n / 2)];
-    seen[(n / 2) * n + n / 2] = true;
-    let mut links: Vec<((usize, usize), (usize, usize))> = Vec::new();
-    while let Some(&(i, j)) = stack.last() {
-        let mut opts: Vec<(usize, usize)> = Vec::new();
-        if i > 0 && !seen[j * n + i - 1] {
-            opts.push((i - 1, j));
-        }
-        if i + 1 < n && !seen[j * n + i + 1] {
-            opts.push((i + 1, j));
-        }
-        if j > 0 && !seen[(j - 1) * n + i] {
-            opts.push((i, j - 1));
-        }
-        if j + 1 < n && !seen[(j + 1) * n + i] {
-            opts.push((i, j + 1));
-        }
-        if opts.is_empty() {
-            stack.pop();
-            continue;
-        }
-        let k = ((rng.f() * opts.len() as f32) as usize).min(opts.len() - 1);
-        let nx = opts[k];
-        seen[nx.1 * n + nx.0] = true;
-        links.push(((i, j), nx));
-        stack.push(nx);
-    }
-    for j in 0..n {
-        for i in 0..n {
-            if i + 1 < n && rng.f() < 0.12 {
-                links.push(((i, j), (i + 1, j)));
-            }
-            if j + 1 < n && rng.f() < 0.12 {
-                links.push(((i, j), (i, j + 1)));
-            }
-        }
-    }
-    links.sort();
-    links.dedup();
+    let (w, h) = (0.5 * p.size, 1.25 * p.size);
+    let levels = p.levels.clamp(1, 5) as usize;
     let mut sys = CaveSystem::default();
-    for (a, b) in links {
-        let (pa, pb) = (at(a.0, a.1), at(b.0, b.1));
-        sys.passages.push(passage(
-            vec![[pa[0], pa[1], z], [pb[0], pb[1], z]],
-            w,
-            h,
-            Profile::Arch,
-        ));
-    }
-    // Ossuary rooms.
-    for j in 0..n {
-        for i in 0..n {
-            if rng.f() < 0.05 {
-                let q = at(i, j);
-                sys.chambers.push(Chamber {
-                    center: [q[0], q[1], z + 0.4],
-                    radii_m: [cell * 0.4, cell * 0.4, h * 1.6],
-                });
+    let mut z_levels = Vec::new();
+    for lvl in 0..levels {
+        let z = ground_min - first - lvl as f32 * level_gap - h;
+        z_levels.push(z);
+        // A perfect maze (randomised depth-first search) plus a few loops, its own per level.
+        let mut seen = vec![false; n * n];
+        let start = (n / 2, n / 2);
+        let mut stack = vec![start];
+        seen[start.1 * n + start.0] = true;
+        let mut links: Vec<((usize, usize), (usize, usize))> = Vec::new();
+        while let Some(&(i, j)) = stack.last() {
+            let mut opts: Vec<(usize, usize)> = Vec::new();
+            if i > 0 && !seen[j * n + i - 1] {
+                opts.push((i - 1, j));
+            }
+            if i + 1 < n && !seen[j * n + i + 1] {
+                opts.push((i + 1, j));
+            }
+            if j > 0 && !seen[(j - 1) * n + i] {
+                opts.push((i, j - 1));
+            }
+            if j + 1 < n && !seen[(j + 1) * n + i] {
+                opts.push((i, j + 1));
+            }
+            if opts.is_empty() {
+                stack.pop();
+                continue;
+            }
+            let k = ((rng.f() * opts.len() as f32) as usize).min(opts.len() - 1);
+            let nx = opts[k];
+            seen[nx.1 * n + nx.0] = true;
+            links.push(((i, j), nx));
+            stack.push(nx);
+        }
+        for j in 0..n {
+            for i in 0..n {
+                if i + 1 < n && rng.f() < 0.12 {
+                    links.push(((i, j), (i + 1, j)));
+                }
+                if j + 1 < n && rng.f() < 0.12 {
+                    links.push(((i, j), (i, j + 1)));
+                }
             }
         }
+        links.sort();
+        links.dedup();
+        for (a, b) in links {
+            let (pa, pb) = (at(a.0, a.1), at(b.0, b.1));
+            sys.passages.push(passage(
+                vec![[pa[0], pa[1], z + h], [pb[0], pb[1], z + h]],
+                w,
+                h,
+                Profile::Arch,
+            ));
+        }
+        // Burial chambers (cubicula).
+        for j in 0..n {
+            for i in 0..n {
+                if rng.f() < 0.05 {
+                    let q = at(i, j);
+                    sys.chambers.push(Chamber {
+                        center: [q[0], q[1], z + h + 0.4],
+                        radii_m: [cell * 0.4, cell * 0.4, h * 1.6],
+                    });
+                }
+            }
+        }
+        // A stair down from the level above, at a random cell.
+        if lvl > 0 {
+            let (i, j) = (
+                ((rng.f() * n as f32) as usize).min(n - 1),
+                ((rng.f() * n as f32) as usize).min(n - 1),
+            );
+            let (top, bottom) = (at(i, j), at((i + 1).min(n - 1), j));
+            let (za, zb) = (z_levels[lvl - 1] + h, z + h);
+            sys.passages.push(passage(
+                vec![[top[0], top[1], za], [bottom[0], bottom[1], zb]],
+                w * 1.1,
+                h,
+                Profile::Arch,
+            ));
+        }
     }
-    // The stair: a 35° incline from the surface down to the galleries.
+    // The stair from the surface: a 35° incline down to the first level's centre.
+    let z0 = z_levels[0];
     let zg = g.z(stair[0], stair[1]);
-    let drop = zg - (z - h);
-    let run = drop / 35f32.to_radians().tan();
+    let run = (zg - z0) / 35f32.to_radians().tan();
     let c = at(n / 2, n / 2);
     let top = [c[0] - run, c[1]];
     let zt = g.z(top[0], top[1]);
     sys.passages.push(passage(
-        vec![[top[0] - 2.0, top[1], zt + h], [c[0], c[1], z]],
+        vec![[top[0] - 2.0, top[1], zt + h], [c[0], c[1], z0 + h]],
         w * 1.1,
         h,
         Profile::Arch,
@@ -1749,8 +1828,8 @@ mod tests {
             s.speleothems
                 .iter()
                 .filter(|x| x.kind == SpeleothemKind::Stalactite)
-                .all(|x| x.length_m <= 0.25 + 1e-4),
-            "lavacicles are small"
+                .all(|x| x.length_m <= 0.6 + 1e-4),
+            "lavacicles stay under about a metre"
         );
     }
 
@@ -1805,15 +1884,27 @@ mod tests {
         let adit = &s.passages[0];
         let (a, b) = (adit.points[1], adit.points[adit.points.len() - 1]);
         let run = (b[0] - a[0]).hypot(b[1] - a[1]);
-        assert!(((b[2] - a[2]) / run - 0.005).abs() < 1e-3, "1 in 200");
+        assert!(
+            ((b[2] - a[2]) / run - 1.0 / 250.0).abs() < 1e-4,
+            "1 in 250, inside Le Neve Foster's 1 in 144–288"
+        );
         assert_eq!(adit.profile, Profile::Arch);
-        assert!((adit.half_width_m[0] * 2.0 - 2.4).abs() < 0.01);
+        assert!(
+            (adit.half_width_m[0] * 2.0 - 2.0).abs() < 0.01
+                && (adit.half_height_m[0] * 2.0 - 1.8).abs() < 0.01,
+            "a 2.0 × 1.8 m drift"
+        );
         let shaft = s
             .passages
             .iter()
             .find(|p| p.profile == Profile::Rect)
             .expect("shaft");
         assert!(shaft.points[0][2] > ground(&hf, EXT, shaft.points[0][0], shaft.points[0][1]));
+        assert!(
+            (shaft.half_width_m[0] * 2.0 - 4.5).abs() < 0.01
+                && (shaft.half_height_m[0] * 2.0 - 2.0).abs() < 0.01,
+            "a 4.5 × 2 m shaft"
+        );
         assert!(s.entrances.iter().any(|e| e.kind == EntranceKind::Shaft));
         assert!(s.speleothems.is_empty());
         assert!(s.roughness_m < 0.2);
@@ -1883,8 +1974,8 @@ mod tests {
         let s = &g.system;
         let n = 10usize; // 80 m / 8 m
         assert!(
-            s.passages.len() > n * n - 1,
-            "a spanning maze plus loops: {}",
+            s.passages.len() > 2 * (n * n - 1),
+            "a spanning maze plus loops on each of the two default levels: {}",
             s.passages.len()
         );
         let galleries: Vec<&Passage> = s
@@ -1892,10 +1983,20 @@ mod tests {
             .iter()
             .filter(|p| p.points.len() == 2 && (p.points[0][2] - p.points[1][2]).abs() < 1e-3)
             .collect();
-        let z = galleries[0].points[0][2];
+        let mut zs: Vec<i32> = galleries
+            .iter()
+            .map(|p| p.points[0][2].round() as i32)
+            .collect();
+        zs.sort_unstable();
+        zs.dedup();
+        assert_eq!(zs.len(), 2, "two levels: {zs:?}");
+        assert!((zs[1] - zs[0] - 5).abs() <= 1, "5 m apart: {zs:?}");
         assert!(
-            galleries.iter().all(|p| (p.points[0][2] - z).abs() < 1e-3),
-            "one level"
+            galleries
+                .iter()
+                .all(|p| (p.half_width_m[0] * 2.0 - 1.0).abs() < 0.01
+                    && (p.half_height_m[0] * 2.0 - 2.5).abs() < 0.01),
+            "1 m × 2.5 m galleries"
         );
         assert!(s.entrances.iter().any(|e| e.kind == EntranceKind::Shaft));
     }
