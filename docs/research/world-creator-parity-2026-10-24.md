@@ -20,9 +20,8 @@
 > `jd.hydrology.rivers@1`), lakes drawn as water (11: a published `lakes` layer in the viewport).
 > Image-based materials (1) closed the same afternoon: `texture {albedo, normal, tile_m, px}` per
 > layer on the detail-tile path (PNG only; triplanar / stochastic blending stay the engine's job).
-> Still open: the Godot / Houdini bridges (6) — owner-blocked, neither
-> engine is installed to run a headless import check; spline I/O (9); workflow conveniences (12);
-> rendering (13).
+> The Godot / Houdini / C4D bridges (6) are out of scope: the owner's rule (2026-10-25) is Unreal,
+> Unity and Blender only. Still open: spline I/O (9); workflow conveniences (12); rendering (13).
 
 # Jenga Dunia vs World Creator: feature parity audit (2026-10-24)
 
