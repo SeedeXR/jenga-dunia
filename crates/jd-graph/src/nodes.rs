@@ -331,6 +331,52 @@ struct ScaleParams {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct StampParams {
+    /// Heightmap file in the project's assets/ (PNG 16-bit, EXR, TIFF, RAW; row 0 = north unless `north_up` is false).
+    path: String,
+    /// Row 0 of the file is north (the image convention) or south (the field convention).
+    #[serde(default = "yes_b")]
+    north_up: bool,
+    /// Where, how big, how high and how it meets the terrain.
+    #[serde(flatten)]
+    place: jd_terrain::Placement,
+}
+fn yes_b() -> bool {
+    true
+}
+
+/// The file named by a node's `path`, resolved and confined to the project's assets/.
+fn asset_file(ctx: &EvalCtx, path: &str) -> JdResult<std::path::PathBuf> {
+    let rel = std::path::Path::new(path);
+    if rel.is_absolute()
+        || rel
+            .components()
+            .any(|c| !matches!(c, std::path::Component::Normal(_)))
+    {
+        return Err(JdError::invalid("path", "must be a plain relative path inside assets/")
+            .next("Copy the file into the project's assets/ directory (project.import_asset) and reference it by name."));
+    }
+    let Some(dir) = &ctx.assets_dir else {
+        return Err(JdError::invalid(
+            "path",
+            "no project is open, so there is no assets/ directory to read from",
+        ));
+    };
+    let file = std::fs::canonicalize(dir.join(rel))
+        .map_err(|e| JdError::invalid("path", format!("cannot read `{path}`: {e}")))?;
+    let base = std::fs::canonicalize(dir)
+        .map_err(|e| JdError::invalid("path", format!("assets directory unavailable: {e}")))?;
+    if !file.starts_with(&base) {
+        return Err(JdError::invalid(
+            "path",
+            "file resolves outside the project's assets/ directory",
+        ));
+    }
+    Ok(file)
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct BlendParams {
     /// Opacity 0..1: how much of the blended result replaces the input (1 = all of it, 0 = the
     /// input passes through).
@@ -703,6 +749,30 @@ pub fn register_all(r: &mut Registry) {
             0
         }),
     );
+    // Placed shapes: World Creator's stamp and primitive layers.
+    r.register(NodeDef::new::<jd_terrain::PrimitiveParams, _>(
+        "jd.shape.primitive@1",
+        "A placed primitive — cone, dome, plateau, ramp or crater — at `center_m`, `size_m` and `rotation_deg`, its 0..1 shape scaled to `height_range_m`, faded over `falloff_m` at the edge, and combined with the terrain by `op` (add, max to raise it out, min to carve it in, lerp to overwrite) at `opacity`; `ratio` sets a plateau's flat top or a crater's rim radius, `floor` a crater's floor",
+        vec![port("in", PortType::Heightfield, true)],
+        vec![port("out", PortType::Heightfield, false)],
+        |ctx, p, i| {
+            let pp: jd_terrain::PrimitiveParams = params(p)?;
+            Ok(out("out", jd_terrain::place_primitive(field(i, "in")?, spacing_m(ctx), &pp)?))
+        },
+    ).with_memory(4.0));
+    r.register(NodeDef::new::<StampParams, _>(
+        "jd.shape.stamp@1",
+        "A heightmap stamp from the project's assets/ set down at `center_m`, `size_m` and `rotation_deg` — its own range normalised to 0..1 and scaled to `height_range_m`, faded over `falloff_m`, combined with the terrain by `op` at `opacity`; a mountain from a photo's relief, a crater, a city plinth placed where you want it",
+        vec![port("in", PortType::Heightfield, true)],
+        vec![port("out", PortType::Heightfield, false)],
+        |ctx, p, i| {
+            let sp: StampParams = params(p)?;
+            let file = asset_file(ctx, &sp.path)?;
+            let opts = jd_terrain::ForeignImport { north_up: sp.north_up, ..Default::default() };
+            let (data, w, h) = jd_terrain::read_foreign(&file, &opts)?;
+            Ok(out("out", jd_terrain::place_stamp(field(i, "in")?, spacing_m(ctx), &sp.place, &data, w, h)?))
+        },
+    ).with_memory(8.0));
     // Blend operations of a layer stack: the chain comes in on `in`, the other layer on `b`.
     for (kind, desc, op) in [
         (

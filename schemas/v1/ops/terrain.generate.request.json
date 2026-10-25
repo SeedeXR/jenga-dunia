@@ -19,6 +19,7 @@
           0.0,
           500.0
         ],
+        "warp": null,
         "offset_m": [
           0.0,
           0.0
@@ -92,6 +93,18 @@
             0.0,
             500.0
           ]
+        },
+        "warp": {
+          "description": "Domain warp: the sampling coordinates are bent by a second noise before the lattice is\nread, which turns straight ridges and round cells into the swirled, folded shapes of\nreal relief (World Creator's distortion filter, Gaea's warp). Unset = none.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DomainWarp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "offset_m": {
           "description": "Offset of the sampling origin in metres.",
@@ -168,6 +181,35 @@
           "type": "string",
           "const": "ping_pong"
         }
+      ]
+    },
+    "DomainWarp": {
+      "description": "Domain warp settings.",
+      "type": "object",
+      "properties": {
+        "amp_m": {
+          "description": "How far a sample point is displaced, metres (> 0).",
+          "type": "number",
+          "format": "float"
+        },
+        "feature_m": {
+          "description": "Wavelength of the displacement field, metres (> 0); larger folds the terrain in broader sweeps.",
+          "type": "number",
+          "format": "float"
+        },
+        "octaves": {
+          "description": "Octaves of the displacement field (1..=8): more adds finer wrinkles to the folds.",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 3
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "amp_m",
+        "feature_m"
       ]
     }
   }

@@ -79,6 +79,11 @@ pub struct NoiseParams {
     /// Output height range in metres: noise ∈ [-1,1] maps to [min, max].
     #[serde(default = "default_height_range")]
     pub height_range_m: [f32; 2],
+    /// Domain warp: the sampling coordinates are bent by a second noise before the lattice is
+    /// read, which turns straight ridges and round cells into the swirled, folded shapes of
+    /// real relief (World Creator's distortion filter, Gaea's warp). Unset = none.
+    #[serde(default)]
+    pub warp: Option<DomainWarp>,
     /// Offset of the sampling origin in metres.
     #[serde(default)]
     pub offset_m: [f32; 2],
@@ -111,6 +116,7 @@ impl Default for NoiseParams {
             lacunarity: default_lacunarity(),
             gain: default_gain(),
             height_range_m: default_height_range(),
+            warp: None,
             offset_m: [0.0, 0.0],
         }
     }
@@ -173,12 +179,56 @@ impl NoiseParams {
     }
 }
 
+/// Domain warp settings.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DomainWarp {
+    /// How far a sample point is displaced, metres (> 0).
+    pub amp_m: f32,
+    /// Wavelength of the displacement field, metres (> 0); larger folds the terrain in broader sweeps.
+    pub feature_m: f32,
+    /// Octaves of the displacement field (1..=8): more adds finer wrinkles to the folds.
+    #[serde(default = "warp_octaves")]
+    pub octaves: u8,
+}
+fn warp_octaves() -> u8 {
+    3
+}
+
+impl DomainWarp {
+    fn validate(&self) -> Result<(), String> {
+        if !(self.amp_m > 0.0 && self.amp_m.is_finite())
+            || !(self.feature_m > 0.0 && self.feature_m.is_finite())
+        {
+            return Err("warp.amp_m and warp.feature_m must be positive".into());
+        }
+        if !(1..=8).contains(&self.octaves) {
+            return Err("warp.octaves must be within 1..=8".into());
+        }
+        Ok(())
+    }
+    /// The displacement field: progressive OpenSimplex2 domain warp of `amp_m`, seeded apart.
+    fn build(&self, seed: i32) -> FastNoiseLite {
+        let mut n = FastNoiseLite::with_seed(seed.wrapping_add(7919));
+        n.set_domain_warp_type(Some(fastnoise_lite::DomainWarpType::OpenSimplex2));
+        n.set_domain_warp_amp(Some(self.amp_m));
+        n.set_frequency(Some(1.0 / self.feature_m));
+        n.set_fractal_type(Some(FractalType::DomainWarpProgressive));
+        n.set_fractal_octaves(Some(i32::from(self.octaves)));
+        n
+    }
+}
+
 /// Generate a heightfield for `world` from `params`. Sampling is in world metres:
 /// pixel (x, y) → (origin + x·spacing, origin + y·spacing).
 pub fn generate_noise(world: &WorldSettings, params: &NoiseParams) -> JdResult<Heightfield> {
     params.validate()?;
+    if let Some(w) = &params.warp {
+        w.validate().map_err(|m| JdError::invalid("warp", m))?;
+    }
     world.validate().map_err(|m| JdError::invalid("world", m))?;
     let noise = params.build();
+    let warp = params.warp.map(|w| w.build(params.seed));
     let [sx, sy] = world.spacing_m();
     let [ox, oy] = [
         world.origin[0] + params.offset_m[0] as f64,
@@ -189,8 +239,10 @@ pub fn generate_noise(world: &WorldSettings, params: &NoiseParams) -> JdResult<H
     let mid = lo + half;
     let mut hf = Heightfield::from_world(world)?;
     hf.fill_with(|x, y| {
-        let wx = (ox + x as f64 * sx) as f32;
-        let wy = (oy + y as f64 * sy) as f32;
+        let (mut wx, mut wy) = ((ox + x as f64 * sx) as f32, (oy + y as f64 * sy) as f32);
+        if let Some(w) = &warp {
+            (wx, wy) = w.domain_warp_2d(wx, wy);
+        }
         let n = noise.get_noise_2d(wx, wy); // ∈ [-1, 1]
         mid + n * half
     });
@@ -211,6 +263,56 @@ mod tests {
             halo: 2,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn domain_warp_bends_the_field_and_a_bad_warp_is_refused() {
+        let w = small_world(128, 64);
+        let plain = generate_noise(
+            &w,
+            &NoiseParams {
+                seed: 5,
+                ..Default::default()
+            },
+        )
+        .expect("plain");
+        let warped = generate_noise(
+            &w,
+            &NoiseParams {
+                seed: 5,
+                warp: Some(DomainWarp {
+                    amp_m: 120.0,
+                    feature_m: 400.0,
+                    octaves: 3,
+                }),
+                ..Default::default()
+            },
+        )
+        .expect("warped");
+        assert_ne!(
+            plain.content_hash(),
+            warped.content_hash(),
+            "the warp moves the samples"
+        );
+        let (ps, ws) = (plain.stats(), warped.stats());
+        assert!(
+            (ps.min - ws.min).abs() < 60.0 && (ps.max - ws.max).abs() < 60.0,
+            "same height range: {ps:?} vs {ws:?}"
+        );
+        assert!(
+            generate_noise(
+                &w,
+                &NoiseParams {
+                    warp: Some(DomainWarp {
+                        amp_m: 0.0,
+                        feature_m: 400.0,
+                        octaves: 3
+                    }),
+                    ..Default::default()
+                }
+            )
+            .is_err()
+        );
     }
 
     #[test]

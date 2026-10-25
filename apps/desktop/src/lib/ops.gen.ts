@@ -1520,6 +1520,15 @@ export type NoiseKind = "open_simplex2" | "open_simplex2_s" | "perlin" | "value"
 
 export type FractalKind = "none" | "fbm" | "ridged" | "ping_pong";
 
+export type DomainWarp = {
+  /** How far a sample point is displaced, metres (> 0). */
+  "amp_m": number;
+  /** Wavelength of the displacement field, metres (> 0); larger folds the terrain in broader sweeps. */
+  "feature_m": number;
+  /** Octaves of the displacement field (1..=8): more adds finer wrinkles to the folds. */
+  "octaves"?: number;
+};
+
 export type NoiseParams = {
   /** Lattice. */
   "kind"?: NoiseKind;
@@ -1537,6 +1546,10 @@ export type NoiseParams = {
   "gain"?: number;
   /** Output height range in metres: noise ∈ [-1,1] maps to [min, max]. */
   "height_range_m"?: [number, number];
+  /** Domain warp: the sampling coordinates are bent by a second noise before the lattice is
+read, which turns straight ridges and round cells into the swirled, folded shapes of
+real relief (World Creator's distortion filter, Gaea's warp). Unset = none. */
+  "warp"?: DomainWarp | null;
   /** Offset of the sampling origin in metres. */
   "offset_m"?: [number, number];
 };
@@ -2439,6 +2452,10 @@ export type NodeParams_jd_noise_fbm_1 = {
   "gain"?: number;
   /** Output height range in metres: noise ∈ [-1,1] maps to [min, max]. */
   "height_range_m"?: [number, number];
+  /** Domain warp: the sampling coordinates are bent by a second noise before the lattice is
+read, which turns straight ridges and round cells into the swirled, folded shapes of
+real relief (World Creator's distortion filter, Gaea's warp). Unset = none. */
+  "warp"?: DomainWarp | null;
   /** Offset of the sampling origin in metres. */
   "offset_m"?: [number, number];
 };
@@ -2495,6 +2512,54 @@ export type NodeParams_jd_sculpt_strokes_1 = {
   /** Keep the result within [min, max] after the strokes — `[0, 1]` when painting a density or
 class mask instead of a height. */
   "clamp"?: [number, number] | null;
+};
+
+export type Primitive = "cone" | "dome" | "plateau" | "ramp" | "crater";
+
+export type PlaceOp = "add" | "max" | "min" | "lerp";
+
+export type NodeParams_jd_shape_primitive_1 = {
+  /** Which shape. */
+  "shape": Primitive;
+  /** Centre in layer metres: `[u east, v north]` from the south-west corner. */
+  "center_m": [number, number];
+  /** Footprint in metres (width along the shape's x, depth along its y), both > 0. */
+  "size_m": [number, number];
+  /** Rotation about the centre, degrees clockwise from north (0 = the shape's y points north). */
+  "rotation_deg"?: number;
+  /** Heights the shape's 0..1 maps to, metres: `[low, high]`. */
+  "height_range_m": [number, number];
+  /** Soft edge inside the footprint, metres (≥ 0): the shape's effect fades to nothing over it. */
+  "falloff_m"?: number;
+  /** Combination with the terrain (default `add`). */
+  "op"?: PlaceOp;
+  /** Opacity 0..1 of the whole effect. */
+  "opacity"?: number;
+  /** Plateau: share of the radius that is flat (0..1). Crater: share of the radius where the rim peaks. */
+  "ratio"?: number;
+  /** Crater floor height as a share of the rim height (−1..1; negative digs below the base). */
+  "floor"?: number;
+};
+
+export type NodeParams_jd_shape_stamp_1 = {
+  /** Heightmap file in the project's assets/ (PNG 16-bit, EXR, TIFF, RAW; row 0 = north unless `north_up` is false). */
+  "path": string;
+  /** Row 0 of the file is north (the image convention) or south (the field convention). */
+  "north_up"?: boolean;
+  /** Centre in layer metres: `[u east, v north]` from the south-west corner. */
+  "center_m": [number, number];
+  /** Footprint in metres (width along the shape's x, depth along its y), both > 0. */
+  "size_m": [number, number];
+  /** Rotation about the centre, degrees clockwise from north (0 = the shape's y points north). */
+  "rotation_deg"?: number;
+  /** Heights the shape's 0..1 maps to, metres: `[low, high]`. */
+  "height_range_m": [number, number];
+  /** Soft edge inside the footprint, metres (≥ 0): the shape's effect fades to nothing over it. */
+  "falloff_m"?: number;
+  /** Combination with the terrain (default `add`). */
+  "op"?: PlaceOp;
+  /** Opacity 0..1 of the whole effect. */
+  "opacity"?: number;
 };
 
 export type SplineMode = "flatten" | "cut" | "raise";
@@ -2733,6 +2798,8 @@ export interface NodeKinds {
   "jd.ocean.bathymetry@1": NodeParams_jd_ocean_bathymetry_1;
   "jd.output.height@1": NodeParams_jd_output_height_1;
   "jd.sculpt.strokes@1": NodeParams_jd_sculpt_strokes_1;
+  "jd.shape.primitive@1": NodeParams_jd_shape_primitive_1;
+  "jd.shape.stamp@1": NodeParams_jd_shape_stamp_1;
   "jd.terrain.spline@1": NodeParams_jd_terrain_spline_1;
   "jd.terrain.strata@1": NodeParams_jd_terrain_strata_1;
   "jd.volcanic.lava@1": NodeParams_jd_volcanic_lava_1;
