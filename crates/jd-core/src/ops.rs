@@ -263,6 +263,27 @@ fn schema_of<T: schemars::JsonSchema>() -> Value {
     serde_json::to_value(schemars::schema_for!(T)).unwrap_or(Value::Null)
 }
 
+/// Append one line to `<project>/logs/ops.log`, rolling it to `ops.log.1` past 8 MiB. Best effort:
+/// a read-only project or a full disk never fails the operation itself.
+fn append_op_log(root: &std::path::Path, line: &serde_json::Value) {
+    use std::io::Write as _;
+    let dir = root.join("logs");
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let path = dir.join("ops.log");
+    if std::fs::metadata(&path).is_ok_and(|m| m.len() > 8 << 20) {
+        let _ = std::fs::rename(&path, dir.join("ops.log.1"));
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        let _ = writeln!(f, "{line}");
+    }
+}
+
 impl Registry {
     /// Register a typed operation. Params are deserialised with `deny_unknown_fields` semantics
     /// enforced by the request type.
@@ -368,6 +389,19 @@ impl Registry {
         } = req;
         let outcome = handler(ctx, params);
         let duration_ms = started.elapsed().as_millis() as u64;
+        // The project's own log: one JSON line per operation in `<project>/logs/ops.log`, written
+        // after the op so `project.open` / `project.create` log into the project they opened.
+        if let Some(root) = ctx.project_root() {
+            let line = match &outcome {
+                Ok((_, warnings)) => {
+                    serde_json::json!({ "ts": crate::project::now_rfc3339(), "op": op_id, "request_id": request_id, "outcome": if detached { "accepted" } else { "ok" }, "duration_ms": duration_ms, "warnings": warnings.iter().map(|w| w.code.clone()).collect::<Vec<_>>() })
+                }
+                Err(e) => {
+                    serde_json::json!({ "ts": crate::project::now_rfc3339(), "op": op_id, "request_id": request_id, "outcome": "error", "duration_ms": duration_ms, "code": e.code.as_str(), "message": e.message })
+                }
+            };
+            append_op_log(&root, &line);
+        }
         match outcome {
             Ok((result, warnings)) => {
                 tracing::info!(
@@ -5436,6 +5470,56 @@ mod tests {
         assert_eq!(
             r.error.as_ref().map(|e| e.code),
             Some(ErrorCode::E_SCHEMA_VERSION)
+        );
+    }
+
+    #[test]
+    fn every_operation_on_an_open_project_lands_in_its_ops_log() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let reg = Registry::with_builtins();
+        let ctx = Context::default();
+        let path = dir.path().join("Log.jdproj");
+        assert_eq!(
+            invoke(
+                &reg,
+                &ctx,
+                "project.create",
+                serde_json::json!({ "path": path, "name": "Log" })
+            )
+            .status,
+            crate::envelope::Status::Ok
+        );
+        invoke(
+            &reg,
+            &ctx,
+            "project.set_name",
+            serde_json::json!({ "name": "Logged" }),
+        );
+        invoke(
+            &reg,
+            &ctx,
+            "graph.set_param",
+            serde_json::json!({ "id": "nope", "key": "x", "value": 1 }),
+        ); // an error is logged too
+        let text = std::fs::read_to_string(path.join("logs/ops.log")).expect("ops.log");
+        let lines: Vec<serde_json::Value> = text
+            .lines()
+            .map(|l| serde_json::from_str(l).expect("json line"))
+            .collect();
+        let ops: Vec<&str> = lines
+            .iter()
+            .map(|l| l["op"].as_str().expect("op"))
+            .collect();
+        assert_eq!(
+            ops,
+            vec!["project.create", "project.set_name", "graph.set_param"]
+        );
+        assert_eq!(lines[0]["outcome"], "ok");
+        assert_eq!(lines[2]["outcome"], "error");
+        assert!(
+            lines[2]["code"]
+                .as_str()
+                .is_some_and(|c| c.starts_with("E_"))
         );
     }
 

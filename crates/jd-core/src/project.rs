@@ -399,7 +399,7 @@ impl History {
     }
 }
 
-fn now_rfc3339() -> String {
+pub(crate) fn now_rfc3339() -> String {
     jiff::Timestamp::now().to_string()
 }
 
