@@ -56,6 +56,14 @@
         "$ref": "#/$defs/MaterialSpec"
       },
       "default": []
+    },
+    "holes": {
+      "description": "A 0..1 layer whose cells ≥ 0.5 are holes, written as `holes.png` (Unity's holes texture via the import script, Unreal's Visibility layer).",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
     }
   },
   "additionalProperties": false,

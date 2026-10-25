@@ -62,6 +62,14 @@
       "format": "uint32",
       "minimum": 0,
       "default": null
+    },
+    "holes": {
+      "description": "A 0..1 layer (a painted mask, a class mask) whose cells ≥ 0.5 are holes: their quads are\nleft out of the mesh — cave and tunnel mouths, building footprints.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
     }
   },
   "additionalProperties": false,

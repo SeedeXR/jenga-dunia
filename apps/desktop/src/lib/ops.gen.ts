@@ -1428,6 +1428,9 @@ flat ground collapses, ridges keep their detail. Not for `.fbx`. */
   /** Also write this many coarser levels beside the file (`<stem>_lod1.<ext>`, …), each with
 a quarter of the previous level's triangles; the report lists them under `lods`. 1..=8, not for `.fbx`. */
   "lods"?: number | null;
+  /** A 0..1 layer (a painted mask, a class mask) whose cells ≥ 0.5 are holes: their quads are
+left out of the mesh — cave and tunnel mouths, building footprints. */
+  "holes"?: string | null;
 };
 
 export type MeshTopology = {
@@ -1486,6 +1489,8 @@ export type TerrainExportProfileRequest = {
   "tiles"?: number | null;
   /** The material stack to translate: masked layers become weightmaps, `materials.json` carries the look, and the report's `loss` lists what the engine cannot take. */
   "materials"?: MaterialSpec[];
+  /** A 0..1 layer whose cells ≥ 0.5 are holes, written as `holes.png` (Unity's holes texture via the import script, Unreal's Visibility layer). */
+  "holes"?: string | null;
 };
 
 export type ProfileSettings = {

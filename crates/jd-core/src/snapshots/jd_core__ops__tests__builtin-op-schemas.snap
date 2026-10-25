@@ -9400,6 +9400,14 @@ expression: list
           "format": "uint32",
           "minimum": 0,
           "default": null
+        },
+        "holes": {
+          "description": "A 0..1 layer (a painted mask, a class mask) whose cells ≥ 0.5 are holes: their quads are\nleft out of the mesh — cave and tunnel mouths, building footprints.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         }
       },
       "additionalProperties": false,
@@ -9728,6 +9736,14 @@ expression: list
             "$ref": "#/$defs/MaterialSpec"
           },
           "default": []
+        },
+        "holes": {
+          "description": "A 0..1 layer whose cells ≥ 0.5 are holes, written as `holes.png` (Unity's holes texture via the import script, Unreal's Visibility layer).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         }
       },
       "additionalProperties": false,

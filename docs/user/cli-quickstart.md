@@ -1195,6 +1195,15 @@ The acceptance scenario runs this check when an Unreal engine is installed under
 
 `terrain.export_profile` writes one folder an engine importer can take as-is (plus `splat_<k>.png`: the material masks packed four per RGBA image, in layer order, for Unity's alphamaps and Unreal weight packs — `materials.json` lists which layer sits in which channel): **Unreal** gets a 16-bit PNG heightmap with row 0 = north, one 8-bit grayscale weightmap per mask layer at the same resolution, and a README with the Landscape numbers computed from the data — Z scale = (max − min) × 100 / 512 (201.771 here for 52…1085 m) and the Z location that puts mid-grey at the mid height; **Unity** gets `heightmap.r16` (16-bit little-endian, row 0 = south, so *Flip Vertically: off*, Byte Order *Windows*), the weightmaps, and the Terrain Height (1033.07 m) plus the y offset (51.98 m). Sizes an engine does not like are reported as `W_ENGINE_SIZE` (Unity wants 2ⁿ+1 squares, Unreal 1009/2017/4033/8129 — use the world presets). The engine-side steps follow the Unity 6 manual and the Unreal 5 Landscape guide but are **UNVERIFIED** until someone imports once; the README says so.
 
+### Holes
+
+```
+$ jd op terrain.export_mesh --project Cave.jdproj --params '{"layer":"height","path":"cave.glb","holes":"mask_cave"}'
+$ jd op terrain.export_profile --project Cave.jdproj --params '{"profile":"unity","dir":"unity","holes":"mask_cave"}'
+```
+
+Any 0..1 layer — a painted mask (`jd.sculpt.strokes@1` with `clamp`), a class mask, a pattern — serves as `holes`: cells at or above 0.5 are left out. `terrain.export_mesh` drops those quads from every format (the report's `triangles` shrinks accordingly; the LOD chain keeps the holes at every level), which is how cave and tunnel mouths and building footprints open a terrain. `terrain.export_profile` writes `holes.png` (255 = hole, row 0 north) and names it in `materials.json`: the Unity import script calls `TerrainData.SetHoles` with it (one cell per quad, so colliders skip the holes too); for Unreal, import it as the landscape's **Visibility** weight layer (the README says so). Unit tests: a 4 × 4 hole in a 16² field removes 32 triangles from the grid mesh, the GLB and the OBJ; the profile's `holes.png` has the north row first; a mask of the wrong size is refused.
+
 ### GIS text formats: ASC and XYZ
 
 ```

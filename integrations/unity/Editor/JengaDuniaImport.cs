@@ -21,7 +21,7 @@ namespace JengaDunia
         [Serializable] class Trees { public int count; public TreeInst[] instances; }
         [Serializable] class Report
         {
-            public string unity, dir; public int heightmap_resolution, source_px, alphamap_layers, trees;
+            public string unity, dir; public int heightmap_resolution, source_px, alphamap_layers, trees, holes;
             public float[] terrain_size, sampled_height_min_max; public string[] layers; public float mean_height; public float[] layer_mean_height; public string[] layer_detail; public float[] layer_tile_m; public List<string> warnings = new List<string>(); public bool ok;
         }
 
@@ -186,6 +186,27 @@ namespace JengaDunia
                     for (var k = 0; k < n; k++) report.layer_mean_height[k] = layerCount[k] > 0 ? (float)(layerSum[k] / layerCount[k]) : -1f;
                 }
                 report.alphamap_layers = layers.Count;
+                // Holes: holes.png (255 = hole, PNG row 0 = north, LoadImage bottom-up like the weightmaps);
+                // SetHoles takes true = terrain present, one cell per quad.
+                var holesPath = Path.Combine(dir, "holes.png");
+                if (File.Exists(holesPath))
+                {
+                    var tex = new Texture2D(2, 2);
+                    if (!ImageConversion.LoadImage(tex, File.ReadAllBytes(holesPath))) throw new Exception("cannot decode holes.png");
+                    data.holesResolution = res - 1;
+                    var keep = new bool[res - 1, res - 1];
+                    var holed = 0;
+                    for (var y = 0; y < res - 1; y++)
+                        for (var x = 0; x < res - 1; x++)
+                        {
+                            int sx = Math.Min(x, w - 1), sy = Math.Min(y, h - 1);
+                            var hole = tex.GetPixel(sx, sy).r >= 0.5f;
+                            keep[y, x] = !hole;
+                            if (hole) holed++;
+                        }
+                    data.SetHoles(0, 0, keep);
+                    report.holes = holed;
+                }
                 report.layers = layerFiles.ToArray();
 
                 // Trees: one primitive prototype, instances from trees_unity.json (normalised nx/nz, height sampled from the terrain).

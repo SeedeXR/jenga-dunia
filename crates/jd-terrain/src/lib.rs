@@ -69,8 +69,8 @@ pub use masks::{Pattern, aspect_mask, edge_fade, occlusion_mask, pattern_mask};
 pub use mesh::{
     BakedMaps, GridMesh, MaterialLayer, MeshExportReport, MeshTopology, auto_step, bake_maps,
     bake_maps_with, export_glb, export_mesh, export_mesh_lods, export_mesh_lods_with,
-    export_mesh_with, export_obj, export_ply, export_stl, export_usda, export_usdc, export_usdz,
-    mesh_topology, write_usdc,
+    export_mesh_lods_with_holes, export_mesh_with, export_mesh_with_holes, export_obj, export_ply,
+    export_stl, export_usda, export_usdc, export_usdz, mesh_topology, write_usdc,
 };
 pub use network::{Mouths, NetworkParams, hydrology_first};
 pub use noise::{FractalKind, NoiseKind, NoiseParams, generate_noise};
@@ -81,7 +81,7 @@ pub use ocean::{
 };
 pub use profiles::{
     EngineProfile, ProfileMaterial, ProfileReport, ProfileSettings, export_profile,
-    export_profile_tiled, export_profile_with,
+    export_profile_tiled, export_profile_with, export_profile_with_holes,
 };
 pub use rain::{RainParams, orographic_rain};
 pub use rocks::{RockParams, rock_mesh};

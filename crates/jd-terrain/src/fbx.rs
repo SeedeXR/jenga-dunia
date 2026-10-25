@@ -233,7 +233,19 @@ pub fn export_fbx(
     step: u32,
     texture: bool,
 ) -> JdResult<MeshExportReport> {
-    let mesh = GridMesh::build(hf, extent_m, step)?;
+    export_fbx_with_holes(hf, extent_m, path, step, texture, None)
+}
+
+/// [`export_fbx`] leaving out the quads a 0..1 `holes` mask marks (≥ 0.5).
+pub fn export_fbx_with_holes(
+    hf: &Heightfield,
+    extent_m: [f64; 2],
+    path: &Path,
+    step: u32,
+    texture: bool,
+    holes: Option<&Heightfield>,
+) -> JdResult<MeshExportReport> {
+    let mesh = GridMesh::build_with(hf, extent_m, step, holes)?;
     let [gw, gh] = mesh.grid;
     let creator = format!("jenga-dunia {}", env!("CARGO_PKG_VERSION"));
 
@@ -243,6 +255,9 @@ pub fn export_fbx(
     let mut corners: Vec<i32> = Vec::with_capacity(polygons.capacity());
     for gz in 0..gh - 1 {
         for gx in 0..gw - 1 {
+            if !crate::mesh::quad_kept(holes, step, gx, gz) {
+                continue;
+            }
             let a = (gz * gw + gx) as i32;
             let (b, c, d) = (a + 1, a + gw as i32, a + gw as i32 + 1);
             polygons.extend_from_slice(&[a, b, d, -(c + 1)]);
@@ -250,7 +265,7 @@ pub fn export_fbx(
         }
     }
     let n_vertices = gw * gh;
-    let n_quads = (gw - 1) * (gh - 1);
+    let n_quads = (polygons.len() / 4) as u32;
 
     let mut geometry_kids = vec![
         N::leaf("GeometryVersion", vec![P::I32(124)]),

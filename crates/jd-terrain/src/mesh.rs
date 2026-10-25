@@ -582,6 +582,28 @@ pub fn export_glb_with(
     texture: bool,
     materials: &[MaterialLayer],
 ) -> JdResult<MeshExportReport> {
+    export_glb_with_holes(hf, extent_m, path, step, texture, materials, None)
+}
+
+/// [`export_glb_with`] leaving out the quads a 0..1 `holes` mask marks (≥ 0.5).
+#[allow(clippy::too_many_arguments)]
+pub fn export_glb_with_holes(
+    hf: &Heightfield,
+    extent_m: [f64; 2],
+    path: &Path,
+    step: u32,
+    texture: bool,
+    materials: &[MaterialLayer],
+    holes: Option<&Heightfield>,
+) -> JdResult<MeshExportReport> {
+    if let Some(m) = holes
+        && (m.width(), m.height()) != (hf.width(), hf.height())
+    {
+        return Err(JdError::invalid(
+            "holes",
+            "the hole mask must match the terrain's size",
+        ));
+    }
     hf.validate_finite()?;
     validate_layers(hf, materials)?;
     if step == 0 {
@@ -675,8 +697,12 @@ pub fn export_glb_with(
     }
     let tan_len = bin.len() - tan_off;
     let idx_off = bin.len();
+    let mut n_triangles = 0u32;
     for gz in 0..gh - 1 {
         for gx in 0..gw - 1 {
+            if !quad_kept(holes, step, gx, gz) {
+                continue;
+            }
             let a = gz * gw + gx;
             let b = a + 1;
             let c = a + gw;
@@ -685,10 +711,10 @@ pub fn export_glb_with(
             for i in [a, b, c, b, d, c] {
                 bin.extend_from_slice(&i.to_le_bytes());
             }
+            n_triangles += 2;
         }
     }
     let idx_len = bin.len() - idx_off;
-    let n_triangles = (gw - 1) * (gh - 1) * 2;
     pad4(&mut bin, 0);
     // Optional baked textures: albedo (one texel per vertex), normal + roughness maps (full field
     // resolution, capped), each in its own buffer view; UVs already map v = 0 to south.
@@ -837,6 +863,18 @@ pub(crate) fn write_glb(path: &Path, json: &serde_json::Value, bin: &[u8]) -> Jd
     Ok(out.len() as u64)
 }
 
+/// Whether the quad whose south-west vertex is grid cell (`gx`, `gz`) is kept: without a hole
+/// mask always; with one, when the mask is below 0.5 at that cell (one cell = one quad, as Unity's
+/// holes texture and Unreal's visibility layer read it).
+pub(crate) fn quad_kept(holes: Option<&Heightfield>, step: u32, gx: u32, gz: u32) -> bool {
+    holes.is_none_or(|m| {
+        m.get(
+            (gx * step).min(m.width() - 1),
+            (gz * step).min(m.height() - 1),
+        ) < 0.5
+    })
+}
+
 /// A regular grid mesh in metres: +X east, +Y up, +Z south, centred on the world (same frame as
 /// the GLB writer and the viewport).
 pub struct GridMesh {
@@ -864,7 +902,26 @@ impl GridMesh {
     }
     /// Sample the field every `step` pixels (always including the last row/column).
     pub fn build(hf: &Heightfield, extent_m: [f64; 2], step: u32) -> JdResult<Self> {
+        Self::build_with(hf, extent_m, step, None)
+    }
+
+    /// [`GridMesh::build`] with an optional 0..1 hole mask (same size as `hf`): quads whose cell
+    /// reads ≥ 0.5 are left out, so caves, tunnel mouths and building footprints open the mesh.
+    pub fn build_with(
+        hf: &Heightfield,
+        extent_m: [f64; 2],
+        step: u32,
+        holes: Option<&Heightfield>,
+    ) -> JdResult<Self> {
         hf.validate_finite()?;
+        if let Some(m) = holes
+            && (m.width(), m.height()) != (hf.width(), hf.height())
+        {
+            return Err(JdError::invalid(
+                "holes",
+                "the hole mask must match the terrain's size",
+            ));
+        }
         if step == 0 {
             return Err(JdError::invalid("step", "must be ≥ 1"));
         }
@@ -919,6 +976,9 @@ impl GridMesh {
         let mut indices = Vec::with_capacity(((gw - 1) * (gh - 1) * 6) as usize);
         for gz in 0..gh - 1 {
             for gx in 0..gw - 1 {
+                if !quad_kept(holes, step, gx, gz) {
+                    continue;
+                }
                 let a = gz * gw + gx;
                 let (b, c, d) = (a + 1, a + gw, a + gw + 1);
                 indices.extend_from_slice(&[a, b, c, b, d, c]);
@@ -1491,12 +1551,44 @@ pub fn export_mesh_with(
     target_triangles: Option<u32>,
     materials: &[MaterialLayer],
 ) -> JdResult<MeshExportReport> {
+    export_mesh_with_holes(
+        hf,
+        extent_m,
+        path,
+        step,
+        texture,
+        target_triangles,
+        materials,
+        None,
+    )
+}
+
+/// [`export_mesh_with`] with an optional 0..1 hole mask: marked quads (≥ 0.5) are left out of
+/// every format (GLB and FBX directly; the others through the grid-mesh writer).
+#[allow(clippy::too_many_arguments)]
+pub fn export_mesh_with_holes(
+    hf: &Heightfield,
+    extent_m: [f64; 2],
+    path: &Path,
+    step: u32,
+    texture: bool,
+    target_triangles: Option<u32>,
+    materials: &[MaterialLayer],
+    holes: Option<&Heightfield>,
+) -> JdResult<MeshExportReport> {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
         .map(|e| e.to_ascii_lowercase());
+    if holes.is_some()
+        && target_triangles.is_none()
+        && !matches!(ext.as_deref(), None | Some("glb") | Some("fbx"))
+    {
+        let grid = GridMesh::build_with(hf, extent_m, step, holes)?;
+        return write_decimated(&grid, ext.as_deref(), extent_m, path, step, None);
+    }
     if let Some(target) = target_triangles {
-        let grid = GridMesh::build(hf, extent_m, step)?;
+        let grid = GridMesh::build_with(hf, extent_m, step, holes)?;
         let mesh = crate::decimate::decimate(&grid, extent_m, target)?;
         let maps = (texture && matches!(ext.as_deref(), None | Some("glb")))
             .then(|| bake_maps_with(hf, extent_m, NORMAL_MAP_CAP, materials))
@@ -1504,14 +1596,16 @@ pub fn export_mesh_with(
         return write_decimated(&mesh, ext.as_deref(), extent_m, path, step, maps.as_ref());
     }
     match ext.as_deref() {
-        None | Some("glb") => export_glb_with(hf, extent_m, path, step, texture, materials),
+        None | Some("glb") => {
+            export_glb_with_holes(hf, extent_m, path, step, texture, materials, holes)
+        }
         Some("obj") => export_obj(hf, extent_m, path, step),
         Some("stl") => export_stl(hf, extent_m, path, step),
         Some("ply") => export_ply(hf, extent_m, path, step),
         Some("usda") => export_usda(hf, extent_m, path, step),
         Some("usdc") => export_usdc(hf, extent_m, path, step),
         Some("usdz") => export_usdz(hf, extent_m, path, step),
-        Some("fbx") => crate::fbx::export_fbx(hf, extent_m, path, step, texture),
+        Some("fbx") => crate::fbx::export_fbx_with_holes(hf, extent_m, path, step, texture, holes),
         Some(other) => Err(JdError::new(
             jd_types::ErrorCode::E_FORMAT_UNSUPPORTED,
             format!("unsupported mesh extension `{other}`"),
@@ -1664,6 +1758,32 @@ pub fn export_mesh_lods_with(
     lods: u32,
     materials: &[MaterialLayer],
 ) -> JdResult<MeshExportReport> {
+    export_mesh_lods_with_holes(
+        hf,
+        extent_m,
+        path,
+        step,
+        texture,
+        target_triangles,
+        lods,
+        materials,
+        None,
+    )
+}
+
+/// [`export_mesh_lods_with`] with an optional hole mask applied to every level.
+#[allow(clippy::too_many_arguments)]
+pub fn export_mesh_lods_with_holes(
+    hf: &Heightfield,
+    extent_m: [f64; 2],
+    path: &Path,
+    step: u32,
+    texture: bool,
+    target_triangles: Option<u32>,
+    lods: u32,
+    materials: &[MaterialLayer],
+    holes: Option<&Heightfield>,
+) -> JdResult<MeshExportReport> {
     if !(1..=8).contains(&lods) {
         return Err(JdError::invalid("lods", "must be within 1..=8"));
     }
@@ -1677,7 +1797,7 @@ pub fn export_mesh_lods_with(
                 .next("Export the LOD chain as .glb/.obj/.ply/.usda, or write FBX without `lods`."),
         );
     }
-    let mut report = export_mesh_with(
+    let mut report = export_mesh_with_holes(
         hf,
         extent_m,
         path,
@@ -1685,8 +1805,9 @@ pub fn export_mesh_lods_with(
         texture,
         target_triangles,
         materials,
+        holes,
     )?;
-    let grid = GridMesh::build(hf, extent_m, step)?;
+    let grid = GridMesh::build_with(hf, extent_m, step, holes)?;
     let maps = (texture && matches!(ext.as_deref(), None | Some("glb")))
         .then(|| bake_maps_with(hf, extent_m, NORMAL_MAP_CAP, materials))
         .transpose()?;
@@ -1885,6 +2006,49 @@ mod tests {
             ..plain
         };
         assert!(bake_maps_with(&hf, [640.0, 640.0], 64, &[bad]).is_err());
+    }
+
+    #[test]
+    fn a_hole_mask_leaves_its_quads_out_of_the_grid_mesh_and_the_glb() {
+        let mut h = Heightfield::new(16, 16, 16, 0).expect("hf");
+        h.fill_with(|x, y| (x + y) as f32);
+        let mut holes = h.clone();
+        holes.fill_with(|x, y| {
+            if (4..8).contains(&x) && (4..8).contains(&y) {
+                1.0
+            } else {
+                0.0
+            }
+        });
+        let full = GridMesh::build(&h, [160.0, 160.0], 1).expect("full");
+        let cut = GridMesh::build_with(&h, [160.0, 160.0], 1, Some(&holes)).expect("cut");
+        assert_eq!(
+            full.indices.len() - cut.indices.len(),
+            16 * 6,
+            "16 quads = 32 triangles gone"
+        );
+        assert_eq!(
+            cut.positions.len(),
+            full.positions.len(),
+            "vertices stay; only faces go"
+        );
+        let dir = tempfile::tempdir().expect("tmp");
+        let path = dir.path().join("holed.glb");
+        let r =
+            export_mesh_with_holes(&h, [160.0, 160.0], &path, 1, false, None, &[], Some(&holes))
+                .expect("glb");
+        assert_eq!(r.triangles, 15 * 15 * 2 - 32);
+        let obj = dir.path().join("holed.obj");
+        let r = export_mesh_with_holes(&h, [160.0, 160.0], &obj, 1, false, None, &[], Some(&holes))
+            .expect("obj");
+        assert_eq!(
+            r.triangles,
+            15 * 15 * 2 - 32,
+            "other formats go through the grid mesh"
+        );
+        let mut wrong = Heightfield::new(8, 8, 8, 0).expect("hf");
+        wrong.fill_with(|_, _| 0.0);
+        assert!(GridMesh::build_with(&h, [160.0, 160.0], 1, Some(&wrong)).is_err());
     }
 
     #[test]

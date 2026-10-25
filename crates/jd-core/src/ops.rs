@@ -3678,6 +3678,9 @@ pub mod terrain {
         /// The material stack to translate: masked layers become weightmaps, `materials.json` carries the look, and the report's `loss` lists what the engine cannot take.
         #[serde(default)]
         pub materials: Vec<MaterialSpec>,
+        /// A 0..1 layer whose cells ≥ 0.5 are holes, written as `holes.png` (Unity's holes texture via the import script, Unreal's Visibility layer).
+        #[serde(default)]
+        pub holes: Option<String>,
     }
 
     /// `terrain.scatter` params.
@@ -3777,6 +3780,10 @@ pub mod terrain {
         /// a quarter of the previous level's triangles; the report lists them under `lods`. 1..=8, not for `.fbx`.
         #[serde(default)]
         pub lods: Option<u32>,
+        /// A 0..1 layer (a painted mask, a class mask) whose cells ≥ 0.5 are holes: their quads are
+        /// left out of the mesh — cave and tunnel mouths, building footprints.
+        #[serde(default)]
+        pub holes: Option<String>,
     }
 
     fn yes() -> bool {
@@ -4637,6 +4644,7 @@ pub mod terrain {
                 if !materials.is_empty() && !matches!(path.extension().and_then(|e| e.to_str()), None | Some("glb")) {
                     warnings.push(Warning::new("W_EXPORT_LOSS", "`materials` are baked into GLB textures only; this format carries the base albedo (FBX) or no texture — export .glb or paint the layers in the engine from `terrain.export_profile`"));
                 }
+                let holes = p.holes.as_ref().map(|n| ctx.with_layer(n, |hf| Ok(hf.clone()))).transpose()?;
                 let report = ctx.with_layer(&p.layer, |hf| {
                     let step = p.step.unwrap_or_else(|| jd_terrain::auto_step(hf.width(), hf.height(), p.max_vertices));
                     if p.step.is_none() && step > 1 {
@@ -4646,8 +4654,8 @@ pub mod terrain {
                         ));
                     }
                     match p.lods {
-                        Some(n) if n > 0 => jd_terrain::export_mesh_lods_with(hf, extent, &path, step, p.texture, p.target_triangles, n, &materials),
-                        _ => jd_terrain::export_mesh_with(hf, extent, &path, step, p.texture, p.target_triangles, &materials),
+                        Some(n) if n > 0 => jd_terrain::export_mesh_lods_with_holes(hf, extent, &path, step, p.texture, p.target_triangles, n, &materials, holes.as_ref()),
+                        _ => jd_terrain::export_mesh_with_holes(hf, extent, &path, step, p.texture, p.target_triangles, &materials, holes.as_ref()),
                     }
                 })?;
                 ctx.with_project(|proj| crate::geo::write_attribution_txt(proj, path.parent().unwrap_or(proj.root())).map(|_| ()))?;
@@ -4679,9 +4687,10 @@ pub mod terrain {
                     Ok(jd_terrain::GeoRef { origin: w.origin, spacing: w.spacing_m(), crs: w.crs.clone() })
                 })?;
                 let extent = ctx.with_project(|proj| Ok(proj.doc.world.extent_m))?;
+                let holes = p.holes.as_ref().map(|n| ctx.with_layer(n, |hf| Ok(hf.clone()))).transpose()?;
                 let report = match p.tiles {
-                    Some(n) => jd_terrain::export_profile_tiled(p.profile, &height, &refs, &stack, &dir, p.range_m, Some(&geo), extent, n)?,
-                    None => jd_terrain::export_profile_with(p.profile, &height, &refs, &stack, &dir, p.range_m, Some(&geo))?,
+                    Some(n) => jd_terrain::export_profile_tiled(p.profile, &height, &refs, &stack, &dir, p.range_m, Some(&geo), extent, n, holes.as_ref())?,
+                    None => jd_terrain::export_profile_with_holes(p.profile, &height, &refs, &stack, &dir, p.range_m, Some(&geo), holes.as_ref())?,
                 };
                 let warnings = report.notes.iter().map(|n| Warning::new("W_ENGINE_SIZE", n.clone())).collect();
                 ctx.with_project(|proj| crate::geo::write_attribution_txt(proj, &dir).map(|_| ()))?;

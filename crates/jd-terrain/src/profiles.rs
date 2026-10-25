@@ -113,6 +113,7 @@ pub fn export_profile_tiled(
     geo: Option<&crate::GeoRef>,
     extent_m: [f64; 2],
     tiles: u32,
+    holes: Option<&Heightfield>,
 ) -> JdResult<ProfileReport> {
     if !(2..=16).contains(&tiles) {
         return Err(JdError::invalid("tiles", "must be within 2..=16"));
@@ -156,7 +157,19 @@ pub fn export_profile_tiled(
                     detail: m.detail,
                 })
                 .collect();
-            let r = export_profile_with(profile, &hf, &refs, &mats, &sub, Some(range), geo)?;
+            let cut_holes = holes
+                .map(|m| m.crop(tx * tw, ty * th, tw, th))
+                .transpose()?;
+            let r = export_profile_with_holes(
+                profile,
+                &hf,
+                &refs,
+                &mats,
+                &sub,
+                Some(range),
+                geo,
+                cut_holes.as_ref(),
+            )?;
             for f in &r.files {
                 files.push(format!("{name}/{f}"));
             }
@@ -204,7 +217,31 @@ pub fn export_profile_with(
     range_m: Option<[f32; 2]>,
     geo: Option<&crate::GeoRef>,
 ) -> JdResult<ProfileReport> {
+    export_profile_with_holes(profile, height, masks, materials, dir, range_m, geo, None)
+}
+
+/// [`export_profile_with`] plus a 0..1 hole mask written as `holes.png` (255 = hole, row 0 north):
+/// Unity's holes texture, Unreal's Visibility layer.
+#[allow(clippy::too_many_arguments)]
+pub fn export_profile_with_holes(
+    profile: EngineProfile,
+    height: &Heightfield,
+    masks: &[(String, &Heightfield)],
+    materials: &[ProfileMaterial<'_>],
+    dir: &Path,
+    range_m: Option<[f32; 2]>,
+    geo: Option<&crate::GeoRef>,
+    holes: Option<&Heightfield>,
+) -> JdResult<ProfileReport> {
     height.validate_finite()?;
+    if let Some(m) = holes
+        && (m.width(), m.height()) != (height.width(), height.height())
+    {
+        return Err(JdError::invalid(
+            "holes",
+            "the hole mask must match the heightmap's size",
+        ));
+    }
     let safe = |name: &str| {
         !name.is_empty()
             && name
@@ -329,7 +366,25 @@ pub fn export_profile_with(
         })?;
         files.push("ao.png".to_owned());
     }
-    // Material translation: masked layers → weightmaps + a manifest; what does not fit → `loss`.
+    if let Some(m) = holes {
+        let mut img = image::GrayImage::new(w, h);
+        for y in 0..h {
+            for x in 0..w {
+                img.put_pixel(
+                    x,
+                    h - 1 - y,
+                    image::Luma([if m.get(x, y) >= 0.5 { 255 } else { 0 }]),
+                );
+            }
+        }
+        img.save(dir.join("holes.png")).map_err(|e| {
+            JdError::new(
+                jd_types::ErrorCode::E_INTERNAL,
+                format!("PNG write failed: {e}"),
+            )
+        })?;
+        files.push("holes.png".to_owned());
+    } // Material translation: masked layers → weightmaps + a manifest; what does not fit → `loss`.
     let mut loss = Vec::new();
     if !materials.is_empty() {
         let mut layers = Vec::new();
@@ -407,7 +462,7 @@ pub fn export_profile_with(
             files.push(file.clone());
             splats.push(serde_json::json!({ "file": file, "channels": chunk.iter().map(|(n, _)| *n).collect::<Vec<_>>() }));
         }
-        let manifest = serde_json::json!({ "engine": match profile { EngineProfile::Unity => "unity", EngineProfile::Unreal => "unreal" }, "layers": layers, "ao": "ao.png", "splatmaps": splats, "loss": loss });
+        let manifest = serde_json::json!({ "engine": match profile { EngineProfile::Unity => "unity", EngineProfile::Unreal => "unreal" }, "layers": layers, "ao": "ao.png", "holes": holes.map(|_| "holes.png"), "splatmaps": splats, "loss": loss });
         std::fs::write(
             dir.join("materials.json"),
             serde_json::to_vec_pretty(&manifest)?,
@@ -432,6 +487,12 @@ pub fn export_profile_with(
     };
     let mut readme = readme(profile, w, h, &settings, masks, &notes);
     if !materials.is_empty() {
+        if holes.is_some() {
+            readme.push_str(match profile {
+            EngineProfile::Unity => "\nHoles: `holes.png` (255 = hole, row 0 north) — the import script calls TerrainData.SetHoles (a cell is a quad; true = terrain present), so the marked cells render nothing and colliders skip them.\n",
+            EngineProfile::Unreal => "\nHoles: `holes.png` (255 = hole, row 0 north) — import it as the landscape's **Visibility** weight layer (Landscape Visibility Mask node in the material; 1 = hidden).\n",
+        });
+        }
         readme.push_str("\nMaterials: `materials.json` lists one entry per layer of the material stack (weightmap, albedo_srgb, roughness/smoothness, emissive) and the RGBA-packed `splat_<k>.png` maps (four layers per image, in order); `ao.png` is the terrain's ambient occlusion (8-bit, 1 − sky occlusion). Lost in translation:\n");
         for l in &loss {
             readme.push_str(&format!("- {l}\n"));
@@ -500,6 +561,55 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_hole_mask_becomes_holes_png_with_the_north_row_first() {
+        let mut h = Heightfield::new(8, 8, 8, 0).expect("hf");
+        h.fill_with(|x, _| x as f32);
+        let mut holes = h.clone();
+        holes.fill_with(|x, y| if x == 1 && y == 6 { 1.0 } else { 0.0 });
+        let dir = tempfile::tempdir().expect("tmp");
+        // One base material so materials.json (which names the holes file) is written.
+        let base = [ProfileMaterial {
+            name: "base".into(),
+            mask: None,
+            albedo: [0.5, 0.5, 0.5],
+            roughness: 0.9,
+            emissive: [0.0; 3],
+            detail: None,
+        }];
+        let r = export_profile_with_holes(
+            EngineProfile::Unreal,
+            &h,
+            &[],
+            &base,
+            &dir.path().join("u"),
+            None,
+            None,
+            Some(&holes),
+        )
+        .expect("profile");
+        assert!(r.files.contains(&"holes.png".to_owned()));
+        let img = image::open(dir.path().join("u/holes.png"))
+            .expect("png")
+            .into_luma8();
+        assert_eq!(
+            img.get_pixel(1, 1)[0],
+            255,
+            "field row 6 is image row 1 (north first)"
+        );
+        assert_eq!(img.get_pixel(1, 6)[0], 0);
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(dir.path().join("u/materials.json")).expect("read"),
+        )
+        .expect("json");
+        assert_eq!(manifest["holes"], "holes.png");
+        let readme = std::fs::read_to_string(dir.path().join("u/README.md")).expect("readme");
+        assert!(
+            readme.contains("Visibility"),
+            "the Unreal README names the visibility layer"
+        );
+    }
+
+    #[test]
     fn tiled_export_cuts_the_world_into_blocks_that_share_one_range() {
         let mut h = Heightfield::new(64, 64, 64, 0).expect("hf");
         h.fill_with(|x, y| (x + y) as f32);
@@ -514,6 +624,7 @@ mod tests {
             None,
             [6400.0, 6400.0],
             2,
+            None,
         )
         .expect("tiled");
         assert_eq!(r.size_px, [64, 64]);
@@ -551,7 +662,8 @@ mod tests {
                 None,
                 None,
                 [6400.0, 6400.0],
-                3
+                3,
+                None,
             )
             .is_err(),
             "64 does not divide by 3"
@@ -609,6 +721,7 @@ mod tests {
         );
         assert!(dir.path().join("u/splat_0.png").exists());
         assert_eq!(manifest["ao"], "ao.png");
+        assert!(manifest["holes"].is_null(), "no hole mask given");
         assert!(
             dir.path().join("u/ao.png").exists(),
             "the ambient-occlusion map is part of every profile"
