@@ -96,7 +96,10 @@ pub use scatter::{
     ScatterParams, ScatterPoint, exclude_near, parse_points_csv, read_points_csv, scatter_points,
     write_points, write_points_engine, write_points_with,
 };
-pub use sculpt::{Stroke, StrokeMode, StrokeShape, apply_strokes};
+pub use sculpt::{
+    BrushAlpha, LayerArea, LayerSettings, Stroke, StrokeMode, StrokeShape, apply_layer_settings,
+    apply_strokes,
+};
 pub use seabed::{SeabedParams, classify_seabed, classify_seabed_current, classify_seabed_with};
 pub use sim::{
     HydraulicParams, HydraulicResult, StreamPowerParams, THERMAL_MAX_RATE, hydraulic_erode,
