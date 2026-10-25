@@ -131,11 +131,67 @@ class JD_OT_import_project(bpy.types.Operator, ImportHelper):
         return {"FINISHED"}
 
 
+def import_splines(context, path, name="JD splines"):
+    """Read a `terrain.export_splines` GeoJSON (layer metres) and build one poly curve per
+    LineString in a new collection, in the terrain's frame (x = u − extent/2, y = v − extent/2
+    is not known here: the file is in layer metres, so the curves are placed with the south-west
+    corner at the origin and the caller moves the collection if the terrain was recentred)."""
+    with open(path, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    if doc.get("jd:coordinates", "local_m") != "local_m":
+        raise RuntimeError("import the splines exported with coordinates = local_m (layer metres); this file is " + str(doc.get("jd:coordinates")))
+    collection = bpy.data.collections.new(name)
+    context.scene.collection.children.link(collection)
+    made = 0
+    for k, feature in enumerate(doc.get("features", [])):
+        geom = feature.get("geometry") or {}
+        if geom.get("type") != "LineString":
+            continue
+        pts = geom.get("coordinates") or []
+        if len(pts) < 2:
+            continue
+        props = feature.get("properties") or {}
+        curve = bpy.data.curves.new(f"{props.get('kind', 'line')}_{k}", type="CURVE")
+        curve.dimensions = "3D"
+        spline = curve.splines.new("POLY")
+        spline.points.add(len(pts) - 1)
+        for point, (u, v) in zip(spline.points, pts):
+            point.co = (float(u), float(v), 0.0, 1.0)
+        obj = bpy.data.objects.new(curve.name, curve)
+        for key, value in props.items():
+            if isinstance(value, (int, float, str)):
+                obj[f"jd_{key}"] = value
+        collection.objects.link(obj)
+        made += 1
+    return collection, made
+
+
+class JD_OT_import_splines(bpy.types.Operator, ImportHelper):
+    """Import rivers and placed splines (terrain.export_splines GeoJSON, layer metres) as poly curves"""
+
+    bl_idname = "jd.import_splines"
+    bl_label = "Import Jenga Dunia splines (.geojson)"
+    bl_options = {"REGISTER", "UNDO"}
+
+    filename_ext = ".geojson"
+    filter_glob: StringProperty(default="*.geojson;*.json", options={"HIDDEN"})
+
+    def execute(self, context):
+        try:
+            _, made = import_splines(context, self.filepath)
+        except (RuntimeError, OSError, ValueError) as exc:
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
+        self.report({"INFO"}, f"Imported {made} curves")
+        return {"FINISHED"}
+
+
 def menu_func(self, _context):
     self.layout.operator(JD_OT_import_project.bl_idname, text="Jenga Dunia project (.jdproj)")
+    self.layout.operator(JD_OT_import_splines.bl_idname, text="Jenga Dunia splines (.geojson)")
 
 
-classes = (JDBridgePreferences, JD_OT_import_project)
+classes = (JDBridgePreferences, JD_OT_import_project, JD_OT_import_splines,)
 
 
 def register():

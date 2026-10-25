@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TerrainExportSplines",
+  "description": "Request of `terrain.export_splines`.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "Output file (`.geojson`), relative to the project's exports/.",
+      "type": "string"
+    },
+    "height": {
+      "description": "Height layer the rivers drain over.",
+      "type": "string",
+      "default": "height"
+    },
+    "rivers": {
+      "description": "A 0..1 river mask layer to trace (omit for graph splines only).",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
+    "threshold": {
+      "description": "Mask value from which a cell is river.",
+      "type": "number",
+      "format": "float",
+      "default": 0.5
+    },
+    "min_length_m": {
+      "description": "Reaches shorter than this are dropped, metres.",
+      "type": "number",
+      "format": "float",
+      "default": 50.0
+    },
+    "graph_splines": {
+      "description": "Also write every `jd.terrain.spline@1` node's polyline (roads, canals, dykes).",
+      "type": "boolean",
+      "default": true
+    },
+    "coordinates": {
+      "description": "Coordinate system of the numbers written.",
+      "$ref": "#/$defs/SplineCoordinates",
+      "default": "local_m"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path"
+  ],
+  "$defs": {
+    "SplineCoordinates": {
+      "description": "Which numbers a splines export writes.",
+      "oneOf": [
+        {
+          "description": "Layer metres: `u` east from the west edge, `v` north from the south edge (Blender, engines).",
+          "type": "string",
+          "const": "local_m"
+        },
+        {
+          "description": "The world's CRS units from its georeference origin (GIS with the same CRS).",
+          "type": "string",
+          "const": "world"
+        },
+        {
+          "description": "WGS 84 longitude / latitude through the world's CRS (standard GeoJSON; needs a CRS).",
+          "type": "string",
+          "const": "wgs84"
+        }
+      ]
+    }
+  }
+}

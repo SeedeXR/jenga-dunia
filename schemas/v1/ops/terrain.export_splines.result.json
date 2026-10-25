@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SplinesReport",
+  "description": "Result of `terrain.export_splines`.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "The file written.",
+      "type": "string"
+    },
+    "rivers": {
+      "description": "River reaches written.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "splines": {
+      "description": "Graph spline polylines written.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "bytes": {
+      "description": "Bytes written.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "coordinates": {
+      "description": "What the coordinates are.",
+      "$ref": "#/$defs/SplineCoordinates"
+    }
+  },
+  "required": [
+    "path",
+    "rivers",
+    "splines",
+    "bytes",
+    "coordinates"
+  ],
+  "$defs": {
+    "SplineCoordinates": {
+      "description": "Which numbers a splines export writes.",
+      "oneOf": [
+        {
+          "description": "Layer metres: `u` east from the west edge, `v` north from the south edge (Blender, engines).",
+          "type": "string",
+          "const": "local_m"
+        },
+        {
+          "description": "The world's CRS units from its georeference origin (GIS with the same CRS).",
+          "type": "string",
+          "const": "world"
+        },
+        {
+          "description": "WGS 84 longitude / latitude through the world's CRS (standard GeoJSON; needs a CRS).",
+          "type": "string",
+          "const": "wgs84"
+        }
+      ]
+    }
+  }
+}

@@ -4268,6 +4268,68 @@ pub mod terrain {
         })
     }
 
+    /// Which numbers a splines export writes.
+    #[derive(
+        Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize, schemars::JsonSchema,
+    )]
+    #[serde(rename_all = "snake_case")]
+    pub enum SplineCoordinates {
+        /// Layer metres: `u` east from the west edge, `v` north from the south edge (Blender, engines).
+        #[default]
+        LocalM,
+        /// The world's CRS units from its georeference origin (GIS with the same CRS).
+        World,
+        /// WGS 84 longitude / latitude through the world's CRS (standard GeoJSON; needs a CRS).
+        Wgs84,
+    }
+
+    /// Request of `terrain.export_splines`.
+    #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct TerrainExportSplines {
+        /// Output file (`.geojson`), relative to the project's exports/.
+        pub path: PathBuf,
+        /// Height layer the rivers drain over.
+        #[serde(default = "default_layer")]
+        pub height: String,
+        /// A 0..1 river mask layer to trace (omit for graph splines only).
+        #[serde(default)]
+        pub rivers: Option<String>,
+        /// Mask value from which a cell is river.
+        #[serde(default = "half")]
+        pub threshold: f32,
+        /// Reaches shorter than this are dropped, metres.
+        #[serde(default = "spline_min_length")]
+        pub min_length_m: f32,
+        /// Also write every `jd.terrain.spline@1` node's polyline (roads, canals, dykes).
+        #[serde(default = "yes")]
+        pub graph_splines: bool,
+        /// Coordinate system of the numbers written.
+        #[serde(default)]
+        pub coordinates: SplineCoordinates,
+    }
+    fn half() -> f32 {
+        0.5
+    }
+    fn spline_min_length() -> f32 {
+        50.0
+    }
+
+    /// Result of `terrain.export_splines`.
+    #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+    pub struct SplinesReport {
+        /// The file written.
+        pub path: PathBuf,
+        /// River reaches written.
+        pub rivers: u32,
+        /// Graph spline polylines written.
+        pub splines: u32,
+        /// Bytes written.
+        pub bytes: u64,
+        /// What the coordinates are.
+        pub coordinates: SplineCoordinates,
+    }
+
     /// One detail tile of a `terrain.textures` result.
     #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
     pub struct DetailOut {
@@ -4742,6 +4804,70 @@ pub mod terrain {
                 let warnings = report.notes.iter().map(|n| Warning::new("W_ENGINE_SIZE", n.clone())).collect();
                 ctx.with_project(|proj| crate::geo::write_attribution_txt(proj, &dir).map(|_| ()))?;
                 Ok((report, warnings))
+            },
+        );
+        r.register::<TerrainExportSplines, SplinesReport, _>(
+            "terrain.export_splines",
+            "Write rivers and placed splines as GeoJSON LineStrings: river centrelines traced from a 0..1 mask down the height layer's D8 drainage (one line per reach, ending on the reach it joins), plus every `jd.terrain.spline@1` polyline; coordinates in layer metres (Blender, engines), the world's CRS units, or WGS 84 longitude / latitude",
+            Scope::Export,
+            |ctx, p| {
+                if !(0.0..=1.0).contains(&p.threshold) || !(p.min_length_m >= 0.0 && p.min_length_m.is_finite()) {
+                    return Err(JdError::invalid("threshold", "threshold within 0..=1, min_length_m ≥ 0"));
+                }
+                let (path, world, graph_lines) = ctx.with_project(|proj| {
+                    let path = if p.path.is_absolute() { p.path.clone() } else { proj.root().join("exports").join(&p.path) };
+                    let mut lines: Vec<(serde_json::Value, Vec<[f32; 2]>)> = Vec::new();
+                    if p.graph_splines {
+                        let mut nodes: Vec<_> = proj.graph.nodes.iter().filter(|(_, n)| n.kind.0.starts_with("jd.terrain.spline@")).collect();
+                        nodes.sort_by_key(|(id, _)| serde_json::to_string(id).unwrap_or_default());
+                        for (id, n) in nodes {
+                            let sp: jd_terrain::SplineParams = serde_json::from_value(Value::Object(jd_graph::model::resolve_keys(&n.params, proj.graph.time)))?;
+                            if sp.points.len() >= 2 {
+                                lines.push((serde_json::json!({ "kind": "spline", "node": id, "mode": sp.mode, "width_m": sp.width_m }), sp.points));
+                            }
+                        }
+                    }
+                    Ok((path, proj.doc.world.clone(), lines))
+                })?;
+                let mut lines = graph_lines;
+                let splines = lines.len() as u32;
+                let sp = world.spacing_m();
+                let rivers = match &p.rivers {
+                    Some(name) => {
+                        let mask = ctx.with_layer(name, |hf| Ok(hf.clone()))?;
+                        let reaches = ctx.with_layer(&p.height, |hf| jd_terrain::river_polylines(hf, &mask, [sp[0] as f32, sp[1] as f32], p.threshold, p.min_length_m))?;
+                        let n = reaches.len() as u32;
+                        for (k, r) in reaches.into_iter().enumerate() {
+                            lines.push((serde_json::json!({ "kind": "river", "reach": k, "cells": r.cells, "length_m": r.length_m }), r.points));
+                        }
+                        n
+                    }
+                    None => 0,
+                };
+                // Layer metres → the requested frame.
+                let to_world = |[u, v]: [f32; 2]| [world.origin[0] + f64::from(u), world.origin[1] + f64::from(v)];
+                let features: Vec<(serde_json::Value, Vec<[f64; 2]>)> = match p.coordinates {
+                    SplineCoordinates::LocalM => lines.into_iter().map(|(props, pts)| (props, pts.into_iter().map(|[u, v]| [f64::from(u), f64::from(v)]).collect())).collect(),
+                    SplineCoordinates::World => lines.into_iter().map(|(props, pts)| (props, pts.into_iter().map(to_world).collect())).collect(),
+                    SplineCoordinates::Wgs84 => {
+                        let crs = world.crs.clone().ok_or_else(|| JdError::invalid("coordinates", "wgs84 needs a world CRS").next("Set `crs` and `origin` in project.set_settings / project.json, or export `local_m`."))?;
+                        let tf = jd_geo::Transformer::new(&crs, "EPSG:4326")?;
+                        let mut out = Vec::with_capacity(lines.len());
+                        for (props, pts) in lines {
+                            let mut xy: Vec<(f64, f64)> = pts.into_iter().map(|p| { let w = to_world(p); (w[0], w[1]) }).collect();
+                            tf.transform(&mut xy)?;
+                            out.push((props, xy.into_iter().map(|(x, y)| [x, y]).collect()));
+                        }
+                        out
+                    }
+                };
+                let doc = jd_terrain::geojson_lines(&features, match p.coordinates { SplineCoordinates::LocalM => "local_m", SplineCoordinates::World => "world_crs", SplineCoordinates::Wgs84 => "wgs84" });
+                if let Some(dir) = path.parent() {
+                    std::fs::create_dir_all(dir)?;
+                }
+                let bytes = serde_json::to_vec_pretty(&doc)?;
+                std::fs::write(&path, &bytes)?;
+                Ok((SplinesReport { path, rivers, splines, bytes: bytes.len() as u64, coordinates: p.coordinates }, Vec::new()))
             },
         );
         r.register::<TerrainScatter, ScatterReport, _>(

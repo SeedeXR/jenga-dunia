@@ -225,6 +225,11 @@
     "scope": "export"
   },
   {
+    "id": "terrain.export_splines",
+    "description": "Write rivers and placed splines as GeoJSON LineStrings: river centrelines traced from a 0..1 mask down the height layer's D8 drainage (one line per reach, ending on the reach it joins), plus every `jd.terrain.spline@1` polyline; coordinates in layer metres (Blender, engines), the world's CRS units, or WGS 84 longitude / latitude",
+    "scope": "export"
+  },
+  {
     "id": "terrain.generate",
     "description": "Generate a noise heightfield for the open project's world and store it as a layer",
     "scope": "project-write"

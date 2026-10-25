@@ -1199,6 +1199,15 @@ The acceptance scenario runs this check when an Unreal engine is installed under
 
 `terrain.export_profile` writes one folder an engine importer can take as-is (plus `splat_<k>.png`: the material masks packed four per RGBA image, in layer order, for Unity's alphamaps and Unreal weight packs — `materials.json` lists which layer sits in which channel): **Unreal** gets a 16-bit PNG heightmap with row 0 = north, one 8-bit grayscale weightmap per mask layer at the same resolution, and a README with the Landscape numbers computed from the data — Z scale = (max − min) × 100 / 512 (201.771 here for 52…1085 m) and the Z location that puts mid-grey at the mid height; **Unity** gets `heightmap.r16` (16-bit little-endian, row 0 = south, so *Flip Vertically: off*, Byte Order *Windows*), the weightmaps, and the Terrain Height (1033.07 m) plus the y offset (51.98 m). Sizes an engine does not like are reported as `W_ENGINE_SIZE` (Unity wants 2ⁿ+1 squares, Unreal 1009/2017/4033/8129 — use the world presets). The engine-side steps follow the Unity 6 manual and the Unreal 5 Landscape guide but are **UNVERIFIED** until someone imports once; the README says so.
 
+### Splines out: rivers and roads as GeoJSON
+
+```
+$ jd op terrain.export_splines --project Hills.jdproj --params '{"path":"rivers.geojson","rivers":"rivers"}'
+rivers 14   splines 2   coordinates local_m   (exports/rivers.geojson)
+```
+
+`terrain.export_splines` writes a GeoJSON `FeatureCollection` of `LineString`s: every river reach traced from a 0..1 `rivers` mask (≥ `threshold`) down the height layer's D8 drainage — one line per reach from its headwater to the sea, a drain or the reach it joins (that junction is the line's last point), reaches under `min_length_m` dropped — plus every `jd.terrain.spline@1` node's polyline (`graph_splines`, default on) with its `mode` and `width_m` as properties. `coordinates` picks the numbers: `local_m` (layer metres, the default — what Blender and the engines want), `world` (the CRS units from the georeference origin) or `wgs84` (longitude / latitude through the world's CRS, standard GeoJSON for QGIS; needs a `crs`). The top-level `jd:coordinates` member says which. Blender: **File → Import → Jenga Dunia splines (.geojson)** builds one poly curve per line in a `JD splines` collection (layer metres, z = 0; the properties come along as custom properties). Unit test: a spring-fed river on a tilted plane traces to one monotone reach starting at the spring's cell centre; the Blender bridge test exports a placed spline and reads its three points back as a curve.
+
 ### Holes
 
 ```

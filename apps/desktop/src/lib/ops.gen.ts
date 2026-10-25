@@ -1538,6 +1538,38 @@ export type TerrainExportProfileResult = {
   "loss"?: string[];
 };
 
+export type SplineCoordinates = "local_m" | "world" | "wgs84";
+
+export type TerrainExportSplinesRequest = {
+  /** Output file (`.geojson`), relative to the project's exports/. */
+  "path": string;
+  /** Height layer the rivers drain over. */
+  "height"?: string;
+  /** A 0..1 river mask layer to trace (omit for graph splines only). */
+  "rivers"?: string | null;
+  /** Mask value from which a cell is river. */
+  "threshold"?: number;
+  /** Reaches shorter than this are dropped, metres. */
+  "min_length_m"?: number;
+  /** Also write every `jd.terrain.spline@1` node's polyline (roads, canals, dykes). */
+  "graph_splines"?: boolean;
+  /** Coordinate system of the numbers written. */
+  "coordinates"?: SplineCoordinates;
+};
+
+export type TerrainExportSplinesResult = {
+  /** The file written. */
+  "path": string;
+  /** River reaches written. */
+  "rivers": number;
+  /** Graph spline polylines written. */
+  "splines": number;
+  /** Bytes written. */
+  "bytes": number;
+  /** What the coordinates are. */
+  "coordinates": SplineCoordinates;
+};
+
 export type NoiseKind = "open_simplex2" | "open_simplex2_s" | "perlin" | "value" | "value_cubic" | "cellular";
 
 export type FractalKind = "none" | "fbm" | "ridged" | "ping_pong";
@@ -2838,6 +2870,8 @@ export interface JdOps {
   "terrain.export_mesh": { request: TerrainExportMeshRequest; result: TerrainExportMeshResult };
   /** Write a Unity or Unreal terrain import set: heightmap in the engine's encoding and row order, one 8-bit weightmap per mask layer, and a README with the computed Terrain Height / Z scale */
   "terrain.export_profile": { request: TerrainExportProfileRequest; result: TerrainExportProfileResult };
+  /** Write rivers and placed splines as GeoJSON LineStrings: river centrelines traced from a 0..1 mask down the height layer's D8 drainage (one line per reach, ending on the reach it joins), plus every `jd.terrain.spline@1` polyline; coordinates in layer metres (Blender, engines), the world's CRS units, or WGS 84 longitude / latitude */
+  "terrain.export_splines": { request: TerrainExportSplinesRequest; result: TerrainExportSplinesResult };
   /** Generate a noise heightfield for the open project's world and store it as a layer */
   "terrain.generate": { request: TerrainGenerateRequest; result: TerrainGenerateResult };
   /** The world's noise continued beyond its border: the graph's noise node evaluated over `scale` × the extent (same seed and origin, so it matches at the edge) at a coarse `px`, as a u16 preview — a horizon skirt for viewers; erosion and the rest of the graph are not continued */

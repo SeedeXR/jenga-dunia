@@ -13,3 +13,4 @@ graphify-out/
 
 # Playwright MCP page snapshots
 .playwright-mcp/
+__pycache__/

@@ -39,6 +39,8 @@ pub mod sim;
 pub mod sky;
 pub mod snowpack;
 pub mod spline;
+pub mod vector;
+pub use vector::{Polyline, geojson_lines, river_polylines};
 pub mod stamp;
 pub mod strata;
 pub mod yardang;
