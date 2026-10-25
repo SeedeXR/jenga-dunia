@@ -48,6 +48,16 @@ test.describe("node graph editor against the real core", () => {
     await seed.blur();
     await expect(page.getByTestId("log")).toContainText("graph.set_param: ok");
     await expect(noise).toContainText("seed=9");
+    // Expressions: a number field takes arithmetic and stores the result.
+    await feature.fill("256*4");
+    await feature.blur();
+    await expect(noise).toContainText("feature_size_m=1024");
+    // Hover thumbnail: the node's output at a coarse lod, drawn beside the pointer.
+    await noise.hover();
+    await expect(page.getByTestId("node-thumb")).toBeVisible();
+    await expect(page.getByTestId("node-thumb-canvas")).toHaveAttribute("data-ready", "1", { timeout: 20_000 });
+    await page.mouse.move(5, 5);
+    await expect(page.getByTestId("node-thumb")).toHaveCount(0);
     // The Noise panel mirrors the node, so Generate will not revert this edit.
     await expect(page.getByTestId("seed")).toHaveValue("9");
     // Live preview: the edit re-evaluates the (complete) starter graph without pressing Evaluate.

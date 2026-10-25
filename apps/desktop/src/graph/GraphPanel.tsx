@@ -17,7 +17,9 @@ import {
   useReactFlow,
 } from "@xyflow/react";
 import { Clock, Play, Plus, Redo2, Trash2, Undo2, Zap, ZapOff } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { nodePreview, type Preview } from "../lib/api";
+import { num } from "../lib/expr";
 import { type GraphNode, useStore } from "../state";
 
 type JdNodeData = { kind: string; label: string; params: Record<string, unknown>; inputs: string[]; outputs: string[]; selected?: boolean };
@@ -37,7 +39,7 @@ function parseKeys(raw: string, isNum: boolean): { keys: [number, unknown][] } |
   if (!raw.includes(":")) return null;
   const keys = raw.split(",").map((part) => {
     const [t, v] = part.split(":").map((x) => x.trim());
-    return [Number(t), isNum ? Number(v) : v] as [number, unknown];
+    return [Number(t), isNum ? num(String(v)) : v] as [number, unknown];
   });
   return keys.every(([t, v]) => Number.isFinite(t) && (!isNum || Number.isFinite(v as number))) ? { keys } : null;
 }
@@ -115,9 +117,9 @@ function StructuredEditor({ columns, rows, testId, onChange }: { columns: Record
   const parse = (raw: string, c: ItemProp): unknown => {
     const t = raw.trim();
     if (t === "") return c.nullable ? null : c.kind === "string" ? "" : undefined;
-    if (c.kind === "number") return Number(t);
+    if (c.kind === "number") return num(t);
     if (c.kind === "boolean") return t === "true";
-    if (c.kind === "range2") return t.split(",").map(Number);
+    if (c.kind === "range2") return t.split(",").map(num);
     return t;
   };
   const set = (i: number, k: string, raw: string, c: ItemProp) => {
@@ -234,6 +236,46 @@ function Inner() {
   const s = useStore();
   const kindMap = useMemo(() => new Map(s.graphKinds.map((k) => [k.kind, { inputs: k.inputs.map((p) => p.name), outputs: k.outputs.map((p) => p.name) }])), [s.graphKinds]);
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode<JdNodeData>>([]);
+  // Hover thumbnail: a node's output at a coarse lod, fetched 250 ms after the pointer settles
+  // (a cache hit after the first look) and drawn as a 96 px grey-scale square by the pointer.
+  const [thumb, setThumb] = useState<{ id: string; x: number; y: number; preview: Preview | null } | null>(null);
+  const thumbTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const thumbCanvas = useRef<HTMLCanvasElement | null>(null);
+  const hoverNode = (id: string, x: number, y: number) => {
+    clearTimeout(thumbTimer.current);
+    thumbTimer.current = setTimeout(() => {
+      setThumb({ id, x, y, preview: null });
+      void nodePreview(id).then((preview) => setThumb((t) => (t && t.id === id ? { ...t, preview } : t)));
+    }, 250);
+  };
+  const leaveNode = () => {
+    clearTimeout(thumbTimer.current);
+    setThumb(null);
+  };
+  useEffect(() => {
+    const c = thumbCanvas.current;
+    const p = thumb?.preview;
+    if (!c || !p) return;
+    const ctx = c.getContext("2d");
+    if (!ctx) return;
+    const img = ctx.createImageData(p.width, p.height);
+    const range = Math.max(1, p.max - p.min) / 65535;
+    for (let y = 0; y < p.height; y++) {
+      for (let x = 0; x < p.width; x++) {
+        const v = (p.data[(p.height - 1 - y) * p.width + x] ?? 0) / 65535; // row 0 = south: flip for the screen
+        const g = Math.round(40 + 215 * v);
+        const o = (y * p.width + x) * 4;
+        img.data[o] = g;
+        img.data[o + 1] = g;
+        img.data[o + 2] = g;
+        img.data[o + 3] = 255;
+      }
+    }
+    c.width = p.width;
+    c.height = p.height;
+    ctx.putImageData(img, 0, 0);
+    void range;
+  }, [thumb]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<FlowEdge>([]);
   const selected = s.selectedNode;
   const setSelected = (v: string | null | ((cur: string | null) => string | null)) => s.setSelectedNode(typeof v === "function" ? v(s.selectedNode) : v);
@@ -283,6 +325,9 @@ function Inner() {
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onNodeClick={(_, n) => setSelected(n.id)}
+          onNodeMouseEnter={(e, n) => hoverNode(n.id, e.clientX, e.clientY)}
+          onNodeMouseLeave={leaveNode}
+          onNodeDragStart={leaveNode}
           onPaneClick={() => setSelected(null)}
           onDelete={({ nodes: dn, edges: de }) =>
             void (async () => {
@@ -308,6 +353,12 @@ function Inner() {
           <Background gap={16} color="#2a2a2a" />
           <Controls showInteractive={false} />
         </ReactFlow>
+        {thumb && (
+          <div className="pointer-events-none fixed z-50 rounded border border-jd-line bg-jd-bg-1 p-1 shadow" style={{ left: thumb.x + 16, top: thumb.y + 16 }} data-testid="node-thumb">
+            <canvas ref={thumbCanvas} className="block h-24 w-24 bg-jd-bg-2" style={{ imageRendering: "pixelated" }} data-testid="node-thumb-canvas" data-ready={thumb.preview ? "1" : "0"} />
+            <div className="mt-0.5 text-center text-[10px] text-jd-fg-2">{thumb.preview ? `${thumb.preview.min.toFixed(0)} … ${thumb.preview.max.toFixed(0)} m` : "…"}</div>
+          </div>
+        )}
         <div className="absolute top-2 left-2 flex items-center gap-1">
           <select className="rounded border border-jd-line bg-jd-bg-2 px-1 py-0.5 text-xs" value={newKind} onChange={(e) => setNewKind(e.target.value)} data-testid="graph-kind">
             {s.graphKinds.map((k) => (
@@ -421,7 +472,7 @@ function Inner() {
                       onBlur={(e) => {
                         const raw = e.target.value.trim();
                         const keyed = raw === "" ? null : parseKeys(raw, isNum);
-                        const value: unknown = raw === "" ? null : (keyed ?? (raw.includes(",") ? raw.split(",").map(Number) : isNum ? Number(raw) : raw === "true" ? true : raw === "false" ? false : raw));
+                        const value: unknown = raw === "" ? null : (keyed ?? (raw.includes(",") ? raw.split(",").map(num) : isNum ? num(raw) : raw === "true" ? true : raw === "false" ? false : raw));
                         // Leaving a field is not an edit: an unchanged value writes nothing (no undo step, no re-evaluation).
                         if (JSON.stringify(value) === JSON.stringify(current ?? null)) return;
                         void s.setParam(sel.id, key, value);

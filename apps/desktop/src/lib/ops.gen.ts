@@ -508,6 +508,30 @@ export type GraphMoveNodeResult = {
   "time"?: number;
 };
 
+export type GraphNodePreviewRequest = {
+  /** The node whose output to preview. */
+  "id": NodeId;
+  /** Its output port (default `out`). */
+  "port"?: string;
+  /** Evaluation lod; omitted = the coarsest lod that keeps the world at or above 128 px a side. */
+  "lod"?: number | null;
+};
+
+export type GraphNodePreviewResult = {
+  /** Width in samples. */
+  "width": number;
+  /** Height in samples. */
+  "height": number;
+  /** Height of sample value 0. */
+  "min": number;
+  /** Height of sample value 65535. */
+  "max": number;
+  /** The exact wire format of `jd_terrain::preview::Preview::to_bytes` (16-byte little-endian
+header `u32 width, u32 height, f32 min, f32 max` followed by row-major u16 samples),
+standard base64 with padding. One decoder serves both transports. */
+  "bytes_base64": string;
+};
+
 export type GraphRedoRequest = Record<string, unknown>;
 
 export type GraphRedoResult = {
@@ -2812,6 +2836,8 @@ export interface JdOps {
   "graph.list": { request: GraphListRequest; result: GraphListResult };
   /** Move a node on the editor canvas (journaled) */
   "graph.move_node": { request: GraphMoveNodeRequest; result: GraphMoveNodeResult };
+  /** A small u16 preview (base64) of one node's output port — the graph evaluated at a coarse lod through the cache, so a hover thumbnail costs a cache hit after the first look */
+  "graph.node_preview": { request: GraphNodePreviewRequest; result: GraphNodePreviewResult };
   /** Re-apply the last undone graph edit (journaled as graph.restore) */
   "graph.redo": { request: GraphRedoRequest; result: GraphRedoResult };
   /** Remove a node and its edges (journaled) */

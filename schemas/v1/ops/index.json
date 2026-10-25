@@ -80,6 +80,11 @@
     "scope": "project-write"
   },
   {
+    "id": "graph.node_preview",
+    "description": "A small u16 preview (base64) of one node's output port — the graph evaluated at a coarse lod through the cache, so a hover thumbnail costs a cache hit after the first look",
+    "scope": "project-read"
+  },
+  {
     "id": "graph.redo",
     "description": "Re-apply the last undone graph edit (journaled as graph.restore)",
     "scope": "project-write"

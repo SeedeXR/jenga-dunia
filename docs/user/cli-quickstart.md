@@ -625,7 +625,7 @@ $ jd op terrain.horizon --project Road.jdproj --params '{"scale":3,"px":256}'
 range 12.7 … 284.4 m over the 6 km skirt vs 31.9 … 278.5 m inside the 2 km world
 ```
 
-`terrain.horizon` reads the graph's noise node (keyframes resolved at the graph's time), builds a world `scale` × larger with the same seed and an origin shifted so the real world sits in its centre, and returns the noise at `px` per side in the `terrain.preview` wire format. The desktop draws it as a skirt under the terrain with a hole for the world (desktop guide, "Horizon"). Only the noise continues — nothing downstream of it does — which is the honest limit of a heightfield world; true streaming beyond the border is Phase 5.
+`terrain.horizon` reads the graph's noise node (keyframes resolved at the graph's time), builds a world `scale` × larger with the same seed and an origin shifted so the real world sits in its centre, and returns the noise at `px` per side in the `terrain.preview` wire format. The desktop draws it as a skirt under the terrain with a hole for the world (desktop guide, "Horizon"). Only the noise continues — nothing downstream of it does — which is the honest limit of a heightfield world; true streaming beyond the border is Phase 5. `graph.node_preview {id, port, lod}` does the same for any node's output port (the graph evaluated at a coarse lod through the cache) — what the desktop's hover thumbnails use.
 
 ### Physical sky as an HDRI
 

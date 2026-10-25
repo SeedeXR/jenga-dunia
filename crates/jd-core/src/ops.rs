@@ -1123,6 +1123,23 @@ pub mod graph {
             .with_disk(std::sync::Arc::new(DiskNodeStore::open(root, limit)))
     }
 
+    /// `graph.node_preview` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct NodePreview {
+        /// The node whose output to preview.
+        pub id: NodeId,
+        /// Its output port (default `out`).
+        #[serde(default = "preview_port")]
+        pub port: String,
+        /// Evaluation lod; omitted = the coarsest lod that keeps the world at or above 128 px a side.
+        #[serde(default)]
+        pub lod: Option<u8>,
+    }
+    fn preview_port() -> String {
+        "out".to_owned()
+    }
+
     /// `graph.add_node` params.
     #[derive(Debug, Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
@@ -1629,6 +1646,32 @@ pub mod graph {
 
     /// Register graph ops.
     pub fn register_all(r: &mut Registry) {
+        r.register::<NodePreview, crate::ops::terrain::PreviewResult, _>(
+            "graph.node_preview",
+            "A small u16 preview (base64) of one node's output port — the graph evaluated at a coarse lod through the cache, so a hover thumbnail costs a cache hit after the first look",
+            Scope::ProjectRead,
+            |ctx, p| {
+                use base64::Engine as _;
+                let (graph, world, root) = ctx.with_project(|pr| Ok((pr.graph.clone(), pr.doc.world.clone(), pr.root().to_path_buf())))?;
+                if !graph.nodes.contains_key(&p.id) {
+                    return Err(JdError::new(ErrorCode::E_INPUT_INVALID, format!("no node `{}`", p.id)));
+                }
+                let side = world.resolution_px[0].max(world.resolution_px[1]).max(1);
+                let lod = p.lod.unwrap_or_else(|| (side as f64 / 128.0).log2().ceil().max(0.0) as u8);
+                let tiered = cache_for(ctx, &root);
+                let (outputs, _) = Evaluator::new(registry(), &tiered)
+                    .with_layers(ctx.layer_loader(&root))
+                    .evaluate_with(&graph, &world, lod, Some(&root.join("assets")))?;
+                let value = outputs.get(&(p.id.clone(), p.port.clone())).ok_or_else(|| {
+                    JdError::new(ErrorCode::E_INPUT_INVALID, format!("node `{}` has no output `{}`", p.id, p.port)).next("Name one of the node's output ports (graph.kinds lists them).")
+                })?;
+                let pv = jd_terrain::preview::preview_u16(value.as_field(), 0);
+                Ok((
+                    crate::ops::terrain::PreviewResult { width: pv.width, height: pv.height, min: pv.min, max: pv.max, bytes_base64: base64::engine::general_purpose::STANDARD.encode(pv.to_bytes()) },
+                    Vec::new(),
+                ))
+            },
+        );
         r.register::<NoParams, Vec<jd_graph::registry::NodeDefInfo>, _>(
             "graph.kinds",
             "List available node kinds with ports and parameter schemas",

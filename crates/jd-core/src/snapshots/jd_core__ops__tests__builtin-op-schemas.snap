@@ -2478,6 +2478,90 @@ expression: list
     }
   },
   {
+    "id": "graph.node_preview",
+    "description": "A small u16 preview (base64) of one node's output port — the graph evaluated at a coarse lod through the cache, so a hover thumbnail costs a cache hit after the first look",
+    "scope": "project-read",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "NodePreview",
+      "description": "`graph.node_preview` params.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "The node whose output to preview.",
+          "$ref": "#/$defs/NodeId"
+        },
+        "port": {
+          "description": "Its output port (default `out`).",
+          "type": "string",
+          "default": "out"
+        },
+        "lod": {
+          "description": "Evaluation lod; omitted = the coarsest lod that keeps the world at or above 128 px a side.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "$defs": {
+        "NodeId": {
+          "description": "Identifies a graph node.",
+          "type": "string"
+        }
+      }
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "PreviewResult",
+      "description": "`terrain.preview` result: a downsampled u16 heightfield, base64-encoded.\n(The desktop app uses the zero-copy `layer_preview` command; this op serves MCP agents\nand browser-based tests that cannot receive raw bytes.)",
+      "type": "object",
+      "properties": {
+        "width": {
+          "description": "Width in samples.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "height": {
+          "description": "Height in samples.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "min": {
+          "description": "Height of sample value 0.",
+          "type": "number",
+          "format": "float"
+        },
+        "max": {
+          "description": "Height of sample value 65535.",
+          "type": "number",
+          "format": "float"
+        },
+        "bytes_base64": {
+          "description": "The exact wire format of `jd_terrain::preview::Preview::to_bytes` (16-byte little-endian\nheader `u32 width, u32 height, f32 min, f32 max` followed by row-major u16 samples),\nstandard base64 with padding. One decoder serves both transports.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "width",
+        "height",
+        "min",
+        "max",
+        "bytes_base64"
+      ]
+    }
+  },
+  {
     "id": "graph.redo",
     "description": "Re-apply the last undone graph edit (journaled as graph.restore)",
     "scope": "project-write",

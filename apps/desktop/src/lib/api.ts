@@ -42,6 +42,16 @@ export async function op<T = unknown>(id: string, params: Record<string, unknown
   return invoke<Response<T>>("op", { request: { op: id, schema_version: SCHEMA_VERSION, params } });
 }
 
+/** A node's output as a small preview (`graph.node_preview`): the same wire format as a layer preview. */
+export async function nodePreview(id: string, port = "out"): Promise<Preview | null> {
+  const r = await op<{ bytes_base64: string }>("graph.node_preview", { id, port });
+  if (r.status !== "ok" || !r.result) return null;
+  const bin = atob(r.result.bytes_base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return decodePreview(bytes.buffer);
+}
+
 export async function opsList(): Promise<OperationInfo[]> {
   return invoke<OperationInfo[]>("ops_list");
 }
