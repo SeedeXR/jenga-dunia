@@ -11,7 +11,7 @@ commit with the Fable 5.1 trailer and a push; CI verified after the last push.
 | ~~1~~ | ~~CleanMyMac exclusions~~ | struck by owner | — |
 | ~~2~~ | ~~Signed macOS bundle~~ | struck by owner | — |
 | ~~3~~ | ~~Windows run check~~ | struck by owner | — |
-| 4 | Native captures: Edit-menu capture (done earlier, `164e2da`), native sculpt recording | recording: app building | the PNG / MP4 under `docs/user/images` + `videos/`, viewed |
+| 4 | Native captures: Edit-menu capture (done earlier, `164e2da`), native sculpt recording | done: `docs/user/videos/sculpt-native.mp4`, viewed; graph.json verified to hold the stroke | the PNG / MP4 under `docs/user/images` + `videos/`, viewed |
 | ~~5~~ | ~~jd-vision model licences~~ | ignored by owner | — |
 | 6 | Spline I/O: river network + `jd.terrain.spline@1` points → GeoJSON (+ Blender curves) | done (gates green; Blender 5.2 BRIDGE OK) | unit test on the writer; Blender bridge test imports the file |
 | 7 | Blend-op readout in the layer stack | done (gates green) | e2e `stack.spec` asserts the row text |
@@ -40,3 +40,4 @@ ask for interactively; if a dialog blocks, report it rather than stall).
 - 14:40 8 done: `graph.node_preview` + hover thumbnails, arithmetic in number fields (`expr.ts`, vitest + graph.spec). Starting 9: HDRI import (9a), post effects + flythrough + stills (9b/9c); path tracer: decision below.
 - 15:25 9a done: `sky.load_hdri` (EXR → dome PNG + sun estimate + luminance), desktop HDRI field / Use sun / clear, `hdri.spec` recovers a baked sun within 12°. Applying 9b/9c (RenderPipeline post effects, stills, flythrough via `project.write_export`) and 12 (camera-height ground-plane scale).
 - 15:55 9b/9c done: RenderPipeline post effects (ACES exposure, bloom, vignette), stills + flythrough frames through `project.write_export`, `render.spec`; 12 done: `ground_plane_height` RANSAC floor fit + `camera_height_m` rescale. 4: Accessibility probe passed (System Events key events OK), `cliclick` installed, building the release app for the recording.
+- 16:30 4 done: release app rebuilt (`pnpm tauri build --no-sign`), Accessibility probe OK, `cliclick` installed, script `/tmp/jd-scratch/record_sculpt.sh` (window at 100,80; Sculpt at 1111,170; drag 665,362 → 877,292), full-screen capture cropped to the window in ffmpeg (a region capture `-V -R` failed to save), frame viewed. All items on the list are done or struck.

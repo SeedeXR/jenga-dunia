@@ -278,7 +278,7 @@ The UI-driven test `e2e/simlayers.spec.ts` adds all four on a 128² world and ch
 
 ![Sculpt mode: Sculpt button, brush panel, stroke node](images/tutorial-04-sculpt.png)
 
-*This capture is the UI-driven test (`e2e/sculpt.spec.ts`, Chromium + the real core) rather than the native window; the native screenshots are re-shot when the display is available.*
+**Screen recording (native):** [`videos/sculpt-native.mp4`](videos/sculpt-native.mp4) (16 s, 1412×844) — the release build on a fresh 256² project: **Sculpt** clicked (the strokes node is spliced in and selected, the Brush panel opens), one left-drag across the terrain painted as a stroke (`graph.append_param` in the log, `strokes=1 recorded` on the node, the `sculpt.strokes` row in the layer stack), **Sculpting…** clicked off and a short orbit. Driven with System Events + `cliclick`, recorded with `screencapture`, cropped to the window; the project's `graph.json` held the stroke afterwards. *The still above is the UI-driven test (`e2e/sculpt.spec.ts`, Chromium + the real core).*
 
 ## Grid tools
 
