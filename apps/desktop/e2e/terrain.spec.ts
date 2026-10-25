@@ -34,6 +34,10 @@ test.describe("desktop UI against the real core", () => {
     await page.getByTestId("seed").fill("7");
     await page.getByTestId("generate").click();
     await expect(page.getByTestId("layer-stats")).toBeVisible();
+    // The landform readout (terrain.measure) sits under the stats and lists the dominant geomorphons.
+    await page.getByTestId("measure").click();
+    await expect(page.getByTestId("measure-readout")).toContainText("relief", { timeout: 30_000 });
+    await expect(page.getByTestId("measure-readout")).toContainText(/slope \d|%/);
     await expect(page.getByTestId("layer-stats")).toContainText("m");
     // The viewport reports its backend and a non-zero triangle count once the preview mesh is built.
     await expect(page.getByTestId("viewport-info")).toContainText(/viewport: (webgpu|webgl2)/);

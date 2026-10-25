@@ -938,6 +938,31 @@ export default function App() {
               <dd className="truncate font-mono">{s.layer.content_hash.slice(0, 16)}…</dd>
             </dl>
           )}
+          {s.layer && (
+            <div className="mt-2">
+              <button className="btn" onClick={() => void s.measureLayer()} disabled={s.busy} title="terrain.measure: relief, hypsometric integral, slope statistics and geomorphon shares — compare with a real DEM of the same landform (Reading a landscape)" data-testid="measure">
+                Measure landform
+              </button>
+              {s.measure && (
+                <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-xs text-jd-fg-2" data-testid="measure-readout">
+                  <dt>relief</dt>
+                  <dd>{s.measure.relief_m.toFixed(0)} m</dd>
+                  <dt>hypsometric</dt>
+                  <dd>{s.measure.hypsometric_integral.toFixed(2)} {s.measure.hypsometric_integral < 0.45 ? "(dissected, old)" : s.measure.hypsometric_integral > 0.55 ? "(plateau-like, young)" : ""}</dd>
+                  <dt>slope</dt>
+                  <dd>mean {s.measure.slope.mean_deg.toFixed(1)}°, median {s.measure.slope.p50_deg.toFixed(1)}°, p90 {s.measure.slope.p90_deg.toFixed(1)}°</dd>
+                  <dt>landforms</dt>
+                  <dd>
+                    {Object.entries(s.measure.geomorphons)
+                      .sort((a, b) => b[1] - a[1])
+                      .slice(0, 5)
+                      .map(([k, v]) => `${k} ${(v * 100).toFixed(0)} %`)
+                      .join(", ")}
+                  </dd>
+                </dl>
+              )}
+            </div>
+          )}
           <h2 className="mt-5 mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Export</h2>
           <Field label="File">
             <span className="flex gap-1">

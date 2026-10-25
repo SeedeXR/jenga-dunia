@@ -3,7 +3,7 @@ import { create } from "zustand";
 import type { Edge, GraphEvaluateResult, GraphListResult, HeightmapFormat, JdOps, JobInfo as JobInfoGen, NodeDefInfo, NodeView, NoiseParams, OceanWavesRequest, OceanWavesResult, OpId, ProjectOpenResult, ProjectSaveResult, ScatterPoint, TerrainStatsResult } from "./lib/ops.gen";
 import { horizonPreview, layerPreview, layerTextures, op, skyPreview, type JdError, type LayerMaps, type Preview, type Response, type Warning } from "./lib/api";
 import { adaptLodBias } from "./lib/previewLod";
-import type { MaterialSpec, MediaMetadataResult } from "./lib/ops.gen";
+import type { MaterialSpec, MediaMetadataResult, TerrainMeasureResult } from "./lib/ops.gen";
 
 export type ProjectSummary = ProjectOpenResult;
 
@@ -202,6 +202,9 @@ interface State {
   importAsset: (path: string) => Promise<void>;
   /** Fetch a real-world DEM around a lon/lat, place the world in its CRS and wire it to the height output. */
   fetchDem: (center: [number, number], radiusM: number, provider: "terrarium" | "copernicus" | "opentopography") => Promise<void>;
+  /** `terrain.measure` of the shown layer: relief, hypsometric integral, slope statistics and geomorphon shares, to compare with a real landform. */
+  measure: TerrainMeasureResult | null;
+  measureLayer: () => Promise<void>;
   /** What a reference photo, panorama or video states (`media.metadata`): place, time, heading, field of view, the sun. */
   reference: MediaMetadataResult | null;
   readReference: (path: string) => Promise<void>;
@@ -393,7 +396,7 @@ export const useStore = create<State>((set, get) => {
     // A filtered evaluation (`only <output>`) republishes one chain; the other layers are still
     // published, so the header keeps listing them.
     const known = get().lastEval?.layers ?? {};
-    set({ lastEval: { ...report, layers: { ...known, ...report.layers } } });
+    set({ lastEval: { ...report, layers: { ...known, ...report.layers } }, measure: null });
     const names = Object.keys(report.layers);
     if (names.length === 0) return;
     const current = get().layer?.layer.split("#")[0];
@@ -808,6 +811,12 @@ export const useStore = create<State>((set, get) => {
       graphGen++;
       const add = await run("graph.add_node", { kind: "jd.input.heightmap@1", params: { path: r.result.name }, position: [right + 320, 0] });
       if (add.status === "ok") await loadGraph();
+    },
+    measure: null,
+    measureLayer: async () => {
+      const layer = get().layer?.layer.split("#")[0] ?? "height";
+      const r = await run("terrain.measure", { layer });
+      set({ measure: r.status === "ok" && r.result ? r.result : null });
     },
     reference: null,
     readReference: async (path) => {
