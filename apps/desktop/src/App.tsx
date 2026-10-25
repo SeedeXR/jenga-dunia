@@ -62,7 +62,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-const inputCls = "w-28 rounded border border-jd-line bg-jd-bg-2 px-2 py-0.5 text-right text-xs text-jd-fg-0 focus:border-jd-accent focus:outline-none";
+const inputCls = "w-28 rounded-md border border-white/5 bg-jd-bg-2 px-2 py-0.5 text-right text-xs text-jd-fg-0 transition-colors hover:border-white/10 focus:border-jd-accent focus:outline-none";
 
 /** World size presets; Unity/Unreal landscapes want 2ⁿ+1 samples so quads line up with their patch grids. */
 export const PRESETS: { label: string; resolution: number; extent: number }[] = [
@@ -417,7 +417,7 @@ export default function App() {
   return (
     <div className="grid h-full grid-rows-[40px_1fr_160px] bg-jd-bg-0 text-jd-fg-0">
       {/* Top bar */}
-      <header className="flex items-center gap-3 border-b border-jd-line bg-jd-bg-1 px-3">
+      <header className="flex items-center gap-3 border-b border-white/5 bg-jd-bg-1 px-3">
         <img src="/jd-mark.svg" alt="Jenga Dunia" className="h-5 w-5" data-testid="brand-mark" />
         <span className="font-semibold tracking-wide">Jenga Dunia</span>
         <span className="text-xs text-jd-fg-2" data-testid="app-version">v{__JD_VERSION__}</span>
@@ -448,7 +448,7 @@ export default function App() {
             b === null ? (
               <span key={`sep-${i}`} className="mx-1 h-4 w-px bg-jd-line" />
             ) : (
-              <button key={b[0]} className="rounded p-1 text-jd-fg-1 hover:bg-jd-bg-3 hover:text-jd-fg-0 disabled:opacity-30" title={b[2]} aria-label={b[2]} onClick={b[3]} disabled={b[4] || s.busy} data-testid={b[0]}>
+              <button key={b[0]} className="rounded-md p-1.5 text-jd-fg-1 transition-colors hover:bg-jd-bg-3 hover:text-jd-fg-0 disabled:opacity-30" title={b[2]} aria-label={b[2]} onClick={b[3]} disabled={b[4] || s.busy} data-testid={b[0]}>
                 {(() => {
                   const Icon = b[1];
                   return <Icon size={15} />;
@@ -505,11 +505,11 @@ export default function App() {
             </button>
           </aside>
         ) : (
-        <aside ref={leftSize.ref} style={leftSize.style} className="relative w-[260px] min-w-[200px] max-w-[520px] resize-x overflow-y-auto border-r border-jd-line bg-jd-bg-1 p-3" title="Drag the bottom-right corner to resize this panel" data-testid="panel-left">
+        <aside ref={leftSize.ref} style={leftSize.style} className="jd-panel relative m-2 mr-1 w-[260px] min-w-[200px] max-w-[520px] resize-x overflow-y-auto p-3" title="Drag the bottom-right corner to resize this panel" data-testid="panel-left">
           <button className="btn absolute top-2 right-2 px-1 py-0" title="Collapse the project panel to the edge" onClick={() => setDock({ left: true })} data-testid="collapse-left">
             <PanelLeftClose size={14} />
           </button>
-          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Project</h2>
+          <h2 className="mb-2 jd-section">Project</h2>
           <Field label="Path">
             <span className="flex gap-1">
               <input ref={pathInput} className={`${inputCls} w-28`} value={projPath} onChange={(e) => setProjPath(e.target.value)} placeholder="~/Worlds/Hills.jdproj" data-testid="project-path" />
@@ -548,7 +548,7 @@ export default function App() {
             </select>
           </Field>
           <div className="mt-2 flex gap-2">
-            <button className="btn" title="Create at the path above (⌘N opens a dialog)" onClick={() => s.newProject(projPath, projName, extent, resolution)} disabled={!projPath || s.busy} data-testid="new-project">
+            <button className="btn btn-primary" title="Create at the path above (⌘N opens a dialog)" onClick={() => s.newProject(projPath, projName, extent, resolution)} disabled={!projPath || s.busy} data-testid="new-project">
               <FolderPlus size={14} /> New
             </button>
             <button className="btn" onClick={() => s.openProject(projPath)} disabled={!projPath || s.busy} data-testid="open-project">
@@ -600,7 +600,7 @@ export default function App() {
           )}
           {s.project && (
             <>
-              <h2 className="mt-4 mb-2 text-[11px] font-semibold tracking-wide text-jd-fg-2 uppercase">Reference image</h2>
+              <h2 className="mt-4 mb-2 jd-section">Reference image</h2>
               <Field label="File">
                 <span className="flex gap-1">
                   <input className={`${inputCls} w-24`} value={refPath} onChange={(e) => setRefPath(e.target.value)} placeholder="photo, 360°, video" title="A photo (JPEG, PNG, TIFF, HEIF, WebP), a 360° photo sphere or a video (MP4, MOV): media.metadata reads where, when and how it was taken, and the sun" data-testid="ref-path" />
@@ -646,7 +646,7 @@ export default function App() {
                 </div>
               )}
               {s.project && <LayerStack />}
-              <h2 className="mt-4 mb-2 text-[11px] font-semibold tracking-wide text-jd-fg-2 uppercase">Settings</h2>
+              <h2 className="mt-4 mb-2 jd-section">Settings</h2>
               <label className="mb-1 flex items-center justify-between gap-2 text-xs text-jd-fg-1" title="Seconds after the last edit before the project autosaves; 0 disables">
                 Autosave (s)
                 <input className={inputCls} type="number" min={0} max={86400} key={`as-${s.settingsRev}-${s.project.settings.autosave_interval_s}`} defaultValue={s.project.settings.autosave_interval_s} onBlur={(e) => { const v = Number(e.target.value); if (v !== s.project?.settings.autosave_interval_s) void s.setSettings({ autosave_interval_s: v }); }} data-testid="setting-autosave" />
@@ -696,7 +696,7 @@ export default function App() {
               </label>
             </>
           )}
-          <h2 className="mt-4 mb-2 text-[11px] font-semibold tracking-wide text-jd-fg-2 uppercase">Tasks</h2>
+          <h2 className="mt-4 mb-2 jd-section">Tasks</h2>
           <ul className="text-xs text-jd-fg-1" data-testid="tasks">
             {s.jobs.length === 0 && <li className="text-jd-fg-2">no running jobs</li>}
             {s.jobs.map((j) => (
@@ -712,7 +712,7 @@ export default function App() {
               </li>
             ))}
           </ul>
-          <h2 className="mt-4 mb-2 text-[11px] font-semibold tracking-wide text-jd-fg-2 uppercase">Diagnostics</h2>
+          <h2 className="mt-4 mb-2 jd-section">Diagnostics</h2>
           <div className="mb-2 flex flex-wrap gap-1">
             <button className="btn px-1.5 py-0" onClick={() => void s.runDiag("env")} disabled={s.busy} data-testid="diag-env">Environment</button>
             <button className="btn px-1.5 py-0" onClick={() => void s.runDiag("gc")} disabled={!s.project || s.busy} data-testid="diag-gc">Cache GC</button>
@@ -742,7 +742,7 @@ export default function App() {
         )}
 
         {/* Center: viewport (top) + node graph (bottom, toggle) */}
-        <main className={`relative grid min-w-0 overflow-hidden bg-jd-bg-0 ${showGraph ? (dock.graph === "right" ? "grid-cols-[1fr_auto]" : "grid-rows-[1fr_auto]") : "grid-rows-[1fr]"}`}>
+        <main className={`relative my-2 grid min-w-0 overflow-hidden rounded-xl bg-jd-bg-0 ring-1 ring-white/5 ${showGraph ? (dock.graph === "right" ? "grid-cols-[1fr_auto]" : "grid-rows-[1fr_auto]") : "grid-rows-[1fr]"}`}>
           <div className="relative min-h-0 min-w-0">
             <TerrainView fog={s.sun.fog} preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} sculpt={{ enabled: s.sculpting && (sculptNode !== undefined || s.drawing !== null), radiusM: s.drawing === "road" ? s.roadWidthM / 2 : s.brush.radius_m, onStroke: (pts) => void s.addStroke(pts), onAdjust: s.adjustBrush }} grid={s.grid.on ? { cells: s.grid.cells, selected: s.grid.selected, onSelect: s.gridSelect } : null} seaLevelM={seaLevelM} lakes={s.lakesPreview} water={water} waves={s.waves} sky={s.sky} hdri={s.hdri} post={s.post} onHandle={s.setViewportHandle} frame={frameOn} horizon={s.horizon} sun={{ azimuthDeg: s.sun.azimuth_deg, elevationDeg: s.sun.elevation_deg }} overlay={s.colorPreview} overlayName={s.colorLayer} instances={s.scatter.points ? { points: s.scatter.points, sizeM: Math.max(s.scatter.spacing_m * 0.35, (s.project?.world.extent_m[0] ?? 0) * 0.012), shape: /debris|rock|boulder|scree|talus/i.test(s.scatter.mask ?? "") ? "rock" : "cone" } : null} maps={s.maps} />
             <ViewportChrome
@@ -831,13 +831,13 @@ export default function App() {
             </button>
           </aside>
         ) : (
-        <aside ref={rightSize.ref} style={rightSize.style} className="relative w-[280px] min-w-[220px] max-w-[560px] resize-x overflow-y-auto border-l border-jd-line bg-jd-bg-1 p-3" title="Drag the bottom-right corner to resize this panel" data-testid="panel-right">
+        <aside ref={rightSize.ref} style={rightSize.style} className="jd-panel relative m-2 ml-1 w-[280px] min-w-[220px] max-w-[560px] resize-x overflow-y-auto p-3" title="Drag the bottom-right corner to resize this panel" data-testid="panel-right">
           <button className="btn absolute top-2 right-2 px-1 py-0" title="Collapse the inspector to the edge" onClick={() => setDock({ right: true })} data-testid="collapse-right">
             <PanelRightClose size={14} />
           </button>
           {s.sculpting && (
             <>
-              <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Brush</h2>
+              <h2 className="mb-2 jd-section">Brush</h2>
               <Field label="Mode">
                 <select className={`${inputCls} w-36`} value={s.brush.mode} onChange={(e) => s.setBrush({ mode: e.target.value as BrushTool["mode"] })} data-testid="brush-mode">
                   <option value="raise">raise</option>
@@ -904,7 +904,7 @@ export default function App() {
           )}
           {s.grid.on && (
             <>
-              <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Grid</h2>
+              <h2 className="mb-2 jd-section">Grid</h2>
               <Field label="Cells per side">
                 <select className={`${inputCls} w-20`} value={s.grid.cells} onChange={(e) => { s.setGrid({ cells: Number(e.target.value) }); s.gridClear(); }} data-testid="grid-cells">
                   {[8, 16, 32, 64].map((n) => (
@@ -966,7 +966,7 @@ export default function App() {
               </dl>
             </>
           )}
-          <h2 className="mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Sun</h2>
+          <h2 className="mb-2 jd-section">Sun</h2>
           <Field label="Textured (PBR)">
             <input type="checkbox" checked={s.pbr} onChange={(e) => s.setPbr(e.target.checked)} title="Shade the terrain with baked albedo, normal and roughness maps (full-field relief at any preview LOD); off = height-ramp vertex colours" data-testid="pbr-toggle" />
           </Field>
@@ -1026,7 +1026,7 @@ export default function App() {
           <Field label={`Fog ${Math.round(s.sun.fog * 100)} %`}>
             <input className="w-28" type="range" min={0} max={1} step={0.05} value={s.sun.fog} onChange={(e) => s.setSun({ fog: Number(e.target.value) })} title="Viewport fog: 0 keeps the faint aerial perspective, 1 closes the view within the world's width (a look setting — bakes and exports are untouched)" data-testid="sky-fog" />
           </Field>
-          <h2 className="mt-4 mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Scatter</h2>
+          <h2 className="mt-4 mb-2 jd-section">Scatter</h2>
           <Field label="Mask">
             <select className={inputCls} value={s.scatter.mask ?? ""} onChange={(e) => s.setScatter({ mask: e.target.value || null })} title="0..1 layer used as the instance density (a class mask, rivers, wetness…)" data-testid="scatter-mask">
               <option value="">none</option>
@@ -1059,7 +1059,7 @@ export default function App() {
             </button>
             <span className="text-xs text-jd-fg-2" data-testid="scatter-count">{s.scatter.points ? `${s.scatter.points.length.toLocaleString()} instances` : ""}</span>
           </div>
-          <h2 className="mt-4 mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Actions</h2>
+          <h2 className="mt-4 mb-2 jd-section">Actions</h2>
           <div className="mb-1 flex flex-wrap gap-1" data-testid="terrain-actions">
             {(
               [
@@ -1075,7 +1075,7 @@ export default function App() {
               </button>
             ))}
           </div>
-          <h2 className="mt-4 mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Simulation layers</h2>
+          <h2 className="mt-4 mb-2 jd-section">Simulation layers</h2>
           <div className="mb-1 flex flex-wrap gap-1">
             {(["snow", "debris", "sand", "lava"] as const).map((k) => (
               <button
@@ -1091,7 +1091,7 @@ export default function App() {
             ))}
           </div>
           <p className="mb-2 text-xs text-jd-fg-2">One click adds the node, publishes its masks as layers and a material; tune it in the graph inspector.</p>
-          <h2 className="mt-4 mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Materials</h2>
+          <h2 className="mt-4 mb-2 jd-section">Materials</h2>
           {s.materials.map((m, i) => (
             <div className="mb-1 flex flex-wrap items-center gap-1" key={i} data-testid={`material-${i}`}>
               <select
@@ -1171,7 +1171,7 @@ export default function App() {
           >
             + layer
           </button>
-          <h2 className="mt-4 mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Terrain · Noise</h2>
+          <h2 className="mt-4 mb-2 jd-section">Terrain · Noise</h2>
           <Field label="Preset">
             <select
               className={`${inputCls} w-36`}
@@ -1266,7 +1266,7 @@ export default function App() {
               <input className={`${inputCls} w-14`} type="number" value={s.noise.height_range_m[1]} onChange={(e) => s.setNoise({ height_range_m: [s.noise.height_range_m[0], Number(e.target.value)] })} />
             </span>
           </Field>
-          <button className="btn mt-2 w-full justify-center" onClick={() => s.generate()} disabled={!s.project || s.busy} data-testid="generate">
+          <button className="btn btn-primary mt-2 w-full justify-center" onClick={() => s.generate()} disabled={!s.project || s.busy} data-testid="generate">
             <Mountain size={14} /> Generate
           </button>
           {s.layer && (
@@ -1308,7 +1308,7 @@ export default function App() {
               )}
             </div>
           )}
-          <h2 className="mt-5 mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Export</h2>
+          <h2 className="mt-5 mb-2 jd-section">Export</h2>
           <Field label="File">
             <span className="flex gap-1">
               <input className={`${inputCls} w-28`} title="Relative paths go to the project's exports/ directory" value={exportPath} onChange={(e) => setExportPath(e.target.value)} data-testid="export-path" />
@@ -1391,7 +1391,7 @@ export default function App() {
       </div>
 
       {/* Bottom: log */}
-      <section className="overflow-y-auto border-t border-jd-line bg-jd-bg-1 px-3 py-2 font-mono text-xs" data-testid="log">
+      <section className="jd-panel mx-2 mb-2 overflow-y-auto px-3 py-2 font-mono text-xs" data-testid="log">
         {s.log.length === 0 && <span className="text-jd-fg-2">Operations and warnings appear here.</span>}
         {s.log.map((e, i) => (
           <div key={i} className={e.level === "error" ? "text-jd-error" : e.level === "warn" ? "text-jd-warn" : "text-jd-fg-1"}>

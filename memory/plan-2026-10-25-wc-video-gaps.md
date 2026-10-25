@@ -13,7 +13,7 @@ only. Engine importer scripts are not gated — run their headless checks if tou
 | 6 | Per-octave strength on the base noise + a general strength | done | unit: octave weights change the field as specified |
 | 2 | Grid transforms on a selection: Duplicate, Rotate, Scale, Tilt, Push / Pull, Align | done | unit (kernel), e2e |
 | 1 | Brush transforms: Rotate, Scale, Tilt, Push / Pull, Align | done | unit (kernel), e2e |
-| 11 | Premium look like World Creator (owner, mid-loop): palette, panel cards, value-bar sliders, section headings, primary buttons, icon buttons | todo — next after 2/1 | captures viewed before/after; all specs green |
+| 11 | Premium look like World Creator (owner, mid-loop): palette, panel cards, value-bar sliders, section headings, primary buttons, icon buttons | done | captures viewed before/after; all specs green |
 | 4 | Alpha brushes: a palette of brush shapes beyond round / square | todo | unit, e2e |
 | 5 | Sculpt-layer settings: height offset / scale / blending, steps, placeable area + Fit to terrain | todo | unit, e2e |
 | 7 | Layer tree with search box and per-row eye in the right panel | todo | e2e |
@@ -27,3 +27,4 @@ only. Engine importer scripts are not gated — run their headless checks if tou
 - 10 + 3 done: global Esc cancels running jobs outside text fields (jobs.spec, two E_CANCELLED); `jd.filter.action@1` (flip_x / flip_y / rotate_left / rotate_right on square worlds / flatten) + desktop Actions row splicing it before the output (actions.spec).
 - 9 + 6 done: framed block (walls to below the lowest ground, teal rim) + marching-squares shoreline, Frame toggle, header `box` / `shore N` (vitest + chrome.spec, capture viewed); `octave_weights` + `strength` on the noise (weighted FBm reproduces the plain fractal at weights 1; the unit test caught `mid` using the scaled half), Strength slider + octave bars (octaves.spec).
 - 2 + 1 done: transform kernel (rotate / scale relief / tilt / push-grab / align to best-fit plane / duplicate, round or square footprint, soft edge; 3 unit tests), Grid ▸ Transform selection, brush modes rotate / scale / tilt / push / align (transforms.spec).
+- 11 done: navy-charcoal tokens + vivid blue, floating `.jd-panel` cards (panels, viewport, log), `.jd-section` headings with a chevron, `.btn-primary` (New, Generate, Evaluate), accent slider fills, thin scrollbars, rounded graph nodes with an accent stripe; before/after captures compared; full suite green.

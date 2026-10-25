@@ -6,15 +6,17 @@
 @theme {
   --font-sans: "Host Grotesk Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
-  --color-jd-bg-0: #0a0a0a;
-  --color-jd-bg-1: #141414;
-  --color-jd-bg-2: #1f1f1f;
-  --color-jd-bg-3: #2a2a2a;
-  --color-jd-line: #3a3a3a;
-  --color-jd-fg-0: #f2f2f2;
-  --color-jd-fg-1: #c8c8c8;
-  --color-jd-fg-2: #9a9a9a;
-  --color-jd-accent: #7fb3ff;
+  /* Navy-charcoal surfaces and a vivid blue, after World Creator 2025's workspace. */
+  --color-jd-bg-0: #0c0f15;
+  --color-jd-bg-1: #151a24;
+  --color-jd-bg-2: #1d2331;
+  --color-jd-bg-3: #283043;
+  --color-jd-line: #2b3346;
+  --color-jd-fg-0: #eef1f7;
+  --color-jd-fg-1: #bec6d5;
+  --color-jd-fg-2: #8a94a9;
+  --color-jd-accent: #6b8cff;
+  --color-jd-primary: #3f63f2;
   --color-jd-warn: #f5c451;
   --color-jd-error: #ff7b72;
 }
@@ -37,8 +39,44 @@ select {
   color-scheme: dark;
 }
 
+/* Sliders take the accent fill; scrollbars stay thin and dark. */
+input[type="range"] {
+  accent-color: var(--color-jd-primary);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-jd-bg-3) transparent;
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-jd-bg-3);
+  border-radius: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 @layer components {
   .btn {
-    @apply inline-flex items-center gap-1 rounded border border-jd-line bg-jd-bg-2 px-2 py-1 text-xs text-jd-fg-0 hover:bg-jd-bg-3 disabled:cursor-not-allowed disabled:opacity-40;
+    @apply inline-flex items-center gap-1 rounded-md border border-white/5 bg-jd-bg-2 px-2 py-1 text-xs text-jd-fg-0 transition-colors hover:border-white/10 hover:bg-jd-bg-3 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  /* The main action of a group: filled blue (World Creator's "Fit to Terrain"). */
+  .btn-primary {
+    @apply border-transparent bg-jd-primary text-white hover:border-transparent hover:bg-jd-primary hover:brightness-110;
+  }
+  /* A floating card: panels sit over the backdrop with a soft shadow instead of hard borders. */
+  .jd-panel {
+    @apply rounded-xl bg-jd-bg-1 shadow-[0_10px_30px_rgba(0,0,0,0.45)] ring-1 ring-white/5;
+  }
+  /* Section headings: bold, light, a chevron like the reference's collapsible groups. */
+  .jd-section {
+    @apply flex items-center gap-1.5 text-[12.5px] font-semibold tracking-normal text-jd-fg-0 normal-case;
+  }
+  .jd-section::before {
+    content: "▾";
+    @apply text-[10px] text-jd-fg-2;
   }
 }

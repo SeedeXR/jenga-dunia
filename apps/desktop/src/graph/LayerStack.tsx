@@ -91,7 +91,7 @@ export default function LayerStack() {
   };
   return (
     <section data-testid="layer-stack">
-      <h2 className="mt-4 mb-1 text-[11px] font-semibold tracking-wide text-jd-fg-2 uppercase">Layers</h2>
+      <h2 className="mt-4 mb-1 jd-section">Layers</h2>
       <div className="mb-1 flex gap-1">
         <select className="min-w-0 flex-1 rounded border border-jd-line bg-jd-bg-2 px-1 text-xs text-jd-fg-0" value={kind} onChange={(e) => setKind(e.target.value)} title="Node kind to add on top of the stack (in front of the height output)" data-testid="layer-add-kind">
           {s.graphKinds

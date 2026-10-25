@@ -146,6 +146,8 @@ Blend operations are nodes like everything else: **min**, **max** and **lerp** (
 
 ## Viewport chrome
 
+**Look.** The workspace follows World Creator 2025's: navy-charcoal surfaces, floating rounded panels with soft shadows over the backdrop (the viewport is a card too), bold section headings with a chevron, a vivid blue for the main action of each group (New, Generate, Evaluate) and for slider fills, thin dark scrollbars, and graph nodes as rounded cards with an accent stripe. The tokens live in `apps/desktop/src/index.css` (`--color-jd-*`, `.jd-panel`, `.jd-section`, `.btn-primary`).
+
 **Octave bars and strength.** Under the Noise panel, **Strength** scales the relief around the middle of the height range (0 = flat at the middle, 2 = twice the relief) and one vertical bar per octave sets that octave's strength (coarsest first, 0..2, fbm only); release a bar to apply it, **reset** clears them. Both write the noise node (`strength`, `octave_weights`), so the CLI and agents see the same thing. UI-driven test: `apps/desktop/e2e/octaves.spec.ts`.
 
 **Actions.** The right panel's **Actions** row — **Flip X**, **Flip Y**, **Rot ⟲**, **Rot ⟳** (90°, square worlds) and **Flatten** (to the mean, or `height_m`) — splices a `jd.filter.action@1` node in front of the height output, so every action is a layer-stack row you can bypass, reorder or remove, and undo works as for any edit. UI-driven test: `apps/desktop/e2e/actions.spec.ts`.

@@ -50,8 +50,8 @@ function JdNode({ data }: NodeProps<FlowNode<JdNodeData>>) {
     .map(([k, v]) => `${k}=${Array.isArray(v) ? (v.some((x) => typeof x === "object" && x !== null) ? `${v.length} recorded` : v.join("…")) : keysOf(v) ? `⏱${keysOf(v)!.length} keys` : String(v)}`)
     .join(" · ");
   return (
-    <div className="min-w-40 rounded border border-jd-line bg-jd-bg-2 text-xs text-jd-fg-0 shadow">
-      <div className="border-b border-jd-line px-2 py-1 font-semibold">{data.label}</div>
+    <div className="min-w-40 overflow-hidden rounded-lg border border-white/5 bg-jd-bg-2 text-xs text-jd-fg-0 shadow-lg shadow-black/40">
+      <div className="border-b border-white/5 border-l-2 border-l-jd-primary bg-jd-bg-3/60 px-2 py-1 font-semibold">{data.label}</div>
       <div className="px-2 py-1 text-[11px] text-jd-fg-2">{data.kind}</div>
       {summary && <div className="truncate px-2 pb-1 text-[11px] text-jd-fg-1">{summary}</div>}
       {data.inputs.map((p, i) => (
@@ -411,7 +411,7 @@ function Inner() {
                 </option>
               ))}
           </select>
-          <button className="btn" title="Evaluate at full resolution" onClick={() => void s.evaluateGraph()} disabled={!s.project || s.busy} data-testid="graph-evaluate">
+          <button className="btn btn-primary" title="Evaluate at full resolution" onClick={() => void s.evaluateGraph()} disabled={!s.project || s.busy} data-testid="graph-evaluate">
             <Play size={12} /> Evaluate
           </button>
           <label className="ml-2 flex items-center gap-1 text-xs text-jd-fg-1" title="Timeline: keyframed parameters (t:v, t:v in the inspector) resolve here; journaled, undoable">
