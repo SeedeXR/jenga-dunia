@@ -11,6 +11,18 @@
 > in scatter (gap 2), pattern masks and curve/smoothstep effects (3), polygon layers (4), crater /
 > inflate / denoise filters (5), tiled export and the Godot / Houdini bridges (6), map export
 > formats (7), holes (8), river editing (9), multiple water bodies (11).
+> **2026-10-25, afternoon:** closed — own models in scatter (2: `terrain.scatter {model}`), pattern
+> masks and curve / smoothstep (3: `jd.pattern@1`, `jd.math.curve@1`), polygon layers (4:
+> `jd.shape.polygon@1`), inflate / deflate and denoise (5: `jd.filter.inflate@1`,
+> `jd.filter.denoise@1`), tiled export (6: `terrain.export_profile {tiles}`), map formats (7: RGBA
+> splat packs, `ao.png` + AO in the ORM map's R, ASC / XYZ heightmaps), holes (8: `holes` on the mesh
+> and profile exports, `holes.png`, Unity SetHoles), river springs (9: `springs` on
+> `jd.hydrology.rivers@1`), lakes drawn as water (11: a published `lakes` layer in the viewport).
+> Image-based materials (1) closed the same afternoon: `texture {albedo, normal, tile_m, px}` per
+> layer on the detail-tile path (PNG only; triplanar / stochastic blending stay the engine's job).
+> Still open: the Godot / Houdini bridges (6) — owner-blocked, neither
+> engine is installed to run a headless import check; spline I/O (9); workflow conveniences (12);
+> rendering (13).
 
 # Jenga Dunia vs World Creator: feature parity audit (2026-10-24)
 
