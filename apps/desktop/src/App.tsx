@@ -349,6 +349,20 @@ export default function App() {
   }, []);
 
   // Native menu bar → the same actions as the buttons (ids from src-tauri build_menu).
+  // Esc aborts whatever is running (World Creator's "Generating (ESC to abort)"); inside a text
+  // field Esc only leaves the field, so typing is never interrupted.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+      const st = useStore.getState();
+      for (const j of st.jobs) if (!j.cancelling) void st.cancelJob(j.id);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false; // StrictMode runs effects twice; never leave a second listener behind
@@ -467,9 +481,10 @@ export default function App() {
               {s.jobs[0]!.op}
               {s.jobs[0]!.total > 0 ? ` · node ${Math.min(s.jobs[0]!.done + 1, s.jobs[0]!.total)}/${s.jobs[0]!.total} ${s.jobs[0]!.current.split("@")[0]?.split(".").pop() ?? ""}` : ""}
               {` · ${(s.jobs[0]!.elapsed_ms / 1000).toFixed(1)} s`}
-              <button className="btn px-1.5 py-0" onClick={() => void s.cancelJob(s.jobs[0]!.id)} disabled={s.jobs[0]!.cancelling} data-testid="job-cancel">
+              <button className="btn px-1.5 py-0" onClick={() => void s.cancelJob(s.jobs[0]!.id)} disabled={s.jobs[0]!.cancelling} title="Cancel the running job (Esc)" data-testid="job-cancel">
                 {s.jobs[0]!.cancelling ? "cancelling…" : "Cancel"}
               </button>
+              <span className="text-jd-fg-2">Esc to abort</span>
             </span>
           ) : (
             <span className="text-xs text-jd-accent">working…</span>
@@ -985,6 +1000,22 @@ export default function App() {
               Export .glb
             </button>
             <span className="text-xs text-jd-fg-2" data-testid="scatter-count">{s.scatter.points ? `${s.scatter.points.length.toLocaleString()} instances` : ""}</span>
+          </div>
+          <h2 className="mt-4 mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Actions</h2>
+          <div className="mb-1 flex flex-wrap gap-1" data-testid="terrain-actions">
+            {(
+              [
+                ["flip_x", "Flip X", "Mirror the terrain east ↔ west"],
+                ["flip_y", "Flip Y", "Mirror the terrain north ↔ south"],
+                ["rotate_left", "Rot ⟲", "Turn the terrain 90° counter-clockwise (square worlds)"],
+                ["rotate_right", "Rot ⟳", "Turn the terrain 90° clockwise (square worlds)"],
+                ["flatten", "Flatten", "Flatten the terrain to its mean height (set height_m in the inspector)"],
+              ] as const
+            ).map(([k, label, title]) => (
+              <button key={k} className="btn" onClick={() => void s.applyAction(k)} disabled={!s.project || s.busy} title={`${title} — a jd.filter.action node in front of the output; undo or bypass it in the layer stack`} data-testid={`action-${k}`}>
+                {label}
+              </button>
+            ))}
           </div>
           <h2 className="mt-4 mb-2 text-xs font-semibold uppercase tracking-wider text-jd-fg-2">Simulation layers</h2>
           <div className="mb-1 flex flex-wrap gap-1">

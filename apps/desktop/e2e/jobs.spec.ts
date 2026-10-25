@@ -55,6 +55,14 @@ test.describe("jobs against the real core", () => {
     await page.getByTestId("job-cancel").click();
     await expect(page.getByTestId("log")).toContainText("E_CANCELLED", { timeout: 30_000 });
     await expect(page.getByTestId("job-progress")).toHaveCount(0);
+
+    // Esc aborts too (outside text fields): a second evaluation, then the key.
+    const cancelledBefore = await page.getByTestId("log").locator("div", { hasText: "E_CANCELLED" }).count();
+    await page.getByTestId("graph-evaluate").click();
+    await expect(page.getByTestId("job-progress")).toContainText("Esc to abort", { timeout: 15_000 });
+    await page.locator("body").press("Escape");
+    await expect.poll(() => page.getByTestId("log").locator("div", { hasText: "E_CANCELLED" }).count(), { timeout: 30_000 }).toBeGreaterThan(cancelledBefore);
+    await expect(page.getByTestId("job-progress")).toHaveCount(0);
     await core.close();
   });
 });
