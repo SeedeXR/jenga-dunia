@@ -4533,6 +4533,38 @@ pub mod terrain {
         50.0
     }
 
+    /// Request of `terrain.export_contours`.
+    #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct TerrainExportContours {
+        /// Output file (`.geojson`), relative to the project's exports/.
+        pub path: PathBuf,
+        /// Layer to contour.
+        #[serde(default = "default_layer")]
+        pub layer: String,
+        /// Height between contour lines, metres (> 0).
+        pub interval_m: f32,
+        /// Lines shorter than this are dropped, metres.
+        #[serde(default)]
+        pub min_length_m: f32,
+        /// Coordinate system of the numbers written (as for splines).
+        #[serde(default)]
+        pub coordinates: SplineCoordinates,
+    }
+
+    /// Result of `terrain.export_contours`.
+    #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
+    pub struct ContoursReport {
+        /// The file written.
+        pub path: PathBuf,
+        /// Lines written.
+        pub lines: u32,
+        /// Distinct levels.
+        pub levels: u32,
+        /// Bytes written.
+        pub bytes: u64,
+    }
+
     /// Result of `terrain.export_splines`.
     #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
     pub struct SplinesReport {
@@ -5061,6 +5093,46 @@ pub mod terrain {
                 let warnings = report.notes.iter().map(|n| Warning::new("W_ENGINE_SIZE", n.clone())).collect();
                 ctx.with_project(|proj| crate::geo::write_attribution_txt(proj, &dir).map(|_| ()))?;
                 Ok((report, warnings))
+            },
+        );
+        r.register::<TerrainExportContours, ContoursReport, _>(
+            "terrain.export_contours",
+            "Write contour lines (iso-height LineStrings every `interval_m`, each with its `elevation_m`) of a layer as GeoJSON — marching squares joined into rings and lines; coordinates in layer metres, world CRS units or WGS 84",
+            Scope::Export,
+            |ctx, p| {
+                let (path, world) = ctx.with_project(|proj| {
+                    let path = if p.path.is_absolute() { p.path.clone() } else { proj.root().join("exports").join(&p.path) };
+                    Ok((path, proj.doc.world.clone()))
+                })?;
+                let sp = world.spacing_m();
+                let lines = ctx.with_layer(&p.layer, |hf| jd_terrain::contour_lines(hf, [sp[0] as f32, sp[1] as f32], p.interval_m, p.min_length_m))?;
+                let levels = lines.iter().map(|(l, _)| (l * 1000.0) as i64).collect::<std::collections::BTreeSet<_>>().len() as u32;
+                let to_world = |[u, v]: [f32; 2]| [world.origin[0] + f64::from(u), world.origin[1] + f64::from(v)];
+                let mut feats: Vec<(serde_json::Value, Vec<[f64; 2]>)> = Vec::with_capacity(lines.len());
+                let tf = match p.coordinates {
+                    SplineCoordinates::Wgs84 => Some(jd_geo::Transformer::new(&world.crs.clone().ok_or_else(|| JdError::invalid("coordinates", "wgs84 needs a world CRS"))?, "EPSG:4326")?),
+                    _ => None,
+                };
+                for (level, pts) in &lines {
+                    let props = serde_json::json!({ "kind": "contour", "elevation_m": level });
+                    let coords: Vec<[f64; 2]> = match (&p.coordinates, &tf) {
+                        (SplineCoordinates::LocalM, _) => pts.iter().map(|[u, v]| [f64::from(*u), f64::from(*v)]).collect(),
+                        (_, Some(tf)) => {
+                            let mut xy: Vec<(f64, f64)> = pts.iter().map(|q| { let w = to_world(*q); (w[0], w[1]) }).collect();
+                            tf.transform(&mut xy)?;
+                            xy.into_iter().map(|(x, y)| [x, y]).collect()
+                        }
+                        _ => pts.iter().map(|q| to_world(*q)).collect(),
+                    };
+                    feats.push((props, coords));
+                }
+                let doc = jd_terrain::geojson_lines(&feats, match p.coordinates { SplineCoordinates::LocalM => "local_m", SplineCoordinates::World => "world_crs", SplineCoordinates::Wgs84 => "wgs84" });
+                if let Some(dir) = path.parent() {
+                    std::fs::create_dir_all(dir)?;
+                }
+                let bytes = serde_json::to_vec(&doc)?;
+                std::fs::write(&path, &bytes)?;
+                Ok((ContoursReport { path, lines: lines.len() as u32, levels, bytes: bytes.len() as u64 }, Vec::new()))
             },
         );
         r.register::<TerrainExportSplines, SplinesReport, _>(

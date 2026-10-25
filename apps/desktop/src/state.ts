@@ -2,6 +2,7 @@
 import { create } from "zustand";
 import type { Edge, GraphEvaluateResult, GraphListResult, HeightmapFormat, JdOps, JobInfo as JobInfoGen, NodeDefInfo, NodeView, NoiseParams, OceanWavesRequest, OceanWavesResult, OpId, ProjectOpenResult, ProjectSaveResult, ScatterPoint, TerrainStatsResult } from "./lib/ops.gen";
 import { horizonPreview, layerPreview, layerTextures, op, skyPreview, type JdError, type LayerMaps, type Preview, type Response, type Warning, hdriPreview, writeExport } from "./lib/api";
+import { orbitAt } from "./lib/camera";
 import { adaptLodBias } from "./lib/previewLod";
 import type { MaterialSpec, MediaMetadataResult, TerrainMeasureResult } from "./lib/ops.gen";
 
@@ -145,8 +146,8 @@ interface State {
   /** A transform of the selection (its bounding square) appended to the transforms node. */
   gridTransform: (kind: "duplicate" | "rotate" | "scale" | "tilt" | "align") => Promise<void>;
   /** Viewport sun direction (not part of the project). */
-  sun: { azimuth_deg: number; elevation_deg: number; turbidity: number; clouds: number; fog: number };
-  setSun: (patch: Partial<{ azimuth_deg: number; elevation_deg: number; turbidity: number; clouds: number; fog: number }>) => void;
+  sun: { azimuth_deg: number; elevation_deg: number; turbidity: number; clouds: number; fog: number; /** Rain in the viewport 0..1 (look only, not saved). */ rain: number };
+  setSun: (patch: Partial<State["sun"]>) => void;
   /** The noise continued beyond the border (`terrain.horizon`), drawn as a coarse skirt under the terrain. */
   horizon: { preview: Preview; scale: number } | null;
   showHorizon: boolean;
@@ -168,6 +169,11 @@ interface State {
   flyKeys: import("./viewport/TerrainView").Orbit[];
   addFlyKey: () => void;
   clearFlyKeys: () => void;
+  /** Drop one key; move the camera to one. */
+  removeFlyKey: (i: number) => void;
+  goToFlyKey: (i: number) => void;
+  /** Play the path in the viewport (no frames written), over `seconds`. */
+  previewFlythrough: (seconds: number) => Promise<void>;
   /** Save the current frame as exports/stills/view_<n>.png. */
   saveStill: () => Promise<void>;
   /** Render `frames` along the keys into exports/flythrough/frame_<k>.png. */
@@ -563,7 +569,7 @@ export const useStore = create<State>((set, get) => {
     return {
       materials: look?.materials ?? [],
       ...(sc ? { scatter: { mask: sc.mask ?? null, spacing_m: sc.spacing_m, seed: sc.seed ?? 0, grow: sc.grow ?? false, points: null } } : {}),
-      ...(su ? { sun: { azimuth_deg: su.azimuth_deg, elevation_deg: su.elevation_deg, turbidity: su.turbidity ?? 3, clouds: su.clouds ?? 0, fog: su.fog ?? 0 } } : {}),
+      ...(su ? { sun: { azimuth_deg: su.azimuth_deg, elevation_deg: su.elevation_deg, turbidity: su.turbidity ?? 3, clouds: su.clouds ?? 0, fog: su.fog ?? 0, rain: 0 } } : {}),
     };
   };
   let lookTimer: ReturnType<typeof setTimeout> | undefined;
@@ -781,7 +787,7 @@ export const useStore = create<State>((set, get) => {
         },
       });
     },
-    sun: { azimuth_deg: 140, elevation_deg: 35, turbidity: 3, clouds: 0, fog: 0 },
+    sun: { azimuth_deg: 140, elevation_deg: 35, turbidity: 3, clouds: 0, fog: 0, rain: 0 },
     setSun: (patch) => {
       set((s) => ({ sun: { ...s.sun, ...patch } }));
       pushLook();
@@ -814,6 +820,23 @@ export const useStore = create<State>((set, get) => {
       if (o) set((st) => ({ flyKeys: [...st.flyKeys, o] }));
     },
     clearFlyKeys: () => set({ flyKeys: [] }),
+    removeFlyKey: (i) => set((st) => ({ flyKeys: st.flyKeys.filter((_, k) => k !== i) })),
+    goToFlyKey: (i) => {
+      const key = get().flyKeys[i];
+      if (key) get().viewport?.setOrbit(key);
+    },
+    previewFlythrough: async (seconds) => {
+      const v = get().viewport;
+      const keys = get().flyKeys;
+      if (!v || keys.length < 2) return;
+      const t0 = performance.now();
+      for (;;) {
+        const t = (performance.now() - t0) / (seconds * 1000);
+        v.setOrbit(orbitAt(keys, Math.min(t, 1)));
+        if (t >= 1) break;
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+      }
+    },
     saveStill: async () => {
       const v = get().viewport;
       if (!v) return;
@@ -828,15 +851,7 @@ export const useStore = create<State>((set, get) => {
       const keys = get().flyKeys;
       if (!v || keys.length < 2 || !(frames >= 2)) return;
       const start = v.getOrbit();
-      const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
-      // ponytail: linear in (theta, phi, radius) between keys; a Catmull-Rom path is the upgrade.
-      const at = (t: number) => {
-        const seg = Math.min(keys.length - 2, Math.floor(t * (keys.length - 1)));
-        const u = t * (keys.length - 1) - seg;
-        const a = keys[seg]!;
-        const b = keys[seg + 1]!;
-        return { theta: lerp(a.theta, b.theta, u), phi: lerp(a.phi, b.phi, u), radius: lerp(a.radius, b.radius, u) };
-      };
+      const at = (t: number) => orbitAt(keys, t); // Catmull-Rom through every key
       let written = 0;
       for (let k = 0; k < frames; k++) {
         v.setOrbit(at(k / (frames - 1)));
@@ -862,9 +877,9 @@ export const useStore = create<State>((set, get) => {
       old?.bitmap.close();
     },
     refreshSky: async () => {
-      const { azimuth_deg, elevation_deg, turbidity, clouds } = get().sun;
+      const { azimuth_deg, elevation_deg, turbidity, clouds, fog } = get().sun;
       try {
-        const r = await skyPreview({ sun_azimuth_deg: azimuth_deg, sun_elevation_deg: Math.max(1, elevation_deg), turbidity, cloud_cover: clouds });
+        const r = await skyPreview({ sun_azimuth_deg: azimuth_deg, sun_elevation_deg: Math.max(1, elevation_deg), turbidity, cloud_cover: clouds, fog });
         const old = get().sky;
         set({ sky: r });
         old?.bitmap.close();
@@ -1219,7 +1234,7 @@ export const useStore = create<State>((set, get) => {
     },
     exportSky: async (path) => {
       const { sun } = get();
-      await run("sky.bake", { sun_azimuth_deg: sun.azimuth_deg, sun_elevation_deg: sun.elevation_deg, turbidity: sun.turbidity, cloud_cover: sun.clouds, path });
+      await run("sky.bake", { sun_azimuth_deg: sun.azimuth_deg, sun_elevation_deg: sun.elevation_deg, turbidity: sun.turbidity, cloud_cover: sun.clouds, fog: sun.fog, path });
     },
     exportHeightmap: async (path, format) => {
       // A live preview only published `height#lod<N>`; exports always use the full-resolution layer.

@@ -52,6 +52,14 @@ test.describe("post effects, stills and flythrough against the real core", () =>
     await page.mouse.up({ button: "right" });
     await page.getByTestId("fly-add").click();
     await expect(page.getByTestId("fly-count")).toContainText("2 keys");
+    // The key list: each key reads its heading; Go moves the camera there; Play runs the path.
+    await expect(page.getByTestId("fly-keys").locator("li")).toHaveCount(2);
+    const headingNow = async () => Number(/(\d+)°/.exec((await page.getByTestId("compass-heading").textContent()) ?? "")?.[1]);
+    const keyHeading = async (i: number) => Number(/(\d+)°/.exec((await page.getByTestId(`fly-key-heading-${i}`).textContent()) ?? "")?.[1]);
+    await page.getByTestId("fly-go-0").click();
+    await expect.poll(headingNow).toBe(await keyHeading(0));
+    await page.getByTestId("fly-preview").click();
+    await expect.poll(headingNow, { timeout: 10_000 }).toBe(await keyHeading(1));
     await page.getByTestId("fly-frames").fill("3");
     await page.getByTestId("fly-record").click();
     await expect(page.getByTestId("log")).toContainText("flythrough: 3/3 frames", { timeout: 60_000 });

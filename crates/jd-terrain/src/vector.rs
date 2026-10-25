@@ -106,6 +106,132 @@ pub fn river_polylines(
     Ok(out)
 }
 
+/// Contour lines of `h` every `interval_m` (levels at multiples of the interval inside the range):
+/// marching squares over the cell centres, the segments of each level joined end to end into
+/// polylines (closed rings repeat their first point). Returns `(level, polyline)` pairs, points in
+/// layer metres. Lines shorter than `min_length_m` are dropped.
+pub fn contour_lines(
+    h: &Heightfield,
+    spacing_m: [f32; 2],
+    interval_m: f32,
+    min_length_m: f32,
+) -> JdResult<Vec<(f32, Vec<[f32; 2]>)>> {
+    if !(interval_m > 0.0 && interval_m.is_finite())
+        || !(min_length_m >= 0.0 && min_length_m.is_finite())
+    {
+        return Err(JdError::invalid(
+            "interval_m",
+            "interval positive, min_length_m ≥ 0",
+        ));
+    }
+    if !spacing_m.iter().all(|s| *s > 0.0 && s.is_finite()) {
+        return Err(JdError::invalid(
+            "spacing_m",
+            "sample spacing must be positive",
+        ));
+    }
+    let st = h.stats();
+    let (lo, hi) = (st.min, st.max);
+    let first = (lo / interval_m).ceil() as i64;
+    let last = (hi / interval_m).floor() as i64;
+    if last - first > 2000 {
+        return Err(JdError::invalid(
+            "interval_m",
+            format!("{} levels: pick a larger interval", last - first + 1),
+        ));
+    }
+    let (w, hh) = (h.width(), h.height());
+    let at = |x: u32, y: u32| {
+        [
+            (x as f32 + 0.5) * spacing_m[0],
+            (y as f32 + 0.5) * spacing_m[1],
+        ]
+    };
+    let key = |p: [f32; 2]| ((p[0] * 64.0).round() as i64, (p[1] * 64.0).round() as i64);
+    let mut out = Vec::new();
+    for k in first..=last {
+        let level = k as f32 * interval_m;
+        // Segments of this level, then chained by shared end points.
+        let mut segs: Vec<([f32; 2], [f32; 2])> = Vec::new();
+        for y in 0..hh.saturating_sub(1) {
+            for x in 0..w.saturating_sub(1) {
+                let corners = [(x, y), (x + 1, y), (x + 1, y + 1), (x, y + 1)];
+                let mut hits: Vec<[f32; 2]> = Vec::with_capacity(4);
+                for e in 0..4 {
+                    let (a, b) = (corners[e], corners[(e + 1) % 4]);
+                    let (za, zb) = (h.get(a.0, a.1) - level, h.get(b.0, b.1) - level);
+                    if (za < 0.0) != (zb < 0.0) {
+                        let t = za / (za - zb);
+                        let (pa, pb) = (at(a.0, a.1), at(b.0, b.1));
+                        hits.push([pa[0] + (pb[0] - pa[0]) * t, pa[1] + (pb[1] - pa[1]) * t]);
+                    }
+                }
+                if hits.len() == 2 {
+                    segs.push((hits[0], hits[1]));
+                } else if hits.len() == 4 {
+                    // A saddle: pair the crossings by the cell-centre value.
+                    let centre =
+                        (h.get(x, y) + h.get(x + 1, y) + h.get(x + 1, y + 1) + h.get(x, y + 1))
+                            * 0.25
+                            - level;
+                    if (centre < 0.0) == (h.get(x, y) - level < 0.0) {
+                        segs.push((hits[0], hits[1]));
+                        segs.push((hits[2], hits[3]));
+                    } else {
+                        segs.push((hits[0], hits[3]));
+                        segs.push((hits[1], hits[2]));
+                    }
+                }
+            }
+        }
+        // Chain: an end point index from rounded coordinates to segment ids.
+        let mut ends: std::collections::HashMap<(i64, i64), Vec<usize>> =
+            std::collections::HashMap::new();
+        for (i, (a, b)) in segs.iter().enumerate() {
+            ends.entry(key(*a)).or_default().push(i);
+            ends.entry(key(*b)).or_default().push(i);
+        }
+        let mut used = vec![false; segs.len()];
+        for start in 0..segs.len() {
+            if used[start] {
+                continue;
+            }
+            used[start] = true;
+            let mut line = vec![segs[start].0, segs[start].1];
+            // Grow forward from the tail, then backward from the head.
+            for forward in [true, false] {
+                loop {
+                    let tip = if forward {
+                        line[line.len() - 1]
+                    } else {
+                        line[0]
+                    };
+                    let next = ends
+                        .get(&key(tip))
+                        .and_then(|ids| ids.iter().copied().find(|&j| !used[j]));
+                    let Some(j) = next else { break };
+                    used[j] = true;
+                    let (a, b) = segs[j];
+                    let other = if key(a) == key(tip) { b } else { a };
+                    if forward {
+                        line.push(other);
+                    } else {
+                        line.insert(0, other);
+                    }
+                }
+            }
+            let len: f32 = line
+                .windows(2)
+                .map(|p| (p[1][0] - p[0][0]).hypot(p[1][1] - p[0][1]))
+                .sum();
+            if len >= min_length_m && line.len() >= 2 {
+                out.push((level, line));
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// A GeoJSON `FeatureCollection` of `LineString`s: `(properties, points)` per feature; `crs`
 /// goes into a foreign member `jd:coordinates` so a reader knows whether the numbers are layer
 /// metres, world CRS units or WGS 84 longitude / latitude.
@@ -126,6 +252,43 @@ pub fn geojson_lines(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_cone_gives_one_closed_ring_per_level() {
+        let mut h = Heightfield::new(64, 64, 64, 0).expect("hf");
+        // A cone 300 m high at the centre, falling 1 m per metre: rings every 50 m.
+        h.fill_with(|x, y| {
+            (300.0 - ((x as f32 - 31.5) * 10.0).hypot((y as f32 - 31.5) * 10.0)).max(0.0)
+        });
+        let lines = contour_lines(&h, [10.0, 10.0], 50.0, 0.0).expect("contours");
+        let levels: std::collections::BTreeSet<i32> =
+            lines.iter().map(|(l, _)| *l as i32).collect();
+        assert_eq!(
+            levels.into_iter().collect::<Vec<_>>(),
+            vec![50, 100, 150, 200, 250, 300]
+                .into_iter()
+                .filter(|l| *l < 300)
+                .collect::<Vec<_>>()
+        );
+        for (level, line) in &lines {
+            let first = line[0];
+            let last = *line.last().expect("pt");
+            assert!(
+                (first[0] - last[0]).hypot(first[1] - last[1]) < 1e-3,
+                "level {level}: a closed ring"
+            );
+            let r_expect = 300.0 - level;
+            for p in line {
+                let r = (p[0] - 320.0).hypot(p[1] - 320.0);
+                assert!(
+                    (r - r_expect).abs() < 8.0,
+                    "level {level}: radius {r} vs {r_expect}"
+                );
+            }
+        }
+        assert_eq!(lines.len(), 5, "one ring per level");
+        assert!(contour_lines(&h, [10.0, 10.0], 0.0, 0.0).is_err());
+    }
+
     use super::*;
     use crate::flow::{FlowMethod, carve_rivers_sourced};
 

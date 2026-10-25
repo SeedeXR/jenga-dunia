@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ContoursReport",
+  "description": "Result of `terrain.export_contours`.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "The file written.",
+      "type": "string"
+    },
+    "lines": {
+      "description": "Lines written.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "levels": {
+      "description": "Distinct levels.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "bytes": {
+      "description": "Bytes written.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "path",
+    "lines",
+    "levels",
+    "bytes"
+  ]
+}

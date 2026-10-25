@@ -126,6 +126,10 @@ for (const [name, id] of [["forest", 6], ["grassland", 5], ["rock", 1]]) {
 const snow = addNode("jd.climate.snow@1", { snow_line_m: 950, transition_m: 120, wind_strength: 0.4 }); // no wind of its own: follows the world's shared wind
 connect(coast, "out", snow, "in");
 publish("snow", snow, "snow");
+// Weather: orographic rain over the same terrain (0..1, windward slopes wet, lee dry), published as a layer.
+const rainNode = addNode("jd.climate.rain@1", {});
+connect(coast, "out", rainNode, "in");
+publish("rain", rainNode, "rain");
 // ── Ocean floor, desert family, strata, a road: branches off the same terrain ──────────────────
 const seabed = addNode("jd.biome.seabed@1", { level_m: SEA });
 connect(coast, "out", seabed, "in");
@@ -175,10 +179,26 @@ mark(3, "VERIFIED", `biome classes present: max class id ${biomeStats.max} (6 ru
 t0 = t();
 const tex = op("terrain.textures", { layer: "height", max_px: 1024 }, false);
 mark(7, "VERIFIED", `terrain.textures: albedo/normal/roughness ${tex.width}×${tex.height} PNGs in ${ms(t0)}`);
-mark(4, "PARTIAL", `PBR maps baked from masks of the terrain itself (height ramp + slope, normal, roughness) and viewport PBR texturing; a material graph assigning user materials per biome mask is not built yet`);
 for (const [fmt, file] of [["exr", "height.exr"], ["png16", "height.png"], ["tiff32", "height.tif"]]) {
   const r = op("terrain.export_heightmap", { layer: "height", path: file, format: fmt, ...(fmt === "png16" ? { range_m: [-80, 1400] } : {}) }, false);
   mark(7, "VERIFIED", `${fmt} heightmap ${r.bytes ?? statSync(r.path).size} bytes`);
+}
+// 4. User materials per class mask: a colour + roughness each, procedural grain on the forest and an
+// image texture set (the exported 16-bit heightmap, imported as an asset) on the rock.
+{
+  const asset = op("project.import_asset", { path: path.join(proj, "exports", "height.png"), name: "rock_tile.png" });
+  const mats = [
+    { mask: "mask_grassland", albedo: [0.32, 0.42, 0.2], roughness: 0.9 },
+    { mask: "mask_forest", albedo: [0.12, 0.24, 0.1], roughness: 0.85, detail: { tile_m: 8, bump: 0.5, contrast: 0.3, seed: 1, px: 256 } },
+    { mask: "mask_rock", albedo: [0.45, 0.42, 0.38], roughness: 0.7, texture: { albedo: asset.name, tile_m: 120, px: 256 } },
+    { mask: "snow", albedo: [0.95, 0.96, 0.98], roughness: 0.45 },
+  ];
+  const plain = op("terrain.textures", { layer: "height", max_px: 512 }, false);
+  const withMats = op("terrain.textures", { layer: "height", max_px: 512, materials: mats }, false);
+  const prof = op("terrain.export_profile", { profile: "unity", dir: "unity-materials", layer: "height", materials: mats }, false);
+  const tiles = ["detail_mask_forest_albedo.png", "detail_mask_rock_albedo.png", "detail_mask_rock_normal.png"].filter((f) => existsSync(path.join(proj, "exports", "unity-materials", f)));
+  const ok = withMats.details.length === 2 && withMats.albedo_png_base64 !== plain.albedo_png_base64 && tiles.length === 3;
+  mark(4, ok ? "VERIFIED" : "FAILED", `user materials per class mask: ${mats.length} layers (grassland / forest / rock / snow masks) baked into the PBR maps — the base colour differs from the mask-free bake; ${withMats.details.length} tiles returned (procedural grain on forest, the imported image \`${asset.name}\` as rock's texture set); the Unity profile writes ${tiles.length}/3 tile files and materials.json (${prof.files.length} files)`);
 }
 const water = op("ocean.bake", { level_m: SEA, visibility_m: 12, wind_speed_mps: 12, max_px: 512, wave_px: 256 }, false);
 mark(7, "VERIFIED", `ocean.bake: ${water.files.join(", ")} ${water.px.join("×")}, max depth ${water.max_depth_m.toFixed(1)} m, waves Hs ${water.waves.significant_height_m.toFixed(2)} m / L ${water.waves.wavelength_m.toFixed(0)} m`);
@@ -428,8 +448,29 @@ const after = JSON.parse(readFileSync(path.join(proj, "graph.json"), "utf8"));
 const snowLine = Object.values(after.nodes).find((n) => n.kind.startsWith("jd.climate.snow")).params.snow_line_m;
 mark(18, snowLine === 900 && (rec.replayed?.length ?? rec.replayed ?? 1) >= 1 ? "VERIFIED" : "FAILED", `recovery: ${journal.length} pending journal entr${journal.length === 1 ? "y" : "ies"} replayed by \`jd open --recover\`, graph.json now has snow_line_m = ${snowLine}`);
 const logDir = path.join(proj, "logs");
-mark(18, "PARTIAL", `logs: every CLI run logs through tracing (JD_LOG); ${existsSync(logDir) ? "project log directory present" : "no per-project log files yet (stderr only)"}`);
-mark(5, "PARTIAL", "clouds: a seeded cover layer on the sky bake/preview (cloud_cover); fog and rain are not modelled");
+{
+  // Every operation on the project lands in logs/ops.log as one JSON line (op, outcome, duration, code).
+  const opsLog = path.join(logDir, "ops.log");
+  const logLines = existsSync(opsLog) ? readFileSync(opsLog, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)) : [];
+  const errs = logLines.filter((l) => l.outcome === "error").length;
+  mark(18, logLines.length > 20 ? "VERIFIED" : "FAILED", `logs: ${logLines.length} operations in ${path.relative(out, opsLog)} (one JSON line each: op, request id, outcome, duration, warnings or error code), ${errs} of them errors; tracing to stderr via JD_LOG as well`);
+}
+{
+  // Weather: fog on the sky (the horizon band evens out toward a haze) and rain on the ground (the
+  // rain field drives a wet material: darker and glossier where it rains).
+  const clear = op("sky.bake", { sun_elevation_deg: 8, sun_azimuth_deg: 140, turbidity: 3, width: 256, path: "sky_clear.exr" }, false);
+  const foggy = op("sky.bake", { sun_elevation_deg: 8, sun_azimuth_deg: 140, turbidity: 3, width: 256, fog: 0.8, path: "sky_fog.exr" }, false);
+  const lum = (c) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  // Fog is a grey haze: the horizon loses its colour (saturation drops) while the zenith stays put.
+  const sat = (c) => (Math.max(...c) - Math.min(...c)) / Math.max(1e-6, Math.max(...c));
+  const zenithShift = Math.abs(lum(foggy.zenith_rgb) / Math.max(1e-6, lum(clear.zenith_rgb)) - 1);
+  const rainStats = op("terrain.stats", { layer: "rain" }, false).stats;
+  const dry = op("terrain.textures", { layer: "height", max_px: 256 }, false);
+  const wetMat = op("terrain.textures", { layer: "height", max_px: 256, materials: [{ mask: "rain", albedo: [0.22, 0.2, 0.18], roughness: 0.2 }] }, false);
+  const fogOk = sat(foggy.horizon_rgb) < 0.7 * sat(clear.horizon_rgb) && zenithShift < 0.05;
+  const rainOk = rainStats.max > 0.5 && rainStats.mean > 0 && wetMat.roughness_png_base64 !== dry.roughness_png_base64;
+  mark(5, fogOk && rainOk ? "VERIFIED" : "FAILED", `weather: fog 0.8 on the sky bake greys the horizon (colour saturation ${sat(clear.horizon_rgb).toFixed(2)} → ${sat(foggy.horizon_rgb).toFixed(2)}) and leaves the zenith within ${(zenithShift * 100).toFixed(1)} % (a haze over the low sky; the desktop's Fog slider drives the same parameter on the dome and the HDRI); rain: jd.climate.rain publishes a 0..1 field (mean ${rainStats.mean.toFixed(3)}, max ${rainStats.max.toFixed(2)}) and a wet material on it changes the roughness map; the viewport draws falling rain from the Rain slider`);
+}
 mark(15, "VERIFIED", "this report records the numbers; conversion losses: PNG16 quantisation (W_EXPORT_LOSS), USD without textures (step 4), FBX albedo only (no normal/roughness maps)");
 
 // ── Report ─────────────────────────────────────────────────────────────────────────────────────

@@ -477,7 +477,7 @@ export default function App() {
           </label>
         )}
         <span className={`${s.lastEval && Object.keys(s.lastEval.layers).length > 1 ? "" : "ml-auto "}text-xs text-jd-fg-2`} data-testid="viewport-info">
-          viewport: {vp.backend} · {vp.triangles.toLocaleString()} tris{vp.seaM !== undefined ? ` · sea ${vp.seaM} m` : ""}{vp.waves ? ` · waves ${vp.waves.heightM.toFixed(1)} m / ${Math.round(vp.waves.lengthM)} m` : ""}{vp.fog ? ` · fog ${Math.round(vp.fog * 100)} %` : ""}{vp.sun ? ` · sun ${vp.sun.elevationDeg}°/${vp.sun.azimuthDeg}°` : ""}{s.colorLayer && s.colorPreview ? ` · colour ${s.colorLayer}` : ""}{vp.instances ? ` · ${vp.instances.toLocaleString()} instances` : ""}{vp.lakes ? ` · lakes ${vp.lakes.toLocaleString()} cells` : ""}{vp.pbrPx ? ` · pbr ${vp.pbrPx[0]}×${vp.pbrPx[1]}` : ""}{vp.skyPx ? ` · sky ${vp.skyPx[0]}×${vp.skyPx[1]}` : ""}{vp.hdri ? " · hdri" : ""}{vp.frame ? " · box" : ""}{vp.shoreSegments ? ` · shore ${vp.shoreSegments.toLocaleString()}` : ""}{vp.post ? ` · post ${vp.post}` : ""}{vp.horizonPx ? ` · horizon ${vp.horizonPx}²` : ""}
+          viewport: {vp.backend} · {vp.triangles.toLocaleString()} tris{vp.seaM !== undefined ? ` · sea ${vp.seaM} m` : ""}{vp.waves ? ` · waves ${vp.waves.heightM.toFixed(1)} m / ${Math.round(vp.waves.lengthM)} m` : ""}{vp.fog ? ` · fog ${Math.round(vp.fog * 100)} %` : ""}{vp.sun ? ` · sun ${vp.sun.elevationDeg}°/${vp.sun.azimuthDeg}°` : ""}{s.colorLayer && s.colorPreview ? ` · colour ${s.colorLayer}` : ""}{vp.instances ? ` · ${vp.instances.toLocaleString()} instances` : ""}{vp.lakes ? ` · lakes ${vp.lakes.toLocaleString()} cells` : ""}{vp.pbrPx ? ` · pbr ${vp.pbrPx[0]}×${vp.pbrPx[1]}` : ""}{vp.skyPx ? ` · sky ${vp.skyPx[0]}×${vp.skyPx[1]}` : ""}{vp.hdri ? " · hdri" : ""}{vp.frame ? " · box" : ""}{vp.rain ? ` · rain ${Math.round(vp.rain * 100)} %` : ""}{vp.shoreSegments ? ` · shore ${vp.shoreSegments.toLocaleString()}` : ""}{vp.post ? ` · post ${vp.post}` : ""}{vp.horizonPx ? ` · horizon ${vp.horizonPx}²` : ""}
           {s.previewStats ? ` · preview lod ${s.previewStats.lod}, ${(s.previewStats.bytes / 1048576).toFixed(2)} MB in ${s.previewStats.ms.toFixed(0)} ms` : ""}
         </span>
         {(s.busy || s.jobs.length > 0) &&
@@ -744,7 +744,7 @@ export default function App() {
         {/* Center: viewport (top) + node graph (bottom, toggle) */}
         <main className={`relative my-2 grid min-w-0 overflow-hidden rounded-xl bg-jd-bg-0 ring-1 ring-white/5 ${showGraph ? (dock.graph === "right" ? "grid-cols-[1fr_auto]" : "grid-rows-[1fr_auto]") : "grid-rows-[1fr]"}`}>
           <div className="relative min-h-0 min-w-0">
-            <TerrainView fog={s.sun.fog} preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} sculpt={{ enabled: s.sculpting && (sculptNode !== undefined || s.drawing !== null), radiusM: s.drawing === "road" ? s.roadWidthM / 2 : s.brush.radius_m, onStroke: (pts) => void s.addStroke(pts), onAdjust: s.adjustBrush }} grid={s.grid.on ? { cells: s.grid.cells, selected: s.grid.selected, onSelect: s.gridSelect } : null} seaLevelM={seaLevelM} lakes={s.lakesPreview} water={water} waves={s.waves} sky={s.sky} hdri={s.hdri} post={s.post} onHandle={s.setViewportHandle} frame={frameOn} horizon={s.horizon} sun={{ azimuthDeg: s.sun.azimuth_deg, elevationDeg: s.sun.elevation_deg }} overlay={s.colorPreview} overlayName={s.colorLayer} instances={s.scatter.points ? { points: s.scatter.points, sizeM: Math.max(s.scatter.spacing_m * 0.35, (s.project?.world.extent_m[0] ?? 0) * 0.012), shape: /debris|rock|boulder|scree|talus/i.test(s.scatter.mask ?? "") ? "rock" : "cone" } : null} maps={s.maps} />
+            <TerrainView fog={s.sun.fog} preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} sculpt={{ enabled: s.sculpting && (sculptNode !== undefined || s.drawing !== null), radiusM: s.drawing === "road" ? s.roadWidthM / 2 : s.brush.radius_m, onStroke: (pts) => void s.addStroke(pts), onAdjust: s.adjustBrush }} grid={s.grid.on ? { cells: s.grid.cells, selected: s.grid.selected, onSelect: s.gridSelect } : null} seaLevelM={seaLevelM} lakes={s.lakesPreview} water={water} waves={s.waves} sky={s.sky} rain={s.sun.rain} hdri={s.hdri} post={s.post} onHandle={s.setViewportHandle} frame={frameOn} horizon={s.horizon} sun={{ azimuthDeg: s.sun.azimuth_deg, elevationDeg: s.sun.elevation_deg }} overlay={s.colorPreview} overlayName={s.colorLayer} instances={s.scatter.points ? { points: s.scatter.points, sizeM: Math.max(s.scatter.spacing_m * 0.35, (s.project?.world.extent_m[0] ?? 0) * 0.012), shape: /debris|rock|boulder|scree|talus/i.test(s.scatter.mask ?? "") ? "rock" : "cone" } : null} maps={s.maps} />
             <nav className="jd-panel absolute top-1/2 right-2 z-10 flex -translate-y-1/2 flex-col gap-0.5 p-1" aria-label="Add a layer" data-testid="layer-strip">
               {(
                 [
@@ -1078,16 +1078,40 @@ export default function App() {
               <button className="btn px-1.5" disabled={!s.viewport || s.flyKeys.length < 2 || s.busy} onClick={() => void s.recordFlythrough(flyFrames)} title="Render the frames along the keys into exports/flythrough/ (then: ffmpeg -framerate 24 -i frame_%04d.png flythrough.mp4)" data-testid="fly-record">
                 Record
               </button>
+              <button className="btn px-1.5" disabled={!s.viewport || s.flyKeys.length < 2} onClick={() => void s.previewFlythrough(4)} title="Play the path in the viewport (4 s, no frames written)" data-testid="fly-preview">
+                Play
+              </button>
               <button className="btn px-1.5" disabled={!s.viewport || !s.project} onClick={() => void s.saveStill()} title="Save the current frame as exports/stills/view_<n>.png" data-testid="still-save">
                 Still
               </button>
             </span>
           </Field>
+          {s.flyKeys.length > 0 && (
+            <ol className="mb-2 ml-1 text-[11px] text-jd-fg-1" data-testid="fly-keys">
+              {s.flyKeys.map((k, i) => (
+                <li key={i} className="flex items-center gap-1 py-0.5" data-testid={`fly-key-${i}`}>
+                  <span className="w-4 text-jd-fg-2">{i + 1}</span>
+                  <span className="flex-1 tabular-nums" data-testid={`fly-key-heading-${i}`}>
+                    {Math.round((((360 - (k.theta * 180) / Math.PI) % 360) + 360) % 360)}° · {Math.round(90 - (k.phi * 180) / Math.PI)}° up · {k.radius >= 1000 ? `${(k.radius / 1000).toFixed(1)} km` : `${Math.round(k.radius)} m`}
+                  </span>
+                  <button className="btn px-1 py-0" onClick={() => s.goToFlyKey(i)} title="Move the camera to this key" data-testid={`fly-go-${i}`}>
+                    Go
+                  </button>
+                  <button className="btn px-1 py-0 text-jd-error" onClick={() => s.removeFlyKey(i)} title="Remove this key" data-testid={`fly-remove-${i}`}>
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ol>
+          )}
           <Field label={`Clouds ${Math.round(s.sun.clouds * 100)} %`}>
             <input className="w-28" type="range" min={0} max={1} step={0.05} value={s.sun.clouds} onChange={(e) => s.setSun({ clouds: Number(e.target.value) })} title="Cloud cover on the sky dome and in the HDRI bake: a seeded cumulus-like noise layer, brighter on the sun side" data-testid="sky-clouds" />
           </Field>
           <Field label={`Fog ${Math.round(s.sun.fog * 100)} %`}>
             <input className="w-28" type="range" min={0} max={1} step={0.05} value={s.sun.fog} onChange={(e) => s.setSun({ fog: Number(e.target.value) })} title="Viewport fog: 0 keeps the faint aerial perspective, 1 closes the view within the world's width (a look setting — bakes and exports are untouched)" data-testid="sky-fog" />
+          </Field>
+          <Field label={`Rain ${Math.round(s.sun.rain * 100)} %`}>
+            <input className="w-28" type="range" min={0} max={1} step={0.05} value={s.sun.rain} onChange={(e) => s.setSun({ rain: Number(e.target.value) })} title="Rain falling in the viewport (look only); the rain itself is the jd.climate.rain node's field — wet surfaces come from a material on that layer" data-testid="sun-rain" />
           </Field>
           <h2 className="mt-4 mb-2 jd-section">Scatter</h2>
           <Field label="Mask">

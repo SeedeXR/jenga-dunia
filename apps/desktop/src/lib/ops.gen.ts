@@ -1372,6 +1372,9 @@ sun side and dimming the disc under cover; a shaded noise field, not a scatterin
   "cloud_scale_deg"?: number;
   /** Seed of the cloud field. */
   "cloud_seed"?: number;
+  /** Fog 0..1: a haze over the low sky — the horizon band fades toward a grey of the horizon's own
+brightness, strongest at the horizon and gone by ~30° up; below the horizon it is full. */
+  "fog"?: number;
   /** Width of the equirectangular map in pixels (even, 16..=8192); the height is half. */
   "width"?: number;
   /** Output `.exr`; relative paths resolve against the project's `exports/`. A `.png` preview is written beside it. */
@@ -1436,6 +1439,9 @@ sun side and dimming the disc under cover; a shaded noise field, not a scatterin
   "cloud_scale_deg"?: number;
   /** Seed of the cloud field. */
   "cloud_seed"?: number;
+  /** Fog 0..1: a haze over the low sky — the horizon band fades toward a grey of the horizon's own
+brightness, strongest at the horizon and gone by ~30° up; below the horizon it is full. */
+  "fog"?: number;
   /** Width of the equirectangular preview in pixels (even, 16..=2048); the height is half. */
   "width"?: number;
 };
@@ -1447,6 +1453,32 @@ export type SkyPreviewResult = {
   "height": number;
   /** Tonemapped sRGB PNG (equirectangular, row 0 = zenith, column 0 = north), standard base64. */
   "png_base64": string;
+};
+
+export type SplineCoordinates = "local_m" | "world" | "wgs84";
+
+export type TerrainExportContoursRequest = {
+  /** Output file (`.geojson`), relative to the project's exports/. */
+  "path": string;
+  /** Layer to contour. */
+  "layer"?: string;
+  /** Height between contour lines, metres (> 0). */
+  "interval_m": number;
+  /** Lines shorter than this are dropped, metres. */
+  "min_length_m"?: number;
+  /** Coordinate system of the numbers written (as for splines). */
+  "coordinates"?: SplineCoordinates;
+};
+
+export type TerrainExportContoursResult = {
+  /** The file written. */
+  "path": string;
+  /** Lines written. */
+  "lines": number;
+  /** Distinct levels. */
+  "levels": number;
+  /** Bytes written. */
+  "bytes": number;
 };
 
 export type HeightmapFormat = "exr" | "png16" | "raw_r16" | "raw_r32" | "tiff32" | "asc" | "xyz";
@@ -1599,8 +1631,6 @@ export type TerrainExportProfileResult = {
   /** What the engine's material model cannot take from the material stack (empty without `materials`). */
   "loss"?: string[];
 };
-
-export type SplineCoordinates = "local_m" | "world" | "wgs84";
 
 export type TerrainExportSplinesRequest = {
   /** Output file (`.geojson`), relative to the project's exports/. */
@@ -3014,6 +3044,8 @@ export interface JdOps {
   "sky.load_hdri": { request: SkyLoadHdriRequest; result: SkyLoadHdriResult };
   /** The physical sky (Preetham) as a small tonemapped equirectangular PNG for viewports — same model as `sky.bake`, no project needed */
   "sky.preview": { request: SkyPreviewRequest; result: SkyPreviewResult };
+  /** Write contour lines (iso-height LineStrings every `interval_m`, each with its `elevation_m`) of a layer as GeoJSON — marching squares joined into rings and lines; coordinates in layer metres, world CRS units or WGS 84 */
+  "terrain.export_contours": { request: TerrainExportContoursRequest; result: TerrainExportContoursResult };
   /** Write a layer as EXR (f32), PNG16, RAW r16 or r32 with a JSON sidecar */
   "terrain.export_heightmap": { request: TerrainExportHeightmapRequest; result: TerrainExportHeightmapResult };
   /** Write a layer as a grid mesh — .glb (normals, UVs, PBR material with baked base-colour texture), .fbx (binary 7.4 quads, Phong material with the baked texture embedded), .obj, binary .stl, binary .ply with vertex colours, .usda, or .usdz (needs usdzip) — metres, +Y up, centred on the world */

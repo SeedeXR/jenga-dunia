@@ -1210,6 +1210,15 @@ rivers 14   splines 2   coordinates local_m   (exports/rivers.geojson)
 
 `terrain.export_splines` writes a GeoJSON `FeatureCollection` of `LineString`s: every river reach traced from a 0..1 `rivers` mask (≥ `threshold`) down the height layer's D8 drainage — one line per reach from its headwater to the sea, a drain or the reach it joins (that junction is the line's last point), reaches under `min_length_m` dropped — plus every `jd.terrain.spline@1` node's polyline (`graph_splines`, default on) with its `mode` and `width_m` as properties. `coordinates` picks the numbers: `local_m` (layer metres, the default — what Blender and the engines want), `world` (the CRS units from the georeference origin) or `wgs84` (longitude / latitude through the world's CRS, standard GeoJSON for QGIS; needs a `crs`). The top-level `jd:coordinates` member says which. Blender: **File → Import → Jenga Dunia splines (.geojson)** builds one poly curve per line in a `JD splines` collection (layer metres, z = 0; the properties come along as custom properties). Unit test: a spring-fed river on a tilted plane traces to one monotone reach starting at the spring's cell centre; the Blender bridge test exports a placed spline and reads its three points back as a curve.
 
+### Contour lines
+
+```
+$ jd op terrain.export_contours --project Hills.jdproj --params '{"path":"contours.geojson","interval_m":25}'
+lines 214   levels 19   (exports/contours.geojson)
+```
+
+`terrain.export_contours` writes iso-height lines every `interval_m` as GeoJSON `LineString`s, each with its `elevation_m`: marching squares over the cell centres (saddles resolved by the cell's mean), the pieces of each level joined end to end — closed rings round summits and pits, open lines where a level leaves the world. `min_length_m` drops scraps; `coordinates` is `local_m`, `world` or `wgs84` as for splines, so QGIS can overlay them on a basemap. Unit test: a 300 m cone gives one closed ring per 50 m level at the right radius.
+
 ### Holes
 
 ```

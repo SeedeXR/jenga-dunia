@@ -33,6 +33,8 @@ export interface ViewportInfo {
   post?: string;
   /** The world is drawn as a framed block. */
   frame?: boolean;
+  /** Rain intensity shown, 0..1. */
+  rain?: number;
   /** Shoreline contour segments drawn at the sea level. */
   shoreSegments?: number;
   /** Compass heading the camera looks toward, degrees clockwise from north. */
@@ -81,6 +83,8 @@ interface Props {
   sun?: { azimuthDeg: number; elevationDeg: number };
   /** Fog 0..1: 0 keeps the faint aerial perspective, 1 closes the view within a world's width. */
   fog?: number;
+  /** Rain 0..1: streaks falling over the world (viewport only; the rain itself is the climate node's field). */
+  rain?: number;
   /** Baked albedo/normal/roughness maps for the shown layer; textured when set and no overlay is active. */
   maps?: LayerMaps | null;
   /** Scatter instances (layer metres: u east, v north from the south edge, z height, r 0..1) drawn as
@@ -469,6 +473,8 @@ interface SceneState {
   homeRadius: number;
   /** The framed block (walls + rim) and the shoreline contour, when drawn. */
   frameGroup: THREE.Group | null;
+  /** Falling rain: line segments recycled through a box over the world. */
+  rain: { lines: THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial>; top: number; bottom: number; amount: number } | null;
   shoreline: THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial> | null;
   /** Post-processing pipeline when any effect is on, and its one-line description for the header. */
   post: RenderPipeline | null;
@@ -498,6 +504,26 @@ export interface ViewportHandle {
   resetView: () => void;
 }
 
+/** Move the rain streaks down a step each frame, wrapping at the bottom of the box. */
+function animateRain(s: SceneState) {
+  const r = s.rain;
+  if (!r) return;
+  const pos = r.lines.geometry.attributes.position as THREE.BufferAttribute;
+  const fall = (r.top - r.bottom) * 0.012;
+  for (let i = 0; i < pos.count; i += 2) {
+    let y0 = pos.getY(i) - fall;
+    let y1 = pos.getY(i + 1) - fall;
+    if (y1 < r.bottom) {
+      const len = y0 - y1;
+      y0 = r.top;
+      y1 = r.top - len;
+    }
+    pos.setY(i, y0);
+    pos.setY(i + 1, y1);
+  }
+  pos.needsUpdate = true;
+}
+
 /** One report shape for every effect, so a later report never drops a field an earlier one set. */
 function infoOf(s: SceneState): ViewportInfo {
   return {
@@ -516,6 +542,7 @@ function infoOf(s: SceneState): ViewportInfo {
     ...(s.hdriOn ? { hdri: true } : {}),
     ...(s.postInfo ? { post: s.postInfo } : {}),
     ...(s.frameGroup ? { frame: true } : {}),
+    ...(s.rain ? { rain: s.rain.amount } : {}),
     ...(s.shoreline ? { shoreSegments: (s.shoreline.geometry.attributes.position?.count ?? 0) / 2 } : {}),
     ...(s.fogAmount > 0 ? { fog: s.fogAmount } : {}),
     ...(s.skirt ? { horizonPx: Math.round(Math.sqrt((s.skirt.geometry.attributes.position?.count ?? 0))) } : {}),
@@ -551,7 +578,7 @@ function sampleHeight(p: Preview, ext: [number, number], u: number, v: number): 
   return p.min + ((p.data[y * p.width + x] ?? 0) / 65535) * (p.max - p.min);
 }
 
-export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = null, seaLevelM = null, lakes = null, hdri = null, post = null, onHandle, frame = true, water = null, waves = null, sky = null, horizon = null, sun, overlay = null, overlayName = null, instances = null, maps = null, fog }: Props) {
+export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = null, seaLevelM = null, lakes = null, hdri = null, post = null, onHandle, frame = true, rain = 0, water = null, waves = null, sky = null, horizon = null, sun, overlay = null, overlayName = null, instances = null, maps = null, fog }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<SceneState | null>(null);
   // Latest sculpt props without re-creating the renderer effect.
@@ -643,6 +670,7 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = n
       hdriOn: false,
       homeRadius: 5200,
       frameGroup: null,
+      rain: null,
       shoreline: null,
       post: null,
       postInfo: null,
@@ -812,6 +840,7 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = n
       const loop = () => {
         if (!alive) return;
         animateSea(state, performance.now() / 1000);
+        animateRain(state);
         if (state.post) state.post.render();
         else renderer.render(scene, camera);
         state.frame = requestAnimationFrame(loop);
@@ -1161,6 +1190,40 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = n
     onInfo?.(infoOf(s));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seaLevelM, water?.visibilityM, water?.tint?.[0], water?.tint?.[1], water?.tint?.[2], water?.breakingDepthM, waves, extentM, preview, onInfo]);
+
+  // Rain: streaks falling through a box over the world, their number and opacity following the amount.
+  useEffect(() => {
+    const s = sceneRef.current;
+    if (!s) return;
+    if (s.rain) {
+      s.scene.remove(s.rain.lines);
+      s.rain.lines.geometry.dispose();
+      s.rain.lines.material.dispose();
+      s.rain = null;
+    }
+    if (rain > 0 && extentM && preview) {
+      const n = Math.round(400 + 3600 * rain);
+      const top = preview.max + (preview.max - preview.min) * 0.6 + 50;
+      const bottom = preview.min;
+      const len = (top - bottom) * 0.04;
+      const pos = new Float32Array(n * 6);
+      let seed = 7;
+      const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+      for (let i = 0; i < n; i++) {
+        const x = (rnd() - 0.5) * extentM[0];
+        const z = (rnd() - 0.5) * extentM[1];
+        const y = bottom + rnd() * (top - bottom);
+        pos.set([x, y, z, x + len * 0.08, y - len, z], i * 6);
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      const lines = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0xc8d6e8, transparent: true, opacity: 0.25 + 0.4 * rain, depthWrite: false }));
+      s.rain = { lines, top, bottom, amount: rain };
+      s.scene.add(lines);
+    }
+    onInfo?.(infoOf(s));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rain, preview, extentM, onInfo]);
 
   // Frame and shoreline: the world as a block with teal rim lines, and a white contour where the
   // terrain meets the sea — rebuilt with the preview (they follow its edge and its heights).

@@ -53,6 +53,12 @@
       "minimum": 0,
       "default": 0
     },
+    "fog": {
+      "description": "Fog 0..1: a haze over the low sky — the horizon band fades toward a grey of the horizon's own\nbrightness, strongest at the horizon and gone by ~30° up; below the horizon it is full.",
+      "type": "number",
+      "format": "float",
+      "default": 0.0
+    },
     "width": {
       "description": "Width of the equirectangular map in pixels (even, 16..=8192); the height is half.",
       "type": "integer",

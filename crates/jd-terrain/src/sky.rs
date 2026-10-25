@@ -45,6 +45,10 @@ pub struct SkyParams {
     /// Seed of the cloud field.
     #[serde(default)]
     pub cloud_seed: u64,
+    /// Fog 0..1: a haze over the low sky — the horizon band fades toward a grey of the horizon's own
+    /// brightness, strongest at the horizon and gone by ~30° up; below the horizon it is full.
+    #[serde(default)]
+    pub fog: f32,
 }
 
 fn d_azimuth() -> f32 {
@@ -77,6 +81,7 @@ impl Default for SkyParams {
             cloud_cover: 0.0,
             cloud_scale_deg: d_cloud_scale(),
             cloud_seed: 0,
+            fog: 0.0,
         }
     }
 }
@@ -155,6 +160,9 @@ impl Sky {
         if !(p.sun_radiance >= 0.0 && p.sun_radiance.is_finite()) || !p.sun_azimuth_deg.is_finite()
         {
             return Err(JdError::invalid("sun_radiance", "must be finite and ≥ 0"));
+        }
+        if !(0.0..=1.0).contains(&p.fog) {
+            return Err(JdError::invalid("fog", "must be within 0..=1"));
         }
         if !(0.0..=1.0).contains(&p.cloud_cover) {
             return Err(JdError::invalid("cloud_cover", "must be within 0..=1"));
@@ -329,6 +337,33 @@ impl Sky {
                 }
             }
         }
+        // Fog over everything: the horizon row's mean brightness as a neutral grey, blended in by
+        // fog × e^(−elevation / 10°) above the horizon and fully below it.
+        if self.params.fog > 0.0 {
+            let mid = height / 2;
+            let row = &px[(mid * width) as usize..((mid + 1) * width) as usize];
+            let mean = row
+                .iter()
+                .fold([0.0f32; 3], |a, p| [a[0] + p[0], a[1] + p[1], a[2] + p[2]])
+                .map(|v| v / width as f32);
+            let lum = 0.2126 * mean[0] + 0.7152 * mean[1] + 0.0722 * mean[2];
+            let grey = [lum * 0.97, lum, lum * 1.03];
+            for r in 0..height {
+                let elevation = 90.0 - (r as f32 + 0.5) / height as f32 * 180.0;
+                let w = self.params.fog
+                    * if elevation > 0.0 {
+                        (-elevation / 10.0).exp()
+                    } else {
+                        1.0
+                    };
+                for c in 0..width {
+                    let p = &mut px[(r * width + c) as usize];
+                    for k in 0..3 {
+                        p[k] += (grey[k] - p[k]) * w;
+                    }
+                }
+            }
+        }
         (width, height, px)
     }
 }
@@ -358,12 +393,10 @@ pub fn bake_sky_hdri(
             format!("EXR write failed: {e}"),
         )
     })?;
-    Ok((
-        w,
-        h,
-        sky.radiance([0.0, 1.0, 0.0]),
-        sky.radiance(direction(0.0, 0.5)),
-    ))
+    // Read from the finished image, so clouds and fog show in the reported colours: the zenith
+    // row, and the row just above the horizon at azimuth 0.
+    let horizon_row = (h / 2).saturating_sub(1);
+    Ok((w, h, px[0], px[(horizon_row * w) as usize]))
 }
 
 /// Tonemapped 8-bit preview of the equirectangular sky (Reinhard, sRGB) as PNG bytes.
@@ -526,6 +559,55 @@ pub fn load_hdri_preview(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fog_flattens_the_low_sky_and_leaves_the_zenith() {
+        let clear = Sky::new(&SkyParams {
+            sun_azimuth_deg: 140.0,
+            sun_elevation_deg: 10.0,
+            ..SkyParams::default()
+        })
+        .expect("sky");
+        let foggy = Sky::new(&SkyParams {
+            fog: 0.8,
+            sun_azimuth_deg: 140.0,
+            sun_elevation_deg: 10.0,
+            ..SkyParams::default()
+        })
+        .expect("sky");
+        let (w, h, a) = clear.equirect(128);
+        let (_, _, b) = foggy.equirect(128);
+        // Spread of brightness round the horizon (row just above it): the sun's glow makes it uneven; fog evens it.
+        let row = h / 2 - 1;
+        let spread = |px: &[[f32; 3]]| {
+            let l: Vec<f32> = (0..w)
+                .map(|c| {
+                    let p = px[(row * w + c) as usize];
+                    0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2]
+                })
+                .collect();
+            let m = l.iter().sum::<f32>() / l.len() as f32;
+            (l.iter().map(|v| (v - m).powi(2)).sum::<f32>() / l.len() as f32).sqrt() / m
+        };
+        assert!(
+            spread(&b) < 0.5 * spread(&a),
+            "fog evens the horizon: {} vs {}",
+            spread(&b),
+            spread(&a)
+        );
+        let zen = |px: &[[f32; 3]]| px[(w / 2) as usize][2];
+        assert!(
+            (zen(&b) - zen(&a)).abs() / zen(&a) < 0.02,
+            "the zenith is untouched"
+        );
+        assert!(
+            Sky::new(&SkyParams {
+                fog: 1.5,
+                ..SkyParams::default()
+            })
+            .is_err()
+        );
+    }
 
     #[test]
     fn a_baked_sky_read_back_as_an_hdri_points_at_its_own_sun() {

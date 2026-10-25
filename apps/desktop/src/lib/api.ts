@@ -121,7 +121,7 @@ export async function horizonPreview(scale = 3, px = 256): Promise<Preview | nul
 }
 
 /** The physical sky for the viewport dome: a tonemapped equirectangular PNG decoded to a bitmap. */
-export async function skyPreview(sun: { sun_azimuth_deg: number; sun_elevation_deg: number; turbidity: number; cloud_cover?: number }, width = 512): Promise<{ bitmap: ImageBitmap; px: [number, number] } | null> {
+export async function skyPreview(sun: { sun_azimuth_deg: number; sun_elevation_deg: number; turbidity: number; cloud_cover?: number; fog?: number }, width = 512): Promise<{ bitmap: ImageBitmap; px: [number, number] } | null> {
   // Three times the bake's default exposure: the dome is seen tonemapped, and a clear zenith near 0.5 reads grey.
   const r = await op<{ width: number; height: number; png_base64: string }>("sky.preview", { ...sun, exposure: 0.15, width });
   if (r.status !== "ok" || !r.result) return null;

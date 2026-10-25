@@ -225,6 +225,11 @@
     "scope": "none"
   },
   {
+    "id": "terrain.export_contours",
+    "description": "Write contour lines (iso-height LineStrings every `interval_m`, each with its `elevation_m`) of a layer as GeoJSON — marching squares joined into rings and lines; coordinates in layer metres, world CRS units or WGS 84",
+    "scope": "export"
+  },
+  {
     "id": "terrain.export_heightmap",
     "description": "Write a layer as EXR (f32), PNG16, RAW r16 or r32 with a JSON sidecar",
     "scope": "export"

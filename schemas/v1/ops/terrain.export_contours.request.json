@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TerrainExportContours",
+  "description": "Request of `terrain.export_contours`.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "Output file (`.geojson`), relative to the project's exports/.",
+      "type": "string"
+    },
+    "layer": {
+      "description": "Layer to contour.",
+      "type": "string",
+      "default": "height"
+    },
+    "interval_m": {
+      "description": "Height between contour lines, metres (> 0).",
+      "type": "number",
+      "format": "float"
+    },
+    "min_length_m": {
+      "description": "Lines shorter than this are dropped, metres.",
+      "type": "number",
+      "format": "float",
+      "default": 0.0
+    },
+    "coordinates": {
+      "description": "Coordinate system of the numbers written (as for splines).",
+      "$ref": "#/$defs/SplineCoordinates",
+      "default": "local_m"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "interval_m"
+  ],
+  "$defs": {
+    "SplineCoordinates": {
+      "description": "Which numbers a splines export writes.",
+      "oneOf": [
+        {
+          "description": "Layer metres: `u` east from the west edge, `v` north from the south edge (Blender, engines).",
+          "type": "string",
+          "const": "local_m"
+        },
+        {
+          "description": "The world's CRS units from its georeference origin (GIS with the same CRS).",
+          "type": "string",
+          "const": "world"
+        },
+        {
+          "description": "WGS 84 longitude / latitude through the world's CRS (standard GeoJSON; needs a CRS).",
+          "type": "string",
+          "const": "wgs84"
+        }
+      ]
+    }
+  }
+}

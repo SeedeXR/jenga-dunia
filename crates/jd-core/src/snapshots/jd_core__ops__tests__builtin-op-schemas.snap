@@ -9510,6 +9510,12 @@ expression: list
           "minimum": 0,
           "default": 0
         },
+        "fog": {
+          "description": "Fog 0..1: a haze over the low sky — the horizon band fades toward a grey of the horizon's own\nbrightness, strongest at the horizon and gone by ~30° up; below the horizon it is full.",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        },
         "width": {
           "description": "Width of the equirectangular map in pixels (even, 16..=8192); the height is half.",
           "type": "integer",
@@ -9720,6 +9726,12 @@ expression: list
           "minimum": 0,
           "default": 0
         },
+        "fog": {
+          "description": "Fog 0..1: a haze over the low sky — the horizon band fades toward a grey of the horizon's own\nbrightness, strongest at the horizon and gone by ~30° up; below the horizon it is full.",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        },
         "width": {
           "description": "Width of the equirectangular preview in pixels (even, 16..=2048); the height is half.",
           "type": "integer",
@@ -9757,6 +9769,107 @@ expression: list
         "width",
         "height",
         "png_base64"
+      ]
+    }
+  },
+  {
+    "id": "terrain.export_contours",
+    "description": "Write contour lines (iso-height LineStrings every `interval_m`, each with its `elevation_m`) of a layer as GeoJSON — marching squares joined into rings and lines; coordinates in layer metres, world CRS units or WGS 84",
+    "scope": "export",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TerrainExportContours",
+      "description": "Request of `terrain.export_contours`.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "Output file (`.geojson`), relative to the project's exports/.",
+          "type": "string"
+        },
+        "layer": {
+          "description": "Layer to contour.",
+          "type": "string",
+          "default": "height"
+        },
+        "interval_m": {
+          "description": "Height between contour lines, metres (> 0).",
+          "type": "number",
+          "format": "float"
+        },
+        "min_length_m": {
+          "description": "Lines shorter than this are dropped, metres.",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        },
+        "coordinates": {
+          "description": "Coordinate system of the numbers written (as for splines).",
+          "$ref": "#/$defs/SplineCoordinates",
+          "default": "local_m"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "interval_m"
+      ],
+      "$defs": {
+        "SplineCoordinates": {
+          "description": "Which numbers a splines export writes.",
+          "oneOf": [
+            {
+              "description": "Layer metres: `u` east from the west edge, `v` north from the south edge (Blender, engines).",
+              "type": "string",
+              "const": "local_m"
+            },
+            {
+              "description": "The world's CRS units from its georeference origin (GIS with the same CRS).",
+              "type": "string",
+              "const": "world"
+            },
+            {
+              "description": "WGS 84 longitude / latitude through the world's CRS (standard GeoJSON; needs a CRS).",
+              "type": "string",
+              "const": "wgs84"
+            }
+          ]
+        }
+      }
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ContoursReport",
+      "description": "Result of `terrain.export_contours`.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "The file written.",
+          "type": "string"
+        },
+        "lines": {
+          "description": "Lines written.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "levels": {
+          "description": "Distinct levels.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "bytes": {
+          "description": "Bytes written.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "path",
+        "lines",
+        "levels",
+        "bytes"
       ]
     }
   },
