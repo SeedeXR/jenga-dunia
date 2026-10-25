@@ -98,6 +98,99 @@ pub fn export_profile(
     export_profile_with(profile, height, masks, &[], dir, range_m, None)
 }
 
+/// [`export_profile_with`] cut into `tiles × tiles` blocks, one engine folder per block
+/// (`tile_<x>_<y>/`, x east, y north from the south-west corner) sharing one height range so
+/// the blocks line up, plus a `tiles.json` manifest with each block's origin and size in metres.
+/// Blocks are plain cuts (no overlap): engines that want 2ⁿ+1 samples per tile get a loss note.
+#[allow(clippy::too_many_arguments)]
+pub fn export_profile_tiled(
+    profile: EngineProfile,
+    height: &Heightfield,
+    masks: &[(String, &Heightfield)],
+    materials: &[ProfileMaterial<'_>],
+    dir: &Path,
+    range_m: Option<[f32; 2]>,
+    geo: Option<&crate::GeoRef>,
+    extent_m: [f64; 2],
+    tiles: u32,
+) -> JdResult<ProfileReport> {
+    if !(2..=16).contains(&tiles) {
+        return Err(JdError::invalid("tiles", "must be within 2..=16"));
+    }
+    let (w, h) = (height.width(), height.height());
+    if w % tiles != 0 || h % tiles != 0 {
+        return Err(JdError::invalid(
+            "tiles",
+            format!("{w}×{h} does not divide into {tiles}×{tiles} blocks"),
+        )
+        .next("Pick a tile count that divides the resolution, or a resolution that divides."));
+    }
+    let (tw, th) = (w / tiles, h / tiles);
+    let stats = height.stats();
+    let range = range_m.unwrap_or([stats.min, stats.max]);
+    std::fs::create_dir_all(dir)?;
+    let mut files = Vec::new();
+    let mut manifest = Vec::new();
+    let mut first: Option<ProfileReport> = None;
+    for ty in 0..tiles {
+        for tx in 0..tiles {
+            let name = format!("tile_{tx}_{ty}");
+            let sub = dir.join(&name);
+            let hf = height.crop(tx * tw, ty * th, tw, th)?;
+            let cut: Vec<(String, Heightfield)> = masks
+                .iter()
+                .map(|(n, m)| Ok((n.clone(), m.crop(tx * tw, ty * th, tw, th)?)))
+                .collect::<JdResult<_>>()?;
+            let refs: Vec<(String, &Heightfield)> =
+                cut.iter().map(|(n, m)| (n.clone(), m)).collect();
+            let mats: Vec<ProfileMaterial<'_>> = materials
+                .iter()
+                .map(|m| ProfileMaterial {
+                    name: m.name.clone(),
+                    mask: m
+                        .mask
+                        .and_then(|_| refs.iter().find(|(n, _)| *n == m.name).map(|(_, f)| *f)),
+                    albedo: m.albedo,
+                    roughness: m.roughness,
+                    emissive: m.emissive,
+                    detail: m.detail,
+                })
+                .collect();
+            let r = export_profile_with(profile, &hf, &refs, &mats, &sub, Some(range), geo)?;
+            for f in &r.files {
+                files.push(format!("{name}/{f}"));
+            }
+            manifest.push(serde_json::json!({
+                "tile": [tx, ty], "dir": name, "size_px": r.size_px,
+                "origin_m": [tx as f64 * extent_m[0] / tiles as f64, ty as f64 * extent_m[1] / tiles as f64],
+                "extent_m": [extent_m[0] / tiles as f64, extent_m[1] / tiles as f64],
+            }));
+            if first.is_none() {
+                first = Some(r);
+            }
+        }
+    }
+    let mut loss = vec!["tiles are plain cuts: neighbouring blocks share no edge row, so an engine that stitches tiles needs its seams welded (Unity: neighbour terrains; Unreal: World Partition's landscape streaming proxies)".to_owned()];
+    if profile == EngineProfile::Unity && !(tw - 1).is_power_of_two() {
+        loss.push(format!(
+            "Unity wants 2ⁿ+1 samples per terrain tile; these are {tw}×{th}"
+        ));
+    }
+    std::fs::write(
+        dir.join("tiles.json"),
+        serde_json::to_vec_pretty(
+            &serde_json::json!({ "engine": match profile { EngineProfile::Unity => "unity", EngineProfile::Unreal => "unreal" }, "tiles": tiles, "range_m": range, "blocks": manifest, "loss": loss }),
+        )?,
+    )?;
+    files.push("tiles.json".to_owned());
+    let mut report =
+        first.ok_or_else(|| JdError::new(jd_types::ErrorCode::E_INTERNAL, "no tiles written"))?;
+    report.dir = dir.to_path_buf();
+    report.files = files;
+    report.size_px = [w, h];
+    Ok(report)
+}
+
 /// [`export_profile`] with the material stack translated for the engine: every masked layer
 /// becomes a weightmap, `materials.json` carries the look per layer, and `loss` says what the
 /// engine's own material model cannot take from the stack (the translation layer's report).
@@ -356,6 +449,65 @@ fn readme(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tiled_export_cuts_the_world_into_blocks_that_share_one_range() {
+        let mut h = Heightfield::new(64, 64, 64, 0).expect("hf");
+        h.fill_with(|x, y| (x + y) as f32);
+        let dir = tempfile::tempdir().expect("tmp");
+        let r = export_profile_tiled(
+            EngineProfile::Unreal,
+            &h,
+            &[],
+            &[],
+            &dir.path().join("tiles"),
+            None,
+            None,
+            [6400.0, 6400.0],
+            2,
+        )
+        .expect("tiled");
+        assert_eq!(r.size_px, [64, 64]);
+        for name in ["tile_0_0", "tile_1_0", "tile_0_1", "tile_1_1"] {
+            assert!(
+                dir.path()
+                    .join("tiles")
+                    .join(name)
+                    .join("heightmap.png")
+                    .exists(),
+                "{name}"
+            );
+        }
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(dir.path().join("tiles/tiles.json")).expect("manifest"),
+        )
+        .expect("json");
+        assert_eq!(manifest["blocks"].as_array().expect("blocks").len(), 4);
+        assert_eq!(
+            manifest["blocks"][3]["origin_m"],
+            serde_json::json!([3200.0, 3200.0])
+        );
+        assert_eq!(
+            manifest["range_m"],
+            serde_json::json!([0.0, 126.0]),
+            "one range for every block"
+        );
+        assert!(
+            export_profile_tiled(
+                EngineProfile::Unity,
+                &h,
+                &[],
+                &[],
+                &dir.path().join("bad"),
+                None,
+                None,
+                [6400.0, 6400.0],
+                3
+            )
+            .is_err(),
+            "64 does not divide by 3"
+        );
+    }
 
     #[test]
     fn materials_translate_to_weightmaps_a_manifest_and_a_loss_list() {

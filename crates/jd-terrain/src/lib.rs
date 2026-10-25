@@ -81,7 +81,7 @@ pub use ocean::{
 };
 pub use profiles::{
     EngineProfile, ProfileMaterial, ProfileReport, ProfileSettings, export_profile,
-    export_profile_with,
+    export_profile_tiled, export_profile_with,
 };
 pub use rain::{RainParams, orographic_rain};
 pub use rocks::{RockParams, rock_mesh};

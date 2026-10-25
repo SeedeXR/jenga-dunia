@@ -144,6 +144,16 @@ impl Heightfield {
         })
     }
 
+    /// A `w × h` window starting at `(x0, y0)` as its own field (same tile size and halo).
+    pub fn crop(&self, x0: u32, y0: u32, w: u32, h: u32) -> JdResult<Self> {
+        if w == 0 || h == 0 || x0 + w > self.width() || y0 + h > self.height() {
+            return Err(JdError::invalid("crop", "window must lie inside the field"));
+        }
+        let mut out = Self::new(w, h, self.tile_size(), self.halo())?;
+        out.fill_with(|x, y| self.get(x0 + x, y0 + y));
+        Ok(out)
+    }
+
     /// A field sized from world settings.
     pub fn from_world(world: &WorldSettings) -> JdResult<Self> {
         Self::new(

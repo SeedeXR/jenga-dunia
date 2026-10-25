@@ -603,6 +603,16 @@ $ jd op terrain.scatter --project Road.jdproj --params '{"mask":"road","height":
 
 `terrain.rocks` writes seeded boulders as meshes: an icosphere (`detail` subdivisions → 20 · 4ⁿ facets) squashed by a seeded anisotropic factor, every vertex pushed along its normal by three octaves of seeded value noise scaled by `roughness`, the bottom `flatten` share cut flat so the rock rests on y = 0, and three vertices per facet so it shades flat. Seeds `seed`, `seed + 1`, … give `count` different rocks; the same seed is always the same rock. The scatter op takes the same settings under `rock`: with it, the instanced `.glb` carries a rock (normals included, a stone-grey material) instead of the 1 m cone proxy, so a mask of stony ground scatters real boulders. VUE's random rock generator (`docs/research/vue-features.md`). Not modelled: strata lines, smooth river cobbles, several rock variants in one instanced file.
 
+### Scatter your own model
+
+```
+$ jd op project.import_asset --project Hills.jdproj --save --params '{"path":"/models/pine.fbx"}'
+$ jd op terrain.scatter --project Hills.jdproj --params '{"mask":"mask_forest","spacing_m":12,"path":"pines.glb","model":"pine.fbx"}'
+count 3 412   (pines.glb: your mesh once, instanced with EXT_mesh_gpu_instancing)
+```
+
+`terrain.scatter {model}` instances a binary FBX mesh from the project's `assets/` (metres, +Y up — a tree, a boulder, a hut) instead of the cone proxy or the generated rock: the GLB carries your mesh once and every instance as a translation, rotation and scale, which Unity, Blender and glTF viewers read directly (Unreal's importer expands them to geometry; use the CSV / DataTable route there). The engine CSV / JSON routes are unchanged — they carry points, and the engine picks the asset. Unit test: a terrain exported as FBX reads back as an instanceable mesh with one unit normal per vertex. Not modelled: materials and textures of the model (geometry only), glTF or OBJ models (convert to FBX, or import through Blender).
+
 ### Horizon: the noise beyond the border
 
 ```
@@ -1182,6 +1192,15 @@ What this proves: the profile's heightmap reaches Unreal as 16-bit grayscale (`T
 The acceptance scenario runs this check when an Unreal engine is installed under `/Users/Shared/Epic Games` (and the Unity check when a Unity editor is found) and marks its item 13 from the reports; without them it stays PARTIAL.
 
 `terrain.export_profile` writes one folder an engine importer can take as-is: **Unreal** gets a 16-bit PNG heightmap with row 0 = north, one 8-bit grayscale weightmap per mask layer at the same resolution, and a README with the Landscape numbers computed from the data — Z scale = (max − min) × 100 / 512 (201.771 here for 52…1085 m) and the Z location that puts mid-grey at the mid height; **Unity** gets `heightmap.r16` (16-bit little-endian, row 0 = south, so *Flip Vertically: off*, Byte Order *Windows*), the weightmaps, and the Terrain Height (1033.07 m) plus the y offset (51.98 m). Sizes an engine does not like are reported as `W_ENGINE_SIZE` (Unity wants 2ⁿ+1 squares, Unreal 1009/2017/4033/8129 — use the world presets). The engine-side steps follow the Unity 6 manual and the Unreal 5 Landscape guide but are **UNVERIFIED** until someone imports once; the README says so.
+
+### Tiled engine export
+
+```
+$ jd op terrain.export_profile --project Big.jdproj --params '{"profile":"unreal","dir":"unreal-tiles","tiles":4,"masks":["snow"]}'
+exports/unreal-tiles/tile_0_0/ … tile_3_3/   (heightmap.png, weight_snow.png, README.md, materials.json each)   tiles.json
+```
+
+`tiles` cuts the world into `tiles × tiles` engine folders named `tile_<x>_<y>` (x east, y north from the south-west corner), every block encoded against **one** height range so they line up, and writes `tiles.json` with each block's origin and extent in metres — World Creator's tiled export for World Partition and streaming terrains. The resolution must divide by the tile count (2–16). Blocks are plain cuts with no shared edge row, so engines that stitch tiles weld the seams themselves (Unity neighbour terrains, Unreal landscape streaming proxies); Unity also wants 2ⁿ+1 samples per tile, which the manifest's `loss` notes when a cut does not give that. Unit test: a 64² field in 2 × 2 blocks writes four heightmaps, the fourth block's origin is half the extent, and a tile count that does not divide is refused.
 
 ### Bring in a real DEM or engine heightmap
 

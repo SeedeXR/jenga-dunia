@@ -3678,6 +3678,9 @@ pub mod terrain {
         /// Height range to encode (default: the layer's min/max).
         #[serde(default)]
         pub range_m: Option<[f32; 2]>,
+        /// Cut the export into `tiles × tiles` engine folders (`tile_<x>_<y>/`) sharing one height range, with a `tiles.json` manifest; the resolution must divide (2..=16).
+        #[serde(default)]
+        pub tiles: Option<u32>,
         /// The material stack to translate: masked layers become weightmaps, `materials.json` carries the look, and the report's `loss` lists what the engine cannot take.
         #[serde(default)]
         pub materials: Vec<MaterialSpec>,
@@ -3697,6 +3700,10 @@ pub mod terrain {
         /// back in the result instead (viewport preview; at most 200 000).
         #[serde(default)]
         pub path: Option<PathBuf>,
+        /// Instance your own model — a binary FBX mesh in the project's assets/ (metres, +Y up) — in `.glb`
+        /// output instead of the cone or the generated rock; wins over `rock` when both are given.
+        #[serde(default)]
+        pub model: Option<PathBuf>,
         /// Instance a generated rock (seeded from the scatter seed) instead of the 1 m cone proxy in `.glb` output.
         #[serde(default)]
         pub rock: Option<jd_terrain::RockParams>,
@@ -4677,7 +4684,11 @@ pub mod terrain {
                     let w = &proj.doc.world;
                     Ok(jd_terrain::GeoRef { origin: w.origin, spacing: w.spacing_m(), crs: w.crs.clone() })
                 })?;
-                let report = jd_terrain::export_profile_with(p.profile, &height, &refs, &stack, &dir, p.range_m, Some(&geo))?;
+                let extent = ctx.with_project(|proj| Ok(proj.doc.world.extent_m))?;
+                let report = match p.tiles {
+                    Some(n) => jd_terrain::export_profile_tiled(p.profile, &height, &refs, &stack, &dir, p.range_m, Some(&geo), extent, n)?,
+                    None => jd_terrain::export_profile_with(p.profile, &height, &refs, &stack, &dir, p.range_m, Some(&geo))?,
+                };
                 let warnings = report.notes.iter().map(|n| Warning::new("W_ENGINE_SIZE", n.clone())).collect();
                 ctx.with_project(|proj| crate::geo::write_attribution_txt(proj, &dir).map(|_| ()))?;
                 Ok((report, warnings))
@@ -4688,10 +4699,12 @@ pub mod terrain {
             "Scatter instance points over the world from a 0..1 density mask layer (stratified jittered grid, deterministic by seed): write CSV / JSON / GLB instances to `path`, or return the points when `path` is omitted",
             Scope::Export,
             |ctx, p| {
-                let (path, extent, avoid_csv) = ctx.with_project(|proj| {
+                let (path, extent, avoid_csv, model) = ctx.with_project(|proj| {
                     let under = |f: &PathBuf| if f.is_absolute() { f.clone() } else { proj.root().join("exports").join(f) };
-                    Ok((p.path.as_ref().map(under), proj.doc.world.extent_m, p.avoid.as_ref().map(|a| under(&a.csv))))
+                    let asset = |f: &PathBuf| if f.is_absolute() { f.clone() } else { proj.root().join("assets").join(f) };
+                    Ok((p.path.as_ref().map(under), proj.doc.world.extent_m, p.avoid.as_ref().map(|a| under(&a.csv)), p.model.as_ref().map(asset)))
                 })?;
+                let model = model.map(|f| jd_terrain::fbx::read_fbx_mesh(&f).and_then(|m| m.to_grid_mesh())).transpose()?;
                 // Two layers: clone the mask out first (the layer lock is not re-entrant).
                 let mask = ctx.with_layer(&p.mask, |hf| Ok(hf.clone()))?;
                 let mut scatter = p.scatter.clone();
@@ -4713,7 +4726,7 @@ pub mod terrain {
                     Some(f) if let Some(engine) = p.engine => (jd_terrain::write_points_engine(f, &points, extent, engine)?, None),
                     Some(f) => {
                         let rock = p.rock.as_ref().map(|r| jd_terrain::rock_mesh(&jd_terrain::RockParams { seed: r.seed ^ p.scatter.seed, ..r.clone() })).transpose()?;
-                        (jd_terrain::write_points_with(f, &points, extent, rock.as_ref())?, None)
+                        (jd_terrain::write_points_with(f, &points, extent, model.as_ref().or(rock.as_ref()))?, None)
                     }
                     None if count > 200_000 => {
                         return Err(JdError::invalid("spacing_m", format!("{count} points is too many to return inline (max 200 000)"))

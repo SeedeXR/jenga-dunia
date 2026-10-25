@@ -1482,6 +1482,8 @@ export type TerrainExportProfileRequest = {
   "masks"?: string[];
   /** Height range to encode (default: the layer's min/max). */
   "range_m"?: [number, number] | null;
+  /** Cut the export into `tiles × tiles` engine folders (`tile_<x>_<y>/`) sharing one height range, with a `tiles.json` manifest; the resolution must divide (2..=16). */
+  "tiles"?: number | null;
   /** The material stack to translate: masked layers become weightmaps, `materials.json` carries the look, and the report's `loss` lists what the engine cannot take. */
   "materials"?: MaterialSpec[];
 };
@@ -1729,6 +1731,9 @@ export type TerrainScatterRequest = {
 relative paths resolve against the project's `exports/`. Omit it to get the points
 back in the result instead (viewport preview; at most 200 000). */
   "path"?: string | null;
+  /** Instance your own model — a binary FBX mesh in the project's assets/ (metres, +Y up) — in `.glb`
+output instead of the cone or the generated rock; wins over `rock` when both are given. */
+  "model"?: string | null;
   /** Instance a generated rock (seeded from the scatter seed) instead of the 1 m cone proxy in `.glb` output. */
   "rock"?: RockParams | null;
   /** Keep clear of an earlier scatter: no point within `radius_m` of any instance in that CSV (ecosystem layers that exclude each other). */

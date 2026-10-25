@@ -9691,6 +9691,16 @@ expression: list
           "maxItems": 2,
           "default": null
         },
+        "tiles": {
+          "description": "Cut the export into `tiles × tiles` engine folders (`tile_<x>_<y>/`) sharing one height range, with a `tiles.json` manifest; the resolution must divide (2..=16).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "default": null
+        },
         "materials": {
           "description": "The material stack to translate: masked layers become weightmaps, `materials.json` carries the look, and the report's `loss` lists what the engine cannot take.",
           "type": "array",
@@ -10659,6 +10669,14 @@ expression: list
         },
         "path": {
           "description": "Output `.csv`, `.json` or `.glb` (proxy mesh instanced with `EXT_mesh_gpu_instancing`);\nrelative paths resolve against the project's `exports/`. Omit it to get the points\nback in the result instead (viewport preview; at most 200 000).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "model": {
+          "description": "Instance your own model — a binary FBX mesh in the project's assets/ (metres, +Y up) — in `.glb`\noutput instead of the cone or the generated rock; wins over `rock` when both are given.",
           "type": [
             "string",
             "null"

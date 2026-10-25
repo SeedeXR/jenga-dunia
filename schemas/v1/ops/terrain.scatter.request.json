@@ -24,6 +24,14 @@
       ],
       "default": null
     },
+    "model": {
+      "description": "Instance your own model — a binary FBX mesh in the project's assets/ (metres, +Y up) — in `.glb`\noutput instead of the cone or the generated rock; wins over `rock` when both are given.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": null
+    },
     "rock": {
       "description": "Instance a generated rock (seeded from the scatter seed) instead of the 1 m cone proxy in `.glb` output.",
       "anyOf": [

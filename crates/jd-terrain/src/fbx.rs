@@ -580,6 +580,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_read_fbx_becomes_an_instanceable_mesh_with_unit_normals() {
+        let mut h = crate::Heightfield::new(8, 8, 8, 0).expect("hf");
+        h.fill_with(|x, y| (x * y) as f32 * 0.1);
+        let dir = tempfile::tempdir().expect("tmp");
+        let path = dir.path().join("rock.fbx");
+        export_fbx(&h, [8.0, 8.0], &path, 1, false).expect("fbx");
+        let m = read_fbx_mesh(&path).expect("read");
+        let g = m.to_grid_mesh().expect("mesh");
+        assert_eq!(g.positions.len(), m.positions.len() * 3);
+        assert_eq!(g.indices.len(), m.triangles.len() * 3);
+        for nrm in g.normals.chunks(3) {
+            let len = (nrm[0] * nrm[0] + nrm[1] * nrm[1] + nrm[2] * nrm[2]).sqrt();
+            assert!((len - 1.0).abs() < 1e-4, "unit normal, got {len}");
+        }
+        assert!(
+            FbxMesh {
+                positions: vec![],
+                triangles: vec![]
+            }
+            .to_grid_mesh()
+            .is_err()
+        );
+    }
+
+    #[test]
     fn fuzzer_found_polygon_index_i32_min_is_a_structured_error() {
         // libFuzzer mutated the 5×5 fixture into a polygon index of i32::MIN, which overflowed
         // the `-i - 1` decode (2026-10-21); the file is kept as a regression input.
@@ -1007,6 +1032,81 @@ pub struct FbxMesh {
     pub positions: Vec<[f64; 3]>,
     /// Triangle indices.
     pub triangles: Vec<[u32; 3]>,
+}
+
+impl FbxMesh {
+    /// The mesh as an instanceable [`crate::mesh::GridMesh`] (positions and triangles as read,
+    /// averaged vertex normals, no UVs): what `terrain.scatter {model}` instances in a GLB.
+    pub fn to_grid_mesh(&self) -> JdResult<crate::mesh::GridMesh> {
+        if self.positions.is_empty() || self.triangles.is_empty() {
+            return Err(jd_types::JdError::invalid(
+                "model",
+                "the mesh has no triangles",
+            ));
+        }
+        let n = self.positions.len();
+        let mut normals = vec![0.0f32; n * 3];
+        for t in &self.triangles {
+            let [a, b, c] = *t;
+            if (a as usize).max(b as usize).max(c as usize) >= n {
+                return Err(jd_types::JdError::invalid(
+                    "model",
+                    "a triangle indexes past the vertices",
+                ));
+            }
+            let (pa, pb, pc) = (
+                self.positions[a as usize],
+                self.positions[b as usize],
+                self.positions[c as usize],
+            );
+            let (u, v) = (
+                [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]],
+                [pc[0] - pa[0], pc[1] - pa[1], pc[2] - pa[2]],
+            );
+            let nrm = [
+                u[1] * v[2] - u[2] * v[1],
+                u[2] * v[0] - u[0] * v[2],
+                u[0] * v[1] - u[1] * v[0],
+            ];
+            for i in [a, b, c] {
+                for k in 0..3 {
+                    normals[i as usize * 3 + k] += nrm[k] as f32;
+                }
+            }
+        }
+        for v in normals.chunks_mut(3) {
+            let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+            if len > 0.0 {
+                for c in v.iter_mut() {
+                    *c /= len;
+                }
+            } else {
+                v[1] = 1.0;
+            }
+        }
+        let (lo, hi) = self
+            .positions
+            .iter()
+            .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), p| {
+                (lo.min(p[1] as f32), hi.max(p[1] as f32))
+            });
+        Ok(crate::mesh::GridMesh {
+            positions: self
+                .positions
+                .iter()
+                .flat_map(|p| p.iter().map(|c| *c as f32))
+                .collect(),
+            normals,
+            uvs: vec![0.0; n * 2],
+            indices: self
+                .triangles
+                .iter()
+                .flat_map(|t| t.iter().copied())
+                .collect(),
+            grid: [0, 0],
+            height_range: [lo, hi],
+        })
+    }
 }
 
 /// Rotation (degrees, XYZ order), scale and translation applied to a point.

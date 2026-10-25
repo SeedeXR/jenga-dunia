@@ -1,8 +1,16 @@
 > Audit run 2026-10-24 by a research agent against the repo at commit c38c8ed and the live World
 > Creator docs. **Since then:** Debris and lava (gap 10) shipped as `jd.erosion.debris@1` and
 > `jd.volcanic.lava@1` (9bab3e2, `simulation-debris-lava.md`); a landform-class mask
-> (`jd.analysis.geomorphon@1`) and `terrain.measure` shipped with the reference-image work. The rest
-> of the ranked gaps stand.
+> (`jd.analysis.geomorphon@1`) and `terrain.measure` shipped with the reference-image work.
+> **2026-10-25:** gap 3 partly closed (`jd.math.min/max/lerp@1` blend nodes with opacity,
+> `jd.analysis.aspect@1` sun-direction mask, `jd.analysis.occlusion@1`), gap 4 closed for stamps
+> and primitives (`jd.shape.stamp@1`, `jd.shape.primitive@1` with crater, plateau, ramp, cone,
+> dome), gap 5 partly (domain warp on `jd.noise.fbm@1`, `jd.filter.edge_fade@1` = zero edge /
+> border blend), gap 12 partly (per-node presets, a layer stack in the desktop), gap 13's cheap
+> part (an emissive channel in materials). Still open: image-based materials (gap 1), own models
+> in scatter (gap 2), pattern masks and curve/smoothstep effects (3), polygon layers (4), crater /
+> inflate / denoise filters (5), tiled export and the Godot / Houdini bridges (6), map export
+> formats (7), holes (8), river editing (9), multiple water bodies (11).
 
 # Jenga Dunia vs World Creator: feature parity audit (2026-10-24)
 

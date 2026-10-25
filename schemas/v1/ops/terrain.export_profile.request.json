@@ -39,6 +39,16 @@
       "maxItems": 2,
       "default": null
     },
+    "tiles": {
+      "description": "Cut the export into `tiles × tiles` engine folders (`tile_<x>_<y>/`) sharing one height range, with a `tiles.json` manifest; the resolution must divide (2..=16).",
+      "type": [
+        "integer",
+        "null"
+      ],
+      "format": "uint32",
+      "minimum": 0,
+      "default": null
+    },
     "materials": {
       "description": "The material stack to translate: masked layers become weightmaps, `materials.json` carries the look, and the report's `loss` lists what the engine cannot take.",
       "type": "array",
