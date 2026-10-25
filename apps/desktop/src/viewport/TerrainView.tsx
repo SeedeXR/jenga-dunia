@@ -3,8 +3,9 @@ import type { OceanWavesResult, WaveComponent } from "../lib/ops.gen";
 // The mesh is a regular grid displaced on the CPU from the u16 preview; colours follow height.
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import { MeshStandardNodeMaterial, WebGPURenderer, type Node } from "three/webgpu";
-import { float, mix, normalMap, texture, uv, vec2 } from "three/tsl";
+import { MeshStandardNodeMaterial, RenderPipeline, WebGPURenderer, type Node } from "three/webgpu";
+import { float, length, mix, normalMap, pass, smoothstep, texture, uv, vec2 } from "three/tsl";
+import { bloom } from "three/addons/tsl/display/BloomNode.js";
 import type { LayerMaps, Preview } from "../lib/api";
 
 export interface ViewportInfo {
@@ -28,6 +29,8 @@ export interface ViewportInfo {
   skyPx?: [number, number];
   /** The dome shows an imported HDRI. */
   hdri?: boolean;
+  /** Post effects in force, e.g. `bloom 0.3 · vignette 0.2 · exposure 1.2`. */
+  post?: string;
   /** Horizon skirt resolution per side, when one is drawn. */
   horizonPx?: number;
 }
@@ -58,6 +61,10 @@ interface Props {
   sky?: { bitmap: ImageBitmap; px: [number, number] } | null;
   /** An imported HDRI (`sky.load_hdri`, same layout): drawn instead of the physical sky while set. */
   hdri?: { bitmap: ImageBitmap; px: [number, number] } | null;
+  /** Post effects: tone-mapping exposure (1 = none), bloom strength (0 = off), vignette amount (0 = off). */
+  post?: { exposure: number; bloom: number; vignette: number } | null;
+  /** Hands the parent a handle for stills and flythroughs: a PNG of the current frame, and the orbit camera. */
+  onHandle?: (h: ViewportHandle | null) => void;
   /** The noise continued `scale` × beyond the border: a coarse skirt drawn under the terrain with a hole for the world. */
   horizon?: { preview: Preview; scale: number } | null;
   /** Sun direction: azimuth clockwise from north (0 = light from the north), elevation above the horizon. */
@@ -380,12 +387,30 @@ interface SceneState {
   skirt: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | null;
   /** An imported HDRI is on the dome. */
   hdriOn: boolean;
+  /** Post-processing pipeline when any effect is on, and its one-line description for the header. */
+  post: RenderPipeline | null;
+  postInfo: string | null;
 }
 
 function placeCamera(s: SceneState) {
   const { theta, phi, radius } = s.orbit;
   s.camera.position.set(radius * Math.sin(phi) * Math.sin(theta), radius * Math.cos(phi), radius * Math.sin(phi) * Math.cos(theta));
   s.camera.lookAt(0, 0, 0);
+}
+
+/** The orbit camera as the viewport keeps it. */
+export interface Orbit {
+  theta: number;
+  phi: number;
+  radius: number;
+}
+
+/** What the viewport lends its parent for captures: render-and-grab, and the camera. */
+export interface ViewportHandle {
+  /** Render one frame and return it as a PNG blob (null if the canvas refuses). */
+  snapshot: () => Promise<Blob | null>;
+  getOrbit: () => Orbit;
+  setOrbit: (o: Orbit) => void;
 }
 
 /** One report shape for every effect, so a later report never drops a field an earlier one set. */
@@ -401,6 +426,7 @@ function infoOf(s: SceneState): ViewportInfo {
     ...(s.pbrPx ? { pbrPx: s.pbrPx } : {}),
     ...(s.skyPx ? { skyPx: s.skyPx } : {}),
     ...(s.hdriOn ? { hdri: true } : {}),
+    ...(s.postInfo ? { post: s.postInfo } : {}),
     ...(s.fogAmount > 0 ? { fog: s.fogAmount } : {}),
     ...(s.skirt ? { horizonPx: Math.round(Math.sqrt((s.skirt.geometry.attributes.position?.count ?? 0))) } : {}),
   };
@@ -435,7 +461,7 @@ function sampleHeight(p: Preview, ext: [number, number], u: number, v: number): 
   return p.min + ((p.data[y * p.width + x] ?? 0) / 65535) * (p.max - p.min);
 }
 
-export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = null, seaLevelM = null, lakes = null, hdri = null, water = null, waves = null, sky = null, horizon = null, sun, overlay = null, overlayName = null, instances = null, maps = null, fog }: Props) {
+export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = null, seaLevelM = null, lakes = null, hdri = null, post = null, onHandle, water = null, waves = null, sky = null, horizon = null, sun, overlay = null, overlayName = null, instances = null, maps = null, fog }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<SceneState | null>(null);
   // Latest sculpt props without re-creating the renderer effect.
@@ -525,6 +551,8 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = n
       fogAmount: 0,
       skirt: null,
       hdriOn: false,
+      post: null,
+      postInfo: null,
     };
     sceneRef.current = state;
     placeCamera(state);
@@ -684,7 +712,8 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = n
       const loop = () => {
         if (!alive) return;
         animateSea(state, performance.now() / 1000);
-        renderer.render(scene, camera);
+        if (state.post) state.post.render();
+        else renderer.render(scene, camera);
         state.frame = requestAnimationFrame(loop);
       };
       loop();
@@ -850,6 +879,60 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = n
     s.gridSel.renderOrder = 6;
     s.scene.add(s.gridSel);
   }, [grid, preview, extentM]);
+
+  // Post effects: ACES tone mapping with an exposure, bloom and a vignette, as one TSL pipeline
+  // that replaces the plain render while any effect is on (off = the renderer's own output).
+  useEffect(() => {
+    const s = sceneRef.current;
+    if (!s) return;
+    const on = post && (post.exposure !== 1 || post.bloom > 0 || post.vignette > 0);
+    s.post?.dispose();
+    s.post = null;
+    s.postInfo = null;
+    s.renderer.toneMapping = on ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
+    s.renderer.toneMappingExposure = on ? post!.exposure : 1;
+    if (on) {
+      const pp = new RenderPipeline(s.renderer);
+      const scenePass = pass(s.scene, s.camera);
+      const base = scenePass.getTextureNode();
+      const lit = post!.bloom > 0 ? base.add(bloom(base, post!.bloom, 0.4, 0.85)) : base;
+      const d = length(uv().sub(vec2(0.5, 0.5)));
+      const graded = post!.vignette > 0 ? lit.mul(float(1).sub(smoothstep(float(0.35), float(0.9), d).mul(float(post!.vignette)))) : lit;
+      pp.outputNode = graded;
+      s.post = pp;
+      const parts = [];
+      if (post!.bloom > 0) parts.push(`bloom ${post!.bloom}`);
+      if (post!.vignette > 0) parts.push(`vignette ${post!.vignette}`);
+      if (post!.exposure !== 1) parts.push(`exposure ${post!.exposure}`);
+      s.postInfo = parts.join(" · ");
+    }
+    onInfo?.(infoOf(s));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [post?.exposure, post?.bloom, post?.vignette, onInfo]);
+
+  // Capture handle: one explicit render then the canvas as a PNG, and the orbit camera for flythroughs.
+  useEffect(() => {
+    const s = sceneRef.current;
+    if (!s || !onHandle) return;
+    onHandle({
+      snapshot: async () => {
+        // The renderer is initialised by the time the handle exists (the loop runs): a synchronous
+        // render, then the canvas is read in the same task, before WebGPU presents and clears it.
+        if (s.post) s.post.render();
+        else s.renderer.render(s.scene, s.camera);
+        return new Promise<Blob | null>((res) => s.renderer.domElement.toBlob(res, "image/png"));
+      },
+      getOrbit: () => ({ ...s.orbit }),
+      setOrbit: (o) => {
+        s.orbit.theta = o.theta;
+        s.orbit.phi = Math.min(Math.max(o.phi, 0.05), Math.PI / 2 - 0.02);
+        s.orbit.radius = Math.min(Math.max(o.radius, s.orbit.minR), s.orbit.maxR);
+        placeCamera(s);
+      },
+    });
+    return () => onHandle(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onHandle]);
 
   // Fog: the slider pulls the fog planes in from the faint aerial-perspective default.
   useEffect(() => {

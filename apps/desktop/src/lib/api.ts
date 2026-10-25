@@ -137,6 +137,15 @@ export async function hdriPreview(path: string, width = 512): Promise<{ bitmap: 
   return { bitmap, px: [r.result.width, r.result.height], sun: { azimuth_deg: r.result.sun_azimuth_deg, elevation_deg: r.result.sun_elevation_deg }, luminance: r.result.mean_luminance };
 }
 
+/** Write a blob under the project's exports/ (`project.write_export`); returns the absolute path or null. */
+export async function writeExport(path: string, blob: Blob): Promise<string | null> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  const r = await op<{ path: string; bytes: number }>("project.write_export", { path, bytes_base64: btoa(bin) });
+  return r.status === "ok" && r.result ? r.result.path : null;
+}
+
 export async function layerTextures(layer: string, maxPx = 1024, materials: MaterialSpec[] = []): Promise<{ maps: LayerMaps; ms: number } | null> {
   const t0 = performance.now();
   const r = await op<JdOps["terrain.textures"]["result"]>("terrain.textures", { materials, layer, max_px: maxPx });

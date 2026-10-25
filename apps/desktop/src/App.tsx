@@ -128,7 +128,8 @@ export default function App() {
   const [tiles, setTiles] = useState(1); // 1 = one folder; 2..16 = tiles × tiles folders with tiles.json
   const [scatterModel, setScatterModel] = useState(""); // an FBX in assets/ to instance; empty = the proxy
   const [holesLayer, setHolesLayer] = useState("");
-  const [hdriPath, setHdriPath] = useState("sky.exr"); // an EXR in assets/ (or an absolute path) for the dome // a 0..1 layer whose cells ≥ 0.5 are holes in the exports; "" = none
+  const [hdriPath, setHdriPath] = useState("sky.exr");
+  const [flyFrames, setFlyFrames] = useState(48); // an EXR in assets/ (or an absolute path) for the dome // a 0..1 layer whose cells ≥ 0.5 are holes in the exports; "" = none
   const [skyPath, setSkyPath] = useState("sky.exr");
   const [vp, setVp] = useState<ViewportInfo>({ backend: "none", triangles: 0 });
   const [showGraph, setShowGraph] = useState(true);
@@ -310,7 +311,7 @@ export default function App() {
           </label>
         )}
         <span className={`${s.lastEval && Object.keys(s.lastEval.layers).length > 1 ? "" : "ml-auto "}text-xs text-jd-fg-2`} data-testid="viewport-info">
-          viewport: {vp.backend} · {vp.triangles.toLocaleString()} tris{vp.seaM !== undefined ? ` · sea ${vp.seaM} m` : ""}{vp.waves ? ` · waves ${vp.waves.heightM.toFixed(1)} m / ${Math.round(vp.waves.lengthM)} m` : ""}{vp.fog ? ` · fog ${Math.round(vp.fog * 100)} %` : ""}{vp.sun ? ` · sun ${vp.sun.elevationDeg}°/${vp.sun.azimuthDeg}°` : ""}{s.colorLayer && s.colorPreview ? ` · colour ${s.colorLayer}` : ""}{vp.instances ? ` · ${vp.instances.toLocaleString()} instances` : ""}{vp.lakes ? ` · lakes ${vp.lakes.toLocaleString()} cells` : ""}{vp.pbrPx ? ` · pbr ${vp.pbrPx[0]}×${vp.pbrPx[1]}` : ""}{vp.skyPx ? ` · sky ${vp.skyPx[0]}×${vp.skyPx[1]}` : ""}{vp.hdri ? " · hdri" : ""}{vp.horizonPx ? ` · horizon ${vp.horizonPx}²` : ""}
+          viewport: {vp.backend} · {vp.triangles.toLocaleString()} tris{vp.seaM !== undefined ? ` · sea ${vp.seaM} m` : ""}{vp.waves ? ` · waves ${vp.waves.heightM.toFixed(1)} m / ${Math.round(vp.waves.lengthM)} m` : ""}{vp.fog ? ` · fog ${Math.round(vp.fog * 100)} %` : ""}{vp.sun ? ` · sun ${vp.sun.elevationDeg}°/${vp.sun.azimuthDeg}°` : ""}{s.colorLayer && s.colorPreview ? ` · colour ${s.colorLayer}` : ""}{vp.instances ? ` · ${vp.instances.toLocaleString()} instances` : ""}{vp.lakes ? ` · lakes ${vp.lakes.toLocaleString()} cells` : ""}{vp.pbrPx ? ` · pbr ${vp.pbrPx[0]}×${vp.pbrPx[1]}` : ""}{vp.skyPx ? ` · sky ${vp.skyPx[0]}×${vp.skyPx[1]}` : ""}{vp.hdri ? " · hdri" : ""}{vp.post ? ` · post ${vp.post}` : ""}{vp.horizonPx ? ` · horizon ${vp.horizonPx}²` : ""}
           {s.previewStats ? ` · preview lod ${s.previewStats.lod}, ${(s.previewStats.bytes / 1048576).toFixed(2)} MB in ${s.previewStats.ms.toFixed(0)} ms` : ""}
         </span>
         {(s.busy || s.jobs.length > 0) &&
@@ -576,7 +577,7 @@ export default function App() {
         {/* Center: viewport (top) + node graph (bottom, toggle) */}
         <main className={`relative grid min-w-0 overflow-hidden bg-jd-bg-0 ${showGraph ? (dock.graph === "right" ? "grid-cols-[1fr_auto]" : "grid-rows-[1fr_auto]") : "grid-rows-[1fr]"}`}>
           <div className="relative min-h-0 min-w-0">
-            <TerrainView fog={s.sun.fog} preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} sculpt={{ enabled: s.sculpting && (sculptNode !== undefined || s.drawing !== null), radiusM: s.drawing === "road" ? s.roadWidthM / 2 : s.brush.radius_m, onStroke: (pts) => void s.addStroke(pts), onAdjust: s.adjustBrush }} grid={s.grid.on ? { cells: s.grid.cells, selected: s.grid.selected, onSelect: s.gridSelect } : null} seaLevelM={seaLevelM} lakes={s.lakesPreview} water={water} waves={s.waves} sky={s.sky} hdri={s.hdri} horizon={s.horizon} sun={{ azimuthDeg: s.sun.azimuth_deg, elevationDeg: s.sun.elevation_deg }} overlay={s.colorPreview} overlayName={s.colorLayer} instances={s.scatter.points ? { points: s.scatter.points, sizeM: Math.max(s.scatter.spacing_m * 0.35, (s.project?.world.extent_m[0] ?? 0) * 0.012), shape: /debris|rock|boulder|scree|talus/i.test(s.scatter.mask ?? "") ? "rock" : "cone" } : null} maps={s.maps} />
+            <TerrainView fog={s.sun.fog} preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} sculpt={{ enabled: s.sculpting && (sculptNode !== undefined || s.drawing !== null), radiusM: s.drawing === "road" ? s.roadWidthM / 2 : s.brush.radius_m, onStroke: (pts) => void s.addStroke(pts), onAdjust: s.adjustBrush }} grid={s.grid.on ? { cells: s.grid.cells, selected: s.grid.selected, onSelect: s.gridSelect } : null} seaLevelM={seaLevelM} lakes={s.lakesPreview} water={water} waves={s.waves} sky={s.sky} hdri={s.hdri} post={s.post} onHandle={s.setViewportHandle} horizon={s.horizon} sun={{ azimuthDeg: s.sun.azimuth_deg, elevationDeg: s.sun.elevation_deg }} overlay={s.colorPreview} overlayName={s.colorLayer} instances={s.scatter.points ? { points: s.scatter.points, sizeM: Math.max(s.scatter.spacing_m * 0.35, (s.project?.world.extent_m[0] ?? 0) * 0.012), shape: /debris|rock|boulder|scree|talus/i.test(s.scatter.mask ?? "") ? "rock" : "cone" } : null} maps={s.maps} />
             <button
               className={`btn absolute top-2 right-28 ${s.sculpting ? "text-jd-accent" : ""}`}
               title={s.sculpting ? "Sculpting: drag on the terrain to paint a stroke (click to stop)" : "Sculpt: adds a stroke node before the output and paints with the brush"}
@@ -759,6 +760,33 @@ export default function App() {
               </button>
               <button className="btn px-1.5" disabled={!s.hdri} onClick={() => s.clearHdri()} title="Back to the physical sky" data-testid="hdri-clear">
                 ×
+              </button>
+            </span>
+          </Field>
+          <Field label={`Exposure ${s.post.exposure}`}>
+            <input className="w-28" type="range" min={0.25} max={4} step={0.05} value={s.post.exposure} onChange={(e) => s.setPost({ exposure: Number(e.target.value) })} title="Tone-mapping exposure (ACES while any effect is on); 1 = the plain render" data-testid="post-exposure" />
+          </Field>
+          <Field label={`Bloom ${s.post.bloom}`}>
+            <input className="w-28" type="range" min={0} max={1} step={0.05} value={s.post.bloom} onChange={(e) => s.setPost({ bloom: Number(e.target.value) })} title="Bloom strength on the bright parts (sun glints, lava glow); 0 = off" data-testid="post-bloom" />
+          </Field>
+          <Field label={`Vignette ${s.post.vignette}`}>
+            <input className="w-28" type="range" min={0} max={1} step={0.05} value={s.post.vignette} onChange={(e) => s.setPost({ vignette: Number(e.target.value) })} title="Darken the frame's corners; 0 = off" data-testid="post-vignette" />
+          </Field>
+          <Field label="Camera">
+            <span className="flex flex-wrap gap-1">
+              <button className="btn px-1.5" disabled={!s.viewport} onClick={() => s.addFlyKey()} title="Add the current view as a flythrough key" data-testid="fly-add">
+                + key
+              </button>
+              <span className="text-xs text-jd-fg-2" data-testid="fly-count">{s.flyKeys.length} keys</span>
+              <button className="btn px-1.5" disabled={s.flyKeys.length === 0} onClick={() => s.clearFlyKeys()} title="Drop the flythrough keys" data-testid="fly-clear">
+                ×
+              </button>
+              <input className={`${inputCls} w-14`} type="number" min={2} max={2400} value={flyFrames} onChange={(e) => setFlyFrames(Math.max(2, Number(e.target.value) || 2))} title="Frames to render along the keys" data-testid="fly-frames" />
+              <button className="btn px-1.5" disabled={!s.viewport || s.flyKeys.length < 2 || s.busy} onClick={() => void s.recordFlythrough(flyFrames)} title="Render the frames along the keys into exports/flythrough/ (then: ffmpeg -framerate 24 -i frame_%04d.png flythrough.mp4)" data-testid="fly-record">
+                Record
+              </button>
+              <button className="btn px-1.5" disabled={!s.viewport || !s.project} onClick={() => void s.saveStill()} title="Save the current frame as exports/stills/view_<n>.png" data-testid="still-save">
+                Still
               </button>
             </span>
           </Field>

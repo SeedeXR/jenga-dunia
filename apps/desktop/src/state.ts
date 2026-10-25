@@ -1,7 +1,7 @@
 // Frontend store: a mirror of what the core reports, never the source of truth (docs/architecture/12-ui-workspace.md).
 import { create } from "zustand";
 import type { Edge, GraphEvaluateResult, GraphListResult, HeightmapFormat, JdOps, JobInfo as JobInfoGen, NodeDefInfo, NodeView, NoiseParams, OceanWavesRequest, OceanWavesResult, OpId, ProjectOpenResult, ProjectSaveResult, ScatterPoint, TerrainStatsResult } from "./lib/ops.gen";
-import { horizonPreview, layerPreview, layerTextures, op, skyPreview, type JdError, type LayerMaps, type Preview, type Response, type Warning, hdriPreview } from "./lib/api";
+import { horizonPreview, layerPreview, layerTextures, op, skyPreview, type JdError, type LayerMaps, type Preview, type Response, type Warning, hdriPreview, writeExport } from "./lib/api";
 import { adaptLodBias } from "./lib/previewLod";
 import type { MaterialSpec, MediaMetadataResult, TerrainMeasureResult } from "./lib/ops.gen";
 
@@ -143,6 +143,20 @@ interface State {
   hdri: { path: string; bitmap: ImageBitmap; px: [number, number]; sun: { azimuth_deg: number; elevation_deg: number } } | null;
   loadHdri: (path: string) => Promise<void>;
   clearHdri: () => void;
+  /** Viewport post effects (viewport only; exports untouched). */
+  post: { exposure: number; bloom: number; vignette: number };
+  setPost: (patch: Partial<{ exposure: number; bloom: number; vignette: number }>) => void;
+  /** The viewport's capture handle (set by the viewport when mounted). */
+  viewport: import("./viewport/TerrainView").ViewportHandle | null;
+  setViewportHandle: (h: import("./viewport/TerrainView").ViewportHandle | null) => void;
+  /** Flythrough: orbit keys in order; frames interpolate between them. */
+  flyKeys: import("./viewport/TerrainView").Orbit[];
+  addFlyKey: () => void;
+  clearFlyKeys: () => void;
+  /** Save the current frame as exports/stills/view_<n>.png. */
+  saveStill: () => Promise<void>;
+  /** Render `frames` along the keys into exports/flythrough/frame_<k>.png. */
+  recordFlythrough: (frames: number) => Promise<void>;
   refreshSky: () => Promise<void>;
   /** Scatter preview: instances placed from a 0..1 mask layer and drawn in the viewport; export writes a GLB. */
   scatter: { mask: string | null; spacing_m: number; seed: number; grow: boolean; points: ScatterPoint[] | null };
@@ -721,6 +735,49 @@ export const useStore = create<State>((set, get) => {
       }
     },
     sky: null,
+    post: { exposure: 1, bloom: 0, vignette: 0 },
+    setPost: (patch) => set((st) => ({ post: { ...st.post, ...patch } })),
+    viewport: null,
+    setViewportHandle: (h) => set({ viewport: h }),
+    flyKeys: [],
+    addFlyKey: () => {
+      const o = get().viewport?.getOrbit();
+      if (o) set((st) => ({ flyKeys: [...st.flyKeys, o] }));
+    },
+    clearFlyKeys: () => set({ flyKeys: [] }),
+    saveStill: async () => {
+      const v = get().viewport;
+      if (!v) return;
+      const blob = await v.snapshot();
+      if (!blob) return logFailure("still", "the canvas gave no image");
+      const n = Date.now() % 100000;
+      const path = await writeExport(`stills/view_${n}.png`, blob);
+      set((st) => ({ log: [...st.log.slice(-199), { ts: Date.now(), level: path ? "info" : "error", text: path ? `still: ${path} (${(blob.size / 1024).toFixed(0)} KB)` : "still: write failed" }] }));
+    },
+    recordFlythrough: async (frames) => {
+      const v = get().viewport;
+      const keys = get().flyKeys;
+      if (!v || keys.length < 2 || !(frames >= 2)) return;
+      const start = v.getOrbit();
+      const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+      // ponytail: linear in (theta, phi, radius) between keys; a Catmull-Rom path is the upgrade.
+      const at = (t: number) => {
+        const seg = Math.min(keys.length - 2, Math.floor(t * (keys.length - 1)));
+        const u = t * (keys.length - 1) - seg;
+        const a = keys[seg]!;
+        const b = keys[seg + 1]!;
+        return { theta: lerp(a.theta, b.theta, u), phi: lerp(a.phi, b.phi, u), radius: lerp(a.radius, b.radius, u) };
+      };
+      let written = 0;
+      for (let k = 0; k < frames; k++) {
+        v.setOrbit(at(k / (frames - 1)));
+        await new Promise((r) => requestAnimationFrame(() => r(null)));
+        const blob = await v.snapshot();
+        if (blob && (await writeExport(`flythrough/frame_${String(k).padStart(4, "0")}.png`, blob))) written++;
+      }
+      v.setOrbit(start);
+      set((st) => ({ log: [...st.log.slice(-199), { ts: Date.now(), level: written === frames ? "info" : "warn", text: `flythrough: ${written}/${frames} frames → exports/flythrough/ (ffmpeg -framerate 24 -i frame_%04d.png …)` }] }));
+    },
     hdri: null,
     loadHdri: async (path) => {
       const r = await hdriPreview(path).catch((e: unknown) => (logFailure("sky.load_hdri", e), null));
