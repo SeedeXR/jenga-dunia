@@ -193,9 +193,10 @@ interface State {
   exportHeightmap: (path: string, format: HeightmapFormat) => Promise<void>;
   /** `terrain.export_profile`: the height, every material mask as a weightmap and the material stack, for Unity or Unreal. */
   /** `tiles` > 1 cuts the export into tiles × tiles engine folders sharing one height range. */
-  exportProfile: (profile: "unity" | "unreal", dir: string, tiles?: number) => Promise<void>;
+  exportProfile: (profile: "unity" | "unreal", dir: string, tiles?: number, holes?: string | null) => Promise<void>;
   /** `terrain.export_mesh` with the material stack baked in; the extension picks the format. */
-  exportMesh: (path: string, lods: number | null, targetTriangles: number | null) => Promise<void>;
+  /** `holes`: a 0..1 layer whose cells ≥ 0.5 are left out of the mesh. */
+  exportMesh: (path: string, lods: number | null, targetTriangles: number | null, holes?: string | null) => Promise<void>;
   /** `sky.bake`: the viewport's sun, turbidity and clouds as an equirectangular HDRI. */
   exportSky: (path: string) => Promise<void>;
   /** Write exports/water/: depth, colour, foam and the wave normal tile for the graph's sea-level node (`ocean.bake`). */
@@ -1031,13 +1032,13 @@ export const useStore = create<State>((set, get) => {
     exportFrames: async (frames) => {
       await run("timeline.export", { frames, dir: "frames", format: "png16" });
     },
-    exportProfile: async (profile, dir, tiles) => {
+    exportProfile: async (profile, dir, tiles, holes) => {
       const materials = get().materials;
       const masks = [...new Set(materials.map((m) => m.mask).filter((m): m is string => !!m))];
-      await run("terrain.export_profile", { profile, dir, layer: "height", masks, materials, ...(tiles && tiles > 1 ? { tiles } : {}) });
+      await run("terrain.export_profile", { profile, dir, layer: "height", masks, materials, ...(tiles && tiles > 1 ? { tiles } : {}), ...(holes ? { holes } : {}) });
     },
-    exportMesh: async (path, lods, targetTriangles) => {
-      await run("terrain.export_mesh", { layer: "height", path, materials: get().materials, ...(lods ? { lods } : {}), ...(targetTriangles ? { target_triangles: targetTriangles } : {}) });
+    exportMesh: async (path, lods, targetTriangles, holes) => {
+      await run("terrain.export_mesh", { layer: "height", path, materials: get().materials, ...(lods ? { lods } : {}), ...(targetTriangles ? { target_triangles: targetTriangles } : {}), ...(holes ? { holes } : {}) });
     },
     exportSky: async (path) => {
       const { sun } = get();

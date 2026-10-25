@@ -100,10 +100,19 @@ export async function wire(page: Page, from: Locator, to: Locator, fromHandle = 
   // React Flow's connect-on-click: click the source handle, then the target handle. A drag works
   // at full zoom but lands short on the few-pixel handles after a fit-view; the click path is
   // zoom-independent, which is what a scripted user needs.
+  // Under load a re-render between the two clicks drops React Flow's pending connection (seen as a
+  // missing `graph.connect` in the suite only): click the pair again, like `selectNode` retries.
   const before = await logCount(page, "graph.connect: ok");
-  await src.click({ force: true });
-  await dst.click({ force: true });
-  await expect.poll(() => logCount(page, "graph.connect: ok")).toBeGreaterThan(before);
+  for (let i = 0; ; i++) {
+    await src.click({ force: true });
+    await dst.click({ force: true });
+    try {
+      await expect.poll(() => logCount(page, "graph.connect: ok"), { timeout: 2500 }).toBeGreaterThan(before);
+      return;
+    } catch (e) {
+      if (i >= 3) throw e;
+    }
+  }
 }
 
 /** Click React Flow's fit-view until `node` is on screen: a node added a moment ago has no measured

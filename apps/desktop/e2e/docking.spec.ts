@@ -17,6 +17,7 @@ test.describe("docking and preview detail", () => {
   });
 
   test("panels collapse, the graph docks right, the layout persists, and 2048² preview detail shows lod 0", async ({ page }, testInfo) => {
+    test.slow(); // the 2048² half rebuilds an 8.4 M-triangle mesh twice: under the parallel suite each preview fetch alone takes ~30 s
     const core = await connectCore(ws);
     await installBridge(page, core);
     const errors: string[] = [];

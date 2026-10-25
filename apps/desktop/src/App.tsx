@@ -127,6 +127,7 @@ export default function App() {
   const [meshPath, setMeshPath] = useState("terrain.glb");
   const [tiles, setTiles] = useState(1); // 1 = one folder; 2..16 = tiles × tiles folders with tiles.json
   const [scatterModel, setScatterModel] = useState(""); // an FBX in assets/ to instance; empty = the proxy
+  const [holesLayer, setHolesLayer] = useState(""); // a 0..1 layer whose cells ≥ 0.5 are holes in the exports; "" = none
   const [skyPath, setSkyPath] = useState("sky.exr");
   const [vp, setVp] = useState<ViewportInfo>({ backend: "none", triangles: 0 });
   const [showGraph, setShowGraph] = useState(true);
@@ -993,6 +994,18 @@ export default function App() {
           >
             <Upload size={14} /> Export heightmap
           </button>
+          <Field label="Holes">
+            <select className={inputCls} value={holesLayer} onChange={(e) => setHolesLayer(e.target.value)} title="A 0..1 layer (a painted mask, a class mask) whose cells ≥ 0.5 are holes: left out of the mesh exports, written as holes.png for the engines (Unity SetHoles, Unreal Visibility)" data-testid="export-holes">
+              <option value="">none</option>
+              {Object.keys(s.lastEval?.layers ?? {})
+                .filter((n) => !n.includes("#"))
+                .map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+            </select>
+          </Field>
           <Field label="Engine">
             <span className="flex gap-1">
               <select className={`${inputCls} w-20`} value={engine} onChange={(e) => setEngine(e.target.value as "unity" | "unreal")} title="Unity Terrain (RAW 16-bit + weightmaps) or Unreal Landscape (PNG16 + weightmaps), with the material stack as materials.json" data-testid="export-engine">
@@ -1000,7 +1013,7 @@ export default function App() {
                 <option value="unreal">Unreal</option>
               </select>
               <input className={`${inputCls} w-12`} type="number" min={1} max={16} value={tiles} onChange={(e) => setTiles(Math.max(1, Math.min(16, Number(e.target.value) || 1)))} title="Tiles per side: 1 writes one folder; 2–16 cut the world into tiles × tiles engine folders (tile_<x>_<y>/) sharing one height range, with tiles.json — the resolution must divide" data-testid="export-tiles" />
-              <button className="btn" disabled={!s.layer || s.busy} onClick={() => void s.exportProfile(engine, engine, tiles)} title="Write exports/<engine>/: heightmap, one weightmap per material mask, RGBA splat maps, README with the import numbers, materials.json" data-testid="export-profile">
+              <button className="btn" disabled={!s.layer || s.busy} onClick={() => void s.exportProfile(engine, engine, tiles, holesLayer || null)} title="Write exports/<engine>/: heightmap, one weightmap per material mask, RGBA splat maps, README with the import numbers, materials.json" data-testid="export-profile">
                 <Upload size={14} /> Export
               </button>
             </span>
@@ -1008,7 +1021,7 @@ export default function App() {
           <Field label="Mesh">
             <span className="flex gap-1">
               <input className={`${inputCls} w-24`} value={meshPath} onChange={(e) => setMeshPath(e.target.value)} title="exports/<file>: .glb (materials baked into its textures), .fbx, .obj, .stl, .ply, .usda, .usdz" data-testid="export-mesh-path" />
-              <button className="btn" disabled={!s.layer || s.busy} onClick={() => void s.exportMesh(meshPath, null, null)} data-testid="export-mesh">
+              <button className="btn" disabled={!s.layer || s.busy} onClick={() => void s.exportMesh(meshPath, null, null, holesLayer || null)} data-testid="export-mesh">
                 <Upload size={14} /> Export
               </button>
             </span>
