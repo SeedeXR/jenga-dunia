@@ -188,7 +188,7 @@ Rendering and presentation is the other big gap: path tracer, HDRI lighting, pos
 | Raise/lower/smooth/flatten brushes | WCR §10 | Have | `jd.sculpt.strokes@1` | |
 | Custom brush shapes, grid tools, pen/tablet rework | WCR §10, §1.1 | Missing | none | Falloff is smooth only. |
 | Mask painting (paint/erase/smooth, import bitmap) | WCR §3.5 | Partial | Strokes with `clamp` on any mask | A bitmap can be imported as a heightmap and used as a mask. No erase/fill/flip tools. |
-| Hole layers (caves) | WCR §3.5 | Missing | none | |
+| Hole layers (caves) | WCR §3.5 | Exceeded (2026-10-25) | `jd.cave.system@1`: generated cave systems (karst, lava tube, sea cave, mountain, mine, tunnel, catacombs) whose mouths open the terrain (`holes`), with walls, speleothems and engine hand-off | WC paints a 2-D hole mask only ([caves research](caves.md)); [ADR-0016](../adr/0016-caves-as-an-implicit-volume-beside-the-heightfield.md) |
 
 ### Splines and roads
 | World Creator feature | WC evidence | Status | Our evidence | Notes |
