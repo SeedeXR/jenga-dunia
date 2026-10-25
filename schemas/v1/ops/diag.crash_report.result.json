@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CrashReportResult",
+  "description": "`diag.crash_report` result.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "The report written.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path"
+  ]
+}

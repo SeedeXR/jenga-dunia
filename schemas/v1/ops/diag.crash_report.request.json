@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CrashReportParams",
+  "description": "`diag.crash_report` params: a crash the front end caught (an uncaught error, a failed render).",
+  "type": "object",
+  "properties": {
+    "message": {
+      "description": "The error message.",
+      "type": "string"
+    },
+    "stack": {
+      "description": "The stack trace, when known.",
+      "type": "string",
+      "default": ""
+    },
+    "source": {
+      "description": "Where it happened (`window`, `promise`, `render`, …).",
+      "type": "string",
+      "default": ""
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "message"
+  ]
+}

@@ -190,6 +190,52 @@ expression: list
     }
   },
   {
+    "id": "diag.crash_report",
+    "description": "Record a crash the front end caught (message, stack, where) as a JSON report beside the project's ops log — or in the temp dir when no project is open — with the version, OS and architecture",
+    "scope": "none",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "CrashReportParams",
+      "description": "`diag.crash_report` params: a crash the front end caught (an uncaught error, a failed render).",
+      "type": "object",
+      "properties": {
+        "message": {
+          "description": "The error message.",
+          "type": "string"
+        },
+        "stack": {
+          "description": "The stack trace, when known.",
+          "type": "string",
+          "default": ""
+        },
+        "source": {
+          "description": "Where it happened (`window`, `promise`, `render`, …).",
+          "type": "string",
+          "default": ""
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "message"
+      ]
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "CrashReportResult",
+      "description": "`diag.crash_report` result.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "The report written.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ]
+    }
+  },
+  {
     "id": "diag.env",
     "description": "Report host environment and detected tools",
     "scope": "none",

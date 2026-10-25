@@ -10,6 +10,11 @@
     "scope": "export"
   },
   {
+    "id": "diag.crash_report",
+    "description": "Record a crash the front end caught (message, stack, where) as a JSON report beside the project's ops log — or in the temp dir when no project is open — with the version, OS and architecture",
+    "scope": "none"
+  },
+  {
     "id": "diag.env",
     "description": "Report host environment and detected tools",
     "scope": "none"

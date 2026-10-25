@@ -8,6 +8,7 @@ import TerrainView, { type ViewportInfo } from "./viewport/TerrainView";
 import { type Brush as BrushTool, type NoiseSettings, useStore } from "./state";
 import type { FractalKind, HeightmapFormat, NoiseKind } from "./lib/ops.gen";
 import type { Preview } from "./lib/api";
+import { LANGS, type Lang, translate } from "./lib/i18n";
 
 /** A resizable panel's size, kept in the browser store (`jd.layout.<key>`) and restored on launch: the
  *  inline style sets the saved px, a ResizeObserver writes every change (try/catch: storage may be off). */
@@ -213,6 +214,7 @@ function ViewportChrome({ heading, distanceM, preview, seaLevelM, mode, onFit, o
 
 export default function App() {
   const s = useStore();
+  const tr = (text: string) => translate(s.lang, text);
   const [projPath, setProjPath] = useState("");
   const [importPath, setImportPath] = useState("");
   const [geo, setGeo] = useState({ lon: 36.82, lat: -1.29, radius: 2000, provider: "terrarium" as "terrarium" | "copernicus" | "opentopography" });
@@ -354,6 +356,22 @@ export default function App() {
   }, []);
 
   // Native menu bar → the same actions as the buttons (ids from src-tauri build_menu).
+  // Crash reporter: an uncaught error or rejected promise anywhere in the UI is written as a report
+  // (diag.crash_report) and shown in the log; the app keeps running.
+  useEffect(() => {
+    const onError = (e: ErrorEvent) => void useStore.getState().reportCrash(String(e.message || e.error), String((e.error as Error | undefined)?.stack ?? ""), "window");
+    const onRejection = (e: PromiseRejectionEvent) => {
+      const r = e.reason as Error | undefined;
+      void useStore.getState().reportCrash(String(r?.message ?? r), String(r?.stack ?? ""), "promise");
+    };
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onRejection);
+    return () => {
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onRejection);
+    };
+  }, []);
+
   // Esc aborts whatever is running (World Creator's "Generating (ESC to abort)"); inside a text
   // field Esc only leaves the field, so typing is never interrupted.
   useEffect(() => {
@@ -509,7 +527,7 @@ export default function App() {
           <button className="btn absolute top-2 right-2 px-1 py-0" title="Collapse the project panel to the edge" onClick={() => setDock({ left: true })} data-testid="collapse-left">
             <PanelLeftClose size={14} />
           </button>
-          <h2 className="mb-2 jd-section">Project</h2>
+          <h2 className="mb-2 jd-section">{tr("Project")}</h2>
           <Field label="Path">
             <span className="flex gap-1">
               <input ref={pathInput} className={`${inputCls} w-28`} value={projPath} onChange={(e) => setProjPath(e.target.value)} placeholder="~/Worlds/Hills.jdproj" data-testid="project-path" />
@@ -600,7 +618,7 @@ export default function App() {
           )}
           {s.project && (
             <>
-              <h2 className="mt-4 mb-2 jd-section">Reference image</h2>
+              <h2 className="mt-4 mb-2 jd-section">{tr("Reference image")}</h2>
               <Field label="File">
                 <span className="flex gap-1">
                   <input className={`${inputCls} w-24`} value={refPath} onChange={(e) => setRefPath(e.target.value)} placeholder="photo, 360°, video" title="A photo (JPEG, PNG, TIFF, HEIF, WebP), a 360° photo sphere or a video (MP4, MOV): media.metadata reads where, when and how it was taken, and the sun" data-testid="ref-path" />
@@ -646,7 +664,17 @@ export default function App() {
                 </div>
               )}
               {s.project && <LayerStack />}
-              <h2 className="mt-4 mb-2 jd-section">Settings</h2>
+              <h2 className="mt-4 mb-2 jd-section">{tr("Settings")}</h2>
+              <label className="mb-1 flex items-center justify-between gap-2 text-xs text-jd-fg-1" title="Interface language (Kiswahili and French are first drafts)">
+                {tr("Language")}
+                <select className={inputCls} value={s.lang} onChange={(e) => s.setLang(e.target.value as Lang)} data-testid="setting-lang">
+                  {LANGS.map((l) => (
+                    <option key={l.code} value={l.code}>
+                      {l.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <label className="mb-1 flex items-center justify-between gap-2 text-xs text-jd-fg-1" title="Seconds after the last edit before the project autosaves; 0 disables">
                 Autosave (s)
                 <input className={inputCls} type="number" min={0} max={86400} key={`as-${s.settingsRev}-${s.project.settings.autosave_interval_s}`} defaultValue={s.project.settings.autosave_interval_s} onBlur={(e) => { const v = Number(e.target.value); if (v !== s.project?.settings.autosave_interval_s) void s.setSettings({ autosave_interval_s: v }); }} data-testid="setting-autosave" />
@@ -696,7 +724,7 @@ export default function App() {
               </label>
             </>
           )}
-          <h2 className="mt-4 mb-2 jd-section">Tasks</h2>
+          <h2 className="mt-4 mb-2 jd-section">{tr("Tasks")}</h2>
           <ul className="text-xs text-jd-fg-1" data-testid="tasks">
             {s.jobs.length === 0 && <li className="text-jd-fg-2">no running jobs</li>}
             {s.jobs.map((j) => (
@@ -712,7 +740,7 @@ export default function App() {
               </li>
             ))}
           </ul>
-          <h2 className="mt-4 mb-2 jd-section">Diagnostics</h2>
+          <h2 className="mt-4 mb-2 jd-section">{tr("Diagnostics")}</h2>
           <div className="mb-2 flex flex-wrap gap-1">
             <button className="btn px-1.5 py-0" onClick={() => void s.runDiag("env")} disabled={s.busy} data-testid="diag-env">Environment</button>
             <button className="btn px-1.5 py-0" onClick={() => void s.runDiag("gc")} disabled={!s.project || s.busy} data-testid="diag-gc">Cache GC</button>
@@ -860,7 +888,7 @@ export default function App() {
           </button>
           {s.sculpting && (
             <>
-              <h2 className="mb-2 jd-section">Brush</h2>
+              <h2 className="mb-2 jd-section">{tr("Brush")}</h2>
               <Field label="Mode">
                 <select className={`${inputCls} w-36`} value={s.brush.mode} onChange={(e) => s.setBrush({ mode: e.target.value as BrushTool["mode"] })} data-testid="brush-mode">
                   <option value="raise">raise</option>
@@ -967,7 +995,7 @@ export default function App() {
           )}
           {s.grid.on && (
             <>
-              <h2 className="mb-2 jd-section">Grid</h2>
+              <h2 className="mb-2 jd-section">{tr("Grid")}</h2>
               <Field label="Cells per side">
                 <select className={`${inputCls} w-20`} value={s.grid.cells} onChange={(e) => { s.setGrid({ cells: Number(e.target.value) }); s.gridClear(); }} data-testid="grid-cells">
                   {[8, 16, 32, 64].map((n) => (
@@ -1029,7 +1057,7 @@ export default function App() {
               </dl>
             </>
           )}
-          <h2 className="mb-2 jd-section">Sun</h2>
+          <h2 className="mb-2 jd-section">{tr("Sun")}</h2>
           <Field label="Textured (PBR)">
             <input type="checkbox" checked={s.pbr} onChange={(e) => s.setPbr(e.target.checked)} title="Shade the terrain with baked albedo, normal and roughness maps (full-field relief at any preview LOD); off = height-ramp vertex colours" data-testid="pbr-toggle" />
           </Field>
@@ -1113,7 +1141,7 @@ export default function App() {
           <Field label={`Rain ${Math.round(s.sun.rain * 100)} %`}>
             <input className="w-28" type="range" min={0} max={1} step={0.05} value={s.sun.rain} onChange={(e) => s.setSun({ rain: Number(e.target.value) })} title="Rain falling in the viewport (look only); the rain itself is the jd.climate.rain node's field — wet surfaces come from a material on that layer" data-testid="sun-rain" />
           </Field>
-          <h2 className="mt-4 mb-2 jd-section">Scatter</h2>
+          <h2 className="mt-4 mb-2 jd-section">{tr("Scatter")}</h2>
           <Field label="Mask">
             <select className={inputCls} value={s.scatter.mask ?? ""} onChange={(e) => s.setScatter({ mask: e.target.value || null })} title="0..1 layer used as the instance density (a class mask, rivers, wetness…)" data-testid="scatter-mask">
               <option value="">none</option>
@@ -1146,7 +1174,7 @@ export default function App() {
             </button>
             <span className="text-xs text-jd-fg-2" data-testid="scatter-count">{s.scatter.points ? `${s.scatter.points.length.toLocaleString()} instances` : ""}</span>
           </div>
-          <h2 className="mt-4 mb-2 jd-section">Actions</h2>
+          <h2 className="mt-4 mb-2 jd-section">{tr("Actions")}</h2>
           <div className="mb-1 flex flex-wrap gap-1" data-testid="terrain-actions">
             {(
               [
@@ -1162,7 +1190,7 @@ export default function App() {
               </button>
             ))}
           </div>
-          <h2 className="mt-4 mb-2 jd-section">Simulation layers</h2>
+          <h2 className="mt-4 mb-2 jd-section">{tr("Simulation layers")}</h2>
           <div className="mb-1 flex flex-wrap gap-1">
             {(["snow", "debris", "sand", "lava"] as const).map((k) => (
               <button
@@ -1178,7 +1206,7 @@ export default function App() {
             ))}
           </div>
           <p className="mb-2 text-xs text-jd-fg-2">One click adds the node, publishes its masks as layers and a material; tune it in the graph inspector.</p>
-          <h2 className="mt-4 mb-2 jd-section">Materials</h2>
+          <h2 className="mt-4 mb-2 jd-section">{tr("Materials")}</h2>
           {s.materials.map((m, i) => (
             <div className="mb-1 flex flex-wrap items-center gap-1" key={i} data-testid={`material-${i}`}>
               <select
@@ -1258,7 +1286,7 @@ export default function App() {
           >
             + layer
           </button>
-          <h2 className="mt-4 mb-2 jd-section">Terrain · Noise</h2>
+          <h2 className="mt-4 mb-2 jd-section">{tr("Terrain · Noise")}</h2>
           <Field label="Preset">
             <select
               className={`${inputCls} w-36`}
@@ -1395,7 +1423,7 @@ export default function App() {
               )}
             </div>
           )}
-          <h2 className="mt-5 mb-2 jd-section">Export</h2>
+          <h2 className="mt-5 mb-2 jd-section">{tr("Export")}</h2>
           <Field label="File">
             <span className="flex gap-1">
               <input className={`${inputCls} w-28`} title="Relative paths go to the project's exports/ directory" value={exportPath} onChange={(e) => setExportPath(e.target.value)} data-testid="export-path" />

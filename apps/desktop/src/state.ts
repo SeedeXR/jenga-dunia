@@ -3,6 +3,7 @@ import { create } from "zustand";
 import type { Edge, GraphEvaluateResult, GraphListResult, HeightmapFormat, JdOps, JobInfo as JobInfoGen, NodeDefInfo, NodeView, NoiseParams, OceanWavesRequest, OceanWavesResult, OpId, ProjectOpenResult, ProjectSaveResult, ScatterPoint, TerrainStatsResult } from "./lib/ops.gen";
 import { horizonPreview, layerPreview, layerTextures, op, skyPreview, type JdError, type LayerMaps, type Preview, type Response, type Warning, hdriPreview, writeExport } from "./lib/api";
 import { orbitAt } from "./lib/camera";
+import { storedLang } from "./lib/i18n";
 import { adaptLodBias } from "./lib/previewLod";
 import type { MaterialSpec, MediaMetadataResult, TerrainMeasureResult } from "./lib/ops.gen";
 
@@ -148,6 +149,11 @@ interface State {
   /** Viewport sun direction (not part of the project). */
   sun: { azimuth_deg: number; elevation_deg: number; turbidity: number; clouds: number; fog: number; /** Rain in the viewport 0..1 (look only, not saved). */ rain: number };
   setSun: (patch: Partial<State["sun"]>) => void;
+  /** UI language (persisted in the browser store). */
+  lang: import("./lib/i18n").Lang;
+  setLang: (lang: import("./lib/i18n").Lang) => void;
+  /** Record a crash the UI caught (diag.crash_report) and note it in the log. */
+  reportCrash: (message: string, stack: string, source: string) => Promise<void>;
   /** The noise continued beyond the border (`terrain.horizon`), drawn as a coarse skirt under the terrain. */
   horizon: { preview: Preview; scale: number } | null;
   showHorizon: boolean;
@@ -786,6 +792,19 @@ export const useStore = create<State>((set, get) => {
           strength: 1,
         },
       });
+    },
+    lang: storedLang(),
+    setLang: (lang) => {
+      set({ lang });
+      try {
+        localStorage.setItem("jd.lang", lang);
+      } catch {
+        /* no storage: the choice lasts the session */
+      }
+    },
+    reportCrash: async (message, stack, source) => {
+      const r = await op<{ path: string }>("diag.crash_report", { message: message.slice(0, 4000), stack: stack.slice(0, 16000), source }).catch(() => null);
+      set((st) => ({ log: [...st.log.slice(-199), { ts: Date.now(), level: "error", text: `crash report${r?.status === "ok" && r.result ? `: ${r.result.path}` : " (not written)"} — ${message}` }] }));
     },
     sun: { azimuth_deg: 140, elevation_deg: 35, turbidity: 3, clouds: 0, fog: 0, rain: 0 },
     setSun: (patch) => {

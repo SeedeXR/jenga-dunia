@@ -51,6 +51,20 @@ export type DiagBundleResult = {
   "bytes": number;
 };
 
+export type DiagCrashReportRequest = {
+  /** The error message. */
+  "message": string;
+  /** The stack trace, when known. */
+  "stack"?: string;
+  /** Where it happened (`window`, `promise`, `render`, …). */
+  "source"?: string;
+};
+
+export type DiagCrashReportResult = {
+  /** The report written. */
+  "path": string;
+};
+
 export type DiagEnvRequest = Record<string, unknown>;
 
 export type ToolStatus = {
@@ -2958,6 +2972,8 @@ export interface JdOps {
   "diag.bench": { request: DiagBenchRequest; result: DiagBenchResult };
   /** Write a diagnostic bundle for a bug report: host environment, project.json / graph.json / scene.json, the tail of the journal, versions — no heightfield data */
   "diag.bundle": { request: DiagBundleRequest; result: DiagBundleResult };
+  /** Record a crash the front end caught (message, stack, where) as a JSON report beside the project's ops log — or in the temp dir when no project is open — with the version, OS and architecture */
+  "diag.crash_report": { request: DiagCrashReportRequest; result: DiagCrashReportResult };
   /** Report host environment and detected tools */
   "diag.env": { request: DiagEnvRequest; result: DiagEnvResult };
   /** Read an FBX file through the Autodesk FBX SDK (when this build carries it) and report what the SDK sees: version, meshes, control points, polygons and triangles, bounds, units, up axis, normals, UVs, material and texture — the reference view of our own FBX writer */

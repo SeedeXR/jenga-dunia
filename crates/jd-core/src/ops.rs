@@ -284,6 +284,37 @@ fn append_op_log(root: &std::path::Path, line: &serde_json::Value) {
     }
 }
 
+/// Write a crash report as JSON — `<project>/logs/crash_<time>.json` when a project is open, else
+/// `<temp>/jenga-dunia/crashes/` — and return its path. Best effort.
+pub fn write_crash_report(
+    project_root: Option<&std::path::Path>,
+    source: &str,
+    context: &str,
+    message: &str,
+    stack: &str,
+) -> Option<std::path::PathBuf> {
+    let dir = match project_root {
+        Some(r) => r.join("logs"),
+        None => std::env::temp_dir().join("jenga-dunia").join("crashes"),
+    };
+    std::fs::create_dir_all(&dir).ok()?;
+    let ts = crate::project::now_rfc3339();
+    let stamp: String = ts.chars().filter(|c| c.is_ascii_digit()).take(17).collect();
+    let path = dir.join(format!("crash_{stamp}_{}.json", std::process::id()));
+    let body = serde_json::json!({
+        "ts": ts,
+        "source": source,
+        "context": context,
+        "message": message,
+        "stack": stack,
+        "version": env!("CARGO_PKG_VERSION"),
+        "os": std::env::consts::OS,
+        "arch": std::env::consts::ARCH,
+    });
+    std::fs::write(&path, serde_json::to_vec_pretty(&body).ok()?).ok()?;
+    Some(path)
+}
+
 impl Registry {
     /// Register a typed operation. Params are deserialised with `deny_unknown_fields` semantics
     /// enforced by the request type.
@@ -387,7 +418,30 @@ impl Registry {
         let Request {
             op: op_id, params, ..
         } = req;
-        let outcome = handler(ctx, params);
+        // A panicking handler must not take the server, the CLI or the desktop down with it: catch
+        // it, write a crash report (the project's logs/, else the temp dir), answer E_INTERNAL.
+        let outcome =
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler(ctx, params))) {
+                Ok(o) => o,
+                Err(payload) => {
+                    let msg = payload
+                        .downcast_ref::<&str>()
+                        .map(|s| (*s).to_owned())
+                        .or_else(|| payload.downcast_ref::<String>().cloned())
+                        .unwrap_or_else(|| "panic".to_owned());
+                    let report =
+                        write_crash_report(ctx.project_root().as_deref(), "core", &op_id, &msg, "");
+                    Err(JdError::new(
+                        ErrorCode::E_INTERNAL,
+                        format!("operation `{op_id}` panicked: {msg}"),
+                    )
+                    .next("A crash report was written; please attach it to an issue.")
+                    .detail(
+                        "crash_report",
+                        report.map(|p| p.display().to_string()).unwrap_or_default(),
+                    ))
+                }
+            };
         let duration_ms = started.elapsed().as_millis() as u64;
         // The project's own log: one JSON line per operation in `<project>/logs/ops.log`, written
         // after the op so `project.open` / `project.create` log into the project they opened.
@@ -4088,6 +4142,26 @@ pub mod terrain {
         PathBuf::from("sky.exr")
     }
 
+    /// `diag.crash_report` params: a crash the front end caught (an uncaught error, a failed render).
+    #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct CrashReportParams {
+        /// The error message.
+        pub message: String,
+        /// The stack trace, when known.
+        #[serde(default)]
+        pub stack: String,
+        /// Where it happened (`window`, `promise`, `render`, …).
+        #[serde(default)]
+        pub source: String,
+    }
+    /// `diag.crash_report` result.
+    #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct CrashReportResult {
+        /// The report written.
+        pub path: PathBuf,
+    }
+
     /// `project.write_export` params.
     #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
@@ -4772,6 +4846,17 @@ pub mod terrain {
                 use base64::Engine as _;
                 let png = jd_terrain::sky_preview_png(&p.sky, p.width)?;
                 Ok((SkyPreviewResult { width: p.width, height: p.width / 2, png_base64: base64::engine::general_purpose::STANDARD.encode(png) }, Vec::new()))
+            },
+        );
+        r.register::<CrashReportParams, CrashReportResult, _>(
+            "diag.crash_report",
+            "Record a crash the front end caught (message, stack, where) as a JSON report beside the project's ops log — or in the temp dir when no project is open — with the version, OS and architecture",
+            Scope::None,
+            |ctx, p| {
+                let source = if p.source.is_empty() { "ui".to_owned() } else { format!("ui:{}", p.source) };
+                let path = crate::ops::write_crash_report(ctx.project_root().as_deref(), &source, "", &p.message, &p.stack)
+                    .ok_or_else(|| JdError::new(ErrorCode::E_INTERNAL, "could not write the crash report"))?;
+                Ok((CrashReportResult { path }, Vec::new()))
             },
         );
         r.register::<WriteExport, WrittenExport, _>(
@@ -5542,6 +5627,36 @@ mod tests {
         assert_eq!(
             r.error.as_ref().map(|e| e.code),
             Some(ErrorCode::E_SCHEMA_VERSION)
+        );
+    }
+
+    #[test]
+    fn a_panicking_operation_answers_e_internal_and_leaves_a_crash_report() {
+        #[derive(Deserialize, Serialize, schemars::JsonSchema)]
+        struct Nothing {}
+        let mut reg = Registry::default();
+        reg.register::<Nothing, Nothing, _>("test.panic", "panics", Scope::None, |_, _| {
+            panic!("kernel blew up")
+        });
+        let ctx = Context::default();
+        let r = invoke(&reg, &ctx, "test.panic", serde_json::json!({}));
+        assert_eq!(r.status, crate::envelope::Status::Error);
+        let err = r.error.expect("error");
+        assert_eq!(err.code, ErrorCode::E_INTERNAL);
+        assert!(err.message.contains("kernel blew up"));
+        let report = err.details["crash_report"]
+            .as_str()
+            .expect("path")
+            .to_owned();
+        let body: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&report).expect("report")).expect("json");
+        assert_eq!(body["context"], "test.panic");
+        assert_eq!(body["source"], "core");
+        let _ = std::fs::remove_file(report);
+        // The registry is still usable afterwards.
+        assert_eq!(
+            invoke(&reg, &ctx, "test.panic", serde_json::json!({})).status,
+            crate::envelope::Status::Error
         );
     }
 

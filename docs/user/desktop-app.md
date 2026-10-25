@@ -146,6 +146,8 @@ Blend operations are nodes like everything else: **min**, **max** and **lerp** (
 
 ## Viewport chrome
 
+**Language and crash reports.** Settings ▸ **Language** switches the panel headings and the main buttons between English, **Kiswahili** and **Français** (first drafts — corrections welcome; unknown strings stay in English) and remembers the choice. An uncaught error anywhere in the interface is written as a crash report — `crash_<time>.json` beside the project's `logs/ops.log`, or in the temp folder when no project is open, with the message, stack, version, OS and architecture — and noted in the log; the app keeps running. A core operation that panics answers `E_INTERNAL` with the report's path instead of taking the app down. UI-driven test: `apps/desktop/e2e/i18n.spec.ts`.
+
 **Look.** The workspace follows World Creator 2025's: navy-charcoal surfaces, floating rounded panels with soft shadows over the backdrop (the viewport is a card too), bold section headings with a chevron, a vivid blue for the main action of each group (New, Generate, Evaluate) and for slider fills, thin dark scrollbars, and graph nodes as rounded cards with an accent stripe. The tokens live in `apps/desktop/src/index.css` (`--color-jd-*`, `.jd-panel`, `.jd-section`, `.btn-primary`).
 
 **Octave bars and strength.** Under the Noise panel, **Strength** scales the relief around the middle of the height range (0 = flat at the middle, 2 = twice the relief) and one vertical bar per octave sets that octave's strength (coarsest first, 0..2, fbm only); release a bar to apply it, **reset** clears them. Both write the noise node (`strength`, `octave_weights`), so the CLI and agents see the same thing. UI-driven test: `apps/desktop/e2e/octaves.spec.ts`.
