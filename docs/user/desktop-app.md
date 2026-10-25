@@ -114,7 +114,7 @@ World Creator's layer stack, as a view over the same graph: the **Layers** secti
 
 ![Layer stack: terrace on top of the noise in the chain, the snowpack node as a side branch, each row with its eye, category badge and arrows](images/desktop-stack.png)
 
-What the stack does not do yet: blend operations between layers (World Creator's overwrite / add / min / max with opacity need min, max and lerp nodes the core does not have) and reordering across side branches. The UI-driven test `e2e/stack.spec.ts` adds terrace and thermal from the stack, bypasses and restores thermal, moves terrace above it, removes thermal and checks the core's edges after every step.
+Blend operations are nodes like everything else: **min**, **max** and **lerp** (`jd.math.min@1`, `jd.math.max@1`, `jd.math.lerp@1`) take the chain on `in` and another layer on `b` — lerp also a 0..1 mask on `t` — with an `opacity`, which is World Creator's layer operation (overwrite / min / max with opacity and a mask) in graph form. Add one from the stack's **+** and wire its `b` in the graph editor: a stamp, a second noise, an imported heightmap. What the stack does not do yet: reordering across side branches. The UI-driven test `e2e/stack.spec.ts` adds terrace and thermal from the stack, bypasses and restores thermal, moves terrace above it, removes thermal and checks the core's edges after every step.
 
 ## Tasks and diagnostics
 
@@ -295,4 +295,4 @@ Every button calls the same operation the CLI and MCP server expose (`jd schema 
 | End-to-end, tools and layers | the grid tool, the brush modifiers, the simulation layers, the saved look with the three exports, and the layer stack, each against the real core | `apps/desktop/e2e/grid.spec.ts`, `sculpt.spec.ts`, `simlayers.spec.ts`, `look.spec.ts`, `stack.spec.ts` |
 | Native window | screenshots of the real Tauri app on macOS; interaction recording requires Accessibility permission for the automating process | this page |
 
-Known limits of this build: the layer stack has no blend operations (overwrite / add / min / max), the viewport draws scatter instances as cones, and the heat layer of a lava flow is coloured with the generic mask gradient. The tutorial images are the real app annotated by `scripts/annotate.mjs`; the Figma file linked in the brief is the design reference and receives the same screenshots once the connector is authorised.
+Known limits of this build: the viewport draws scatter instances as cones, and the heat layer of a lava flow is coloured with the generic mask gradient. The tutorial images are the real app annotated by `scripts/annotate.mjs`; the Figma file linked in the brief is the design reference and receives the same screenshots once the connector is authorised.

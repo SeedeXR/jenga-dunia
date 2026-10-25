@@ -2384,6 +2384,24 @@ export type NodeParams_jd_mask_class_1 = {
 
 export type NodeParams_jd_math_add_1 = Record<string, unknown>;
 
+export type NodeParams_jd_math_lerp_1 = {
+  /** Opacity 0..1: how much of the blended result replaces the input (1 = all of it, 0 = the
+input passes through). */
+  "opacity"?: number;
+};
+
+export type NodeParams_jd_math_max_1 = {
+  /** Opacity 0..1: how much of the blended result replaces the input (1 = all of it, 0 = the
+input passes through). */
+  "opacity"?: number;
+};
+
+export type NodeParams_jd_math_min_1 = {
+  /** Opacity 0..1: how much of the blended result replaces the input (1 = all of it, 0 = the
+input passes through). */
+  "opacity"?: number;
+};
+
 export type NodeParams_jd_math_multiply_1 = Record<string, unknown>;
 
 export type NodeParams_jd_math_remap_1 = {
@@ -2701,6 +2719,9 @@ export interface NodeKinds {
   "jd.input.layer@1": NodeParams_jd_input_layer_1;
   "jd.mask.class@1": NodeParams_jd_mask_class_1;
   "jd.math.add@1": NodeParams_jd_math_add_1;
+  "jd.math.lerp@1": NodeParams_jd_math_lerp_1;
+  "jd.math.max@1": NodeParams_jd_math_max_1;
+  "jd.math.min@1": NodeParams_jd_math_min_1;
   "jd.math.multiply@1": NodeParams_jd_math_multiply_1;
   "jd.math.remap@1": NodeParams_jd_math_remap_1;
   "jd.math.scale@1": NodeParams_jd_math_scale_1;

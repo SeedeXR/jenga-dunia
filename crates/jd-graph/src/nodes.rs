@@ -328,6 +328,42 @@ struct ScaleParams {
     #[serde(default = "one_f")]
     factor: f32,
 }
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct BlendParams {
+    /// Opacity 0..1: how much of the blended result replaces the input (1 = all of it, 0 = the
+    /// input passes through).
+    #[serde(default = "one_f")]
+    opacity: f32,
+}
+
+/// Pointwise over `a`, `b` and an optional third field of the same size.
+fn map3(
+    a: &Heightfield,
+    b: &Heightfield,
+    t: Option<&Heightfield>,
+    f: impl Fn(f32, f32, f32) -> f32 + Sync,
+) -> JdResult<Heightfield> {
+    for (name, o) in [("b", Some(b)), ("t", t)] {
+        if let Some(o) = o
+            && (o.width(), o.height()) != (a.width(), a.height())
+        {
+            return Err(JdError::invalid(name, "field size differs from `in`"));
+        }
+    }
+    let mut outf = Heightfield::new(a.width(), a.height(), a.tile_size(), a.halo())?;
+    outf.fill_with(|x, y| f(a.get(x, y), b.get(x, y), t.map_or(1.0, |t| t.get(x, y))));
+    Ok(outf)
+}
+
+fn blend_opacity(p: &Map<String, Json>) -> JdResult<f32> {
+    let bp: BlendParams = params(p)?;
+    if !(0.0..=1.0).contains(&bp.opacity) {
+        return Err(JdError::invalid("opacity", "must be within 0..=1"));
+    }
+    Ok(bp.opacity)
+}
 fn one_f() -> f32 {
     1.0
 }
@@ -666,6 +702,59 @@ pub fn register_all(r: &mut Registry) {
             let _ = p;
             0
         }),
+    );
+    // Blend operations of a layer stack: the chain comes in on `in`, the other layer on `b`.
+    for (kind, desc, op) in [
+        (
+            "jd.math.min@1",
+            "min(in, b): keeps the lower of the chain and another layer — carve a stamp or a valley floor into the terrain; `opacity` blends the result over the input",
+            f32::min as fn(f32, f32) -> f32,
+        ),
+        (
+            "jd.math.max@1",
+            "max(in, b): keeps the higher of the chain and another layer — raise a stamp, a plateau or a dune field onto the terrain; `opacity` blends the result over the input",
+            f32::max as fn(f32, f32) -> f32,
+        ),
+    ] {
+        r.register(
+            NodeDef::new::<BlendParams, _>(
+                kind,
+                desc,
+                vec![
+                    port("in", PortType::Heightfield, true),
+                    port("b", PortType::Heightfield, true),
+                ],
+                vec![port("out", PortType::Heightfield, false)],
+                move |_, p, i| {
+                    let k = blend_opacity(p)?;
+                    Ok(out(
+                        "out",
+                        map2(field(i, "in")?, field(i, "b")?, |a, b| {
+                            a + (op(a, b) - a) * k
+                        })?,
+                    ))
+                },
+            )
+            .local(|_| 0),
+        );
+    }
+    r.register(
+        NodeDef::new::<BlendParams, _>(
+            "jd.math.lerp@1",
+            "in + (b − in) × t × opacity: blends another layer over the chain where the optional 0..1 `t` mask says (everywhere when unwired) — World Creator's layer overwrite with a mask and an opacity",
+            vec![
+                port("in", PortType::Heightfield, true),
+                port("b", PortType::Heightfield, true),
+                port("t", PortType::Heightfield, false),
+            ],
+            vec![port("out", PortType::Heightfield, false)],
+            |_, p, i| {
+                let k = blend_opacity(p)?;
+                let t = i.get("t").map(|v| v.as_field());
+                Ok(out("out", map3(field(i, "in")?, field(i, "b")?, t.map(|t| &**t), |a, b, t| a + (b - a) * t.clamp(0.0, 1.0) * k)?))
+            },
+        )
+        .local(|_| 0),
     );
     r.register(
         NodeDef::new::<NoParams, _>(
@@ -1524,6 +1613,85 @@ mod tests {
         // A third evaluation with nothing changed is served from the cache outright.
         let (_, again) = ev.evaluate_with(&edited, &world, 0, None).expect("again");
         assert!(again.nodes.iter().all(|n| n.cached));
+    }
+
+    #[test]
+    fn blend_nodes_take_the_lower_the_higher_or_a_masked_mix_scaled_by_opacity() {
+        let reg = Registry::with_builtins();
+        let mut g = Graph::default();
+        let a = add(
+            &mut g,
+            "jd.noise.fbm@1",
+            serde_json::json!({ "seed": 1, "height_range_m": [0.0, 100.0], "feature_size_m": 64.0 }),
+        );
+        // Constant fields: the noise scaled to zero, then remapped to one value.
+        let zero = add(
+            &mut g,
+            "jd.math.scale@1",
+            serde_json::json!({ "factor": 0.0 }),
+        );
+        connect(&mut g, &a, "out", &zero, "in");
+        let b = add(
+            &mut g,
+            "jd.math.remap@1",
+            serde_json::json!({ "from": [0.0, 1.0], "to": [50.0, 50.0] }),
+        ); // a flat 50 m
+        let t = add(
+            &mut g,
+            "jd.math.remap@1",
+            serde_json::json!({ "from": [0.0, 1.0], "to": [0.25, 0.25] }),
+        ); // a constant mask
+        connect(&mut g, &zero, "out", &b, "in");
+        connect(&mut g, &zero, "out", &t, "in");
+        let lo = add(&mut g, "jd.math.min@1", serde_json::json!({}));
+        let hi = add(
+            &mut g,
+            "jd.math.max@1",
+            serde_json::json!({ "opacity": 0.5 }),
+        );
+        let mix = add(&mut g, "jd.math.lerp@1", serde_json::json!({}));
+        let plain = add(
+            &mut g,
+            "jd.math.lerp@1",
+            serde_json::json!({ "opacity": 0.0 }),
+        );
+        for (n, has_t) in [(&lo, false), (&hi, false), (&mix, true), (&plain, false)] {
+            connect(&mut g, &a, "out", n, "in");
+            connect(&mut g, &b, "out", n, "b");
+            if has_t {
+                connect(&mut g, &t, "out", n, "t");
+            }
+        }
+        let cache = Cache::default();
+        let ev = Evaluator::new(&reg, &cache);
+        let (outs, _) = ev.evaluate_with(&g, &world(), 0, None).expect("eval");
+        let f = |id: &NodeId| outs[&(id.clone(), "out".into())].as_field().to_vec();
+        let (av, lov, hiv, mixv, plainv) = (f(&a), f(&lo), f(&hi), f(&mix), f(&plain));
+        for i in 0..av.len() {
+            assert!(
+                (lov[i] - av[i].min(50.0)).abs() < 1e-4,
+                "min at {i}: {} vs {}",
+                lov[i],
+                av[i]
+            );
+            assert!(
+                (hiv[i] - (av[i] + (av[i].max(50.0) - av[i]) * 0.5)).abs() < 1e-4,
+                "max at half opacity at {i}"
+            );
+            assert!(
+                (mixv[i] - (av[i] + (50.0 - av[i]) * 0.25)).abs() < 1e-4,
+                "lerp by the 0.25 mask at {i}"
+            );
+            assert_eq!(plainv[i], av[i], "opacity 0 passes the input through");
+        }
+        let bad = add(
+            &mut g,
+            "jd.math.min@1",
+            serde_json::json!({ "opacity": 1.5 }),
+        );
+        connect(&mut g, &a, "out", &bad, "in");
+        connect(&mut g, &b, "out", &bad, "b");
+        assert!(ev.evaluate_with(&g, &world(), 0, None).is_err());
     }
 
     #[test]
