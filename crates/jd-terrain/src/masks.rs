@@ -209,9 +209,99 @@ pub fn pattern_mask(
     Ok(out)
 }
 
+/// Whole-terrain actions (World Creator's Flip X / Flip Y / Rot Left / Rot Right / Flatten).
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TerrainAction {
+    /// Mirror east ↔ west.
+    FlipX,
+    /// Mirror north ↔ south.
+    FlipY,
+    /// Turn 90° counter-clockwise seen from above (east goes north). Square fields only.
+    RotateLeft,
+    /// Turn 90° clockwise seen from above (east goes south). Square fields only.
+    RotateRight,
+    /// Every cell to one height: `height_m`, or the field's mean when it is not given.
+    Flatten,
+}
+
+/// Apply a whole-terrain action. Row 0 is the south edge, column 0 the west edge.
+pub fn terrain_action(
+    h: &Heightfield,
+    action: TerrainAction,
+    height_m: Option<f32>,
+) -> JdResult<Heightfield> {
+    let (w, hh) = (h.width(), h.height());
+    if matches!(
+        action,
+        TerrainAction::RotateLeft | TerrainAction::RotateRight
+    ) && w != hh
+    {
+        return Err(JdError::invalid(
+            "action",
+            format!("a 90° turn needs a square world; this one is {w}×{hh}"),
+        )
+        .next("Flip instead, or make the world square."));
+    }
+    if let Some(v) = height_m
+        && !v.is_finite()
+    {
+        return Err(JdError::invalid("height_m", "must be finite"));
+    }
+    let mut out = h.clone();
+    match action {
+        TerrainAction::FlipX => out.fill_with(|x, y| h.get(w - 1 - x, y)),
+        TerrainAction::FlipY => out.fill_with(|x, y| h.get(x, hh - 1 - y)),
+        // New (x, y) is where old (x0, y0) lands: CCW sends old east (x0 = w − 1) to new north.
+        TerrainAction::RotateLeft => out.fill_with(|x, y| h.get(y, hh - 1 - x)),
+        TerrainAction::RotateRight => out.fill_with(|x, y| h.get(w - 1 - y, x)),
+        TerrainAction::Flatten => {
+            let v = height_m.unwrap_or(h.stats().mean as f32);
+            out.fill_with(|_, _| v);
+        }
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn actions_flip_turn_and_flatten_with_row_zero_south() {
+        let mut h = Heightfield::new(4, 4, 4, 0).expect("hf");
+        h.fill_with(|x, y| (x + 10 * y) as f32); // east grows by 1, north by 10
+        let fx = terrain_action(&h, TerrainAction::FlipX, None).expect("fx");
+        assert_eq!(fx.get(0, 0), 3.0);
+        let fy = terrain_action(&h, TerrainAction::FlipY, None).expect("fy");
+        assert_eq!(fy.get(0, 0), 30.0);
+        // Left: the south-east corner (3, 0) = 3 ends up north-east (3, 3).
+        let l = terrain_action(&h, TerrainAction::RotateLeft, None).expect("left");
+        assert_eq!(l.get(3, 3), 3.0);
+        assert_eq!(
+            l.get(0, 0),
+            30.0,
+            "the north-west corner comes to the south-west"
+        );
+        // Right undoes left.
+        let back = terrain_action(&l, TerrainAction::RotateRight, None).expect("right");
+        assert_eq!(back.to_vec(), h.to_vec());
+        let flat = terrain_action(&h, TerrainAction::Flatten, None).expect("flat");
+        assert!(
+            flat.to_vec().iter().all(|v| (*v - 16.5).abs() < 1e-5),
+            "flatten to the mean"
+        );
+        assert_eq!(
+            terrain_action(&h, TerrainAction::Flatten, Some(7.0))
+                .expect("flat7")
+                .get(2, 2),
+            7.0
+        );
+        let wide = Heightfield::new(8, 4, 4, 0).expect("hf");
+        assert!(terrain_action(&wide, TerrainAction::RotateLeft, None).is_err());
+    }
 
     #[test]
     fn aspect_lights_the_slopes_that_face_the_sun_and_leaves_flat_ground_half() {

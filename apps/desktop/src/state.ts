@@ -171,6 +171,8 @@ interface State {
    *  the height output (or beside it for snow, which does not move the terrain), its masks are published
    *  as layers, a material row takes the first mask, and the viewport colours by it. */
   addSimulation: (which: SimulationKind) => Promise<void>;
+  /** A whole-terrain action (`jd.filter.action@1`) spliced in front of the height output. */
+  applyAction: (action: "flip_x" | "flip_y" | "rotate_left" | "rotate_right" | "flatten") => Promise<void>;
   /** Paint the scatter mask: a clamped (0..1) stroke node in front of the mask's output, brush strength 0.5, sculpt mode on. */
   paintDensity: () => Promise<void>;
   /** What the next viewport drag draws: a road (a spline node in front of the height output), or nothing (brush strokes). */
@@ -875,6 +877,10 @@ export const useStore = create<State>((set, get) => {
       // Colour by the first mask once the (live or explicit) evaluation has published it.
       pendingColor = sim.publish[0]?.[1] ?? null;
       set({ selectedNode: id });
+    },
+    applyAction: async (action) => {
+      const id = await spliceBefore("height", "jd.filter.action@1", { action });
+      if (id) set({ selectedNode: id });
     },
     paintDensity: async () => {
       const mask = get().scatter.mask;

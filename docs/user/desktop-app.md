@@ -146,6 +146,10 @@ Blend operations are nodes like everything else: **min**, **max** and **lerp** (
 
 ## Viewport chrome
 
+**Actions.** The right panel's **Actions** row — **Flip X**, **Flip Y**, **Rot ⟲**, **Rot ⟳** (90°, square worlds) and **Flatten** (to the mean, or `height_m`) — splices a `jd.filter.action@1` node in front of the height output, so every action is a layer-stack row you can bypass, reorder or remove, and undo works as for any edit. UI-driven test: `apps/desktop/e2e/actions.spec.ts`.
+
+**Esc aborts.** While a job runs the header shows its progress, a **Cancel** button and *Esc to abort*: pressing Esc anywhere outside a text field cancels every running job (inside a field Esc only leaves the field). UI-driven test: `apps/desktop/e2e/jobs.spec.ts`.
+
 Around the terrain the viewport carries what World Creator's does: a **compass strip** at the top (N / E / S / W and 15° ticks scroll as you orbit; the readout gives the heading the camera looks toward and its distance), a **height ruler** down the left edge (the shown layer's range in metres with nice ticks, the zero line heavier, negative heights in amber, the sea level marked when a sea-level node is in the graph, `Max` / `Min` at the ends), **shortcut hints** at the bottom that change with the tool (orbit, Sculpt, Grid, Road), and three buttons at the top left: **Fit** (home view), **Still** (save the frame under `exports/stills/`) and **Fullscreen**. The header shows the brand mark (the bird-head line drawing; the window icon is the disc version) and an icon toolbar — **New**, **Open**, **Save**, **Import**, **Export**, **Undo**, **Redo**, **Generate**, **Evaluate**, **Still**, **Fullscreen** — that runs the same actions as the native menu and its shortcuts. UI-driven test: `apps/desktop/e2e/chrome.spec.ts`.
 
 ## Hydrology layers in the viewport

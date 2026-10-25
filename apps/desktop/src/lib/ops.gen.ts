@@ -2411,6 +2411,15 @@ graph, unset → the world's shared wind. */
   "shadow_deg"?: number;
 };
 
+export type TerrainAction = "flip_x" | "flip_y" | "rotate_left" | "rotate_right" | "flatten";
+
+export type NodeParams_jd_filter_action_1 = {
+  /** The action. */
+  "action": TerrainAction;
+  /** Flatten: the height, metres (omit for the field's mean). */
+  "height_m"?: number | null;
+};
+
 export type NodeParams_jd_filter_blur_1 = {
   /** Box-blur radius in pixels (1..=4; must not exceed the world's tile halo). */
   "radius"?: number;
@@ -2992,6 +3001,7 @@ export interface NodeKinds {
   "jd.erosion.stream_power@1": NodeParams_jd_erosion_stream_power_1;
   "jd.erosion.thermal@1": NodeParams_jd_erosion_thermal_1;
   "jd.erosion.yardang@1": NodeParams_jd_erosion_yardang_1;
+  "jd.filter.action@1": NodeParams_jd_filter_action_1;
   "jd.filter.blur@1": NodeParams_jd_filter_blur_1;
   "jd.filter.denoise@1": NodeParams_jd_filter_denoise_1;
   "jd.filter.edge_fade@1": NodeParams_jd_filter_edge_fade_1;

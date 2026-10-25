@@ -1606,6 +1606,80 @@
     }
   },
   {
+    "kind": "jd.filter.action@1",
+    "description": "A whole-terrain action: `flip_x` (east ↔ west), `flip_y` (north ↔ south), `rotate_left` / `rotate_right` (90°, square worlds), or `flatten` to `height_m` (default the mean) — World Creator's Actions row",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "ActionParams",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "The action.",
+          "$ref": "#/$defs/TerrainAction"
+        },
+        "height_m": {
+          "description": "Flatten: the height, metres (omit for the field's mean).",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float",
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "action"
+      ],
+      "$defs": {
+        "TerrainAction": {
+          "description": "Whole-terrain actions (World Creator's Flip X / Flip Y / Rot Left / Rot Right / Flatten).",
+          "oneOf": [
+            {
+              "description": "Mirror east ↔ west.",
+              "type": "string",
+              "const": "flip_x"
+            },
+            {
+              "description": "Mirror north ↔ south.",
+              "type": "string",
+              "const": "flip_y"
+            },
+            {
+              "description": "Turn 90° counter-clockwise seen from above (east goes north). Square fields only.",
+              "type": "string",
+              "const": "rotate_left"
+            },
+            {
+              "description": "Turn 90° clockwise seen from above (east goes south). Square fields only.",
+              "type": "string",
+              "const": "rotate_right"
+            },
+            {
+              "description": "Every cell to one height: `height_m`, or the field's mean when it is not given.",
+              "type": "string",
+              "const": "flatten"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
     "kind": "jd.filter.blur@1",
     "description": "Box blur (tile-local, reads through the halo; radius ≤ world.halo)",
     "inputs": [

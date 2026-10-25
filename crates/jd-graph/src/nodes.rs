@@ -404,6 +404,16 @@ fn pattern_width() -> f32 {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct ActionParams {
+    /// The action.
+    action: jd_terrain::TerrainAction,
+    /// Flatten: the height, metres (omit for the field's mean).
+    #[serde(default)]
+    height_m: Option<f32>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct AspectParams {
     /// Compass direction the light comes from, degrees clockwise from north (180 = a southern sun).
     #[serde(default = "south")]
@@ -933,6 +943,16 @@ pub fn register_all(r: &mut Registry) {
         |ctx, p, i| {
             let pp: PatternParams = params(p)?;
             Ok(out("out", jd_terrain::pattern_mask(field(i, "in")?, spacing_m(ctx), pp.kind, pp.period_m, pp.width_m, pp.angle_deg, pp.softness)?))
+        },
+    ).with_memory(4.0));
+    r.register(NodeDef::new::<ActionParams, _>(
+        "jd.filter.action@1",
+        "A whole-terrain action: `flip_x` (east ↔ west), `flip_y` (north ↔ south), `rotate_left` / `rotate_right` (90°, square worlds), or `flatten` to `height_m` (default the mean) — World Creator's Actions row",
+        vec![port("in", PortType::Heightfield, true)],
+        vec![port("out", PortType::Heightfield, false)],
+        |_, p, i| {
+            let ap: ActionParams = params(p)?;
+            Ok(out("out", jd_terrain::terrain_action(field(i, "in")?, ap.action, ap.height_m)?))
         },
     ).with_memory(4.0));
     // Masks and filters from World Creator's distribution and filter lists.
