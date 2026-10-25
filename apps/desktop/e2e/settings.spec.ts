@@ -48,6 +48,8 @@ test.describe("project settings against the real core", () => {
     expect(await page.getByTestId("panel-left").evaluate((el) => getComputedStyle(el).width)).toBe("300px");
     await page.getByTestId("project-path").fill(proj);
     await page.getByTestId("open-project").click();
+    // The start-up probe already shows the project the core still has open; wait for this Open itself.
+    await expect(page.getByTestId("log")).toContainText("project.open: ok");
     await expect(page.locator("header")).toContainText("World — 128²");
     await expect(page.getByTestId("wind-azimuth")).toHaveValue("270");
     await expect(page.getByTestId("wind-speed")).toHaveValue("8");

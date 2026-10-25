@@ -502,7 +502,10 @@ export const useStore = create<State>((set, get) => {
     lookTimer = setTimeout(() => {
       const { project, materials, scatter, sun } = get();
       if (!project) return;
-      void run("project.set_look", { materials, scatter: { mask: scatter.mask, spacing_m: scatter.spacing_m, seed: scatter.seed, grow: scatter.grow }, sun: { azimuth_deg: sun.azimuth_deg, elevation_deg: sun.elevation_deg, turbidity: sun.turbidity, clouds: sun.clouds, fog: sun.fog } });
+      // A background write like autosave: `op` + `log`, never `run` — `run` flips `busy`, which
+      // disables every gated button for the round trip, and a click landing in that window is lost
+      // (seen as e2e flakes: Paint density ignored while the look was being written).
+      op<JdOps["project.set_look"]["result"]>("project.set_look", { materials, scatter: { mask: scatter.mask, spacing_m: scatter.spacing_m, seed: scatter.seed, grow: scatter.grow }, sun: { azimuth_deg: sun.azimuth_deg, elevation_deg: sun.elevation_deg, turbidity: sun.turbidity, clouds: sun.clouds, fog: sun.fog } }).then(log, (e) => logFailure("project.set_look", e));
     }, 400);
   };
   // Autosave: a debounced project.save after any journaled edit, so `dirty` / `journal` return to
@@ -577,8 +580,9 @@ export const useStore = create<State>((set, get) => {
     waves: null,
     loadWaves: async (wind) => {
       if (!wind) return set({ waves: null });
-      const r = await run("ocean.waves", wind);
-      set({ waves: r.status === "ok" ? (r.result ?? null) : null });
+      const r = await op<JdOps["ocean.waves"]["result"]>("ocean.waves", wind).catch((e: unknown) => (logFailure("ocean.waves", e), null)); // background (an effect on wind changes): no `busy`
+      if (r) log(r);
+      set({ waves: r?.status === "ok" ? (r.result ?? null) : null });
     },
     materials: [],
     setMaterials: (materials) => {
@@ -949,8 +953,12 @@ export const useStore = create<State>((set, get) => {
       const r = await run("project.open", { path });
       if (r.status === "ok" && r.result) {
         // The graph first, then the project: the Noise panel shows the opened graph's values
-        // before anything is editable, so a quick edit cannot be overwritten by the load.
-        set({ project: null, layer: null, preview: null, lastEval: null });
+        // before anything is editable, so a quick edit cannot be overwritten by the load. Opening
+        // the project already shown (the start-up probe found it, then Open on the same path) keeps
+        // it mounted: unmounting would drop an edit in progress (seen as an e2e flake: a settings
+        // value typed before the Open round trip came back was wiped by the remount).
+        const same = get().project?.project_id === r.result.project_id;
+        if (!same) set({ project: null, layer: null, preview: null, lastEval: null });
         await loadGraph();
         set({ project: r.result, ...lookState(r.result) });
         void refreshMaps();

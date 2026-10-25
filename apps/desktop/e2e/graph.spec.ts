@@ -90,6 +90,9 @@ test.describe("node graph editor against the real core", () => {
     await page.getByTestId("graph-evaluate").click();
     await expect(page.getByTestId("layer-stats")).toBeVisible();
     await expect(page.getByTestId("viewport-info")).toContainText(/ [1-9][\d,]* tris/);
+    // The live preview may have shown those already: wait for the explicit evaluation itself, since
+    // Undo / Redo are disabled while it runs (busy) and a click on a disabled button is lost.
+    await expect(page.getByTestId("log")).toContainText("graph.evaluate: ok");
 
     // Delete key on the selected blur node removes it and its edge through graph.remove_node.
     await blur.click();
