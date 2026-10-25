@@ -2725,6 +2725,38 @@ class mask instead of a height. */
   "clamp"?: [number, number] | null;
 };
 
+export type TransformKind = "rotate" | "scale" | "tilt" | "push" | "align" | "duplicate";
+
+export type RegionShape = "round" | "square";
+
+export type RegionTransform = {
+  /** The op. */
+  "kind": TransformKind;
+  /** Region centre in layer metres `[u, v]`. */
+  "center_m": [number, number];
+  /** Region radius (round) or half-width (square), metres. */
+  "radius_m": number;
+  /** Footprint shape. */
+  "shape"?: RegionShape;
+  /** Share of the radius over which the effect fades out at the edge (0 = hard edge, 1 = all the way in). */
+  "falloff"?: number;
+  /** Rotate: degrees counter-clockwise. Tilt: slope angle in degrees. */
+  "angle_deg"?: number;
+  /** Tilt: direction the slope rises toward, degrees clockwise from north. */
+  "azimuth_deg"?: number;
+  /** Scale: relief factor about the region's mean. */
+  "factor"?: number;
+  /** Push / Duplicate: displacement in metres `[east, north]`. */
+  "vector_m"?: [number, number];
+  /** Blend of the result over the original, 0..1. */
+  "strength"?: number;
+};
+
+export type NodeParams_jd_sculpt_transforms_1 = {
+  /** Region transforms replayed in order (appended one per brush drag or grid button). */
+  "ops"?: RegionTransform[];
+};
+
 export type PlaceOp = "add" | "max" | "min" | "lerp";
 
 export type NodeParams_jd_shape_polygon_1 = {
@@ -3038,6 +3070,7 @@ export interface NodeKinds {
   "jd.output.height@1": NodeParams_jd_output_height_1;
   "jd.pattern@1": NodeParams_jd_pattern_1;
   "jd.sculpt.strokes@1": NodeParams_jd_sculpt_strokes_1;
+  "jd.sculpt.transforms@1": NodeParams_jd_sculpt_transforms_1;
   "jd.shape.polygon@1": NodeParams_jd_shape_polygon_1;
   "jd.shape.primitive@1": NodeParams_jd_shape_primitive_1;
   "jd.shape.stamp@1": NodeParams_jd_shape_stamp_1;

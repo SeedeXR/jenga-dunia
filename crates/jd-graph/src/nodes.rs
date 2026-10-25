@@ -404,6 +404,14 @@ fn pattern_width() -> f32 {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
+struct TransformsParams {
+    /// Region transforms replayed in order (appended one per brush drag or grid button).
+    #[serde(default)]
+    ops: Vec<jd_terrain::RegionTransform>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct ActionParams {
     /// The action.
     action: jd_terrain::TerrainAction,
@@ -945,6 +953,16 @@ pub fn register_all(r: &mut Registry) {
             Ok(out("out", jd_terrain::pattern_mask(field(i, "in")?, spacing_m(ctx), pp.kind, pp.period_m, pp.width_m, pp.angle_deg, pp.softness)?))
         },
     ).with_memory(4.0));
+    r.register(NodeDef::new::<TransformsParams, _>(
+        "jd.sculpt.transforms@1",
+        "Region transforms replayed in order — rotate, scale (relief about the mean), tilt, push (grab), align (onto the best-fit plane), duplicate — on a round brush footprint or a square grid selection, each with a soft edge; World Creator's brush and grid transform tools",
+        vec![port("in", PortType::Heightfield, true)],
+        vec![port("out", PortType::Heightfield, false)],
+        |ctx, p, i| {
+            let tp: TransformsParams = params(p)?;
+            Ok(out("out", jd_terrain::apply_transforms(field(i, "in")?, spacing_m(ctx), &tp.ops)?))
+        },
+    ).with_memory(8.0));
     r.register(NodeDef::new::<ActionParams, _>(
         "jd.filter.action@1",
         "A whole-terrain action: `flip_x` (east ↔ west), `flip_y` (north ↔ south), `rotate_left` / `rotate_right` (90°, square worlds), or `flatten` to `height_m` (default the mean) — World Creator's Actions row",

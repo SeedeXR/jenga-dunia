@@ -16,8 +16,14 @@ export type NoiseSettings = Required<Omit<NoiseParams, "offset_m" | "warp" | "oc
 export interface Brush {
   radius_m: number;
   strength_m: number;
-  mode: "raise" | "lower" | "smooth" | "flatten";
+  mode: "raise" | "lower" | "smooth" | "flatten" | "rotate" | "scale" | "tilt" | "push" | "align";
   amount: number;
+  /** Rotate: degrees per drag (counter-clockwise). */
+  angle_deg: number;
+  /** Scale: relief factor about the footprint's mean. */
+  factor: number;
+  /** Tilt: slope angle, degrees; the drag direction sets which way it rises. */
+  tilt_deg: number;
   /** Edge hardness 0..1 (0 = soft falloff over the whole radius, 1 = hard edge). */
   hardness: number;
   target_m: number | null;
@@ -34,6 +40,11 @@ export interface GridTool {
   smoothness: number;
   height_m: number;
   step_m: number;
+  /** Transform settings for the selection: rotation (degrees), relief factor, tilt angle and its direction. */
+  angle_deg: number;
+  factor: number;
+  tilt_deg: number;
+  tilt_azimuth_deg: number;
 }
 
 export interface LogEntry {
@@ -121,7 +132,7 @@ interface State {
   adjustBrush: (what: "radius" | "strength", factor: number) => void;
   /** Grid tool: cells of the world selected in the viewport and levelled, raised or lowered as one square-stamp stroke. */
   grid: GridTool;
-  setGrid: (patch: Partial<Pick<GridTool, "cells" | "smoothness" | "height_m" | "step_m">>) => void;
+  setGrid: (patch: Partial<Omit<GridTool, "on" | "selected">>) => void;
   /** Turn the grid tool on (leaves sculpt mode) or off. */
   toggleGrid: (on: boolean) => void;
   /** Add, remove or toggle cells (`[ix, iy]` from the south-west corner) in the selection. */
@@ -129,6 +140,8 @@ interface State {
   gridClear: () => void;
   /** One journaled stroke over the selected cells: `set` flattens them to `height_m`, `raise` / `lower` move them by `step_m`. */
   gridApply: (kind: "set" | "raise" | "lower") => Promise<void>;
+  /** A transform of the selection (its bounding square) appended to the transforms node. */
+  gridTransform: (kind: "duplicate" | "rotate" | "scale" | "tilt" | "align") => Promise<void>;
   /** Viewport sun direction (not part of the project). */
   sun: { azimuth_deg: number; elevation_deg: number; turbidity: number; clouds: number; fog: number };
   setSun: (patch: Partial<{ azimuth_deg: number; elevation_deg: number; turbidity: number; clouds: number; fog: number }>) => void;
@@ -519,6 +532,25 @@ export const useStore = create<State>((set, get) => {
     if (existing) return existing.id;
     return spliceBefore(layer, "jd.sculpt.strokes@1", clamp ? { clamp } : null);
   };
+  // The transforms node feeding the height output (spliced in when there is none).
+  const transformsNodeFor = async (layer: string): Promise<string | null> => {
+    const g = get().graph;
+    const output = g.nodes.find((n) => n.kind.startsWith("jd.output.height@") && String(n.params?.layer ?? "height") === layer);
+    if (!output) return null;
+    // Anywhere up the chain that feeds the output (a strokes node spliced later sits in front of it).
+    const seen = new Set<string>();
+    let cur: string | undefined = output.id;
+    while (cur && !seen.has(cur)) {
+      seen.add(cur);
+      const feed = g.edges.find((e) => e.to.node === cur && e.to.port === "in");
+      const up = feed ? g.nodes.find((n) => n.id === feed.from.node) : undefined;
+      if (!up) break;
+      if (up.kind.startsWith("jd.sculpt.transforms@")) return up.id;
+      cur = up.id;
+    }
+    return spliceBefore(layer, "jd.sculpt.transforms@1", null);
+  };
+  const r1 = (v: number) => Math.round(v * 10) / 10;
   type GraphView = GraphListResult;
   // The look (materials, scatter, sun) lives in scene.json: restored from the project summary on
   // open, written back (debounced, journaled) whenever a setter changes it.
@@ -681,12 +713,12 @@ export const useStore = create<State>((set, get) => {
     setSelectedNode: (id) => set({ selectedNode: id }),
     sculpting: false,
     setSculpting: (on) => set({ sculpting: on, ...(on ? {} : { drawing: null }) }),
-    brush: { radius_m: 150, strength_m: 40, mode: "raise", amount: 0.5, hardness: 0, target_m: null },
+    brush: { radius_m: 150, strength_m: 40, mode: "raise", amount: 0.5, hardness: 0, target_m: null, angle_deg: 30, factor: 1.5, tilt_deg: 15 },
     adjustBrush: (what, factor) =>
       set((s) => ({
         brush: what === "radius" ? { ...s.brush, radius_m: Math.max(1, Math.round(s.brush.radius_m * factor)) } : { ...s.brush, strength_m: Math.round(s.brush.strength_m * factor * 10) / 10 },
       })),
-    grid: { on: false, cells: 32, selected: [], smoothness: 0.25, height_m: 0, step_m: 10 },
+    grid: { on: false, cells: 32, selected: [], smoothness: 0.25, height_m: 0, step_m: 10, angle_deg: 90, factor: 1.5, tilt_deg: 10, tilt_azimuth_deg: 0 },
     setGrid: (patch) => set((s) => ({ grid: { ...s.grid, ...patch } })),
     toggleGrid: (on) => set((s) => ({ grid: { ...s.grid, on }, ...(on ? { sculpting: false, drawing: null } : {}) })),
     gridSelect: (cells, op) =>
@@ -713,6 +745,39 @@ export const useStore = create<State>((set, get) => {
       const value = kind === "set" ? { ...base, mode: "flatten", target_m: grid.height_m } : { ...base, mode: "raise", strength_m: kind === "raise" ? grid.step_m : -grid.step_m };
       set({ selectedNode: id });
       await mutate("graph.append_param", { id, key: "strokes", value });
+    },
+    gridTransform: async (kind) => {
+      const { grid, project } = get();
+      if (!project || grid.selected.length === 0) return;
+      const ext = project.world.extent_m;
+      const [cw, ch] = [ext[0] / grid.cells, ext[1] / grid.cells];
+      const cells = grid.selected.map((k) => k.split(",").map(Number) as [number, number]);
+      const xs = cells.map(([x]) => x);
+      const ys = cells.map(([, y]) => y);
+      // The selection's bounding square: World Creator transforms the selected block as one piece.
+      const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs) + 1, Math.min(...ys), Math.max(...ys) + 1];
+      const centre = [r1(((x0 + x1) / 2) * cw), r1(((y0 + y1) / 2) * ch)];
+      const half = r1((Math.max((x1 - x0) * cw, (y1 - y0) * ch)) / 2);
+      const id = await transformsNodeFor("height");
+      if (!id) return;
+      set({ selectedNode: id });
+      await mutate("graph.append_param", {
+        id,
+        key: "ops",
+        value: {
+          kind,
+          center_m: centre,
+          radius_m: half,
+          shape: "square",
+          falloff: Math.round(grid.smoothness * 100) / 100,
+          angle_deg: kind === "tilt" ? grid.tilt_deg : grid.angle_deg,
+          azimuth_deg: grid.tilt_azimuth_deg,
+          factor: grid.factor,
+          // Duplicate: the copy lands one selection-width east.
+          vector_m: kind === "duplicate" ? [r1((x1 - x0) * cw), 0] : [0, 0],
+          strength: 1,
+        },
+      });
     },
     sun: { azimuth_deg: 140, elevation_deg: 35, turbidity: 3, clouds: 0, fog: 0 },
     setSun: (patch) => {
@@ -900,6 +965,34 @@ export const useStore = create<State>((set, get) => {
         const rounded = points.map(([u, v]) => [Math.round(u * 10) / 10, Math.round(v * 10) / 10]);
         const id = await spliceBefore("height", "jd.terrain.spline@1", { points: rounded, width_m: get().roadWidthM });
         if (id) set({ selectedNode: id });
+        return;
+      }
+      const xform = (["rotate", "scale", "tilt", "push", "align"] as const).find((m) => m === get().brush.mode);
+      if (xform) {
+        // A transform brush: the drag's start is the centre, its end gives the push vector and the tilt direction.
+        if (points.length === 0) return;
+        const b = get().brush;
+        const [p0, p1] = [points[0]!, points[points.length - 1]!];
+        const d = [p1[0] - p0[0], p1[1] - p0[1]];
+        const id = await transformsNodeFor("height");
+        if (!id) return;
+        set({ selectedNode: id });
+        await mutate("graph.append_param", {
+          id,
+          key: "ops",
+          value: {
+            kind: xform,
+            center_m: [r1(p0[0]), r1(p0[1])],
+            radius_m: b.radius_m,
+            shape: "round",
+            falloff: Math.round((1 - b.hardness) * 100) / 100,
+            angle_deg: xform === "tilt" ? b.tilt_deg : b.angle_deg,
+            azimuth_deg: Math.round(((Math.atan2(d[0]!, d[1]!) * 180) / Math.PI + 360) % 360),
+            factor: b.factor,
+            vector_m: [r1(d[0]!), r1(d[1]!)],
+            strength: b.amount,
+          },
+        });
         return;
       }
       const { selectedNode, graph, brush } = get();

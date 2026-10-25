@@ -844,8 +844,33 @@ export default function App() {
                   <option value="lower">lower</option>
                   <option value="smooth">smooth</option>
                   <option value="flatten">flatten</option>
+                  <option value="rotate">rotate</option>
+                  <option value="scale">scale</option>
+                  <option value="tilt">tilt</option>
+                  <option value="push">push / pull</option>
+                  <option value="align">align</option>
                 </select>
               </Field>
+              {s.brush.mode === "rotate" && (
+                <Field label="Angle (°)">
+                  <input className={inputCls} type="number" step={5} value={s.brush.angle_deg} onChange={(e) => s.setBrush({ angle_deg: Number(e.target.value) })} title="Click (or drag) on the terrain: the footprint turns this much counter-clockwise about where you pressed" data-testid="brush-angle" />
+                </Field>
+              )}
+              {s.brush.mode === "scale" && (
+                <Field label="Factor">
+                  <input className={inputCls} type="number" step={0.1} min={0} max={10} value={s.brush.factor} onChange={(e) => s.setBrush({ factor: Number(e.target.value) })} title="Relief about the footprint's mean: 0 levels it, 2 doubles it" data-testid="brush-factor" />
+                </Field>
+              )}
+              {s.brush.mode === "tilt" && (
+                <Field label="Tilt (°)">
+                  <input className={inputCls} type="number" step={1} value={s.brush.tilt_deg} onChange={(e) => s.setBrush({ tilt_deg: Number(e.target.value) })} title="Drag on the terrain: the footprint tilts this much, rising in the drag's direction" data-testid="brush-tilt" />
+                </Field>
+              )}
+              {(s.brush.mode === "rotate" || s.brush.mode === "scale" || s.brush.mode === "tilt" || s.brush.mode === "push" || s.brush.mode === "align") && (
+                <p className="mb-2 text-[11px] text-jd-fg-2" data-testid="brush-xform-hint">
+                  {s.brush.mode === "push" ? "Drag: the terrain under the brush slides with the drag (grab)." : s.brush.mode === "align" ? "Click: the footprint is levelled onto its own best-fit plane." : "Press where the footprint is centred; each drag is one transform in a jd.sculpt.transforms node."}
+                </p>
+              )}
               <Field label="Radius (m)">
                 <input className={inputCls} type="number" value={s.brush.radius_m} onChange={(e) => s.setBrush({ radius_m: Number(e.target.value) })} data-testid="brush-radius" />
               </Field>
@@ -906,6 +931,32 @@ export default function App() {
               <div className="mb-2 flex gap-2">
                 <button className="btn" onClick={() => void s.gridApply("raise")} disabled={s.grid.selected.length === 0 || s.busy} data-testid="grid-raise">Raise</button>
                 <button className="btn" onClick={() => void s.gridApply("lower")} disabled={s.grid.selected.length === 0 || s.busy} data-testid="grid-lower">Lower</button>
+              </div>
+              <h3 className="mb-1 text-[11px] font-semibold text-jd-fg-1">Transform selection</h3>
+              <div className="mb-1 grid grid-cols-[auto_1fr_auto_1fr] items-center gap-1 text-[11px] text-jd-fg-2">
+                <span>Angle</span>
+                <input className={`${inputCls} w-full`} type="number" step={5} value={s.grid.angle_deg} onChange={(e) => s.setGrid({ angle_deg: Number(e.target.value) })} data-testid="grid-angle" />
+                <span>Factor</span>
+                <input className={`${inputCls} w-full`} type="number" step={0.1} value={s.grid.factor} onChange={(e) => s.setGrid({ factor: Number(e.target.value) })} data-testid="grid-factor" />
+                <span>Tilt</span>
+                <input className={`${inputCls} w-full`} type="number" step={1} value={s.grid.tilt_deg} onChange={(e) => s.setGrid({ tilt_deg: Number(e.target.value) })} data-testid="grid-tilt" />
+                <span>Toward</span>
+                <input className={`${inputCls} w-full`} type="number" step={15} value={s.grid.tilt_azimuth_deg} onChange={(e) => s.setGrid({ tilt_azimuth_deg: Number(e.target.value) })} title="Direction the tilt rises toward, degrees clockwise from north" data-testid="grid-tilt-azimuth" />
+              </div>
+              <div className="mb-2 flex flex-wrap gap-1" data-testid="grid-transforms">
+                {(
+                  [
+                    ["duplicate", "Duplicate", "Copy the selected block one selection-width east"],
+                    ["rotate", "Rotate", "Turn the selected block by Angle (counter-clockwise)"],
+                    ["scale", "Scale", "Scale the block's relief about its mean by Factor"],
+                    ["tilt", "Tilt", "Tilt the block by Tilt degrees, rising toward Toward"],
+                    ["align", "Align", "Level the block onto its own best-fit plane"],
+                  ] as const
+                ).map(([k, label, title]) => (
+                  <button key={k} className="btn" onClick={() => void s.gridTransform(k)} disabled={s.grid.selected.length === 0 || s.busy} title={`${title} — appended to a jd.sculpt.transforms node; Raise / Lower above are World Creator's Push / Pull`} data-testid={`grid-${k}`}>
+                    {label}
+                  </button>
+                ))}
               </div>
               <dl className="mb-4 grid grid-cols-[auto_1fr] gap-x-2 text-[11px] text-jd-fg-2" data-testid="grid-shortcuts">
                 <dt>Click</dt><dd>toggle a cell</dd>

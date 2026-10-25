@@ -39,6 +39,8 @@ pub mod sim;
 pub mod sky;
 pub mod snowpack;
 pub mod spline;
+pub mod transform;
+pub use transform::{RegionShape, RegionTransform, TransformKind, apply_transforms};
 pub mod vector;
 pub use vector::{Polyline, geojson_lines, river_polylines};
 pub mod stamp;

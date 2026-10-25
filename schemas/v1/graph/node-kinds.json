@@ -3335,6 +3335,172 @@
     }
   },
   {
+    "kind": "jd.sculpt.transforms@1",
+    "description": "Region transforms replayed in order — rotate, scale (relief about the mean), tilt, push (grab), align (onto the best-fit plane), duplicate — on a round brush footprint or a square grid selection, each with a soft edge; World Creator's brush and grid transform tools",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "TransformsParams",
+      "type": "object",
+      "properties": {
+        "ops": {
+          "description": "Region transforms replayed in order (appended one per brush drag or grid button).",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RegionTransform"
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false,
+      "$defs": {
+        "RegionTransform": {
+          "description": "One region transform.",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "description": "The op.",
+              "$ref": "#/$defs/TransformKind"
+            },
+            "center_m": {
+              "description": "Region centre in layer metres `[u, v]`.",
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "radius_m": {
+              "description": "Region radius (round) or half-width (square), metres.",
+              "type": "number",
+              "format": "float"
+            },
+            "shape": {
+              "description": "Footprint shape.",
+              "$ref": "#/$defs/RegionShape",
+              "default": "round"
+            },
+            "falloff": {
+              "description": "Share of the radius over which the effect fades out at the edge (0 = hard edge, 1 = all the way in).",
+              "type": "number",
+              "format": "float",
+              "default": 0.30000001192092896
+            },
+            "angle_deg": {
+              "description": "Rotate: degrees counter-clockwise. Tilt: slope angle in degrees.",
+              "type": "number",
+              "format": "float",
+              "default": 0.0
+            },
+            "azimuth_deg": {
+              "description": "Tilt: direction the slope rises toward, degrees clockwise from north.",
+              "type": "number",
+              "format": "float",
+              "default": 0.0
+            },
+            "factor": {
+              "description": "Scale: relief factor about the region's mean.",
+              "type": "number",
+              "format": "float",
+              "default": 1.0
+            },
+            "vector_m": {
+              "description": "Push / Duplicate: displacement in metres `[east, north]`.",
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "minItems": 2,
+              "maxItems": 2,
+              "default": [
+                0.0,
+                0.0
+              ]
+            },
+            "strength": {
+              "description": "Blend of the result over the original, 0..1.",
+              "type": "number",
+              "format": "float",
+              "default": 1.0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "center_m",
+            "radius_m"
+          ]
+        },
+        "TransformKind": {
+          "description": "What a region transform does.",
+          "oneOf": [
+            {
+              "description": "Turn the terrain inside the region about its centre by `angle_deg` (counter-clockwise from above).",
+              "type": "string",
+              "const": "rotate"
+            },
+            {
+              "description": "Scale the relief about the region's mean height by `factor` (0 levels it, 2 doubles it).",
+              "type": "string",
+              "const": "scale"
+            },
+            {
+              "description": "Tilt the region: add a slope of `angle_deg` rising toward `azimuth_deg` (clockwise from north).",
+              "type": "string",
+              "const": "tilt"
+            },
+            {
+              "description": "Grab and move: the terrain under the region slides by `vector_m` (fading with the weight).",
+              "type": "string",
+              "const": "push"
+            },
+            {
+              "description": "Level the region onto its own best-fit plane (keeps the slope, removes the bumps).",
+              "type": "string",
+              "const": "align"
+            },
+            {
+              "description": "Copy the region's terrain to the region shifted by `vector_m`.",
+              "type": "string",
+              "const": "duplicate"
+            }
+          ]
+        },
+        "RegionShape": {
+          "description": "The region's footprint.",
+          "oneOf": [
+            {
+              "description": "A disc of `radius_m` (brush tools).",
+              "type": "string",
+              "const": "round"
+            },
+            {
+              "description": "A square of half-width `radius_m` (grid selections).",
+              "type": "string",
+              "const": "square"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
     "kind": "jd.shape.polygon@1",
     "description": "A polygon layer: a closed outline (`points` in layer metres) takes `height_m` through `op` — `lerp` flattens a pad, `add` lifts, `max` / `min` clip — fading to nothing over `falloff_m` outside the outline, at `opacity` (World Creator's polygon shape)",
     "inputs": [
