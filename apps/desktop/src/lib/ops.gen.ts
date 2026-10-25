@@ -2296,11 +2296,25 @@ export type NodeParams_jd_filter_blur_1 = {
   "radius"?: number;
 };
 
+export type NodeParams_jd_filter_denoise_1 = {
+  /** Box-blur radius in pixels (1..=4; must not exceed the world's tile halo). */
+  "radius"?: number;
+};
+
 export type NodeParams_jd_filter_edge_fade_1 = {
   /** Width of the fade inside the border, metres (> 0). */
   "width_m"?: number;
   /** Height the border fades to, metres. */
   "edge_m"?: number;
+};
+
+export type MorphMode = "inflate" | "deflate";
+
+export type NodeParams_jd_filter_inflate_1 = {
+  /** Grow or shrink. */
+  "mode": MorphMode;
+  /** Window radius in pixels (1..=4; must not exceed the world's tile halo). */
+  "radius"?: number;
 };
 
 export type NodeParams_jd_filter_terrace_1 = {
@@ -2832,7 +2846,9 @@ export interface NodeKinds {
   "jd.erosion.thermal@1": NodeParams_jd_erosion_thermal_1;
   "jd.erosion.yardang@1": NodeParams_jd_erosion_yardang_1;
   "jd.filter.blur@1": NodeParams_jd_filter_blur_1;
+  "jd.filter.denoise@1": NodeParams_jd_filter_denoise_1;
   "jd.filter.edge_fade@1": NodeParams_jd_filter_edge_fade_1;
+  "jd.filter.inflate@1": NodeParams_jd_filter_inflate_1;
   "jd.filter.terrace@1": NodeParams_jd_filter_terrace_1;
   "jd.hydrology.fill@1": NodeParams_jd_hydrology_fill_1;
   "jd.hydrology.network@1": NodeParams_jd_hydrology_network_1;

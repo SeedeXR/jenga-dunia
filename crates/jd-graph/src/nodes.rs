@@ -343,6 +343,25 @@ enum CurveKind {
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum MorphMode {
+    /// Each cell takes the highest value within the radius: ridges and islands grow, pits close.
+    Inflate,
+    /// Each cell takes the lowest value within the radius: ridges thin, valleys widen.
+    Deflate,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct MorphParams {
+    /// Grow or shrink.
+    mode: MorphMode,
+    /// Window radius in pixels (1..=4; must not exceed the world's tile halo).
+    #[serde(default = "one")]
+    radius: u32,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct CurveParams {
     /// The curve.
@@ -736,11 +755,18 @@ fn rivers_depth() -> f32 {
 
 /// Tile-local box blur that reads neighbours through the halo (ADR-0005). Fails cleanly when
 /// the field's halo is smaller than the radius — a tile must never read outside its padding.
-fn box_blur(a: &Heightfield, radius: u32) -> JdResult<Heightfield> {
+/// A tile-local window filter: `reduce` sees the (2r+1)² values around each cell (through the
+/// halo) and returns the cell's new value — the mean is a box blur, max / min inflate / deflate,
+/// the median denoises.
+fn window_filter(
+    a: &Heightfield,
+    radius: u32,
+    reduce: impl Fn(&mut [f32]) -> f32 + Sync,
+) -> JdResult<Heightfield> {
     if radius == 0 || radius > a.halo() {
         return Err(JdError::invalid(
             "radius",
-            format!("blur radius {radius} exceeds the tile halo {}", a.halo()),
+            format!("filter radius {radius} exceeds the tile halo {}", a.halo()),
         )
         .why("Tile-local filters can only read as far as the halo around each tile.")
         .next("Lower the radius or raise `world.halo` in project.json."));
@@ -753,16 +779,16 @@ fn box_blur(a: &Heightfield, radius: u32) -> JdResult<Heightfield> {
         .par_iter()
         .map(|t| {
             let mut data = vec![0.0f32; (ts * ts) as usize];
-            let n = ((2 * r + 1) * (2 * r + 1)) as f32;
+            let mut window = Vec::with_capacity(((2 * r + 1) * (2 * r + 1)) as usize);
             for iy in 0..ts as i64 {
                 for ix in 0..ts as i64 {
-                    let mut sum = 0.0f32;
+                    window.clear();
                     for dy in -r..=r {
                         for dx in -r..=r {
-                            sum += t.get_padded(ix + dx, iy + dy);
+                            window.push(t.get_padded(ix + dx, iy + dy));
                         }
                     }
-                    data[(iy * ts as i64 + ix) as usize] = sum / n;
+                    data[(iy * ts as i64 + ix) as usize] = reduce(&mut window);
                 }
             }
             data
@@ -774,6 +800,17 @@ fn box_blur(a: &Heightfield, radius: u32) -> JdResult<Heightfield> {
         t[((y % ts) * ts + (x % ts)) as usize]
     });
     Ok(outf)
+}
+
+fn box_blur(a: &Heightfield, radius: u32) -> JdResult<Heightfield> {
+    window_filter(a, radius, |w| w.iter().sum::<f32>() / w.len() as f32)
+}
+
+/// The median of a window (partial sort; NaN-free fields by construction).
+fn median(w: &mut [f32]) -> f32 {
+    let mid = w.len() / 2;
+    let (_, m, _) = w.select_nth_unstable_by(mid, |a, b| a.total_cmp(b));
+    *m
 }
 
 /// Register every built-in node kind.
@@ -1083,6 +1120,42 @@ pub fn register_all(r: &mut Registry) {
             let _ = p;
             p.get("radius").and_then(|v| v.as_u64()).unwrap_or(1) as u32
         }),
+    );
+    r.register(
+        NodeDef::new::<MorphParams, _>(
+            "jd.filter.inflate@1",
+            "Morphological inflate / deflate: each cell takes the highest (or lowest) value within `radius` pixels — grows or shrinks masks and landforms, closes pits or thins ridges (World Creator's Inflate / Expand and Shrink; tile-local, radius ≤ world.halo)",
+            vec![port("in", PortType::Heightfield, true)],
+            vec![port("out", PortType::Heightfield, false)],
+            |_, p, i| {
+                let mp: MorphParams = params(p)?;
+                if !(1..=4).contains(&mp.radius) {
+                    return Err(JdError::invalid("radius", "must be within 1..=4"));
+                }
+                let f = field(i, "in")?;
+                Ok(out("out", match mp.mode {
+                    MorphMode::Inflate => window_filter(f, mp.radius, |w| w.iter().copied().fold(f32::NEG_INFINITY, f32::max))?,
+                    MorphMode::Deflate => window_filter(f, mp.radius, |w| w.iter().copied().fold(f32::INFINITY, f32::min))?,
+                }))
+            },
+        )
+        .local(|p| p.get("radius").and_then(|v| v.as_u64()).unwrap_or(1) as u32),
+    );
+    r.register(
+        NodeDef::new::<BlurParams, _>(
+            "jd.filter.denoise@1",
+            "Median filter: removes single-cell spikes and pits (DEM noise, import artefacts) while keeping edges that a blur would soften (World Creator's Denoise; tile-local, radius ≤ world.halo)",
+            vec![port("in", PortType::Heightfield, true)],
+            vec![port("out", PortType::Heightfield, false)],
+            |_, p, i| {
+                let bp: BlurParams = params(p)?;
+                if !(1..=4).contains(&bp.radius) {
+                    return Err(JdError::invalid("radius", "must be within 1..=4"));
+                }
+                Ok(out("out", window_filter(field(i, "in")?, bp.radius, median)?))
+            },
+        )
+        .local(|p| p.get("radius").and_then(|v| v.as_u64()).unwrap_or(1) as u32),
     );
     r.register(NodeDef::new::<ThermalParams, _>(
         "jd.erosion.thermal@1",
@@ -1854,6 +1927,43 @@ mod tests {
         // A third evaluation with nothing changed is served from the cache outright.
         let (_, again) = ev.evaluate_with(&edited, &world, 0, None).expect("again");
         assert!(again.nodes.iter().all(|n| n.cached));
+    }
+
+    #[test]
+    fn inflate_grows_a_spike_and_the_median_removes_it_while_a_blur_spreads_it() {
+        let mut h = Heightfield::new(32, 32, 32, 2).expect("hf");
+        h.fill_with(|x, y| if (x, y) == (16, 16) { 10.0 } else { 0.0 });
+        let grown = window_filter(&h, 1, |w| {
+            w.iter().copied().fold(f32::NEG_INFINITY, f32::max)
+        })
+        .expect("inflate");
+        let high = (0..32)
+            .flat_map(|y| (0..32).map(move |x| (x, y)))
+            .filter(|&(x, y)| grown.get(x, y) == 10.0)
+            .count();
+        assert_eq!(high, 9, "a 3×3 block");
+        let shrunk = window_filter(&grown, 1, |w| {
+            w.iter().copied().fold(f32::INFINITY, f32::min)
+        })
+        .expect("deflate");
+        assert_eq!(shrunk.get(16, 16), 10.0);
+        assert_eq!(
+            shrunk.get(15, 16),
+            0.0,
+            "open = inflate then deflate restores the spike"
+        );
+        let clean = window_filter(&h, 1, median).expect("median");
+        assert_eq!(
+            clean.get(16, 16),
+            0.0,
+            "a lone spike is noise to the median"
+        );
+        let blurred = box_blur(&h, 1).expect("blur");
+        assert!((blurred.get(16, 16) - 10.0 / 9.0).abs() < 1e-5);
+        assert!(
+            window_filter(&h, 3, median).is_err(),
+            "radius past the halo"
+        );
     }
 
     #[test]
