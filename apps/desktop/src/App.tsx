@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { Box, Brush, Camera, Download, FileInput, FilePlus, FolderOpen, FolderPlus, FolderSearch, Globe, Grid3x3, Home, Maximize2, Mountain, PanelBottom, PanelLeftClose, PanelLeftOpen, PanelRight, PanelRightClose, PanelRightOpen, Play, Redo2, Route, Save, Undo2, Upload, Wand2, Workflow } from "lucide-react";
+import { Box, Brush, Camera, Circle, CircleDot, Download, FileInput, FilePlus, FolderOpen, FolderPlus, FolderSearch, Gem, Globe, Grid2x2, Grid3x3, Grip, Home, Maximize2, Mountain, PanelBottom, PanelLeftClose, PanelLeftOpen, PanelRight, PanelRightClose, PanelRightOpen, Play, Redo2, Route, Save, Sparkles, Undo2, Upload, Wand2, WavesVertical, Workflow } from "lucide-react";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import GraphPanel from "./graph/GraphPanel";
 import LayerStack from "./graph/LayerStack";
@@ -871,6 +871,23 @@ export default function App() {
                   {s.brush.mode === "push" ? "Drag: the terrain under the brush slides with the drag (grab)." : s.brush.mode === "align" ? "Click: the footprint is levelled onto its own best-fit plane." : "Press where the footprint is centred; each drag is one transform in a jd.sculpt.transforms node."}
                 </p>
               )}
+              <div className="mb-2 grid grid-cols-7 gap-1" role="radiogroup" aria-label="Brush alpha" data-testid="brush-alphas">
+                {(
+                  [
+                    ["plain", Circle, "Plain: the smooth round falloff"],
+                    ["noise", Sparkles, "Noise: fractal value noise, 0.25..1 of the stroke"],
+                    ["crater", CircleDot, "Crater: a raised rim round a sunken bowl"],
+                    ["ridges", WavesVertical, "Ridges: parallel bands across the stroke"],
+                    ["rocks", Gem, "Rocks: rounded rock bumps"],
+                    ["dots", Grip, "Dots: scattered round dots"],
+                    ["checker", Grid2x2, "Checker: full and quarter strength squares"],
+                  ] as const
+                ).map(([k, Icon, title]) => (
+                  <button key={k} className={`flex aspect-square items-center justify-center rounded-md border ${s.brush.alpha === k ? "border-jd-accent bg-jd-bg-3 text-jd-fg-0" : "border-white/5 bg-jd-bg-2 text-jd-fg-2 hover:text-jd-fg-0"}`} title={title} aria-label={title} role="radio" aria-checked={s.brush.alpha === k} onClick={() => s.setBrush({ alpha: k })} data-testid={`alpha-${k}`}>
+                    <Icon size={14} />
+                  </button>
+                ))}
+              </div>
               <Field label="Radius (m)">
                 <input className={inputCls} type="number" value={s.brush.radius_m} onChange={(e) => s.setBrush({ radius_m: Number(e.target.value) })} data-testid="brush-radius" />
               </Field>
@@ -894,6 +911,29 @@ export default function App() {
               <p className="mb-2 text-xs text-jd-fg-2">
                 {s.brush.mode === "raise" ? "Drag on the terrain to raise it." : s.brush.mode === "lower" ? "Drag on the terrain to lower it." : s.brush.mode === "smooth" ? "Drag to blend heights towards their local mean." : "Drag to pull heights towards the target height."} Each stroke is one undo step.
               </p>
+              {sculptNode && (
+                <div className="mb-3 rounded-lg bg-jd-bg-2/60 p-2" data-testid="layer-settings">
+                  <h3 className="jd-section mb-1">Layer settings</h3>
+                  {(
+                    [
+                      ["height_scale", "Height scale", 1, 0.1, "Multiplies what the strokes changed (0 hides the layer)"],
+                      ["height_offset_m", "Height offset (m)", 0, 1, "Added wherever the layer applies"],
+                      ["blending", "Blending", 1, 0.05, "Opacity of the whole layer, 0..1"],
+                      ["level_step_m", "Level step (m)", 0, 1, "Quantise the change into steps of this height (0 = off)"],
+                    ] as const
+                  ).map(([key, label, dflt, step, title]) => (
+                    <Field key={key} label={label}>
+                      <input className={inputCls} type="number" step={step} key={`${key}-${String(sculptNode.params?.[key] ?? dflt)}`} defaultValue={Number(sculptNode.params?.[key] ?? dflt)} title={title} onBlur={(e) => { const v = Number(e.target.value); if (v !== Number(sculptNode.params?.[key] ?? dflt)) void s.setParam(sculptNode.id, key, v); }} data-testid={`layer-${key}`} />
+                    </Field>
+                  ))}
+                  <div className="mt-1 flex items-center justify-between text-[11px] text-jd-fg-2">
+                    <span data-testid="layer-area">{sculptNode.params?.area ? "area: placed" : "area: whole terrain"}</span>
+                    <button className="btn btn-primary" disabled={!sculptNode.params?.area} onClick={() => void s.setParam(sculptNode.id, "area", null)} title="Apply the layer over the whole terrain (clears the area; place one in the inspector)" data-testid="layer-fit">
+                      Fit to terrain
+                    </button>
+                  </div>
+                </div>
+              )}
               <dl className="mb-4 grid grid-cols-[auto_1fr] gap-x-2 text-[11px] text-jd-fg-2" data-testid="brush-shortcuts">
                 <dt>Left drag</dt><dd>stroke</dd>
                 <dt>Right drag</dt><dd>orbit</dd>

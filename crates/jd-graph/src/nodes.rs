@@ -565,6 +565,21 @@ struct SculptParams {
     /// class mask instead of a height.
     #[serde(default)]
     clamp: Option<[f32; 2]>,
+    /// Layer setting: multiplies what the strokes changed (0 hides the layer).
+    #[serde(default = "one_f")]
+    height_scale: f32,
+    /// Layer setting: added to the change wherever the layer applies, metres.
+    #[serde(default)]
+    height_offset_m: f32,
+    /// Layer setting: opacity of the whole layer, 0..1.
+    #[serde(default = "one_f")]
+    blending: f32,
+    /// Layer setting: quantise the change into steps of this many metres (0 = off).
+    #[serde(default)]
+    level_step_m: f32,
+    /// Layer setting: where the layer applies (omit = the whole terrain).
+    #[serde(default)]
+    area: Option<jd_terrain::LayerArea>,
 }
 
 /// One biome rule: every given range must hold; a range on an input that is not connected
@@ -1461,7 +1476,10 @@ pub fn register_all(r: &mut Registry) {
         vec![port("out", PortType::Heightfield, false)],
         |ctx, p, i| {
             let sp: SculptParams = params(p)?;
-            let painted = apply_strokes(field(i, "in")?, spacing_m(ctx), &sp.strokes)?;
+            let base = field(i, "in")?;
+            let painted = apply_strokes(base, spacing_m(ctx), &sp.strokes)?;
+            let layer = jd_terrain::LayerSettings { height_scale: sp.height_scale, height_offset_m: sp.height_offset_m, blending: sp.blending, level_step_m: sp.level_step_m, area: sp.area };
+            let painted = if layer == jd_terrain::LayerSettings::default() { painted } else { jd_terrain::apply_layer_settings(base, &painted, spacing_m(ctx), &layer)? };
             let Some([lo, hi]) = sp.clamp else {
                 return Ok(out("out", painted));
             };

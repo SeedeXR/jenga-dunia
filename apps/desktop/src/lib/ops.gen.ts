@@ -2697,6 +2697,8 @@ export type StrokeMode = "raise" | "smooth" | "flatten";
 
 export type StrokeShape = "round" | "square";
 
+export type BrushAlpha = "plain" | "noise" | "crater" | "ridges" | "rocks" | "dots" | "checker";
+
 export type Stroke = {
   /** Polyline in layer metres: `[u east, v north]` from the south-west corner (row 0 = south). */
   "points": ([number, number])[];
@@ -2715,6 +2717,19 @@ starts (0 = the falloff spans the whole radius, 1 = a hard edge). */
   "shape"?: StrokeShape;
   /** `flatten` only: the height to flatten to, metres; unset = the height under the first point. */
   "target_m"?: number | null;
+  /** Brush alpha: the pattern inside the footprint (default plain). */
+  "alpha"?: BrushAlpha;
+};
+
+export type LayerArea = {
+  /** Centre `[u east, v north]`, metres. */
+  "center_m": [number, number];
+  /** Width and depth, metres. */
+  "size_m": [number, number];
+  /** Rotation about the centre, degrees clockwise from north. */
+  "rotation_deg"?: number;
+  /** Fade width inside the edge, metres. */
+  "blend_m"?: number;
 };
 
 export type NodeParams_jd_sculpt_strokes_1 = {
@@ -2723,6 +2738,16 @@ export type NodeParams_jd_sculpt_strokes_1 = {
   /** Keep the result within [min, max] after the strokes — `[0, 1]` when painting a density or
 class mask instead of a height. */
   "clamp"?: [number, number] | null;
+  /** Layer setting: multiplies what the strokes changed (0 hides the layer). */
+  "height_scale"?: number;
+  /** Layer setting: added to the change wherever the layer applies, metres. */
+  "height_offset_m"?: number;
+  /** Layer setting: opacity of the whole layer, 0..1. */
+  "blending"?: number;
+  /** Layer setting: quantise the change into steps of this many metres (0 = off). */
+  "level_step_m"?: number;
+  /** Layer setting: where the layer applies (omit = the whole terrain). */
+  "area"?: LayerArea | null;
 };
 
 export type TransformKind = "rotate" | "scale" | "tilt" | "push" | "align" | "duplicate";

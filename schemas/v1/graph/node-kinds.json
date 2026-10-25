@@ -3226,6 +3226,42 @@
           "minItems": 2,
           "maxItems": 2,
           "default": null
+        },
+        "height_scale": {
+          "description": "Layer setting: multiplies what the strokes changed (0 hides the layer).",
+          "type": "number",
+          "format": "float",
+          "default": 1.0
+        },
+        "height_offset_m": {
+          "description": "Layer setting: added to the change wherever the layer applies, metres.",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        },
+        "blending": {
+          "description": "Layer setting: opacity of the whole layer, 0..1.",
+          "type": "number",
+          "format": "float",
+          "default": 1.0
+        },
+        "level_step_m": {
+          "description": "Layer setting: quantise the change into steps of this many metres (0 = off).",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        },
+        "area": {
+          "description": "Layer setting: where the layer applies (omit = the whole terrain).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LayerArea"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "additionalProperties": false,
@@ -3288,6 +3324,11 @@
               ],
               "format": "float",
               "default": null
+            },
+            "alpha": {
+              "description": "Brush alpha: the pattern inside the footprint (default plain).",
+              "$ref": "#/$defs/BrushAlpha",
+              "default": "plain"
             }
           },
           "additionalProperties": false,
@@ -3329,6 +3370,89 @@
               "type": "string",
               "const": "square"
             }
+          ]
+        },
+        "BrushAlpha": {
+          "description": "Brush alpha: the pattern inside the footprint (World Creator's brush palette). It multiplies the\nfalloff; patterns are laid out in brush-sized units from the layer origin, so a long stroke\nreads as one continuous texture.",
+          "oneOf": [
+            {
+              "description": "The plain smooth falloff.",
+              "type": "string",
+              "const": "plain"
+            },
+            {
+              "description": "Fractal value noise, 0.25..1 of the stroke.",
+              "type": "string",
+              "const": "noise"
+            },
+            {
+              "description": "A raised rim at 3/4 of the radius around a sunken bowl (raise mode: a crater; lower: a ring dyke).",
+              "type": "string",
+              "const": "crater"
+            },
+            {
+              "description": "Parallel bands across the stroke, three per radius, running north–south.",
+              "type": "string",
+              "const": "ridges"
+            },
+            {
+              "description": "Rounded rock bumps (a cellular pattern, half-radius cells).",
+              "type": "string",
+              "const": "rocks"
+            },
+            {
+              "description": "Scattered round dots.",
+              "type": "string",
+              "const": "dots"
+            },
+            {
+              "description": "A checkerboard of full and quarter strength.",
+              "type": "string",
+              "const": "checker"
+            }
+          ]
+        },
+        "LayerArea": {
+          "description": "Where a sculpt layer applies: a rectangle in layer metres, turned about its centre, fading over\n`blend_m` at its edge (World Creator's Area Settings). No area = the whole world.",
+          "type": "object",
+          "properties": {
+            "center_m": {
+              "description": "Centre `[u east, v north]`, metres.",
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "size_m": {
+              "description": "Width and depth, metres.",
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "rotation_deg": {
+              "description": "Rotation about the centre, degrees clockwise from north.",
+              "type": "number",
+              "format": "float",
+              "default": 0.0
+            },
+            "blend_m": {
+              "description": "Fade width inside the edge, metres.",
+              "type": "number",
+              "format": "float",
+              "default": 0.0
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "center_m",
+            "size_m"
           ]
         }
       }

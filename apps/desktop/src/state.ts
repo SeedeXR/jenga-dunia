@@ -24,6 +24,8 @@ export interface Brush {
   factor: number;
   /** Tilt: slope angle, degrees; the drag direction sets which way it rises. */
   tilt_deg: number;
+  /** Brush alpha: the pattern inside the footprint. */
+  alpha: "plain" | "noise" | "crater" | "ridges" | "rocks" | "dots" | "checker";
   /** Edge hardness 0..1 (0 = soft falloff over the whole radius, 1 = hard edge). */
   hardness: number;
   target_m: number | null;
@@ -713,7 +715,7 @@ export const useStore = create<State>((set, get) => {
     setSelectedNode: (id) => set({ selectedNode: id }),
     sculpting: false,
     setSculpting: (on) => set({ sculpting: on, ...(on ? {} : { drawing: null }) }),
-    brush: { radius_m: 150, strength_m: 40, mode: "raise", amount: 0.5, hardness: 0, target_m: null, angle_deg: 30, factor: 1.5, tilt_deg: 15 },
+    brush: { radius_m: 150, strength_m: 40, mode: "raise", amount: 0.5, hardness: 0, target_m: null, angle_deg: 30, factor: 1.5, tilt_deg: 15, alpha: "plain" },
     adjustBrush: (what, factor) =>
       set((s) => ({
         brush: what === "radius" ? { ...s.brush, radius_m: Math.max(1, Math.round(s.brush.radius_m * factor)) } : { ...s.brush, strength_m: Math.round(s.brush.strength_m * factor * 10) / 10 },
@@ -1011,6 +1013,7 @@ export const useStore = create<State>((set, get) => {
           amount: brush.amount,
           hardness: brush.hardness,
           ...(brush.mode === "flatten" && brush.target_m != null ? { target_m: brush.target_m } : {}),
+          ...(brush.alpha !== "plain" ? { alpha: brush.alpha } : {}),
         },
       });
     },
