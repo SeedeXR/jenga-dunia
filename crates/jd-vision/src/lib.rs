@@ -72,6 +72,10 @@ pub struct Depth {
     pub masked_share: f32,
     /// MoGe-2's metric-scale estimate (metres per unit of shifted z); 1 for DA3.
     pub metric_scale: f32,
+    /// The ground-plane fit when a `camera_height_m` prior was given and a plane was found:
+    /// the height the depth implied before rescaling, the factor applied to `depth_m`, and the
+    /// share of lower-image pixels on the plane.
+    pub ground: Option<GroundFit>,
     /// The model family.
     pub model: ModelKind,
     /// Milliseconds spent loading the model (0 when the session was already resident).
@@ -173,6 +177,124 @@ const DA3_CANONICAL_FOCAL_PX: f32 = 300.0;
 /// 221 of MoGe's 222 nodes and then fails to compute them ("Unable to compute the prediction",
 /// zero-sized slices in the encoder) — and ort's default device policy would register it on
 /// macOS anyway — so the session asks for the CPU outright.
+/// What a camera-height prior did to the depth.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GroundFit {
+    /// Camera height above the fitted ground plane as the model's depth had it, metres.
+    pub fitted_height_m: f32,
+    /// `camera_height_m / fitted_height_m`, applied to every depth.
+    pub scale: f32,
+    /// Share of the lower-image trusted pixels within the plane's inlier band, 0..1.
+    pub inliers: f32,
+}
+
+/// Fit the ground plane in the lower part of a depth map (pinhole with `fov_x_deg`, y up) and
+/// return the camera's height above it with the inlier share — the monocular scale cue that
+/// makes a landscape read at its true size: metric heads trained on photos of rooms and streets
+/// read open country ~10× too close, and a photographer's eye height (or a drone's altitude) is a
+/// number the picture carries. RANSAC over three-point planes in the bottom 40 % of the image,
+/// inlier band 2 % of the median depth, the plane must face up (|n·ŷ| ≥ 0.7) and hold a third of
+/// the candidates; `None` when no such plane exists (a cliff face, a lake, the sky).
+pub fn ground_plane_height(
+    depth: &[f32],
+    trusted: &[bool],
+    w: u32,
+    h: u32,
+    fov_x_deg: f32,
+) -> Option<(f32, f32)> {
+    if !(fov_x_deg > 1.0 && fov_x_deg < 179.0)
+        || depth.len() != (w * h) as usize
+        || trusted.len() != depth.len()
+    {
+        return None;
+    }
+    let fx = (w as f32 * 0.5) / (fov_x_deg.to_radians() * 0.5).tan();
+    let (cx, cy) = (w as f32 * 0.5, h as f32 * 0.5);
+    // Candidates: trusted pixels in the bottom 40 % of the image, subsampled to ~4 k points.
+    let top = (h as f32 * 0.6) as u32;
+    let mut pts: Vec<[f32; 3]> = Vec::new();
+    let stride = (((w * (h - top)) as f32 / 4096.0).sqrt().ceil() as u32).max(1);
+    for i in (top..h).step_by(stride as usize) {
+        for j in (0..w).step_by(stride as usize) {
+            let k = (i * w + j) as usize;
+            if trusted[k] && depth[k].is_finite() && depth[k] > 0.0 {
+                let z = depth[k];
+                pts.push([
+                    (j as f32 + 0.5 - cx) / fx * z,
+                    -(i as f32 + 0.5 - cy) / fx * z,
+                    z,
+                ]);
+            }
+        }
+    }
+    if pts.len() < 30 {
+        return None;
+    }
+    let mut zs: Vec<f32> = pts.iter().map(|p| p[2]).collect();
+    zs.sort_by(f32::total_cmp);
+    let band = zs[zs.len() / 2] * 0.02;
+    let sub = |a: [f32; 3], b: [f32; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let cross = |a: [f32; 3], b: [f32; 3]| {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    };
+    let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    // A small deterministic LCG picks the triples: the same image gives the same plane.
+    let mut seed = 0x9E37_79B9u32 ^ (pts.len() as u32);
+    let mut next = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        seed as usize % pts.len()
+    };
+    let mut best: Option<([f32; 3], f32, usize)> = None;
+    for _ in 0..256 {
+        let (a, b, c) = (pts[next()], pts[next()], pts[next()]);
+        let n = cross(sub(b, a), sub(c, a));
+        let len = dot(n, n).sqrt();
+        if len < 1e-9 {
+            continue;
+        }
+        let n = [n[0] / len, n[1] / len, n[2] / len];
+        if n[1].abs() < 0.7 {
+            continue; // not a floor: a wall, a slope facing the camera
+        }
+        let d = -dot(n, a);
+        let inliers = pts
+            .iter()
+            .filter(|p| (dot(n, **p) + d).abs() <= band)
+            .count();
+        if best.is_none_or(|(_, _, k)| inliers > k) {
+            best = Some((n, d, inliers));
+        }
+    }
+    let (n, d, inliers) = best?;
+    if inliers * 3 < pts.len() {
+        return None;
+    }
+    // Refit on the inliers: the mean point and the mean normal direction give a steadier height.
+    let inl: Vec<[f32; 3]> = pts
+        .iter()
+        .copied()
+        .filter(|p| (dot(n, *p) + d).abs() <= band)
+        .collect();
+    let m = inl.iter().fold([0.0f32; 3], |acc, p| {
+        [acc[0] + p[0], acc[1] + p[1], acc[2] + p[2]]
+    });
+    let m = [
+        m[0] / inl.len() as f32,
+        m[1] / inl.len() as f32,
+        m[2] / inl.len() as f32,
+    ];
+    let height = dot(n, m).abs(); // distance from the camera (the origin) to the plane
+    (height > 0.0 && height.is_finite()).then_some((height, inliers as f32 / pts.len() as f32))
+}
+
+/// Depth from one photograph: see the module notes for the two model families; without a
+/// camera-height prior (see [`depth_from_image_with`]).
 pub fn depth_from_image(
     image: &Path,
     model: &Path,
@@ -181,6 +303,34 @@ pub fn depth_from_image(
     fov_x_deg: Option<f32>,
     camera_model: Option<&Path>,
 ) -> JdResult<Depth> {
+    depth_from_image_with(
+        image,
+        model,
+        max_px,
+        num_tokens,
+        fov_x_deg,
+        camera_model,
+        None,
+    )
+}
+
+/// [`depth_from_image`] plus a camera-height prior: with `camera_height_m` and a metric depth,
+/// the ground plane is fitted and every depth rescaled so the camera sits that high above it.
+#[allow(clippy::too_many_arguments)]
+pub fn depth_from_image_with(
+    image: &Path,
+    model: &Path,
+    max_px: u32,
+    num_tokens: i64,
+    fov_x_deg: Option<f32>,
+    camera_model: Option<&Path>,
+    camera_height_m: Option<f32>,
+) -> JdResult<Depth> {
+    if let Some(hm) = camera_height_m
+        && !(hm > 0.0 && hm.is_finite())
+    {
+        return Err(JdError::invalid("camera_height_m", "must be positive"));
+    }
     if !(518..=4096).contains(&max_px) {
         return Err(JdError::invalid("max_px", "must be within 518..=4096"));
     }
@@ -405,6 +555,23 @@ pub fn depth_from_image(
         )
         .next("Try a photograph with visible relief."));
     }
+    // The camera-height prior: fit the ground and rescale a metric depth to it.
+    let mut ground = None;
+    if let (Some(hm), true, Some(fov)) = (camera_height_m, metric, fov_x_deg)
+        && let Some((fitted, inliers)) = ground_plane_height(&depth, &trusted, w, h, fov)
+    {
+        let scale = hm / fitted;
+        for d in depth.iter_mut() {
+            *d *= scale;
+        }
+        lo *= scale;
+        hi *= scale;
+        ground = Some(GroundFit {
+            fitted_height_m: fitted,
+            scale,
+            inliers,
+        });
+    }
     let height01 = (0..n)
         .map(|i| {
             if trusted[i] {
@@ -430,6 +597,7 @@ pub fn depth_from_image(
         focal_shift,
         masked_share: 1.0 - n_trusted as f32 / n as f32,
         metric_scale,
+        ground,
         model: kind,
         load_ms,
         infer_ms,
@@ -601,6 +769,39 @@ mod tests {
 
     /// A pinhole camera with a known focal and a known z shift, seen through MoGe's affine
     /// convention, comes back with both numbers.
+    #[test]
+    fn a_level_camera_over_a_plane_recovers_its_height_and_the_scale_factor() {
+        // A pinhole 1.6 m above flat ground, 60° horizontal field of view, looking level: the
+        // ground fills the lower half; the model's depth is this scene read 10× too close.
+        let (w, h, fov) = (160u32, 120u32, 60.0f32);
+        let fx = (w as f32 * 0.5) / (fov.to_radians() * 0.5).tan();
+        let cy = h as f32 * 0.5;
+        let mut depth = vec![f32::NAN; (w * h) as usize];
+        let mut trusted = vec![false; (w * h) as usize];
+        for i in 0..h {
+            for j in 0..w {
+                let yd = -(i as f32 + 0.5 - cy) / fx; // ray slope downwards below the horizon
+                if yd < -0.02 {
+                    let z = 1.6 / -yd; // metres to the ground along the optical axis
+                    let k = (i * w + j) as usize;
+                    depth[k] = z * 0.1; // the 10× short reading
+                    trusted[k] = true;
+                }
+            }
+        }
+        let (fitted, inliers) = ground_plane_height(&depth, &trusted, w, h, fov).expect("a floor");
+        assert!((fitted - 0.16).abs() < 0.005, "fitted height {fitted}");
+        assert!(inliers > 0.9, "inliers {inliers}");
+        assert!((1.6 / fitted - 10.0).abs() < 0.3, "scale {}", 1.6 / fitted);
+        // A wall facing the camera (depth constant) is not a floor.
+        let wall: Vec<f32> = depth.iter().map(|_| 5.0).collect();
+        assert!(ground_plane_height(&wall, &trusted, w, h, fov).is_none());
+        assert!(
+            ground_plane_height(&depth, &trusted, w, h, 0.0).is_none(),
+            "a field of view is needed"
+        );
+    }
+
     #[test]
     fn focal_and_shift_are_recovered_from_a_synthetic_point_map() {
         let (w, h) = (96u32, 64u32);
