@@ -202,6 +202,126 @@ fn place_with(
     Ok(out)
 }
 
+/// A polygon layer: a closed outline in layer metres set to one height.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PolygonParams {
+    /// Corners in layer metres `[u east, v north]`, in order (≥ 3, any winding; the last joins the first).
+    pub points: Vec<[f32; 2]>,
+    /// The height the polygon takes, metres (what `op` combines with the terrain).
+    pub height_m: f32,
+    /// Soft edge outside the outline, metres (≥ 0): the effect fades to nothing over it.
+    #[serde(default)]
+    pub falloff_m: f32,
+    /// Combination with the terrain (default `lerp`: a flattened pad; `add` lifts, `max` / `min` clip).
+    #[serde(default = "polygon_op")]
+    pub op: PlaceOp,
+    /// Opacity 0..1 of the whole effect.
+    #[serde(default = "one")]
+    pub opacity: f32,
+}
+fn polygon_op() -> PlaceOp {
+    PlaceOp::Lerp
+}
+
+/// Even-odd point-in-polygon and the distance to the nearest edge, metres.
+fn polygon_inside_and_distance(points: &[[f32; 2]], u: f32, v: f32) -> (bool, f32) {
+    let mut inside = false;
+    let mut best = f32::INFINITY;
+    let n = points.len();
+    for i in 0..n {
+        let (a, b) = (points[i], points[(i + 1) % n]);
+        if (a[1] > v) != (b[1] > v) {
+            let x = a[0] + (v - a[1]) / (b[1] - a[1]) * (b[0] - a[0]);
+            if u < x {
+                inside = !inside;
+            }
+        }
+        let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+        let len2 = dx * dx + dy * dy;
+        let t = if len2 > 0.0 {
+            (((u - a[0]) * dx + (v - a[1]) * dy) / len2).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        best = best.min((u - (a[0] + t * dx)).hypot(v - (a[1] + t * dy)));
+    }
+    (inside, best)
+}
+
+/// Place a polygon on `h`: inside the outline the terrain takes `height_m` through `op` at full
+/// `opacity`; outside, the effect fades over `falloff_m` (a flattened building pad, a raised
+/// field, a clipped plateau — World Creator's polygon shape layer).
+pub fn place_polygon(
+    h: &Heightfield,
+    spacing_m: [f32; 2],
+    p: &PolygonParams,
+) -> JdResult<Heightfield> {
+    if p.points.len() < 3 || !p.points.iter().all(|c| c.iter().all(|v| v.is_finite())) {
+        return Err(JdError::invalid(
+            "points",
+            "need at least three finite corners",
+        ));
+    }
+    if !p.height_m.is_finite()
+        || !(p.falloff_m >= 0.0 && p.falloff_m.is_finite())
+        || !(0.0..=1.0).contains(&p.opacity)
+    {
+        return Err(JdError::invalid(
+            "height_m",
+            "height finite, falloff ≥ 0, opacity within 0..=1",
+        ));
+    }
+    if !spacing_m.iter().all(|s| *s > 0.0 && s.is_finite()) {
+        return Err(JdError::invalid(
+            "spacing_m",
+            "sample spacing must be positive",
+        ));
+    }
+    // Only cells within the outline's box (+ falloff) need the per-edge test.
+    let (mut lo, mut hi) = ([f32::INFINITY; 2], [f32::NEG_INFINITY; 2]);
+    for c in &p.points {
+        for k in 0..2 {
+            lo[k] = lo[k].min(c[k]);
+            hi[k] = hi[k].max(c[k]);
+        }
+    }
+    let mut out = h.clone();
+    out.fill_with(|x, y| {
+        let v0 = h.get(x, y);
+        let (u, v) = (
+            (x as f32 + 0.5) * spacing_m[0],
+            (y as f32 + 0.5) * spacing_m[1],
+        );
+        if u < lo[0] - p.falloff_m
+            || u > hi[0] + p.falloff_m
+            || v < lo[1] - p.falloff_m
+            || v > hi[1] + p.falloff_m
+        {
+            return v0;
+        }
+        let (inside, d) = polygon_inside_and_distance(&p.points, u, v);
+        let w = if inside {
+            1.0
+        } else if p.falloff_m > 0.0 {
+            (1.0 - d / p.falloff_m).clamp(0.0, 1.0)
+        } else {
+            0.0
+        } * p.opacity;
+        if w <= 0.0 {
+            return v0;
+        }
+        let blended = match p.op {
+            PlaceOp::Add => v0 + p.height_m,
+            PlaceOp::Max => v0.max(p.height_m),
+            PlaceOp::Min => v0.min(p.height_m),
+            PlaceOp::Lerp => p.height_m,
+        };
+        v0 + (blended - v0) * w
+    });
+    Ok(out)
+}
+
 /// Place a primitive on `h`.
 pub fn place_primitive(
     h: &Heightfield,
@@ -277,6 +397,56 @@ pub fn place_stamp(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_polygon_flattens_its_inside_and_fades_outside() {
+        let mut h = Heightfield::new(64, 64, 64, 0).expect("hf");
+        h.fill_with(|x, _| x as f32); // a ramp east
+        let pad = PolygonParams {
+            points: vec![
+                [200.0, 200.0],
+                [400.0, 200.0],
+                [400.0, 400.0],
+                [200.0, 400.0],
+            ],
+            height_m: 100.0,
+            falloff_m: 50.0,
+            op: PlaceOp::Lerp,
+            opacity: 1.0,
+        };
+        let out = place_polygon(&h, [10.0, 10.0], &pad).expect("pad");
+        assert_eq!(out.get(30, 30), 100.0, "inside: the pad height");
+        assert_eq!(out.get(5, 5), h.get(5, 5), "far outside: untouched");
+        // 25 m outside the east edge (u = 425): half-way through the falloff.
+        let mid = out.get(42, 30);
+        assert!(
+            (mid - (42.0 + (100.0 - 42.0) * 0.5)).abs() < 1.0,
+            "fade: {mid}"
+        );
+        let lifted = place_polygon(
+            &h,
+            [10.0, 10.0],
+            &PolygonParams {
+                op: PlaceOp::Add,
+                falloff_m: 0.0,
+                ..pad.clone()
+            },
+        )
+        .expect("add");
+        assert_eq!(lifted.get(30, 30), 130.0);
+        assert_eq!(lifted.get(42, 30), 42.0, "no falloff: a hard edge");
+        assert!(
+            place_polygon(
+                &h,
+                [10.0, 10.0],
+                &PolygonParams {
+                    points: vec![[0.0, 0.0], [1.0, 1.0]],
+                    ..pad
+                }
+            )
+            .is_err()
+        );
+    }
 
     fn flat() -> Heightfield {
         let mut h = Heightfield::new(64, 64, 64, 0).expect("hf");

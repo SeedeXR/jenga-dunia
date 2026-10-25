@@ -99,6 +99,9 @@ pub use sim::{
 pub use sky::{Sky, SkyParams, bake_sky_hdri, sky_preview_png};
 pub use snowpack::{SnowpackParams, snowpack};
 pub use spline::{SplineMode, SplineParams, apply_spline};
-pub use stamp::{PlaceOp, Placement, Primitive, PrimitiveParams, place_primitive, place_stamp};
+pub use stamp::{
+    PlaceOp, Placement, PolygonParams, Primitive, PrimitiveParams, place_polygon, place_primitive,
+    place_stamp,
+};
 pub use strata::{StrataParams, strata_hardness};
 pub use yardang::{YardangParams, wind_abrasion};

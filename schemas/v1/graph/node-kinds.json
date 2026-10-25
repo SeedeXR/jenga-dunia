@@ -3247,6 +3247,99 @@
     }
   },
   {
+    "kind": "jd.shape.polygon@1",
+    "description": "A polygon layer: a closed outline (`points` in layer metres) takes `height_m` through `op` — `lerp` flattens a pad, `add` lifts, `max` / `min` clip — fading to nothing over `falloff_m` outside the outline, at `opacity` (World Creator's polygon shape)",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "PolygonParams",
+      "description": "A polygon layer: a closed outline in layer metres set to one height.",
+      "type": "object",
+      "properties": {
+        "points": {
+          "description": "Corners in layer metres `[u east, v north]`, in order (≥ 3, any winding; the last joins the first).",
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            },
+            "minItems": 2,
+            "maxItems": 2
+          }
+        },
+        "height_m": {
+          "description": "The height the polygon takes, metres (what `op` combines with the terrain).",
+          "type": "number",
+          "format": "float"
+        },
+        "falloff_m": {
+          "description": "Soft edge outside the outline, metres (≥ 0): the effect fades to nothing over it.",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        },
+        "op": {
+          "description": "Combination with the terrain (default `lerp`: a flattened pad; `add` lifts, `max` / `min` clip).",
+          "$ref": "#/$defs/PlaceOp",
+          "default": "lerp"
+        },
+        "opacity": {
+          "description": "Opacity 0..1 of the whole effect.",
+          "type": "number",
+          "format": "float",
+          "default": 1.0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "points",
+        "height_m"
+      ],
+      "$defs": {
+        "PlaceOp": {
+          "description": "How a placed shape meets the terrain.",
+          "oneOf": [
+            {
+              "description": "Add the shape's height to the terrain.",
+              "type": "string",
+              "const": "add"
+            },
+            {
+              "description": "Keep the higher: the shape rises out of the terrain.",
+              "type": "string",
+              "const": "max"
+            },
+            {
+              "description": "Keep the lower: the shape is carved into the terrain.",
+              "type": "string",
+              "const": "min"
+            },
+            {
+              "description": "Replace the terrain with the shape's height.",
+              "type": "string",
+              "const": "lerp"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
     "kind": "jd.shape.primitive@1",
     "description": "A placed primitive — cone, dome, plateau, ramp or crater — at `center_m`, `size_m` and `rotation_deg`, its 0..1 shape scaled to `height_range_m`, faded over `falloff_m` at the edge, and combined with the terrain by `op` (add, max to raise it out, min to carve it in, lerp to overwrite) at `opacity`; `ratio` sets a plateau's flat top or a crater's rim radius, `floor` a crater's floor",
     "inputs": [

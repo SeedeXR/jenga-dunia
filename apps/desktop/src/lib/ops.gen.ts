@@ -2591,9 +2591,22 @@ class mask instead of a height. */
   "clamp"?: [number, number] | null;
 };
 
-export type Primitive = "cone" | "dome" | "plateau" | "ramp" | "crater";
-
 export type PlaceOp = "add" | "max" | "min" | "lerp";
+
+export type NodeParams_jd_shape_polygon_1 = {
+  /** Corners in layer metres `[u east, v north]`, in order (≥ 3, any winding; the last joins the first). */
+  "points": ([number, number])[];
+  /** The height the polygon takes, metres (what `op` combines with the terrain). */
+  "height_m": number;
+  /** Soft edge outside the outline, metres (≥ 0): the effect fades to nothing over it. */
+  "falloff_m"?: number;
+  /** Combination with the terrain (default `lerp`: a flattened pad; `add` lifts, `max` / `min` clip). */
+  "op"?: PlaceOp;
+  /** Opacity 0..1 of the whole effect. */
+  "opacity"?: number;
+};
+
+export type Primitive = "cone" | "dome" | "plateau" | "ramp" | "crater";
 
 export type NodeParams_jd_shape_primitive_1 = {
   /** Which shape. */
@@ -2882,6 +2895,7 @@ export interface NodeKinds {
   "jd.output.height@1": NodeParams_jd_output_height_1;
   "jd.pattern@1": NodeParams_jd_pattern_1;
   "jd.sculpt.strokes@1": NodeParams_jd_sculpt_strokes_1;
+  "jd.shape.polygon@1": NodeParams_jd_shape_polygon_1;
   "jd.shape.primitive@1": NodeParams_jd_shape_primitive_1;
   "jd.shape.stamp@1": NodeParams_jd_shape_stamp_1;
   "jd.terrain.spline@1": NodeParams_jd_terrain_spline_1;

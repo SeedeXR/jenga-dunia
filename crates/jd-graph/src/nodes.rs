@@ -969,6 +969,16 @@ pub fn register_all(r: &mut Registry) {
         },
     ).with_memory(4.0));
     // Placed shapes: World Creator's stamp and primitive layers.
+    r.register(NodeDef::new::<jd_terrain::PolygonParams, _>(
+        "jd.shape.polygon@1",
+        "A polygon layer: a closed outline (`points` in layer metres) takes `height_m` through `op` — `lerp` flattens a pad, `add` lifts, `max` / `min` clip — fading to nothing over `falloff_m` outside the outline, at `opacity` (World Creator's polygon shape)",
+        vec![port("in", PortType::Heightfield, true)],
+        vec![port("out", PortType::Heightfield, false)],
+        |ctx, p, i| {
+            let pp: jd_terrain::PolygonParams = params(p)?;
+            Ok(out("out", jd_terrain::place_polygon(field(i, "in")?, spacing_m(ctx), &pp)?))
+        },
+    ).with_memory(4.0));
     r.register(NodeDef::new::<jd_terrain::PrimitiveParams, _>(
         "jd.shape.primitive@1",
         "A placed primitive — cone, dome, plateau, ramp or crater — at `center_m`, `size_m` and `rotation_deg`, its 0..1 shape scaled to `height_range_m`, faded over `falloff_m` at the edge, and combined with the terrain by `op` (add, max to raise it out, min to carve it in, lerp to overwrite) at `opacity`; `ratio` sets a plateau's flat top or a crater's rim radius, `floor` a crater's floor",
