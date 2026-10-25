@@ -32,6 +32,8 @@ interface Props {
   preview: Preview | null;
   /** Colour vertices from this layer's preview instead of the height ramp. */
   overlay?: Preview | null;
+  /** Name of the overlay layer: a `heat` layer (a lava flow's glow) gets a black → red → yellow ramp, masks the accent gradient. */
+  overlayName?: string | null;
   extentM: [number, number] | null;
   onInfo?: (info: ViewportInfo) => void;
   /** Sculpt mode: pointer drags paint a stroke on the terrain instead of orbiting. Points are
@@ -58,7 +60,7 @@ interface Props {
   maps?: LayerMaps | null;
   /** Scatter instances (layer metres: u east, v north from the south edge, z height, r 0..1) drawn as
    *  `sizeM`-tall cones — a preview marker, the exported GLB carries 1 m proxies. */
-  instances?: { points: { u: number; v: number; z: number; r: number; age?: number }[]; sizeM: number } | null;
+  instances?: { points: { u: number; v: number; z: number; r: number; age?: number }[]; sizeM: number; shape?: "cone" | "rock" } | null;
 }
 
 /** Fog planes from the world size and the slider: 0 → a faint aerial perspective (2×…12× the world), 1 → the view closes within the world. */
@@ -105,7 +107,7 @@ const RAMP: Float32Array = (() => {
 
 /** Vertex colour from an overlay layer: class maps (small integers) get a palette, masks a
  *  dark→accent gradient. The overlay may be a different size than the height preview. */
-function overlayColor(o: Preview, u: number, v: number, out: THREE.Color): void {
+function overlayColor(o: Preview, u: number, v: number, out: THREE.Color, ramp: "mask" | "heat" = "mask"): void {
   const x = Math.min(o.width - 1, Math.max(0, Math.round(u * (o.width - 1))));
   const y = Math.min(o.height - 1, Math.max(0, Math.round(v * (o.height - 1))));
   const q = o.data[y * o.width + x] ?? 0;
@@ -115,13 +117,38 @@ function overlayColor(o: Preview, u: number, v: number, out: THREE.Color): void 
     const id = Math.round(value);
     if (id <= 0) out.setRGB(0.12, 0.12, 0.14);
     else out.setHSL(((id - 1) * 0.618034) % 1, 0.55, 0.45); // golden-angle palette
+  } else if (ramp === "heat") {
+    // Glow of molten lava: dark basalt through red and orange to yellow at the vent.
+    const t = Math.min(1, Math.max(0, value));
+    if (t <= 0) out.setRGB(0.12, 0.11, 0.11);
+    else if (t < 0.5) out.setRGB(0.35 + 1.3 * t, 0.05 + 0.3 * t, 0.03);
+    else out.setRGB(1.0, 0.2 + 1.4 * (t - 0.5), 0.05 + 0.6 * (t - 0.5));
   } else {
     const t = o.max > o.min ? (value - o.min) / (o.max - o.min) : 0;
     out.setRGB(0.1 + 0.15 * t, 0.12 + 0.6 * t, 0.16 + 0.75 * t);
   }
 }
 
-export function buildTerrainGeometry(p: Preview, extent: [number, number], overlay: Preview | null = null): THREE.BufferGeometry {
+/** Ramp for an overlay layer by its name: a lava flow's `heat` glows, everything else is a mask. */
+export function rampFor(name: string | null | undefined): "mask" | "heat" {
+  return name === "heat" ? "heat" : "mask";
+}
+
+/** A low-poly boulder for scatter previews: a seeded, flattened icosahedron (the GLB export writes the core's own rocks). */
+function rockGeometry(): THREE.BufferGeometry {
+  const geo = new THREE.IcosahedronGeometry(0.5, 1);
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  let h = 1337;
+  const rnd = () => ((h = (h * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  for (let i = 0; i < pos.count; i++) {
+    const k = 0.78 + 0.44 * rnd();
+    pos.setXYZ(i, pos.getX(i) * k, pos.getY(i) * k * 0.65 + 0.3, pos.getZ(i) * k);
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+
+export function buildTerrainGeometry(p: Preview, extent: [number, number], overlay: Preview | null = null, ramp: "mask" | "heat" = "mask"): THREE.BufferGeometry {
   const { width, height, min, max, data } = p;
   const geo = new THREE.PlaneGeometry(extent[0], extent[1], width - 1, height - 1);
   geo.rotateX(-Math.PI / 2); // plane in XZ, +Y up (glTF frame)
@@ -136,7 +163,7 @@ export function buildTerrainGeometry(p: Preview, extent: [number, number], overl
       const q = data[(height - 1 - j) * width + i] ?? 0;
       pos.setY(vi, min + (q / 65535) * range);
       if (overlay) {
-        overlayColor(overlay, i / Math.max(1, width - 1), (height - 1 - j) / Math.max(1, height - 1), tmp);
+        overlayColor(overlay, i / Math.max(1, width - 1), (height - 1 - j) / Math.max(1, height - 1), tmp, ramp);
         colors[vi * 3] = tmp.r;
         colors[vi * 3 + 1] = tmp.g;
         colors[vi * 3 + 2] = tmp.b;
@@ -282,7 +309,7 @@ interface SceneState {
   sky: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>;
   sunDeg: { azimuthDeg: number; elevationDeg: number };
   orbit: { theta: number; phi: number; radius: number; minR: number; maxR: number };
-  instances: THREE.InstancedMesh<THREE.ConeGeometry, THREE.MeshStandardMaterial> | null;
+  instances: THREE.InstancedMesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | null;
   /** Size of the baked maps currently on the terrain material. */
   pbrPx: [number, number] | null;
   /** Size of the sky texture on the dome, when one is applied. */
@@ -344,7 +371,7 @@ function sampleHeight(p: Preview, ext: [number, number], u: number, v: number): 
   return p.min + ((p.data[y * p.width + x] ?? 0) / 65535) * (p.max - p.min);
 }
 
-export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = null, seaLevelM = null, water = null, waves = null, sky = null, horizon = null, sun, overlay = null, instances = null, maps = null, fog }: Props) {
+export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = null, seaLevelM = null, water = null, waves = null, sky = null, horizon = null, sun, overlay = null, overlayName = null, instances = null, maps = null, fog }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<SceneState | null>(null);
   // Latest sculpt props without re-creating the renderer effect.
@@ -639,7 +666,7 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = n
       s.triangles = 0;
     }
     if (!preview || !extentM) return;
-    const geo = buildTerrainGeometry(preview, extentM, overlay);
+    const geo = buildTerrainGeometry(preview, extentM, overlay, rampFor(overlayName));
     // Baked maps texture the terrain like the exports (full-field relief at any preview LOD);
     // a colour overlay wins, and without maps the hypsometric vertex colours show.
     const textured = maps && !overlay;
@@ -695,7 +722,7 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = n
     s.camera.updateProjectionMatrix();
     placeCamera(s);
     onInfo?.(infoOf(s));
-  }, [preview, extentM, overlay, maps, onInfo]);
+  }, [preview, extentM, overlay, overlayName, maps, onInfo]);
 
   // Grid tool overlay: cell lines draped on the preview and the selected cells as translucent
   // quads (a fan around each cell's centre, so a cell follows a slope). Rebuilt when the
@@ -878,9 +905,10 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = n
       s.instances = null;
     }
     if (instances && instances.points.length > 0 && extentM) {
-      const geo = new THREE.ConeGeometry(0.3, 1, 6);
-      geo.translate(0, 0.5, 0); // base on the ground
-      const mesh = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ color: 0x3c9a4c, roughness: 0.8 }), instances.points.length);
+      const rock = instances.shape === "rock";
+      const geo = rock ? rockGeometry() : new THREE.ConeGeometry(0.3, 1, 6);
+      if (!rock) geo.translate(0, 0.5, 0); // base on the ground
+      const mesh = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({ color: rock ? 0x5a554f : 0x3c9a4c, roughness: rock ? 0.95 : 0.8 }), instances.points.length);
       const m = new THREE.Matrix4();
       const q = new THREE.Quaternion();
       const pos = new THREE.Vector3();
@@ -900,7 +928,7 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = n
     // Depend on the parts, not the wrapper object: App builds a fresh `{ points, sizeM }` every
     // render and onInfo → setState would otherwise loop ("Maximum update depth exceeded").
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [instances?.points, instances?.sizeM, extentM, onInfo]);
+  }, [instances?.points, instances?.sizeM, instances?.shape, extentM, onInfo]);
 
   return <div ref={host} className="h-full w-full" data-testid="viewport" />;
 }

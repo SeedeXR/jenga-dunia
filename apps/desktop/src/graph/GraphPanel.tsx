@@ -182,6 +182,54 @@ function toFlow(nodes: GraphNode[], kinds: Map<string, { inputs: string[]; outpu
   }));
 }
 
+/** Per-node presets (World Creator's per-filter presets): a named set of parameters per kind,
+ *  applied as ordinary journaled set_param calls, so undo removes them one by one. */
+export const PRESETS: Record<string, { name: string; params: Record<string, unknown> }[]> = {
+  "jd.erosion.thermal@1": [
+    { name: "dry sand", params: { talus_deg: 32, iterations: 60 } },
+    { name: "scree", params: { talus_deg: 38, iterations: 100 } },
+    { name: "soft slump", params: { talus_deg: 28, iterations: 200, rate: 0.2 } },
+  ],
+  "jd.erosion.hydraulic@1": [
+    { name: "gentle rain", params: { iterations: 100, rain_rate: 0.006 } },
+    { name: "monsoon", params: { iterations: 300, rain_rate: 0.03 } },
+    { name: "hard rock", params: { iterations: 200, dissolve_k: 0.1 } },
+  ],
+  "jd.erosion.stream_power@1": [
+    { name: "young uplands", params: { k: 0.0004, iterations: 20 } },
+    { name: "old lowlands", params: { k: 0.002, iterations: 60 } },
+  ],
+  "jd.erosion.aeolian@1": [
+    { name: "transverse dunes", params: { iterations: 200, wind2_azimuth_deg: null } },
+    { name: "star dunes", params: { iterations: 300, wind2_azimuth_deg: 0, wind2_share: 0.5 } },
+  ],
+  "jd.climate.snowpack@1": [
+    { name: "deep winter", params: { temperature_c: -8, steps: 60 } },
+    { name: "spring thaw", params: { temperature_c: 6, steps: 60 } },
+    { name: "alpine summer", params: { temperature_c: 14, steps: 40 } },
+  ],
+  "jd.climate.rain@1": [
+    { name: "temperate westerlies", params: { temperature_c: 12, recovery_km: 40 } },
+    { name: "arid shadow", params: { temperature_c: 28, base_per_km: 0.002, recovery_km: 120 } },
+  ],
+  "jd.erosion.debris@1": [
+    { name: "cliff talus", params: { source_slope_deg: 45, reach_deg: 30, sorting: 0.5 } },
+    { name: "boulder field", params: { source_slope_deg: 40, reach_deg: 27, size_min_m: 1, size_max_m: 6, sorting: 1 } },
+  ],
+  "jd.volcanic.lava@1": [
+    { name: "short a'ā tongue", params: { eruption_s: 3600, duration_s: 7200, cooling: 0.6 } },
+    { name: "long pāhoehoe sheet", params: { eruption_s: 43200, duration_s: 86400, viscosity_pa_s: 1000, cooling: 0.2 } },
+  ],
+  "jd.filter.terrace@1": [
+    { name: "rice paddies", params: { step_m: 5, softness: 0.1 } },
+    { name: "mesa caps", params: { step_m: 40, softness: 0.05 } },
+  ],
+  "jd.erosion.karst@1": [
+    { name: "doline plain", params: { density_per_km2: 3, profile: "bowl" } },
+    { name: "collapse field", params: { density_per_km2: 6, profile: "collapse", depth_m: [6, 25] } },
+  ],
+};
+
 function Inner() {
   const s = useStore();
   const kindMap = useMemo(() => new Map(s.graphKinds.map((k) => [k.kind, { inputs: k.inputs.map((p) => p.name), outputs: k.outputs.map((p) => p.name) }])), [s.graphKinds]);
@@ -315,6 +363,30 @@ function Inner() {
           <>
             <div className="mb-1 font-semibold">{sel.ui?.label ?? sel.kind}</div>
             <div className="mb-2 font-mono text-[11px] text-jd-fg-2">{sel.kind}</div>
+            {PRESETS[sel.kind] && (
+              <label className="mb-2 flex items-center justify-between gap-2" title="A named set of parameters for this kind; each value is one journaled edit">
+                <span className="text-jd-fg-1">preset</span>
+                <select
+                  className="w-28 rounded border border-jd-line bg-jd-bg-2 px-1 text-xs"
+                  value=""
+                  onChange={(e) => {
+                    const pr = PRESETS[sel.kind]?.find((x) => x.name === e.target.value);
+                    if (!pr) return;
+                    void (async () => {
+                      for (const [k, v] of Object.entries(pr.params)) await s.setParam(sel.id, k, v);
+                    })();
+                  }}
+                  data-testid="node-preset"
+                >
+                  <option value="">choose…</option>
+                  {PRESETS[sel.kind]?.map((pr) => (
+                    <option key={pr.name} value={pr.name}>
+                      {pr.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             {Object.entries(schemaProps).map(([key, prop]) => {
               const current = sel.params?.[key];
               const isNum = prop.type === "number" || prop.type === "integer";

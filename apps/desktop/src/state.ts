@@ -3,7 +3,7 @@ import { create } from "zustand";
 import type { Edge, GraphEvaluateResult, GraphListResult, HeightmapFormat, JdOps, JobInfo as JobInfoGen, NodeDefInfo, NodeView, NoiseParams, OceanWavesRequest, OceanWavesResult, OpId, ProjectOpenResult, ProjectSaveResult, ScatterPoint, TerrainStatsResult } from "./lib/ops.gen";
 import { horizonPreview, layerPreview, layerTextures, op, skyPreview, type JdError, type LayerMaps, type Preview, type Response, type Warning } from "./lib/api";
 import { adaptLodBias } from "./lib/previewLod";
-import type { MaterialSpec } from "./lib/ops.gen";
+import type { MaterialSpec, MediaMetadataResult } from "./lib/ops.gen";
 
 export type ProjectSummary = ProjectOpenResult;
 
@@ -202,6 +202,13 @@ interface State {
   importAsset: (path: string) => Promise<void>;
   /** Fetch a real-world DEM around a lon/lat, place the world in its CRS and wire it to the height output. */
   fetchDem: (center: [number, number], radiusM: number, provider: "terrarium" | "copernicus" | "opentopography") => Promise<void>;
+  /** What a reference photo, panorama or video states (`media.metadata`): place, time, heading, field of view, the sun. */
+  reference: MediaMetadataResult | null;
+  readReference: (path: string) => Promise<void>;
+  /** Put the reference's sun on the viewport sky (when it was above the horizon). */
+  useReferenceSun: () => void;
+  /** Fetch the real terrain around the reference's position (Terrarium, 5 km radius) and place the world on it. */
+  terrainFromReference: () => Promise<void>;
   save: () => Promise<void>;
   /** Bumped when a settings edit is refused so the inputs snap back to the stored values. */
   settingsRev: number;
@@ -801,6 +808,21 @@ export const useStore = create<State>((set, get) => {
       graphGen++;
       const add = await run("graph.add_node", { kind: "jd.input.heightmap@1", params: { path: r.result.name }, position: [right + 320, 0] });
       if (add.status === "ok") await loadGraph();
+    },
+    reference: null,
+    readReference: async (path) => {
+      const r = await run("media.metadata", { path });
+      set({ reference: r.status === "ok" && r.result ? r.result : null });
+    },
+    useReferenceSun: () => {
+      const sun = get().reference?.sun;
+      if (!sun || sun.below_horizon) return;
+      get().setSun({ azimuth_deg: Math.round(sun.azimuth_deg) % 360, elevation_deg: Math.min(90, Math.max(3, Math.round(sun.elevation_deg))) });
+    },
+    terrainFromReference: async () => {
+      const g = get().reference?.gps;
+      if (!g) return;
+      await get().fetchDem([g.lon, g.lat], 5000, "terrarium");
     },
     fetchDem: async (center, radiusM, provider) => {
       const r = await run("geo.fetch_dem", { center, radius_m: radiusM, provider, res_m: 30 });

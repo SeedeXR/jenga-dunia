@@ -43,6 +43,10 @@ test.describe("simulation layers against the real core", () => {
     expect(snow.result.stats.max).toBeGreaterThan(0.5);
     expect(snow.result.stats.mean).toBeLessThan(0.9); // a snow line inside the world, not a white-out
 
+    // The snowpack node is selected: a per-node preset applies its values as ordinary edits.
+    await page.getByTestId("node-preset").selectOption("spring thaw");
+    await expect(panel.locator(".react-flow__node", { hasText: "jd.climate.snowpack@1" })).toContainText("temperature_c=6", { timeout: 15_000 });
+
     // Lava: spliced in front of the height output; heat and lava published; a basalt material.
     await page.getByTestId("sim-lava").click();
     await expect(panel.locator(".react-flow__node", { hasText: "jd.volcanic.lava@1" })).toBeVisible();

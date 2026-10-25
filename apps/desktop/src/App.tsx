@@ -179,6 +179,16 @@ export default function App() {
     setImportPath(p);
     await useStore.getState().importAsset(p);
   }, []);
+  const [refPath, setRefPath] = useState("");
+  const pickReference = useCallback(async () => {
+    const p = await openDialog({
+      title: "Reference image or video",
+      filters: [{ name: "Images and videos", extensions: ["jpg", "jpeg", "png", "tif", "tiff", "heic", "webp", "mp4", "mov"] }],
+    }).catch(() => null);
+    if (typeof p !== "string") return;
+    setRefPath(p);
+    await useStore.getState().readReference(p);
+  }, []);
   const pickExportPath = useCallback(async () => {
     const p = await saveDialog({
       title: "Export heightmap",
@@ -418,6 +428,51 @@ export default function App() {
           )}
           {s.project && (
             <>
+              <h2 className="mt-4 mb-2 text-[11px] font-semibold tracking-wide text-jd-fg-2 uppercase">Reference image</h2>
+              <Field label="File">
+                <span className="flex gap-1">
+                  <input className={`${inputCls} w-24`} value={refPath} onChange={(e) => setRefPath(e.target.value)} placeholder="photo, 360°, video" title="A photo (JPEG, PNG, TIFF, HEIF, WebP), a 360° photo sphere or a video (MP4, MOV): media.metadata reads where, when and how it was taken, and the sun" data-testid="ref-path" />
+                  <button className="btn px-1.5" title="Choose a reference image or video…" onClick={() => void pickReference()} disabled={s.busy} data-testid="ref-browse">
+                    <FolderSearch size={14} />
+                  </button>
+                  <button className="btn px-1.5" onClick={() => void s.readReference(refPath)} disabled={!refPath || s.busy} data-testid="ref-read">
+                    Read
+                  </button>
+                </span>
+              </Field>
+              {s.reference && (
+                <div className="mb-2 text-xs" data-testid="ref-info">
+                  <dl className="grid grid-cols-[auto_1fr] gap-x-2 text-jd-fg-2">
+                    <dt>kind</dt>
+                    <dd>{s.reference.kind}{s.reference.px ? ` ${s.reference.px[0]}×${s.reference.px[1]}` : ""}</dd>
+                    <dt>when</dt>
+                    <dd>{s.reference.captured_at_utc ?? "unknown"}{s.reference.captured_at_source ? ` (${s.reference.captured_at_source})` : ""}</dd>
+                    <dt>where</dt>
+                    <dd>{s.reference.gps ? `${s.reference.gps.lat.toFixed(4)}, ${s.reference.gps.lon.toFixed(4)}` : "no GPS"}</dd>
+                    <dt>heading</dt>
+                    <dd>{s.reference.heading_deg != null ? `${s.reference.heading_deg.toFixed(0)}° ${s.reference.heading_ref ?? ""}` : "unknown"}</dd>
+                    <dt>field of view</dt>
+                    <dd>{s.reference.fov_x_deg != null ? `${s.reference.fov_x_deg.toFixed(1)}°` : s.reference.projection ? s.reference.projection.type : "unknown"}</dd>
+                    <dt>sun</dt>
+                    <dd>{s.reference.sun ? (s.reference.sun.below_horizon ? "below the horizon" : `${s.reference.sun.azimuth_deg.toFixed(0)}° from north, ${s.reference.sun.elevation_deg.toFixed(0)}° up`) : "needs place and time"}</dd>
+                  </dl>
+                  <div className="mt-1 flex gap-1">
+                    <button className="btn" onClick={() => s.useReferenceSun()} disabled={!s.reference.sun || s.reference.sun.below_horizon} title="Set the viewport sun to the reference's" data-testid="ref-use-sun">
+                      Use sun
+                    </button>
+                    <button className="btn" onClick={() => void s.terrainFromReference()} disabled={!s.reference.gps || s.busy} title="Fetch the real terrain 5 km around the reference's position (Terrarium) and place the world on it" data-testid="ref-terrain">
+                      Terrain here
+                    </button>
+                  </div>
+                  {s.reference.notes.length > 0 && (
+                    <ul className="mt-1 list-disc pl-4 text-jd-fg-2" data-testid="ref-notes">
+                      {s.reference.notes.map((n) => (
+                        <li key={n}>{n}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
               {s.project && <LayerStack />}
               <h2 className="mt-4 mb-2 text-[11px] font-semibold tracking-wide text-jd-fg-2 uppercase">Settings</h2>
               <label className="mb-1 flex items-center justify-between gap-2 text-xs text-jd-fg-1" title="Seconds after the last edit before the project autosaves; 0 disables">
@@ -517,7 +572,7 @@ export default function App() {
         {/* Center: viewport (top) + node graph (bottom, toggle) */}
         <main className={`relative grid min-w-0 overflow-hidden bg-jd-bg-0 ${showGraph ? (dock.graph === "right" ? "grid-cols-[1fr_auto]" : "grid-rows-[1fr_auto]") : "grid-rows-[1fr]"}`}>
           <div className="relative min-h-0 min-w-0">
-            <TerrainView fog={s.sun.fog} preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} sculpt={{ enabled: s.sculpting && (sculptNode !== undefined || s.drawing !== null), radiusM: s.drawing === "road" ? s.roadWidthM / 2 : s.brush.radius_m, onStroke: (pts) => void s.addStroke(pts), onAdjust: s.adjustBrush }} grid={s.grid.on ? { cells: s.grid.cells, selected: s.grid.selected, onSelect: s.gridSelect } : null} seaLevelM={seaLevelM} water={water} waves={s.waves} sky={s.sky} horizon={s.horizon} sun={{ azimuthDeg: s.sun.azimuth_deg, elevationDeg: s.sun.elevation_deg }} overlay={s.colorPreview} instances={s.scatter.points ? { points: s.scatter.points, sizeM: Math.max(s.scatter.spacing_m * 0.35, (s.project?.world.extent_m[0] ?? 0) * 0.012) } : null} maps={s.maps} />
+            <TerrainView fog={s.sun.fog} preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} sculpt={{ enabled: s.sculpting && (sculptNode !== undefined || s.drawing !== null), radiusM: s.drawing === "road" ? s.roadWidthM / 2 : s.brush.radius_m, onStroke: (pts) => void s.addStroke(pts), onAdjust: s.adjustBrush }} grid={s.grid.on ? { cells: s.grid.cells, selected: s.grid.selected, onSelect: s.gridSelect } : null} seaLevelM={seaLevelM} water={water} waves={s.waves} sky={s.sky} horizon={s.horizon} sun={{ azimuthDeg: s.sun.azimuth_deg, elevationDeg: s.sun.elevation_deg }} overlay={s.colorPreview} overlayName={s.colorLayer} instances={s.scatter.points ? { points: s.scatter.points, sizeM: Math.max(s.scatter.spacing_m * 0.35, (s.project?.world.extent_m[0] ?? 0) * 0.012), shape: /debris|rock|boulder|scree|talus/i.test(s.scatter.mask ?? "") ? "rock" : "cone" } : null} maps={s.maps} />
             <button
               className={`btn absolute top-2 right-28 ${s.sculpting ? "text-jd-accent" : ""}`}
               title={s.sculpting ? "Sculpting: drag on the terrain to paint a stroke (click to stop)" : "Sculpt: adds a stroke node before the output and paints with the brush"}
