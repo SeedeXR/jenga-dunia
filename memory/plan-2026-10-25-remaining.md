@@ -14,13 +14,13 @@ commit with the Fable 5.1 trailer and a push; CI verified after the last push.
 | 4 | Native captures: Edit-menu capture, native sculpt recording | todo | the PNG / MP4 under `docs/user/images` + `videos/`, viewed |
 | ~~5~~ | ~~jd-vision model licences~~ | ignored by owner | — |
 | 6 | Spline I/O: river network + `jd.terrain.spline@1` points → GeoJSON (+ Blender curves) | done (gates green; Blender 5.2 BRIDGE OK) | unit test on the writer; Blender bridge test imports the file |
-| 7 | Blend-op readout in the layer stack | in gate | e2e `stack.spec` asserts the row text |
+| 7 | Blend-op readout in the layer stack | done (gates green) | e2e `stack.spec` asserts the row text |
 | 8 | Workflow conveniences: hover thumbnails, expressions in fields | todo | e2e for both |
 | 9 | Rendering: HDRI import, post effects, flythrough + stills, path tracer (scoped) | todo | e2e per feature; path tracer: feasibility decided in-loop |
 | 10 | Tile-level cache blobs + SQLite index | todo | unit test: a memo survives a restart |
 | 11 | Diff / archive paging for deeper undo | todo | unit test: undo past the in-memory window |
 | 12 | DA3 / metric-depth refinements in jd-vision | todo | the documented 10× scale error measured before / after |
-| 13 | Acceptance report regeneration | todo | `scripts/acceptance.mjs --out /tmp/jd-accept` report attached to the handover |
+| 13 | Acceptance report regeneration | running | `scripts/acceptance.mjs --out /tmp/jd-accept` report attached to the handover |
 
 ## Order
 6 → 7 → 13 → 10 → 11 → 8 → 9 → 12 → 4 (4 last: it needs screen-recording permission the OS may
@@ -32,3 +32,4 @@ ask for interactively; if a dialog blocks, report it rather than stall).
 ## Log
 - 11:05 plan written; starting 6.
 - 12:50 6 done: `terrain.export_splines` (D8-traced river reaches + spline nodes → GeoJSON, local_m / world / wgs84), Blender `jd.import_splines`; 7 drafted, stack.spec green alone.
+- 13:05 7 done (lerp/min/max and shape rows read op · opacity · b-layer); 13 started: `JD_UNITY_PROJECT=/tmp/jd-unity node scripts/acceptance.mjs --out /tmp/jd-accept`.

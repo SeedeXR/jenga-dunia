@@ -43,6 +43,19 @@ export default function LayerStack() {
   const { chain, others } = stackOf(s.graph.nodes, s.graph.edges);
   const [kind, setKind] = useState("jd.erosion.thermal@1");
   const short = (n: GraphNode) => n.ui?.label ?? (n.kind.split(".").slice(1).join(".").replace(/@\d+$/, ""));
+  // Blend readout: how a layer combines with the chain — the blend nodes' op and opacity with the
+  // layer wired into `b`, a placed shape's `op` × opacity — so the stack reads like a layer list.
+  const readout = (n: GraphNode): string | null => {
+    const blend = /^jd\.math\.(min|max|lerp)@/.exec(n.kind);
+    const pct = (v: unknown) => `${Math.round(Number(v ?? 1) * 100)} %`;
+    if (blend) {
+      const feed = s.graph.edges.find((e) => e.to.node === n.id && e.to.port === "b");
+      const src = feed ? s.graph.nodes.find((x) => x.id === feed.from.node) : undefined;
+      return `${blend[1]} · ${pct(n.params?.opacity)}${src ? ` · ${short(src)}` : " · b unwired"}`;
+    }
+    if (n.kind.startsWith("jd.shape.")) return `${String(n.params?.op ?? (n.kind.includes("polygon") ? "lerp" : "add"))} · ${pct(n.params?.opacity)}`;
+    return null;
+  };
   const row = (n: GraphNode, i: number, inChain: boolean) => {
     const cat = categoryOf(n.kind);
     const selected = s.selectedNode === n.id;
@@ -53,6 +66,11 @@ export default function LayerStack() {
         </button>
         <button className="min-w-0 flex-1 truncate text-left" title={n.kind} onClick={() => s.setSelectedNode(n.id)}>
           {short(n)}
+          {readout(n) && (
+            <span className="ml-1 text-[10px] text-jd-fg-2" data-testid={`layer-op-${n.id}`}>
+              {readout(n)}
+            </span>
+          )}
         </button>
         <span className={`rounded px-1 text-[10px] ${BADGE[cat]}`}>{cat}</span>
         {inChain && (

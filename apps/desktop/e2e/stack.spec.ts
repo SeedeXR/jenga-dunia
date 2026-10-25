@@ -56,6 +56,7 @@ test.describe("layer stack against the real core", () => {
     // Move terrace up: it is applied after thermal now (noise → thermal → terrace → height).
     await page.getByTestId(`layer-up-${terrace.id}`).click();
     await expect(chain.nth(0)).toContainText("filter.terrace");
+
     await expect(chain.nth(1)).toContainText("erosion.thermal");
     const v = await view();
     const output = v.result.nodes.find((n) => n.kind.startsWith("jd.output.height@"))!;
@@ -77,6 +78,12 @@ test.describe("layer stack against the real core", () => {
     await expect(chain).toHaveCount(2);
     await page.waitForTimeout(300);
     await page.screenshot({ path: testInfo.outputPath("stack.png") }); // tutorial image source
+    // A blend layer reads as op · opacity · the layer in `b` (unwired here): the stack is a layer list.
+    await page.getByTestId("layer-add-kind").selectOption("jd.math.lerp@1");
+    await page.getByTestId("layer-add").click();
+    const lerp = chain.filter({ hasText: "math.lerp" });
+    await expect(lerp).toHaveCount(1);
+    await expect(lerp.locator("[data-testid^='layer-op-']")).toContainText("lerp · 100 % · b unwired");
     expect(errors, "no uncaught page errors").toEqual([]);
     await core.close();
   });
