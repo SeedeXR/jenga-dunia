@@ -155,6 +155,24 @@ pub fn flow_accumulation_with(
     log_scale: bool,
     method: FlowMethod,
 ) -> JdResult<Heightfield> {
+    flow_accumulation_sourced(h, spacing_m, log_scale, method, None)
+}
+
+/// [`flow_accumulation_with`] plus `sources`: extra upstream area per cell, in cells (a spring
+/// fed from outside the world, a culvert outlet), added to the one cell every cell contributes.
+/// The log scale divides by the total mass, so 0..1 still holds with sources.
+pub fn flow_accumulation_sourced(
+    h: &Heightfield,
+    spacing_m: [f32; 2],
+    log_scale: bool,
+    method: FlowMethod,
+    sources: Option<&Heightfield>,
+) -> JdResult<Heightfield> {
+    if let Some(src) = sources
+        && (src.width(), src.height()) != (h.width(), h.height())
+    {
+        return Err(JdError::invalid("sources", "must match the terrain's size"));
+    }
     if !spacing_m.iter().all(|s| *s > 0.0 && s.is_finite()) {
         return Err(JdError::invalid(
             "spacing_m",
@@ -182,6 +200,19 @@ pub fn flow_accumulation_with(
     // Descending height, ties by index: identical output regardless of thread count.
     order.par_sort_unstable_by(|a, b| v[*b as usize].total_cmp(&v[*a as usize]).then(a.cmp(b)));
     let mut acc = vec![1.0f32; w * hh];
+    if let Some(src) = sources {
+        for (i, a) in acc.iter_mut().enumerate() {
+            let v = src.get((i % w) as u32, (i / w) as u32);
+            if !(v >= 0.0 && v.is_finite()) {
+                return Err(JdError::invalid(
+                    "sources",
+                    "source areas must be finite and ≥ 0",
+                ));
+            }
+            *a += v;
+        }
+    }
+    let total: f32 = acc.iter().sum();
     let mut slopes = [(0usize, 0.0f32); 8];
     for &i in &order {
         let a = acc[i as usize];
@@ -218,7 +249,7 @@ pub fn flow_accumulation_with(
             }
         }
     }
-    let n = (w * hh) as f32;
+    let n = total;
     let mut out = Heightfield::new(h.width(), h.height(), h.tile_size(), h.halo())?;
     out.fill_with(|x, y| {
         let a = acc[y as usize * w + x as usize];
@@ -348,6 +379,21 @@ pub fn carve_rivers_with(
     method: FlowMethod,
     drains: Option<&Heightfield>,
 ) -> JdResult<(Heightfield, Heightfield)> {
+    carve_rivers_sourced(h, spacing_m, threshold, depth_m, method, drains, None)
+}
+
+/// [`carve_rivers_with`] plus `springs`: extra catchment per cell, in cells, poured in at those
+/// cells (see [`flow_accumulation_sourced`]) — a river that starts where you say, fed from
+/// beyond the world's edge or from underground.
+pub fn carve_rivers_sourced(
+    h: &Heightfield,
+    spacing_m: [f32; 2],
+    threshold: f32,
+    depth_m: f32,
+    method: FlowMethod,
+    drains: Option<&Heightfield>,
+    springs: Option<&Heightfield>,
+) -> JdResult<(Heightfield, Heightfield)> {
     if !(0.0..1.0).contains(&threshold) {
         return Err(JdError::invalid("threshold", "must be within 0..1"));
     }
@@ -355,7 +401,7 @@ pub fn carve_rivers_with(
         return Err(JdError::invalid("depth_m", "must be finite and ≥ 0"));
     }
     let (filled, _) = fill_depressions_with(h, 0.001, drains)?;
-    let acc = flow_accumulation_with(&filled, spacing_m, true, method)?;
+    let acc = flow_accumulation_sourced(&filled, spacing_m, true, method, springs)?;
     let mut mask = Heightfield::new(h.width(), h.height(), h.tile_size(), h.halo())?;
     mask.fill_with(|x, y| {
         let t = ((acc.get(x, y) - threshold) / (1.0 - threshold)).clamp(0.0, 1.0);
@@ -475,6 +521,50 @@ pub fn wetness_index_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_spring_starts_a_river_on_a_plane_that_would_not_have_one() {
+        // A plane tilted east: each row only ever gathers its own 64 cells — below the threshold.
+        let mut h = Heightfield::new(64, 64, 64, 0).expect("hf");
+        h.fill_with(|x, _| 1000.0 - x as f32);
+        let (_, dry) =
+            carve_rivers_with(&h, [10.0, 10.0], 0.55, 2.0, FlowMethod::D8, None).expect("dry");
+        assert_eq!(dry.get(40, 32), 0.0);
+        let mut springs = h.clone();
+        springs.fill_with(|x, y| if (x, y) == (10, 32) { 4096.0 } else { 0.0 });
+        let (carved, wet) = carve_rivers_sourced(
+            &h,
+            [10.0, 10.0],
+            0.55,
+            2.0,
+            FlowMethod::D8,
+            None,
+            Some(&springs),
+        )
+        .expect("wet");
+        assert!(
+            wet.get(40, 32) > 0.5,
+            "downstream of the spring: {}",
+            wet.get(40, 32)
+        );
+        assert_eq!(wet.get(5, 32), 0.0, "nothing upstream of it");
+        assert_eq!(wet.get(40, 10), 0.0, "other rows untouched");
+        assert!(carved.get(40, 32) < h.get(40, 32), "the channel is incised");
+        let mut bad = h.clone();
+        bad.fill_with(|_, _| -1.0);
+        assert!(
+            carve_rivers_sourced(
+                &h,
+                [10.0, 10.0],
+                0.55,
+                2.0,
+                FlowMethod::D8,
+                None,
+                Some(&bad)
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn plane_drains_to_its_low_edge_and_conserves_area() {

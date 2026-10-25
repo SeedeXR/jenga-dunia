@@ -2375,6 +2375,12 @@ export type NodeParams_jd_hydrology_rivers_1 = {
   "depth_m"?: number;
   /** Flow routing used to find channels: `d8`, `dinf` (fewer parallel-line artefacts) or `mfd` (wide, diffuse). */
   "method"?: FlowMethod;
+  /** Springs: points in layer metres (east from the west edge, north from the south edge) where a
+river starts regardless of the local catchment — each pours `spring_area_m2` of upstream
+area in (a karst resurgence, a river entering from beyond the world's edge). */
+  "springs"?: ([number, number])[];
+  /** Upstream area each spring contributes, m² (default 1 km²). */
+  "spring_area_m2"?: number;
 };
 
 export type NodeParams_jd_hydrology_sea_level_1 = {

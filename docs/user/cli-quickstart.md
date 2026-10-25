@@ -281,6 +281,8 @@ $ jd op terrain.export_heightmap --project Rivers.jdproj --params '{"layer":"riv
 
 Measured on this 512² world (debug build): the rivers node takes 329 ms with `d8`, 333 ms with `dinf` and 372 ms with `mfd`; the share of channel cells sitting on a perfectly straight two-neighbour run is 77 % (d8), 68 % (dinf) and 20 % (mfd), and the river mask covers 3 167 / 3 288 / 4 614 cells respectively. `d8` and `dinf` stay close — the fill step and the threshold dominate the drainage pattern — so switch to `dinf` when you see parallel 45° streaks on planar slopes; `mfd` gives the widest, most natural-looking valleys at the cost of sharper channel edges.
 
+**Springs.** `jd.hydrology.rivers@1` takes `springs: [[u, v], …]` (layer metres: east from the west edge, north from the south edge) and `spring_area_m2` (default 1 km²): each point pours that much upstream area into the flow at its cell, so a river starts there whether or not the local catchment would make one — a karst resurgence, a river entering from beyond the world's edge, a culvert. The log-scaled accumulation is normalised by the total mass, so `threshold` keeps its meaning. Unit test: on a plane tilted east no row reaches the threshold; a 4 096-cell spring at one cell makes a river downstream of it and nothing upstream or on other rows; negative source areas are refused.
+
 ### Sea level and coastlines
 
 ```

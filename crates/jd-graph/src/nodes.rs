@@ -6,9 +6,9 @@ use std::sync::Arc;
 use jd_terrain::{
     AeolianParams, CoastalParams, DropletParams, FlowMethod, ForeignImport, Heightfield,
     HydraulicParams, NoiseParams, SeabedParams, SnowParams, StreamPowerParams, Stroke,
-    THERMAL_MAX_RATE, aeolian_transport_with, apply_strokes, carve_rivers_with, droplet_erode,
-    fill_depressions_with, flow_accumulation_with, generate_noise, resample_to_world, sea_level,
-    slope_mask, snow_cover, wetness_index_with,
+    THERMAL_MAX_RATE, aeolian_transport_with, apply_strokes, droplet_erode, fill_depressions_with,
+    flow_accumulation_with, generate_noise, resample_to_world, sea_level, slope_mask, snow_cover,
+    wetness_index_with,
 };
 use jd_types::{JdError, JdResult};
 use rayon::prelude::*;
@@ -745,6 +745,17 @@ struct RiversParams {
     /// Flow routing used to find channels: `d8`, `dinf` (fewer parallel-line artefacts) or `mfd` (wide, diffuse).
     #[serde(default)]
     method: FlowMethod,
+    /// Springs: points in layer metres (east from the west edge, north from the south edge) where a
+    /// river starts regardless of the local catchment — each pours `spring_area_m2` of upstream
+    /// area in (a karst resurgence, a river entering from beyond the world's edge).
+    #[serde(default)]
+    springs: Vec<[f32; 2]>,
+    /// Upstream area each spring contributes, m² (default 1 km²).
+    #[serde(default = "spring_area")]
+    spring_area_m2: f32,
+}
+fn spring_area() -> f32 {
+    1.0e6
 }
 fn rivers_threshold() -> f32 {
     0.55
@@ -1699,13 +1710,34 @@ pub fn register_all(r: &mut Registry) {
     .with_memory_fn(|p| if p.get("refraction").and_then(|v| v.as_bool()).unwrap_or(false) { 36.0 } else { 22.0 }));
     r.register(NodeDef::new::<RiversParams, _>(
         "jd.hydrology.rivers@1",
-        "Carve river channels where flow accumulates (depressions filled first); outputs the carved terrain and a 0..1 river mask",
+        "Carve river channels where flow accumulates (depressions filled first), plus any `springs` you place (points that pour `spring_area_m2` of catchment in, so a river starts there); outputs the carved terrain and a 0..1 river mask",
         vec![port("in", PortType::Heightfield, true), port("drains", PortType::Heightfield, false)],
         vec![port("out", PortType::Heightfield, false), port("rivers", PortType::Heightfield, false)],
         |ctx, p, i| {
             let rp: RiversParams = params(p)?;
             let drains = i.get("drains").map(|v| v.as_field());
-            let (carved, rivers) = carve_rivers_with(field(i, "in")?, spacing_m(ctx), rp.threshold, rp.depth_m, rp.method, drains.map(|d| &**d))?;
+            let h = field(i, "in")?;
+            let sp = spacing_m(ctx);
+            let springs = if rp.springs.is_empty() {
+                None
+            } else {
+                if !(rp.spring_area_m2 > 0.0 && rp.spring_area_m2.is_finite()) {
+                    return Err(JdError::invalid("spring_area_m2", "must be positive"));
+                }
+                let cells = rp.spring_area_m2 / (sp[0] * sp[1]);
+                let mut src = Heightfield::new(h.width(), h.height(), h.tile_size(), h.halo())?;
+                src.fill_with(|_, _| 0.0);
+                for [u, v] in &rp.springs {
+                    if !(u.is_finite() && v.is_finite()) {
+                        return Err(JdError::invalid("springs", "spring positions must be finite"));
+                    }
+                    let x = ((u / sp[0]).floor().max(0.0) as u32).min(h.width() - 1);
+                    let y = ((v / sp[1]).floor().max(0.0) as u32).min(h.height() - 1);
+                    src.set(x, y, src.get(x, y) + cells);
+                }
+                Some(src)
+            };
+            let (carved, rivers) = jd_terrain::carve_rivers_sourced(h, sp, rp.threshold, rp.depth_m, rp.method, drains.map(|d| &**d), springs.as_ref())?;
             Ok(BTreeMap::from([("out".to_owned(), Value::field(carved)), ("rivers".to_owned(), Value::field(rivers))]))
         },
     ).with_memory(32.0));

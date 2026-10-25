@@ -1977,7 +1977,7 @@
   },
   {
     "kind": "jd.hydrology.rivers@1",
-    "description": "Carve river channels where flow accumulates (depressions filled first); outputs the carved terrain and a 0..1 river mask",
+    "description": "Carve river channels where flow accumulates (depressions filled first), plus any `springs` you place (points that pour `spring_area_m2` of catchment in, so a river starts there); outputs the carved terrain and a 0..1 river mask",
     "inputs": [
       {
         "name": "in",
@@ -2023,6 +2023,26 @@
           "description": "Flow routing used to find channels: `d8`, `dinf` (fewer parallel-line artefacts) or `mfd` (wide, diffuse).",
           "$ref": "#/$defs/FlowMethod",
           "default": "d8"
+        },
+        "springs": {
+          "description": "Springs: points in layer metres (east from the west edge, north from the south edge) where a\nriver starts regardless of the local catchment — each pours `spring_area_m2` of upstream\narea in (a karst resurgence, a river entering from beyond the world's edge).",
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            },
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "default": []
+        },
+        "spring_area_m2": {
+          "description": "Upstream area each spring contributes, m² (default 1 km²).",
+          "type": "number",
+          "format": "float",
+          "default": 1000000.0
         }
       },
       "additionalProperties": false,
