@@ -193,7 +193,7 @@ namespace JengaDunia
                 {
                     var tex = new Texture2D(2, 2);
                     if (!ImageConversion.LoadImage(tex, File.ReadAllBytes(holesPath))) throw new Exception("cannot decode holes.png");
-                    data.holesResolution = res - 1;
+                    // holesResolution is read-only: it follows heightmapResolution − 1, which SetHoles expects.
                     var keep = new bool[res - 1, res - 1];
                     var holed = 0;
                     for (var y = 0; y < res - 1; y++)
