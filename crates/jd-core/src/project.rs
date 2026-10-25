@@ -284,17 +284,66 @@ pub struct Project {
 /// exactly what the user saw.
 /// ponytail: whole-graph snapshots, capped at 100 entries and 64 MiB of serialised graph (a
 /// stroke-heavy graph — 500 strokes × 50 points — serialises to 2 MiB, so ~30 of those; ordinary
-/// graphs are kilobytes and keep all 100). Diff-based history with an on-disk archive is the
-/// upgrade if a session ever needs deeper undo than that.
+/// graphs are kilobytes and keep all 100). Snapshots trimmed from memory are paged to
+/// `<project>/history/` for the session, so undo reaches as far as the disk allows.
 #[derive(Debug, Default)]
 pub struct History {
     undo: Vec<(GraphDocument, usize)>,
     redo: Vec<(GraphDocument, usize)>,
+    /// Where snapshots trimmed from memory are paged to (`<project>/history/`), when set.
+    archive: Option<PathBuf>,
+    /// Snapshots on disk, oldest first (`000000.json` …); undo reads them once memory is empty.
+    archived: usize,
 }
 
 impl History {
     const CAP: usize = 100;
     const BYTES_CAP: usize = 64 << 20;
+
+    /// A history that pages trimmed snapshots to `dir` instead of dropping them: undo reaches past
+    /// the in-memory window (100 snapshots / 64 MiB) as far as the disk goes. The directory is
+    /// cleared on open — the archive is session-scoped, like the stacks.
+    pub fn in_dir(dir: PathBuf) -> Self {
+        let _ = std::fs::remove_dir_all(&dir); // stale pages from an earlier session
+        Self {
+            archive: Some(dir),
+            ..Self::default()
+        }
+    }
+
+    fn page_path(&self, n: usize) -> Option<PathBuf> {
+        self.archive
+            .as_ref()
+            .map(|d| d.join(format!("{n:06}.json")))
+    }
+
+    /// Page the oldest in-memory snapshot to disk (best effort: a failed write drops it, as the
+    /// memory-only history always did).
+    fn page_out(&mut self, g: GraphDocument) {
+        if let Some(path) = self.page_path(self.archived)
+            && let Some(dir) = path.parent()
+            && std::fs::create_dir_all(dir).is_ok()
+            && serde_json::to_vec(&g)
+                .map(|b| std::fs::write(&path, b))
+                .is_ok_and(|r| r.is_ok())
+        {
+            self.archived += 1;
+        }
+    }
+
+    /// Read back and remove the newest paged snapshot.
+    fn page_in(&mut self) -> Option<GraphDocument> {
+        while self.archived > 0 {
+            self.archived -= 1;
+            let path = self.page_path(self.archived)?;
+            let bytes = std::fs::read(&path).ok();
+            let _ = std::fs::remove_file(&path);
+            if let Some(g) = bytes.and_then(|b| serde_json::from_slice(&b).ok()) {
+                return Some(g);
+            }
+        }
+        None
+    }
     fn size_of(g: &GraphDocument) -> usize {
         serde_json::to_vec(g).map_or(0, |v| v.len())
     }
@@ -309,12 +358,18 @@ impl History {
     fn trim_to(&mut self, cap: usize, bytes_cap: usize) {
         let mut bytes = self.undo_bytes();
         while self.undo.len() > 1 && (self.undo.len() > cap || bytes > bytes_cap) {
-            bytes -= self.undo.remove(0).1;
+            let (g, size) = self.undo.remove(0);
+            bytes -= size;
+            self.page_out(g);
         }
     }
-    /// Pop the snapshot to restore for undo, remembering `current` for redo.
+    /// Pop the snapshot to restore for undo, remembering `current` for redo; past the in-memory
+    /// window the paged snapshots are read back, newest first.
     pub fn undo(&mut self, current: GraphDocument) -> Option<GraphDocument> {
-        let (g, _) = self.undo.pop()?;
+        let g = match self.undo.pop() {
+            Some((g, _)) => g,
+            None => self.page_in()?,
+        };
         let size = Self::size_of(&current);
         self.redo.push((current, size));
         Some(g)
@@ -336,7 +391,7 @@ impl History {
     }
     /// (undo depth, redo depth).
     pub fn depths(&self) -> (usize, usize) {
-        (self.undo.len(), self.redo.len())
+        (self.undo.len() + self.archived, self.redo.len())
     }
     /// Bytes of serialised graph the undo stack holds.
     pub fn undo_bytes(&self) -> usize {
@@ -501,7 +556,7 @@ impl Project {
             graph: jd_graph::nodes::starter(),
             scene: SceneDocument::default(),
             pending_journal: Vec::new(),
-            history: History::default(),
+            history: History::in_dir(path.join("history")),
             revision: 0,
             dirty: true,
             lock_nonce: String::new(),
@@ -559,7 +614,7 @@ impl Project {
             graph,
             scene,
             pending_journal,
-            history: History::default(),
+            history: History::in_dir(path.join("history")),
             revision: 0,
             dirty: false,
             lock_nonce: String::new(),
@@ -822,6 +877,48 @@ mod tests {
                 && h.undo(GraphDocument::default()).is_none()
         );
         assert_eq!(h.depths(), (0, 1));
+    }
+
+    #[test]
+    fn history_pages_trimmed_snapshots_to_disk_and_undoes_through_them() {
+        let dir = tmp();
+        let mut h = History::in_dir(dir.path().join("history"));
+        for i in 0..5 {
+            h.record(GraphDocument {
+                time: i as f32,
+                ..GraphDocument::default()
+            });
+        }
+        h.trim_to(1, usize::MAX); // one stays in memory, four go to disk
+        assert_eq!(h.depths().0, 5);
+        assert_eq!(
+            std::fs::read_dir(dir.path().join("history"))
+                .expect("dir")
+                .count(),
+            4
+        );
+        let mut times = Vec::new();
+        while let Some(g) = h.undo(GraphDocument::default()) {
+            times.push(g.time);
+        }
+        assert_eq!(
+            times,
+            vec![4.0, 3.0, 2.0, 1.0, 0.0],
+            "newest first, memory then disk"
+        );
+        assert_eq!(h.depths(), (0, 5));
+        assert_eq!(
+            std::fs::read_dir(dir.path().join("history"))
+                .expect("dir")
+                .count(),
+            0,
+            "pages are consumed"
+        );
+        // A new session clears whatever an old one left behind.
+        std::fs::write(dir.path().join("history").join("000009.json"), b"{}").expect("stale");
+        let fresh = History::in_dir(dir.path().join("history"));
+        assert_eq!(fresh.depths(), (0, 0));
+        assert!(!dir.path().join("history").join("000009.json").exists());
     }
 
     #[test]
