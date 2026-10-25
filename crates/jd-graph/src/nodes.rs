@@ -1851,6 +1851,82 @@ pub fn output_layer_name(params: &Map<String, Json>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A store that remembers everything: stands in for the project's cache directory.
+    #[derive(Default)]
+    struct MemStore(
+        std::sync::Mutex<
+            std::collections::HashMap<
+                [u8; 32],
+                std::collections::BTreeMap<String, jd_terrain::Heightfield>,
+            >,
+        >,
+    );
+    impl crate::eval::NodeStore for MemStore {
+        fn get(
+            &self,
+            key: &[u8; 32],
+        ) -> Option<std::collections::BTreeMap<String, jd_terrain::Heightfield>> {
+            self.0.lock().ok()?.get(key).cloned()
+        }
+        fn put(
+            &self,
+            key: &[u8; 32],
+            outputs: &std::collections::BTreeMap<String, jd_terrain::Heightfield>,
+        ) {
+            if let Ok(mut g) = self.0.lock() {
+                g.insert(*key, outputs.clone());
+            }
+        }
+    }
+
+    #[test]
+    fn a_disk_tier_serves_a_fresh_memory_cache_without_recomputing() {
+        use crate::eval::{Cache, Evaluator};
+        let reg = Registry::with_builtins();
+        let g = starter();
+        let store: std::sync::Arc<MemStore> = std::sync::Arc::default();
+        let first = Cache::with_capacity(16).with_disk(store.clone());
+        let (outs1, rep1) = Evaluator::new(&reg, &first)
+            .evaluate_with(&g, &world(), 0, None)
+            .expect("first");
+        assert!(
+            rep1.nodes.iter().all(|n| !n.cached),
+            "nothing cached on a cold run"
+        );
+        assert!(
+            !store.0.lock().expect("lock").is_empty(),
+            "the tier received the outputs"
+        );
+        // A new process: empty memory, the same disk tier.
+        let second = Cache::with_capacity(16).with_disk(store.clone());
+        let (outs2, rep2) = Evaluator::new(&reg, &second)
+            .evaluate_with(&g, &world(), 0, None)
+            .expect("second");
+        assert!(
+            rep2.nodes.iter().all(|n| n.cached),
+            "every node came from the tier: {:?}",
+            rep2.nodes
+                .iter()
+                .map(|n| (n.kind.clone(), n.cached))
+                .collect::<Vec<_>>()
+        );
+        for (k, v) in &outs1 {
+            assert_eq!(
+                outs2[k].as_field().to_vec(),
+                v.as_field().to_vec(),
+                "identical outputs for {k:?}"
+            );
+        }
+        let none = Cache::with_capacity(16);
+        let (_, rep3) = Evaluator::new(&reg, &none)
+            .evaluate_with(&g, &world(), 0, None)
+            .expect("third");
+        assert!(
+            rep3.nodes.iter().all(|n| !n.cached),
+            "without the tier a fresh cache recomputes"
+        );
+    }
     use crate::eval::{Cache, Evaluator};
     use crate::model::{Edge, Graph, Node, NodeKind, PortRef, UiMeta};
     use jd_types::{ErrorCode, NodeId, WorldSettings};

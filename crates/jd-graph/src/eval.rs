@@ -71,12 +71,23 @@ impl Value {
 /// Cached outputs of one node, keyed by output port.
 type NodeOutputs = BTreeMap<String, Value>;
 
-/// In-memory cache of node outputs keyed by the node's input hash.
-/// ponytail: memory-only with a count cap; the content-addressed disk cache (`jd-cache`) lands with jobs.
+/// A second tier behind the in-memory cache: node outputs by input hash, kept across runs and
+/// restarts (the project's `cache/` directory in the core). `get` returns every output port of a
+/// node or nothing; `put` stores them. Both are best effort: a failing store only loses the tier.
+pub trait NodeStore: Send + Sync {
+    /// The outputs stored under `key`, by port.
+    fn get(&self, key: &[u8; 32]) -> Option<BTreeMap<String, Heightfield>>;
+    /// Store a node's outputs under `key`.
+    fn put(&self, key: &[u8; 32], outputs: &BTreeMap<String, Heightfield>);
+}
+
+/// In-memory cache of node outputs keyed by the node's input hash, with an optional disk tier.
 #[derive(Default, Clone)]
 pub struct Cache {
     inner: Arc<Mutex<HashMap<[u8; 32], NodeOutputs>>>,
     cap: usize,
+    /// The tier consulted on a miss and written on every store.
+    disk: Option<Arc<dyn NodeStore>>,
     /// What each local node last saw and produced, per (node, lod): the tile-level dirty set is
     /// the tiles whose input hashes differ from this.
     memo: Arc<Mutex<HashMap<(NodeId, u8), Memo>>>,
@@ -97,13 +108,38 @@ impl Cache {
         Self {
             inner: Arc::default(),
             cap,
+            disk: None,
             memo: Arc::default(),
         }
     }
+    /// The same memory cache with a disk tier behind it (a clone shares the memory, not the tier).
+    pub fn with_disk(mut self, store: Arc<dyn NodeStore>) -> Self {
+        self.disk = Some(store);
+        self
+    }
     fn get(&self, key: &[u8; 32]) -> Option<NodeOutputs> {
-        self.inner.lock().ok()?.get(key).cloned()
+        if let Some(v) = self.inner.lock().ok()?.get(key).cloned() {
+            return Some(v);
+        }
+        // A miss in memory: the disk tier may hold the outputs from an earlier run.
+        let fields = self.disk.as_ref()?.get(key)?;
+        let outs: NodeOutputs = fields
+            .into_iter()
+            .map(|(port, hf)| (port, Value::field(hf)))
+            .collect();
+        if let Ok(mut g) = self.inner.lock() {
+            g.insert(*key, outs.clone());
+        }
+        Some(outs)
     }
     fn put(&self, key: [u8; 32], v: NodeOutputs) {
+        if let Some(disk) = &self.disk {
+            let fields: BTreeMap<String, Heightfield> = v
+                .iter()
+                .map(|(p, val)| (p.clone(), (**val.as_field()).clone()))
+                .collect();
+            disk.put(&key, &fields);
+        }
         if let Ok(mut g) = self.inner.lock() {
             if self.cap > 0 && g.len() >= self.cap {
                 g.clear(); // ponytail: wholesale eviction; LRU when the disk cache arrives

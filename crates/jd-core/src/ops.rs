@@ -1041,9 +1041,86 @@ pub mod graph {
     }
 
     fn cache() -> &'static Cache {
-        // ponytail: process-wide in-memory cache (cap 256 node results); the disk cache comes with jobs.
+        // Process-wide memory cache (cap 256 node results); `cache_for` adds the project's disk tier.
         static CACHE: std::sync::OnceLock<Cache> = std::sync::OnceLock::new();
         CACHE.get_or_init(|| Cache::with_capacity(256))
+    }
+
+    /// Node outputs persisted in the project's `cache/layers/` beside the published layers: the
+    /// content-addressed `.jdl` blobs and their LRU eviction (`settings.cache_limit_bytes`,
+    /// `project.cache_gc`) are shared; a node's ports are listed in `node-ports.json` under the
+    /// input hash, as `node:<hash>:<port>` index entries. An evaluation after a restart — or in
+    /// another process on the same project — finds every unchanged node's outputs here.
+    struct DiskNodeStore {
+        layers: jd_cache::LayerCache,
+        ports_index: std::path::PathBuf,
+    }
+    impl DiskNodeStore {
+        fn open(root: &std::path::Path, limit_bytes: u64) -> Self {
+            Self {
+                layers: jd_cache::LayerCache::open(root).with_limit(limit_bytes),
+                ports_index: root.join("cache").join("layers").join("node-ports.json"),
+            }
+        }
+        fn ports(&self) -> std::collections::BTreeMap<String, Vec<String>> {
+            std::fs::read(&self.ports_index)
+                .ok()
+                .and_then(|b| serde_json::from_slice(&b).ok())
+                .unwrap_or_default()
+        }
+        fn name(hash: &str, port: &str) -> String {
+            format!("node:{hash}:{port}")
+        }
+    }
+    fn hex32(key: &[u8; 32]) -> String {
+        key.iter().map(|b| format!("{b:02x}")).collect()
+    }
+    impl jd_graph::eval::NodeStore for DiskNodeStore {
+        fn get(
+            &self,
+            key: &[u8; 32],
+        ) -> Option<std::collections::BTreeMap<String, jd_terrain::Heightfield>> {
+            let hash = hex32(key);
+            let ports = self.ports().remove(&hash)?;
+            let mut out = std::collections::BTreeMap::new();
+            for port in ports {
+                out.insert(
+                    port.clone(),
+                    self.layers.get(&Self::name(&hash, &port)).ok().flatten()?,
+                );
+            }
+            Some(out)
+        }
+        fn put(
+            &self,
+            key: &[u8; 32],
+            outputs: &std::collections::BTreeMap<String, jd_terrain::Heightfield>,
+        ) {
+            let hash = hex32(key);
+            for (port, hf) in outputs {
+                if self.layers.put(&Self::name(&hash, port), hf).is_err() {
+                    return; // a full or unwritable disk only loses the tier
+                }
+            }
+            let mut ports = self.ports();
+            ports.insert(hash, outputs.keys().cloned().collect());
+            if let Ok(bytes) = serde_json::to_vec(&ports)
+                && let Some(dir) = self.ports_index.parent()
+                && std::fs::create_dir_all(dir).is_ok()
+            {
+                let _ = std::fs::write(&self.ports_index, bytes);
+            }
+        }
+    }
+
+    /// The process cache with the project's disk tier behind it.
+    fn cache_for(ctx: &Context, root: &std::path::Path) -> Cache {
+        let limit = ctx
+            .with_project(|p| Ok(p.doc.settings.cache_limit_bytes))
+            .unwrap_or(2 << 30);
+        cache()
+            .clone()
+            .with_disk(std::sync::Arc::new(DiskNodeStore::open(root, limit)))
     }
 
     /// `graph.add_node` params.
@@ -1499,7 +1576,8 @@ pub mod graph {
                 .detail("nodes", vec![other.to_string(), id.to_string()]));
             }
         }
-        let (outputs, report) = Evaluator::new(registry(), cache())
+        let tiered = cache_for(ctx, &root);
+        let (outputs, report) = Evaluator::new(registry(), &tiered)
             .with_layers(ctx.layer_loader(&root))
             .only_outputs(only.clone())
             .evaluate_job(&graph, &world, lod, Some(&root.join("assets")), ctl)
@@ -1798,9 +1876,10 @@ pub mod graph {
                 let job = ctx.jobs.start("timeline.export");
                 // Every frame is kept until the shared range is known: frames × field must fit the budget.
                 let mut fields: Vec<(f32, std::sync::Arc<jd_terrain::Heightfield>)> = Vec::with_capacity(p.frames as usize);
+                let tiered = cache_for(ctx, &root);
                 for k in 0..p.frames {
                     graph.time = p.from + (p.to - p.from) * k as f32 / (p.frames - 1) as f32;
-                    let (outputs, _) = Evaluator::new(registry(), cache()).evaluate_job(&graph, &world, p.lod, Some(&root.join("assets")), &job.ctl)?;
+                    let (outputs, _) = Evaluator::new(registry(), &tiered).evaluate_job(&graph, &world, p.lod, Some(&root.join("assets")), &job.ctl)?;
                     let hf = outputs.get(&(out.clone(), "out".to_owned())).map(|v| v.as_field().clone()).ok_or_else(|| JdError::new(ErrorCode::E_INTERNAL, "output node produced nothing"))?;
                     if (hf.width() as u64 * hf.height() as u64 * 4).saturating_mul(p.frames as u64) > budget {
                         return Err(JdError::new(ErrorCode::E_RESOURCE_MEMORY, "the frame sequence does not fit the project's memory budget")
