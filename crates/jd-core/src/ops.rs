@@ -3348,7 +3348,9 @@ pub mod graph {
             let started = call(&reg, &ctx, "graph.evaluate_async", serde_json::json!({}));
             let id = started.job_id.expect("job id");
             let mut running = false;
-            for _ in 0..600 {
+            // Up to 30 s: on a busy CI runner (other tests meshing caves in parallel) the job can take
+            // seconds to start; it breaks out as soon as the first step is reported.
+            for _ in 0..6000 {
                 let jobs = call(&reg, &ctx, "jobs.list", serde_json::json!({}))
                     .result
                     .expect("jobs");
