@@ -2425,6 +2425,19 @@ export type NodeParams_jd_mask_class_1 = {
 
 export type NodeParams_jd_math_add_1 = Record<string, unknown>;
 
+export type CurveKind = "smoothstep" | "gamma" | "invert" | "threshold";
+
+export type NodeParams_jd_math_curve_1 = {
+  /** The curve. */
+  "kind": CurveKind;
+  /** Start of the transition (smoothstep, threshold) or the low end of the range (gamma, invert). */
+  "edge0"?: number;
+  /** End of the transition or the high end of the range. */
+  "edge1"?: number;
+  /** Gamma exponent (> 0). */
+  "gamma"?: number;
+};
+
 export type NodeParams_jd_math_lerp_1 = {
   /** Opacity 0..1: how much of the blended result replaces the input (1 = all of it, 0 = the
 input passes through). */
@@ -2504,6 +2517,21 @@ cell's fill is scaled back by the same factor. Omit for no limit. */
 export type NodeParams_jd_output_height_1 = {
   /** Layer name the result is published under. */
   "layer"?: string;
+};
+
+export type Pattern = "dots" | "grid" | "stripes" | "checker";
+
+export type NodeParams_jd_pattern_1 = {
+  /** The design. */
+  "kind": Pattern;
+  /** Repeat distance, metres (> 0). */
+  "period_m"?: number;
+  /** Dot radius, line or band width, metres (0 < width ≤ period). */
+  "width_m"?: number;
+  /** Rotation of the design, degrees clockwise from north. */
+  "angle_deg"?: number;
+  /** Edge blur as a share of the width (0..1). */
+  "softness"?: number;
 };
 
 export type StrokeMode = "raise" | "smooth" | "flatten";
@@ -2815,6 +2843,7 @@ export interface NodeKinds {
   "jd.input.layer@1": NodeParams_jd_input_layer_1;
   "jd.mask.class@1": NodeParams_jd_mask_class_1;
   "jd.math.add@1": NodeParams_jd_math_add_1;
+  "jd.math.curve@1": NodeParams_jd_math_curve_1;
   "jd.math.lerp@1": NodeParams_jd_math_lerp_1;
   "jd.math.max@1": NodeParams_jd_math_max_1;
   "jd.math.min@1": NodeParams_jd_math_min_1;
@@ -2824,6 +2853,7 @@ export interface NodeKinds {
   "jd.noise.fbm@1": NodeParams_jd_noise_fbm_1;
   "jd.ocean.bathymetry@1": NodeParams_jd_ocean_bathymetry_1;
   "jd.output.height@1": NodeParams_jd_output_height_1;
+  "jd.pattern@1": NodeParams_jd_pattern_1;
   "jd.sculpt.strokes@1": NodeParams_jd_sculpt_strokes_1;
   "jd.shape.primitive@1": NodeParams_jd_shape_primitive_1;
   "jd.shape.stamp@1": NodeParams_jd_shape_stamp_1;

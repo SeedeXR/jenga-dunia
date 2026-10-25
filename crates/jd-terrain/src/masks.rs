@@ -134,6 +134,81 @@ pub fn edge_fade(
     Ok(out)
 }
 
+/// Pattern masks: a regular design in world metres (World Creator's Dots / Grid / Stripes
+/// distributions) — fields for scatter, materials or a stamp's `t`.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum Pattern {
+    /// Discs of radius `width_m` on a `period_m` grid.
+    Dots,
+    /// Lines of `width_m` along both axes every `period_m`.
+    Grid,
+    /// Bands of `width_m` every `period_m`, running along the pattern's y axis.
+    Stripes,
+    /// Alternating `period_m` squares.
+    Checker,
+}
+
+/// A 0..1 pattern mask over a field's footprint in layer metres (u east from the west edge,
+/// v north from the south edge, like placed shapes); `angle_deg` rotates the design clockwise
+/// from north, `softness` (0..1, as a share of `width_m`) blurs the edges.
+pub fn pattern_mask(
+    h: &Heightfield,
+    spacing_m: [f32; 2],
+    kind: Pattern,
+    period_m: f32,
+    width_m: f32,
+    angle_deg: f32,
+    softness: f32,
+) -> JdResult<Heightfield> {
+    check_spacing(spacing_m)?;
+    if !(period_m > 0.0 && period_m.is_finite())
+        || !(width_m > 0.0 && width_m.is_finite() && width_m <= period_m)
+    {
+        return Err(JdError::invalid("period_m", "need 0 < width_m ≤ period_m"));
+    }
+    if !(0.0..=1.0).contains(&softness) || !angle_deg.is_finite() {
+        return Err(JdError::invalid(
+            "softness",
+            "softness must be within 0..=1 and the angle finite",
+        ));
+    }
+    let (sr, cr) = angle_deg.to_radians().sin_cos();
+    let soft = (softness * width_m).max(1e-6);
+    let edge = |d: f32| ((d / soft) * 0.5 + 0.5).clamp(0.0, 1.0); // d ≥ 0 inside
+    let mut out = h.clone();
+    out.fill_with(|x, y| {
+        let u = (x as f32 + 0.5) * spacing_m[0];
+        let v = (y as f32 + 0.5) * spacing_m[1];
+        let (px, py) = (u * cr - v * sr, u * sr + v * cr);
+        let (fx, fy) = (px.rem_euclid(period_m), py.rem_euclid(period_m));
+        let half = width_m * 0.5;
+        match kind {
+            Pattern::Dots => {
+                let d = (fx - period_m * 0.5).hypot(fy - period_m * 0.5);
+                edge(width_m - d)
+            }
+            Pattern::Grid => {
+                let dx = (fx - period_m * 0.5).abs();
+                let dy = (fy - period_m * 0.5).abs();
+                edge((half - dx).max(half - dy))
+            }
+            Pattern::Stripes => edge(half - (fx - period_m * 0.5).abs()),
+            Pattern::Checker => {
+                let cx = (px / period_m).floor() as i64;
+                let cy = (py / period_m).floor() as i64;
+                let inside = (cx + cy).rem_euclid(2) == 0;
+                let dx = (fx.min(period_m - fx)).min(fy.min(period_m - fy));
+                let w = edge(dx);
+                if inside { w } else { 1.0 - w }
+            }
+        }
+    });
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,6 +238,33 @@ mod tests {
             0.5
         );
         assert!(aspect_mask(&h, [10.0, 10.0], 90.0, 1.5).is_err());
+    }
+
+    #[test]
+    fn patterns_repeat_in_world_metres_and_refuse_a_width_past_the_period() {
+        let mut h = Heightfield::new(64, 64, 64, 0).expect("hf");
+        h.fill_with(|_, _| 0.0);
+        let dots =
+            pattern_mask(&h, [10.0, 10.0], Pattern::Dots, 160.0, 40.0, 0.0, 0.0).expect("dots");
+        // Dot centres at (80, 80) + k·160 m → cells (7..8, 7..8); a corner cell is empty.
+        assert_eq!(dots.get(7, 7), 1.0);
+        assert_eq!(dots.get(0, 0), 0.0);
+        let on: usize = (0..64)
+            .flat_map(|y| (0..64).map(move |x| (x, y)))
+            .filter(|&(x, y)| dots.get(x, y) > 0.5)
+            .count();
+        assert!(
+            on > 600 && on < 1000,
+            "16 dots of ~π·4² ≈ 50 cells each: {on}"
+        );
+        let stripes = pattern_mask(&h, [10.0, 10.0], Pattern::Stripes, 160.0, 40.0, 0.0, 0.0)
+            .expect("stripes");
+        assert_eq!(stripes.get(7, 3), stripes.get(7, 60), "stripes run along y");
+        let checker = pattern_mask(&h, [10.0, 10.0], Pattern::Checker, 320.0, 320.0, 0.0, 0.0)
+            .expect("checker");
+        assert_eq!(checker.get(5, 5), 1.0);
+        assert_eq!(checker.get(40, 5), 0.0);
+        assert!(pattern_mask(&h, [10.0, 10.0], Pattern::Grid, 100.0, 120.0, 0.0, 0.0).is_err());
     }
 
     #[test]

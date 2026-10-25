@@ -2288,6 +2288,83 @@
     }
   },
   {
+    "kind": "jd.math.curve@1",
+    "description": "Reshape a mask or height: `smoothstep` from edge0 to edge1, `gamma` over [edge0, edge1], `invert` within [edge0, edge1], or a `threshold` step — the curve, smoothstep, step and invert effects of a distribution",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "CurveParams",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "The curve.",
+          "$ref": "#/$defs/CurveKind"
+        },
+        "edge0": {
+          "description": "Start of the transition (smoothstep, threshold) or the low end of the range (gamma, invert).",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        },
+        "edge1": {
+          "description": "End of the transition or the high end of the range.",
+          "type": "number",
+          "format": "float",
+          "default": 1.0
+        },
+        "gamma": {
+          "description": "Gamma exponent (> 0).",
+          "type": "number",
+          "format": "float",
+          "default": 1.0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind"
+      ],
+      "$defs": {
+        "CurveKind": {
+          "oneOf": [
+            {
+              "description": "Smoothstep from `edge0` to `edge1`: 0 below, 1 above, an S between.",
+              "type": "string",
+              "const": "smoothstep"
+            },
+            {
+              "description": "`((v − lo) / (hi − lo))^gamma` over [lo, hi]: < 1 lifts the mid-tones, > 1 darkens them.",
+              "type": "string",
+              "const": "gamma"
+            },
+            {
+              "description": "`lo + hi − v`: flips a mask or a height range.",
+              "type": "string",
+              "const": "invert"
+            },
+            {
+              "description": "0 below `edge0`, 1 above `edge1` (a hard step when they are equal).",
+              "type": "string",
+              "const": "threshold"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
     "kind": "jd.math.lerp@1",
     "description": "in + (b − in) × t × opacity: blends another layer over the chain where the optional 0..1 `t` mask says (everywhere when unwired) — World Creator's layer overwrite with a mask and an opacity",
     "inputs": [
@@ -2823,6 +2900,90 @@
         }
       },
       "additionalProperties": false
+    }
+  },
+  {
+    "kind": "jd.pattern@1",
+    "description": "A 0..1 pattern mask in world metres over the input's footprint — `dots`, `grid`, `stripes` or `checker` with `period_m`, `width_m`, `angle_deg` and edge `softness` — for scatter rows, field patterns, paved grids and stamp masks",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "PatternParams",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "The design.",
+          "$ref": "#/$defs/Pattern"
+        },
+        "period_m": {
+          "description": "Repeat distance, metres (> 0).",
+          "type": "number",
+          "format": "float",
+          "default": 100.0
+        },
+        "width_m": {
+          "description": "Dot radius, line or band width, metres (0 < width ≤ period).",
+          "type": "number",
+          "format": "float",
+          "default": 25.0
+        },
+        "angle_deg": {
+          "description": "Rotation of the design, degrees clockwise from north.",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        },
+        "softness": {
+          "description": "Edge blur as a share of the width (0..1).",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "kind"
+      ],
+      "$defs": {
+        "Pattern": {
+          "description": "Pattern masks: a regular design in world metres (World Creator's Dots / Grid / Stripes\ndistributions) — fields for scatter, materials or a stamp's `t`.",
+          "oneOf": [
+            {
+              "description": "Discs of radius `width_m` on a `period_m` grid.",
+              "type": "string",
+              "const": "dots"
+            },
+            {
+              "description": "Lines of `width_m` along both axes every `period_m`.",
+              "type": "string",
+              "const": "grid"
+            },
+            {
+              "description": "Bands of `width_m` every `period_m`, running along the pattern's y axis.",
+              "type": "string",
+              "const": "stripes"
+            },
+            {
+              "description": "Alternating `period_m` squares.",
+              "type": "string",
+              "const": "checker"
+            }
+          ]
+        }
+      }
     }
   },
   {

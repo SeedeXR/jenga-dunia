@@ -330,6 +330,60 @@ struct ScaleParams {
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum CurveKind {
+    /// Smoothstep from `edge0` to `edge1`: 0 below, 1 above, an S between.
+    Smoothstep,
+    /// `((v − lo) / (hi − lo))^gamma` over [lo, hi]: < 1 lifts the mid-tones, > 1 darkens them.
+    Gamma,
+    /// `lo + hi − v`: flips a mask or a height range.
+    Invert,
+    /// 0 below `edge0`, 1 above `edge1` (a hard step when they are equal).
+    Threshold,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct CurveParams {
+    /// The curve.
+    kind: CurveKind,
+    /// Start of the transition (smoothstep, threshold) or the low end of the range (gamma, invert).
+    #[serde(default)]
+    edge0: f32,
+    /// End of the transition or the high end of the range.
+    #[serde(default = "one_f")]
+    edge1: f32,
+    /// Gamma exponent (> 0).
+    #[serde(default = "one_f")]
+    gamma: f32,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct PatternParams {
+    /// The design.
+    kind: jd_terrain::Pattern,
+    /// Repeat distance, metres (> 0).
+    #[serde(default = "pattern_period")]
+    period_m: f32,
+    /// Dot radius, line or band width, metres (0 < width ≤ period).
+    #[serde(default = "pattern_width")]
+    width_m: f32,
+    /// Rotation of the design, degrees clockwise from north.
+    #[serde(default)]
+    angle_deg: f32,
+    /// Edge blur as a share of the width (0..1).
+    #[serde(default)]
+    softness: f32,
+}
+fn pattern_period() -> f32 {
+    100.0
+}
+fn pattern_width() -> f32 {
+    25.0
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct AspectParams {
     /// Compass direction the light comes from, degrees clockwise from north (180 = a southern sun).
@@ -788,6 +842,51 @@ pub fn register_all(r: &mut Registry) {
             0
         }),
     );
+    // Curves (World Creator's Curve / Smoothstep / Step / Invert effects) and pattern masks.
+    r.register(
+        NodeDef::new::<CurveParams, _>(
+            "jd.math.curve@1",
+            "Reshape a mask or height: `smoothstep` from edge0 to edge1, `gamma` over [edge0, edge1], `invert` within [edge0, edge1], or a `threshold` step — the curve, smoothstep, step and invert effects of a distribution",
+            vec![port("in", PortType::Heightfield, true)],
+            vec![port("out", PortType::Heightfield, false)],
+            |_, p, i| {
+                let cp: CurveParams = params(p)?;
+                if !(cp.gamma > 0.0 && cp.gamma.is_finite()) || !cp.edge0.is_finite() || !cp.edge1.is_finite() {
+                    return Err(JdError::invalid("gamma", "gamma must be positive and the edges finite"));
+                }
+                let (e0, e1) = (cp.edge0, cp.edge1);
+                let span = e1 - e0;
+                Ok(out(
+                    "out",
+                    map1(field(i, "in")?, move |v| match cp.kind {
+                        CurveKind::Smoothstep => {
+                            let t = if span.abs() > 0.0 { ((v - e0) / span).clamp(0.0, 1.0) } else if v >= e0 { 1.0 } else { 0.0 };
+                            t * t * (3.0 - 2.0 * t)
+                        }
+                        CurveKind::Gamma => {
+                            let t = if span.abs() > 0.0 { ((v - e0) / span).clamp(0.0, 1.0) } else { 0.0 };
+                            e0 + t.powf(cp.gamma) * span
+                        }
+                        CurveKind::Invert => e0 + e1 - v,
+                        CurveKind::Threshold => {
+                            if v < e0.min(e1) { 0.0 } else if v >= e0.max(e1) { 1.0 } else { (v - e0.min(e1)) / span.abs() }
+                        }
+                    })?,
+                ))
+            },
+        )
+        .local(|_| 0),
+    );
+    r.register(NodeDef::new::<PatternParams, _>(
+        "jd.pattern@1",
+        "A 0..1 pattern mask in world metres over the input's footprint — `dots`, `grid`, `stripes` or `checker` with `period_m`, `width_m`, `angle_deg` and edge `softness` — for scatter rows, field patterns, paved grids and stamp masks",
+        vec![port("in", PortType::Heightfield, true)],
+        vec![port("out", PortType::Heightfield, false)],
+        |ctx, p, i| {
+            let pp: PatternParams = params(p)?;
+            Ok(out("out", jd_terrain::pattern_mask(field(i, "in")?, spacing_m(ctx), pp.kind, pp.period_m, pp.width_m, pp.angle_deg, pp.softness)?))
+        },
+    ).with_memory(4.0));
     // Masks and filters from World Creator's distribution and filter lists.
     r.register(NodeDef::new::<AspectParams, _>(
         "jd.analysis.aspect@1",
@@ -1755,6 +1854,53 @@ mod tests {
         // A third evaluation with nothing changed is served from the cache outright.
         let (_, again) = ev.evaluate_with(&edited, &world, 0, None).expect("again");
         assert!(again.nodes.iter().all(|n| n.cached));
+    }
+
+    #[test]
+    fn curves_reshape_a_ramp() {
+        let reg = Registry::with_builtins();
+        let mut g = Graph::default();
+        let a = add(
+            &mut g,
+            "jd.noise.fbm@1",
+            serde_json::json!({ "seed": 1, "height_range_m": [0.0, 1.0], "feature_size_m": 64.0 }),
+        );
+        let sm = add(
+            &mut g,
+            "jd.math.curve@1",
+            serde_json::json!({ "kind": "smoothstep", "edge0": 0.25, "edge1": 0.75 }),
+        );
+        let inv = add(
+            &mut g,
+            "jd.math.curve@1",
+            serde_json::json!({ "kind": "invert", "edge0": 0.0, "edge1": 1.0 }),
+        );
+        let th = add(
+            &mut g,
+            "jd.math.curve@1",
+            serde_json::json!({ "kind": "threshold", "edge0": 0.5, "edge1": 0.5 }),
+        );
+        for n in [&sm, &inv, &th] {
+            connect(&mut g, &a, "out", n, "in");
+        }
+        let cache = Cache::default();
+        let ev = Evaluator::new(&reg, &cache);
+        let (outs, _) = ev.evaluate_with(&g, &world(), 0, None).expect("eval");
+        let f = |id: &NodeId| outs[&(id.clone(), "out".into())].as_field().to_vec();
+        let (av, smv, invv, thv) = (f(&a), f(&sm), f(&inv), f(&th));
+        for i in 0..av.len() {
+            let t = ((av[i] - 0.25) / 0.5).clamp(0.0, 1.0);
+            assert!((smv[i] - t * t * (3.0 - 2.0 * t)).abs() < 1e-5);
+            assert!((invv[i] - (1.0 - av[i])).abs() < 1e-5);
+            assert_eq!(thv[i], if av[i] >= 0.5 { 1.0 } else { 0.0 });
+        }
+        let bad = add(
+            &mut g,
+            "jd.math.curve@1",
+            serde_json::json!({ "kind": "gamma", "gamma": 0.0 }),
+        );
+        connect(&mut g, &a, "out", &bad, "in");
+        assert!(ev.evaluate_with(&g, &world(), 0, None).is_err());
     }
 
     #[test]
