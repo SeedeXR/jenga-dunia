@@ -16,8 +16,8 @@ only. Engine importer scripts are not gated — run their headless checks if tou
 | 11 | Premium look like World Creator (owner, mid-loop): palette, panel cards, value-bar sliders, section headings, primary buttons, icon buttons | done | captures viewed before/after; all specs green |
 | 4 | Alpha brushes: a palette of brush shapes beyond round / square | done | unit, e2e |
 | 5 | Sculpt-layer settings: height offset / scale / blending, steps, placeable area + Fit to terrain | done | unit, e2e |
-| 7 | Layer tree with search box and per-row eye in the right panel | todo | e2e |
-| 8 | Vertical icon strip for adding layer types | todo | e2e |
+| 7 | Layer tree with search box and per-row eye in the right panel | done | e2e |
+| 8 | Vertical icon strip for adding layer types | done | e2e |
 
 ## Decisions
 - 2/1: one kernel (`jd_terrain::transform`) and one node (`jd.sculpt.transforms@1`, ops appended like strokes) serve both the grid and the brush. Grid Push / Pull = the existing Raise / Lower; brush Push / Pull = a grab (the terrain slides with the drag). The lookup walks the whole chain feeding the output, so a strokes node spliced later does not make a second transforms node (the e2e caught that).
@@ -29,3 +29,4 @@ only. Engine importer scripts are not gated — run their headless checks if tou
 - 2 + 1 done: transform kernel (rotate / scale relief / tilt / push-grab / align to best-fit plane / duplicate, round or square footprint, soft edge; 3 unit tests), Grid ▸ Transform selection, brush modes rotate / scale / tilt / push / align (transforms.spec).
 - 11 done: navy-charcoal tokens + vivid blue, floating `.jd-panel` cards (panels, viewport, log), `.jd-section` headings with a chevron, `.btn-primary` (New, Generate, Evaluate), accent slider fills, thin scrollbars, rounded graph nodes with an accent stripe; before/after captures compared; full suite green.
 - 4 + 5 done: `BrushAlpha` (plain / noise / crater / ridges / rocks / dots / checker) multiplies the stroke falloff, palette in the Brush panel (alphas.spec); `LayerSettings` (height scale / offset, blending, level step, area) on the strokes node as plain fields (serde can't flatten under deny_unknown_fields), Brush panel Layer settings + Fit to terrain (sculptlayer.spec).
+- 7 + 8 done: the layer stack became a tree (search box, Height stack + Shape / Filters / Simulation / Mask groups with counts, collapsible), placed shapes count as shape layers but stay removable; a 10-icon strip on the viewport's right edge adds a cone, terraces, smoothing, thermal / hydraulic erosion, rivers, or the four simulation layers (tree.spec, capture viewed). All items of the plan done.

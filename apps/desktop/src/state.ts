@@ -211,7 +211,7 @@ interface State {
   /** `graph.set_bypass`: pass a node's input through unchanged (the layer stack's eye). */
   setBypass: (id: string, bypass: boolean) => Promise<void>;
   /** Splice `kind` in front of the height output (the layer stack's +). */
-  insertLayer: (kind: string) => Promise<void>;
+  insertLayer: (kind: string, params?: Record<string, unknown> | null) => Promise<void>;
   /** Remove a chain node and reconnect what fed it to what it fed. */
   unsplice: (id: string) => Promise<void>;
   /** Move a chain node one step later (`up`, nearer the output) or earlier (`down`) by re-wiring its neighbours. */
@@ -1085,8 +1085,8 @@ export const useStore = create<State>((set, get) => {
     disconnectNodes: async (from, fromPort, to, toPort) => mutate("graph.disconnect", { from, from_port: fromPort, to, to_port: toPort }),
     setParam: async (id, key, value) => mutate("graph.set_param", { id, key, value }),
     setBypass: async (id, bypass) => mutate("graph.set_bypass", { id, bypass }),
-    insertLayer: async (kind) => {
-      const id = await spliceBefore("height", kind, null);
+    insertLayer: async (kind, params) => {
+      const id = await spliceBefore("height", kind, params ?? null);
       if (id) set({ selectedNode: id });
     },
     unsplice: async (id) => {

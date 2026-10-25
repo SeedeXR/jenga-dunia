@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { Box, Brush, Camera, Circle, CircleDot, Download, FileInput, FilePlus, FolderOpen, FolderPlus, FolderSearch, Gem, Globe, Grid2x2, Grid3x3, Grip, Home, Maximize2, Mountain, PanelBottom, PanelLeftClose, PanelLeftOpen, PanelRight, PanelRightClose, PanelRightOpen, Play, Redo2, Route, Save, Sparkles, Undo2, Upload, Wand2, WavesVertical, Workflow } from "lucide-react";
+import { Blend, Box, Brush, Camera, Circle, CircleDot, Download, Droplets, FileInput, FilePlus, Flame, FolderOpen, FolderPlus, FolderSearch, Gem, GitBranch, Globe, Grid2x2, Grid3x3, Grip, Home, Layers, Maximize2, Mountain, PanelBottom, PanelLeftClose, PanelLeftOpen, PanelRight, PanelRightClose, PanelRightOpen, Pickaxe, Play, Redo2, Route, Save, Snowflake, Sparkles, Thermometer, Undo2, Upload, Wand2, WavesVertical, Wind, Workflow } from "lucide-react";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import GraphPanel from "./graph/GraphPanel";
 import LayerStack from "./graph/LayerStack";
@@ -745,6 +745,29 @@ export default function App() {
         <main className={`relative my-2 grid min-w-0 overflow-hidden rounded-xl bg-jd-bg-0 ring-1 ring-white/5 ${showGraph ? (dock.graph === "right" ? "grid-cols-[1fr_auto]" : "grid-rows-[1fr_auto]") : "grid-rows-[1fr]"}`}>
           <div className="relative min-h-0 min-w-0">
             <TerrainView fog={s.sun.fog} preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} sculpt={{ enabled: s.sculpting && (sculptNode !== undefined || s.drawing !== null), radiusM: s.drawing === "road" ? s.roadWidthM / 2 : s.brush.radius_m, onStroke: (pts) => void s.addStroke(pts), onAdjust: s.adjustBrush }} grid={s.grid.on ? { cells: s.grid.cells, selected: s.grid.selected, onSelect: s.gridSelect } : null} seaLevelM={seaLevelM} lakes={s.lakesPreview} water={water} waves={s.waves} sky={s.sky} hdri={s.hdri} post={s.post} onHandle={s.setViewportHandle} frame={frameOn} horizon={s.horizon} sun={{ azimuthDeg: s.sun.azimuth_deg, elevationDeg: s.sun.elevation_deg }} overlay={s.colorPreview} overlayName={s.colorLayer} instances={s.scatter.points ? { points: s.scatter.points, sizeM: Math.max(s.scatter.spacing_m * 0.35, (s.project?.world.extent_m[0] ?? 0) * 0.012), shape: /debris|rock|boulder|scree|talus/i.test(s.scatter.mask ?? "") ? "rock" : "cone" } : null} maps={s.maps} />
+            <nav className="jd-panel absolute top-1/2 right-2 z-10 flex -translate-y-1/2 flex-col gap-0.5 p-1" aria-label="Add a layer" data-testid="layer-strip">
+              {(
+                [
+                  ["strip-cone", Mountain, "Shape: a cone at the world's centre (jd.shape.primitive)", () => {
+                    const e = s.project?.world.extent_m ?? [1000, 1000];
+                    void s.insertLayer("jd.shape.primitive@1", { shape: "cone", center_m: [e[0] / 2, e[1] / 2], size_m: [e[0] / 3, e[1] / 3], height_range_m: [0, Math.max(50, (s.layer?.stats.max ?? 500) / 3)], op: "max" });
+                  }],
+                  ["strip-terrace", Layers, "Filter: terraces (jd.filter.terrace)", () => void s.insertLayer("jd.filter.terrace@1")],
+                  ["strip-blur", Blend, "Filter: smooth (jd.filter.blur)", () => void s.insertLayer("jd.filter.blur@1")],
+                  ["strip-thermal", Thermometer, "Simulation: thermal erosion (jd.erosion.thermal)", () => void s.insertLayer("jd.erosion.thermal@1")],
+                  ["strip-hydraulic", Droplets, "Simulation: hydraulic erosion (jd.erosion.hydraulic)", () => void s.insertLayer("jd.erosion.hydraulic@1")],
+                  ["strip-rivers", GitBranch, "Simulation: carve rivers (jd.hydrology.rivers)", () => void s.insertLayer("jd.hydrology.rivers@1")],
+                  ["strip-snow", Snowflake, "Simulation layer: snow", () => void s.addSimulation("snow")],
+                  ["strip-sand", Wind, "Simulation layer: wind-blown sand", () => void s.addSimulation("sand")],
+                  ["strip-debris", Pickaxe, "Simulation layer: rockfall debris", () => void s.addSimulation("debris")],
+                  ["strip-lava", Flame, "Simulation layer: lava flow", () => void s.addSimulation("lava")],
+                ] as const
+              ).map(([tid, Icon, title, onClick]) => (
+                <button key={tid} className="rounded-md p-1.5 text-jd-accent transition-colors hover:bg-jd-bg-3 hover:text-jd-fg-0 disabled:opacity-30" title={title} aria-label={title} onClick={onClick} disabled={!s.project || s.busy} data-testid={tid}>
+                  <Icon size={15} />
+                </button>
+              ))}
+            </nav>
             <ViewportChrome
               heading={vp.heading}
               distanceM={vp.distanceM}

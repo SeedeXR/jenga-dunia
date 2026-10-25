@@ -74,7 +74,7 @@ test.describe("layer stack against the real core", () => {
     await expect.poll(() => logCount(page, "graph.evaluate: ok"), { timeout: 60_000 }).toBeGreaterThan(evaluated);
     // A side branch (snow) appears under the chain, not in it.
     await page.getByTestId("sim-snow").click();
-    await expect(page.getByTestId("layer-others").locator("li")).toHaveCount(1);
+    await expect(page.getByTestId("layer-others").locator("[data-testid^='layer-row-']")).toHaveCount(1);
     await expect(chain).toHaveCount(2);
     await page.waitForTimeout(300);
     await page.screenshot({ path: testInfo.outputPath("stack.png") }); // tutorial image source

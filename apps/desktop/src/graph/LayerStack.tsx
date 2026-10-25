@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Eye, EyeOff, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Eye, EyeOff, Plus, Search, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { type GraphNode, useStore } from "../state";
 
@@ -11,7 +11,7 @@ export type LayerCategory = "shape" | "filter" | "simulation" | "mask" | "output
 
 export function categoryOf(kind: string): LayerCategory {
   const ns = kind.split(".")[1] ?? "";
-  if (ns === "noise" || ns === "input") return "shape";
+  if (ns === "noise" || ns === "input" || ns === "shape") return "shape";
   if (ns === "erosion" || ns === "climate" || ns === "volcanic" || ns === "hydrology" || ns === "ocean") return "simulation";
   if (ns === "analysis" || ns === "mask" || ns === "biome") return "mask";
   if (ns === "output") return "output";
@@ -42,6 +42,12 @@ export default function LayerStack() {
   const s = useStore();
   const { chain, others } = stackOf(s.graph.nodes, s.graph.edges);
   const [kind, setKind] = useState("jd.erosion.thermal@1");
+  // World Creator's layer tree: a search box over every row, and the side branches grouped by
+  // category under collapsible headings with their counts.
+  const [query, setQuery] = useState("");
+  const [closed, setClosed] = useState<Record<string, boolean>>({});
+  const q = query.trim().toLowerCase();
+  const matches = (n: GraphNode) => !q || n.kind.toLowerCase().includes(q) || (n.ui?.label ?? "").toLowerCase().includes(q);
   const short = (n: GraphNode) => n.ui?.label ?? (n.kind.split(".").slice(1).join(".").replace(/@\d+$/, ""));
   // Blend readout: how a layer combines with the chain — the blend nodes' op and opacity with the
   // layer wired into `b`, a placed shape's `op` × opacity — so the stack reads like a layer list.
@@ -81,7 +87,7 @@ export default function LayerStack() {
             <button className="btn px-1 py-0" title="Apply earlier (move down the stack)" onClick={() => void s.swapInChain(n.id, "down")} disabled={i === chain.length - 1} data-testid={`layer-down-${n.id}`}>
               <ArrowDown size={12} />
             </button>
-            <button className="btn px-1 py-0 text-jd-error" title="Remove this layer and close the gap" onClick={() => void s.unsplice(n.id)} disabled={cat === "shape"} data-testid={`layer-remove-${n.id}`}>
+            <button className="btn px-1 py-0 text-jd-error" title="Remove this layer and close the gap" onClick={() => void s.unsplice(n.id)} disabled={n.kind.startsWith("jd.noise.") || n.kind.startsWith("jd.input.")} data-testid={`layer-remove-${n.id}`}>
               <Trash2 size={12} />
             </button>
           </>
@@ -106,15 +112,44 @@ export default function LayerStack() {
           <Plus size={12} />
         </button>
       </div>
-      <ol className="mb-1" data-testid="layer-chain">
-        {chain.map((n, i) => row(n, i, true))}
-      </ol>
-      {others.length > 0 && (
-        <>
-          <div className="mb-1 text-[10px] text-jd-fg-2">Side branches</div>
-          <ul data-testid="layer-others">{others.map((n, i) => row(n, i, false))}</ul>
-        </>
-      )}
+      <label className="mb-1 flex items-center gap-1 rounded-md border border-white/5 bg-jd-bg-2 px-1.5 py-0.5 text-xs text-jd-fg-2 focus-within:border-jd-accent">
+        <Search size={12} />
+        <input className="min-w-0 flex-1 bg-transparent text-jd-fg-0 outline-none placeholder:text-jd-fg-2" placeholder="Search layers" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search layers" data-testid="layer-search" />
+      </label>
+      {(() => {
+        const head = (key: string, label: string, count: number) => (
+          <button className="flex w-full items-center gap-1 py-0.5 text-left text-[11px] font-semibold text-jd-fg-1" onClick={() => setClosed((c) => ({ ...c, [key]: !c[key] }))} aria-expanded={!closed[key]} data-testid={`layer-group-${key}`}>
+            {closed[key] ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+            {label}
+            <span className="ml-auto rounded bg-jd-bg-3 px-1 text-[10px] font-normal text-jd-fg-2">{count}</span>
+          </button>
+        );
+        const groups: [LayerCategory, string][] = [["shape", "Shape layers"], ["filter", "Filters"], ["simulation", "Simulation layers"], ["mask", "Mask layers"]];
+        return (
+          <>
+            {head("stack", "Height stack", chain.length)}
+            {!closed.stack && (
+              <ol className="mb-1" data-testid="layer-chain">
+                {chain.map((n, i) => (matches(n) ? row(n, i, true) : null))}
+              </ol>
+            )}
+            {others.length > 0 && (
+              <ul data-testid="layer-others">
+                {groups.map(([cat, label]) => {
+                  const rows = others.filter((n) => categoryOf(n.kind) === cat);
+                  if (rows.length === 0) return null;
+                  return (
+                    <li key={cat}>
+                      {head(cat, label, rows.length)}
+                      {!closed[cat] && <ul className="ml-2">{rows.map((n, i) => (matches(n) ? row(n, i, false) : null))}</ul>}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </>
+        );
+      })()}
     </section>
   );
 }
