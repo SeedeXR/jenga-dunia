@@ -131,8 +131,40 @@ try:
         report["weightmap_source_formats"] = sorted({fmt(v) for v in weights.values()})
         details = {k: v for k, v in imported.items() if k.startswith("detail_")}
         report["detail_textures"] = {k: {"size": v.get("size"), "source_format": fmt(v)} for k, v in details.items()}
+        # Caves: import each cave_<n>.glb and work out how Interchange mapped our glTF axes (from the
+        # bounds caves.json records in the export frame), so the README's placement is measured.
+        caves_json = os.path.join(profile, "caves.json")
+        cave_ok = True
+        if os.path.exists(caves_json):
+            listed = json.load(open(caves_json))["caves"]
+            report["caves"] = []
+            for c in listed:
+                name = "SM_" + re.sub(r"[^A-Za-z0-9_]", "_", os.path.splitext(c["file"])[0])
+                paths = import_file(os.path.join(profile, c["file"]), "/Game/JengaDunia/Caves", name)
+                meshes = [unreal.EditorAssetLibrary.load_asset(p) for p in paths]
+                meshes = [m for m in meshes if m and m.get_class().get_name() == "StaticMesh"]
+                if not meshes:
+                    cave_ok = False
+                    report["caves"].append({"file": c["file"], "error": "no StaticMesh imported"})
+                    continue
+                info = mesh_info(meshes[0])
+                ue = info.get("bounds_cm") or {}
+                ours_min, ours_max = c["bounds_min"], c["bounds_max"]
+                mapping = {}
+                for k, axis in enumerate("XYZ"):
+                    lo, hi = ue["min"][k] / 100.0, ue["max"][k] / 100.0
+                    best = None
+                    for j, g in enumerate("xyz"):
+                        for sign in (1, -1):
+                            a, b = sorted((sign * ours_min[j], sign * ours_max[j]))
+                            err = abs(a - lo) + abs(b - hi)
+                            if best is None or err < best[0]:
+                                best = (err, ("+" if sign > 0 else "-") + g)
+                    mapping[axis] = {"from": best[1], "error_m": round(best[0], 3)}
+                cave_ok = cave_ok and all(v["error_m"] < 0.5 for v in mapping.values())
+                report["caves"].append({"file": c["file"], "triangles": info.get("triangles"), "bounds_cm": ue, "axis_mapping": mapping})
         # The profile promises a 16-bit grayscale heightmap and 8-bit grayscale weightmaps.
-        report["ok"] = (
+        report["ok"] = cave_ok and (
             bool(hm.get("size"))
             and fmt(hm) == "TSF G16"
             and all(fmt(v) == "TSF G8" for v in weights.values())

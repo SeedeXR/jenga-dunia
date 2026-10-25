@@ -1328,7 +1328,7 @@ pub mod graph {
     }
 
     /// Generate a cave node's system from its evaluated inputs.
-    fn build_cave(
+    pub(crate) fn build_cave(
         ctx: &Context,
         id: &NodeId,
         lod: u8,
@@ -1385,7 +1385,7 @@ pub mod graph {
     }
 
     /// Mesh the walls; without an explicit voxel size, coarsen until the cave fits the budget.
-    fn cave_walls(
+    pub(crate) fn cave_walls(
         sys: &jd_terrain::CaveSystem,
         hf: &jd_terrain::Heightfield,
         extent: [f64; 2],
@@ -1470,7 +1470,7 @@ pub mod graph {
                     std::fs::create_dir_all(dir)?;
                 }
                 let report = if ext == "glb" {
-                    jd_terrain::mesh::write_glb_mesh(&mesh, extent, &path, 1, None)?
+                    jd_terrain::mesh::write_glb_mesh_named(&mesh, extent, &path, 1, None, "cave")?
                 } else {
                     jd_terrain::fbx::export_fbx_mesh(&mesh, &path, "cave", [0.42, 0.40, 0.38])?
                 };
@@ -3865,6 +3865,44 @@ pub mod graph {
                 assert_eq!(r.status, Status::Ok, "{:?}", r.error);
                 assert!(dir.path().join("cave.jdproj/exports").join(name).is_file());
             }
+            // Engine profiles carry the cave: its mesh, the entrances list, the mouth in holes.png, the placement in the README.
+            for (profile, file) in [("unity", "cave_1.fbx"), ("unreal", "cave_1.glb")] {
+                let r = call(
+                    &reg,
+                    &ctx,
+                    "terrain.export_profile",
+                    serde_json::json!({ "profile": profile, "dir": profile, "caves": true }),
+                );
+                assert_eq!(r.status, crate::envelope::Status::Ok, "{:?}", r.error);
+                let files: Vec<String> =
+                    serde_json::from_value(r.result.expect("report")["files"].clone())
+                        .expect("files");
+                for f in [file, "caves.json", "holes.png"] {
+                    assert!(files.iter().any(|x| x == f), "{profile}: {f} in {files:?}");
+                }
+                let readme = std::fs::read_to_string(
+                    dir.path()
+                        .join("cave.jdproj/exports")
+                        .join(profile)
+                        .join("README.md"),
+                )
+                .expect("readme");
+                assert!(
+                    readme.contains("## Caves"),
+                    "{profile} README places the caves"
+                );
+                let listed: serde_json::Value = serde_json::from_slice(
+                    &std::fs::read(
+                        dir.path()
+                            .join("cave.jdproj/exports")
+                            .join(profile)
+                            .join("caves.json"),
+                    )
+                    .expect("json"),
+                )
+                .expect("parse");
+                assert_eq!(listed["entrances"][0]["kind"], "portal");
+            }
             let wrong = call(&reg, &ctx, "caves.mesh", serde_json::json!({ "id": noise }));
             assert_eq!(
                 wrong.error.map(|e| e.code),
@@ -4321,6 +4359,11 @@ pub mod terrain {
         /// A 0..1 layer whose cells ≥ 0.5 are holes, written as `holes.png` (Unity's holes texture via the import script, Unreal's Visibility layer).
         #[serde(default)]
         pub holes: Option<String>,
+        /// Carry the project's caves: every `jd.cave.system@1` node's walls and speleothems as
+        /// `cave_<n>.fbx` (Unity) / `cave_<n>.glb` (Unreal) in the terrain frame, their entrance holes
+        /// merged into `holes.png`, and `caves.json` listing the files, bounds and entrances.
+        #[serde(default)]
+        pub caves: bool,
     }
 
     /// `terrain.scatter` params.
@@ -5600,11 +5643,79 @@ pub mod terrain {
                     Ok(jd_terrain::GeoRef { origin: w.origin, spacing: w.spacing_m(), crs: w.crs.clone() })
                 })?;
                 let extent = ctx.with_project(|proj| Ok(proj.doc.world.extent_m))?;
-                let holes = p.holes.as_ref().map(|n| ctx.with_layer(n, |hf| Ok(hf.clone()))).transpose()?;
-                let report = match p.tiles {
+                let mut holes = p.holes.as_ref().map(|n| ctx.with_layer(n, |hf| Ok(hf.clone()))).transpose()?;
+                // The project's caves travel with the terrain: their walls in the terrain frame, their
+                // entrance holes merged into the hole mask, their entrances listed for placement checks.
+                let mut caves: Vec<(jd_terrain::mesh::GridMesh, Vec<jd_terrain::Entrance>)> = Vec::new();
+                if p.caves {
+                    let ids: Vec<jd_types::NodeId> = ctx.with_project(|proj| Ok(proj.graph.nodes.iter().filter(|(_, n)| n.kind.0 == "jd.cave.system@1").map(|(id, _)| id.clone()).collect()))?;
+                    for id in ids {
+                        let (made, hf, ext) = crate::ops::graph::build_cave(ctx, &id, 0)?;
+                        let (mut mesh, _) = crate::ops::graph::cave_walls(&made.system, &hf, ext, None, 1_000_000)?;
+                        jd_terrain::append_mesh(&mut mesh, &jd_terrain::speleothem_mesh(&made.system.speleothems, ext, made.system.seed));
+                        let open = jd_terrain::entrance_holes(&made.system, &hf, ext)?;
+                        if (open.width(), open.height()) == (height.width(), height.height()) {
+                            holes = Some(match holes.take() {
+                                Some(mut h) => {
+                                    let prev = h.clone();
+                                    h.fill_with(|x, y| prev.get(x, y).max(open.get(x, y)));
+                                    h
+                                }
+                                None => open,
+                            });
+                        }
+                        if !mesh.indices.is_empty() {
+                            caves.push((mesh, made.system.entrances.clone()));
+                        }
+                    }
+                }
+                let mut report = match p.tiles {
                     Some(n) => jd_terrain::export_profile_tiled(p.profile, &height, &refs, &stack, &dir, p.range_m, Some(&geo), extent, n, holes.as_ref())?,
                     None => jd_terrain::export_profile_with_holes(p.profile, &height, &refs, &stack, &dir, p.range_m, Some(&geo), holes.as_ref())?,
                 };
+                if !caves.is_empty() {
+                    let mut listed = Vec::new();
+                    for (i, (mesh, entrances)) in caves.iter().enumerate() {
+                        let name = match p.profile {
+                            jd_terrain::EngineProfile::Unity => format!("cave_{}.fbx", i + 1),
+                            jd_terrain::EngineProfile::Unreal => format!("cave_{}.glb", i + 1),
+                        };
+                        let path = dir.join(&name);
+                        match p.profile {
+                            jd_terrain::EngineProfile::Unity => {
+                                jd_terrain::fbx::export_fbx_mesh(mesh, &path, "cave", [0.42, 0.40, 0.38])?;
+                            }
+                            jd_terrain::EngineProfile::Unreal => {
+                                jd_terrain::mesh::write_glb_mesh_named(mesh, extent, &path, 1, None, "cave")?;
+                            }
+                        }
+                        let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+                        for v in mesh.positions.as_chunks::<3>().0 {
+                            for k in 0..3 {
+                                lo[k] = lo[k].min(v[k]);
+                                hi[k] = hi[k].max(v[k]);
+                            }
+                        }
+                        report.files.push(name.clone());
+                        listed.push(serde_json::json!({ "file": name, "triangles": mesh.indices.len() / 3, "bounds_min": lo, "bounds_max": hi, "entrances": entrances.iter().map(|e| serde_json::json!({ "u": e.at[0], "v": e.at[1], "z": e.at[2], "kind": e.kind, "underwater": e.underwater })).collect::<Vec<_>>() }));
+                    }
+                    let entrances: Vec<serde_json::Value> = listed.iter().flat_map(|c| c["entrances"].as_array().cloned().unwrap_or_default()).collect();
+                    let doc = serde_json::json!({ "frame": "meshes: x = u − extent_x/2 (east), y = height, z = extent_y/2 − v (south), metres; entrances: u east, v north from the south-west corner, z height", "extent_m": extent, "caves": listed, "entrances": entrances });
+                    std::fs::write(dir.join("caves.json"), serde_json::to_vec_pretty(&doc).map_err(|e| JdError::new(ErrorCode::E_INTERNAL, e.to_string()))?)?;
+                    report.files.push("caves.json".to_owned());
+                    // Placement in the README, as measured by the headless engine checks.
+                    let readme = dir.join("README.md");
+                    let mut text = std::fs::read_to_string(&readme).unwrap_or_default();
+                    text.push_str(&match p.profile {
+                        jd_terrain::EngineProfile::Unity => format!("\n## Caves\n\n`cave_<n>.fbx` are in the terrain export's frame (x east, y up, z south, centred on the world). The import script places them: **rotation Y = 180°, position = ({:.1}, 0, {:.1})** — the terrain's centre — with mesh colliders, so they land under the terrain where `holes.png` opens it. Checked headlessly: every entrance in `caves.json` lies within a few metres of the placed cave mesh.\n", extent[0] / 2.0, extent[1] / 2.0),
+                        jd_terrain::EngineProfile::Unreal => format!("\n## Caves\n\nImport `cave_<n>.glb` (Interchange; Nanite works). Interchange maps the file's +x → X (east), +z → Y (south), +y → Z (up), metres → cm (measured headlessly). Place each cave actor at the **Landscape's location + ({:.0}, {:.0}, 0) cm** — the Landscape's centre — with no rotation, and Z = 0 in world space (the Landscape's Z location above already puts its heights at their real elevation). Paint or import `holes.png` as the Visibility layer (the landscape material needs a Landscape Visibility Mask node) so the mouths open.\n", extent[0] * 50.0, extent[1] * 50.0),
+                    });
+                    std::fs::write(&readme, text)?;
+                    report.notes.push(match p.profile {
+                        jd_terrain::EngineProfile::Unity => format!("{} cave mesh(es) as cave_<n>.fbx: the import script places them under the terrain (turned 180° about Y, at the terrain's centre) with mesh colliders; their mouths open through holes.png", caves.len()),
+                        jd_terrain::EngineProfile::Unreal => format!("{} cave mesh(es) as cave_<n>.glb: import them (Interchange) and place them as the README says; their mouths open through holes.png on the Visibility layer", caves.len()),
+                    });
+                }
                 let warnings = report.notes.iter().map(|n| Warning::new("W_ENGINE_SIZE", n.clone())).collect();
                 ctx.with_project(|proj| crate::geo::write_attribution_txt(proj, &dir).map(|_| ()))?;
                 Ok((report, warnings))

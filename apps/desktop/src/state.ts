@@ -1411,10 +1411,14 @@ export const useStore = create<State>((set, get) => {
     exportProfile: async (profile, dir, tiles, holes) => {
       const materials = get().materials;
       const masks = [...new Set(materials.map((m) => m.mask).filter((m): m is string => !!m))];
-      await run("terrain.export_profile", { profile, dir, layer: "height", masks, materials, ...(tiles && tiles > 1 ? { tiles } : {}), ...(holes ? { holes } : {}) });
+      // The project's caves go along: their meshes in the engine's format, their mouths merged into holes.png.
+      const caves = get().graph.nodes.some((n) => n.kind.startsWith("jd.cave.system@"));
+      await run("terrain.export_profile", { profile, dir, layer: "height", masks, materials, ...(tiles && tiles > 1 ? { tiles } : {}), ...(holes ? { holes } : {}), ...(caves ? { caves: true } : {}) });
     },
     exportMesh: async (path, lods, targetTriangles, holes) => {
-      await run("terrain.export_mesh", { layer: "height", path, materials: get().materials, ...(lods ? { lods } : {}), ...(targetTriangles ? { target_triangles: targetTriangles } : {}), ...(holes ? { holes } : {}) });
+      // Without a holes layer chosen, the caves' mouths open the mesh (cave_holes, when published).
+      const open = holes ?? (get().lastEval?.layers?.cave_holes ? "cave_holes" : null);
+      await run("terrain.export_mesh", { layer: "height", path, materials: get().materials, ...(lods ? { lods } : {}), ...(targetTriangles ? { target_triangles: targetTriangles } : {}), ...(open ? { holes: open } : {}) });
     },
     exportSky: async (path) => {
       const { sun } = get();

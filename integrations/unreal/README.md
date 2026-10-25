@@ -36,3 +36,7 @@ a heightmap file; that step is the editor's Landscape mode → Import from file,
 and location the profile's README states. Known loss, read from the engine source: UE 5.8's glTF
 parser does not implement `EXT_mesh_gpu_instancing`, so the instanced scatter GLB imports as plain
 geometry — use the CSV / DataTable route from `terrain.scatter {engine: "unreal"}`.
+
+## Caves
+
+A profile exported with `caves: true` carries `cave_<n>.glb` and `caves.json`. The headless check imports each GLB through Interchange and measures how the axes mapped: +x → X (east), +z → Y (south), +y → Z (up), metres → cm, 0 m error on each axis (UE 5.8). Place the cave actor at the Landscape's location + (extent_x × 50, extent_y × 50, 0) cm, unrotated; the README in the profile gives the numbers. The mouths open through `holes.png` on the Landscape's Visibility layer (the landscape material needs a Landscape Visibility Mask node).

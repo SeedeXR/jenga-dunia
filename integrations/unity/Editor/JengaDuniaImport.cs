@@ -19,9 +19,11 @@ namespace JengaDunia
         [Serializable] class Materials { public MaterialLayer[] layers; }
         [Serializable] class TreeInst { public float x, y, z, nx, nz, yaw_deg, scale; }
         [Serializable] class Trees { public int count; public TreeInst[] instances; }
+        [Serializable] class CaveEntrance { public float u, v, z; public string kind; public bool underwater; }
+        [Serializable] class CaveList { public CaveEntrance[] entrances; }
         [Serializable] class Report
         {
-            public string unity, dir; public int heightmap_resolution, source_px, alphamap_layers, trees, holes;
+            public string unity, dir; public int heightmap_resolution, source_px, alphamap_layers, trees, holes, caves, cave_triangles; public float cave_entrance_max_dist_m;
             public float[] terrain_size, sampled_height_min_max; public string[] layers; public float mean_height; public float[] layer_mean_height; public string[] layer_detail; public float[] layer_tile_m; public List<string> warnings = new List<string>(); public bool ok;
         }
 
@@ -236,6 +238,47 @@ namespace JengaDunia
                 for (var y = 0; y < res; y += Math.Max(1, res / 64))
                     for (var x = 0; x < res; x += Math.Max(1, res / 64))
                     { var v = terrain.SampleHeight(new Vector3(x * ex / (res - 1), 0, y * ez / (res - 1))) + side.range_m[0]; mn = Math.Min(mn, v); mx = Math.Max(mx, v); }
+                // Caves: cave_<n>.fbx are in the terrain export's frame (x east, y up, z south, centred on
+                // the world). Turned 180° about Y and moved to the terrain's centre they land in the
+                // terrain's own frame (x east, z north from its corner). Mesh colliders let a player walk in.
+                var caveRoots = new List<GameObject>();
+                var caveFiles = Directory.GetFiles(dir, "cave_*.fbx");
+                Array.Sort(caveFiles);
+                foreach (var f in caveFiles)
+                {
+                    var dst = "Assets/JengaDunia/" + Path.GetFileName(f);
+                    File.Copy(f, dst, true);
+                    AssetDatabase.ImportAsset(dst, ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
+                    if (AssetImporter.GetAtPath(dst) is ModelImporter mi) { mi.addCollider = true; mi.SaveAndReimport(); }
+                    var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(dst) ?? throw new Exception("Unity made no model from " + dst);
+                    var inst = (GameObject)PrefabUtility.InstantiatePrefab(prefab);
+                    inst.transform.SetPositionAndRotation(new Vector3(ex / 2, 0, ez / 2), Quaternion.Euler(0, 180, 0));
+                    caveRoots.Add(inst);
+                    foreach (var mf in inst.GetComponentsInChildren<MeshFilter>()) report.cave_triangles += mf.sharedMesh.triangles.Length / 3;
+                }
+                report.caves = caveRoots.Count;
+                // Placement check: every entrance listed in caves.json (u east, v north, z height) lies
+                // within a few metres of the placed cave mesh in world space.
+                var cavesJson = Path.Combine(dir, "caves.json");
+                if (caveRoots.Count > 0 && File.Exists(cavesJson))
+                {
+                    var list = JsonUtility.FromJson<CaveList>(File.ReadAllText(cavesJson));
+                    var verts = new List<Vector3>();
+                    foreach (var r in caveRoots)
+                        foreach (var mf in r.GetComponentsInChildren<MeshFilter>())
+                            foreach (var v in mf.sharedMesh.vertices) verts.Add(mf.transform.TransformPoint(v));
+                    float worst = 0;
+                    foreach (var e in list.entrances)
+                    {
+                        var p = new Vector3(e.u, e.z, e.v);
+                        var best = float.MaxValue;
+                        foreach (var v in verts) best = Math.Min(best, (v - p).sqrMagnitude);
+                        worst = Math.Max(worst, Mathf.Sqrt(best));
+                    }
+                    report.cave_entrance_max_dist_m = worst;
+                    if (worst > 12) throw new Exception($"a cave entrance is {worst:F1} m from the placed cave mesh: the placement is wrong");
+                }
+                if (caveRoots.Count > 0) UnityEditor.SceneManagement.EditorSceneManager.SaveScene(scene, "Assets/JengaDunia/Terrain.unity");
                 report.terrain_size = new[] { data.size.x, data.size.y, data.size.z };
                 report.sampled_height_min_max = new[] { mn, mx };
                 report.heightmap_resolution = data.heightmapResolution;

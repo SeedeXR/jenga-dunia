@@ -29,3 +29,7 @@ the report says so.
 
 Verified on Unity 6000.4.8f1 (macOS) with the acceptance world — see `docs/user/cli-quickstart.md`.
 MIT, like the rest of the repository.
+
+## Caves
+
+A profile exported with `caves: true` carries `cave_<n>.fbx` and `caves.json`. `JengaDunia.Import.Run` imports each cave with mesh colliders and places it at rotation Y = 180° and the terrain's centre (the FBX is in the terrain export's frame: x east, y up, z south, centred), then checks every entrance in `caves.json` lies within a few metres of the placed mesh (`cave_entrance_max_dist_m` in the report; 2.25 m on the test mine). The mouths open through `holes.png` (`SetHoles`); in URP, enable Terrain Holes in the URP asset or they vanish in builds.

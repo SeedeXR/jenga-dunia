@@ -10972,6 +10972,11 @@ expression: list
             "null"
           ],
           "default": null
+        },
+        "caves": {
+          "description": "Carry the project's caves: every `jd.cave.system@1` node's walls and speleothems as\n`cave_<n>.fbx` (Unity) / `cave_<n>.glb` (Unreal) in the terrain frame, their entrance holes\nmerged into `holes.png`, and `caves.json` listing the files, bounds and entrances.",
+          "type": "boolean",
+          "default": false
         }
       },
       "additionalProperties": false,

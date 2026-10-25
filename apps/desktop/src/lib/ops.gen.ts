@@ -1698,6 +1698,10 @@ export type TerrainExportProfileRequest = {
   "materials"?: MaterialSpec[];
   /** A 0..1 layer whose cells ≥ 0.5 are holes, written as `holes.png` (Unity's holes texture via the import script, Unreal's Visibility layer). */
   "holes"?: string | null;
+  /** Carry the project's caves: every `jd.cave.system@1` node's walls and speleothems as
+`cave_<n>.fbx` (Unity) / `cave_<n>.glb` (Unreal) in the terrain frame, their entrance holes
+merged into `holes.png`, and `caves.json` listing the files, bounds and entrances. */
+  "caves"?: boolean;
 };
 
 export type ProfileSettings = {

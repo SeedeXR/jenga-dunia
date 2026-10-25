@@ -1427,6 +1427,18 @@ pub fn write_glb_mesh(
     step: u32,
     maps: Option<&BakedMaps>,
 ) -> JdResult<MeshExportReport> {
+    write_glb_mesh_named(mesh, extent_m, path, step, maps, "terrain")
+}
+
+/// [`write_glb_mesh`] with the mesh, node and material named `name` (a cave, a rock).
+pub fn write_glb_mesh_named(
+    mesh: &GridMesh,
+    extent_m: [f64; 2],
+    path: &Path,
+    step: u32,
+    maps: Option<&BakedMaps>,
+    name: &str,
+) -> JdResult<MeshExportReport> {
     let n = mesh.vertices() as usize;
     let mut bin: Vec<u8> = Vec::with_capacity(n * 48 + mesh.indices.len() * 4);
     let (mut min, mut max) = ([f32::MAX; 3], [f32::MIN; 3]);
@@ -1473,7 +1485,7 @@ pub fn write_glb_mesh(
         serde_json::json!({ "bufferView": 3, "componentType": 5125, "count": mesh.indices.len(), "type": "SCALAR" }),
     ];
     let mut attributes = serde_json::json!({ "POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2 });
-    let mut material = serde_json::json!({ "name": "terrain", "pbrMetallicRoughness": { "baseColorFactor": [0.55, 0.5, 0.45, 1.0], "metallicFactor": 0.0, "roughnessFactor": 0.95 } });
+    let mut material = serde_json::json!({ "name": name, "pbrMetallicRoughness": { "baseColorFactor": [0.55, 0.5, 0.45, 1.0], "metallicFactor": 0.0, "roughnessFactor": 0.95 } });
     let mut images = Vec::new();
     let mut normal_px = None;
     if let Some(m) = maps {
@@ -1497,7 +1509,7 @@ pub fn write_glb_mesh(
             images.push(serde_json::json!({ "bufferView": views.len() - 1, "mimeType": "image/png", "name": name }));
             pad4(&mut bin, 0);
         }
-        material = serde_json::json!({ "name": "terrain", "pbrMetallicRoughness": { "baseColorTexture": { "index": 0, "texCoord": 0 }, "baseColorFactor": [1.0, 1.0, 1.0, 1.0], "metallicRoughnessTexture": { "index": 2, "texCoord": 0 }, "metallicFactor": 0.0, "roughnessFactor": 1.0 }, "normalTexture": { "index": 1, "texCoord": 0 } });
+        material = serde_json::json!({ "name": name, "pbrMetallicRoughness": { "baseColorTexture": { "index": 0, "texCoord": 0 }, "baseColorFactor": [1.0, 1.0, 1.0, 1.0], "metallicRoughnessTexture": { "index": 2, "texCoord": 0 }, "metallicFactor": 0.0, "roughnessFactor": 1.0 }, "normalTexture": { "index": 1, "texCoord": 0 } });
         material["occlusionTexture"] = serde_json::json!({ "index": 2, "texCoord": 0 }); // AO in R of the ORM map
         if m.emissive.is_some() {
             material["emissiveTexture"] = serde_json::json!({ "index": 3, "texCoord": 0 });
@@ -1511,8 +1523,8 @@ pub fn write_glb_mesh(
         "bufferViews": views,
         "accessors": accessors,
         "materials": [material],
-        "meshes": [{ "name": "terrain", "primitives": [{ "attributes": attributes, "indices": 3, "material": 0, "mode": 4 }] }],
-        "nodes": [{ "mesh": 0, "name": "terrain" }],
+        "meshes": [{ "name": name, "primitives": [{ "attributes": attributes, "indices": 3, "material": 0, "mode": 4 }] }],
+        "nodes": [{ "mesh": 0, "name": name }],
         "scenes": [{ "nodes": [0] }],
         "scene": 0
     });

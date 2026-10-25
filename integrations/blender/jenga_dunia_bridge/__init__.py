@@ -53,18 +53,30 @@ def _adopt(objects, collection, prefix):
             obj.name = f"{prefix} {obj.name}"
 
 
-def import_project(context, binary, project, layer, step, texture, scatter_mask, spacing_m, seed):
-    """Export through `jd` and import into a new collection. Returns (terrain objects, instance count, mesh report)."""
+def import_project(context, binary, project, layer, step, texture, scatter_mask, spacing_m, seed, caves=True):
+    """Export through `jd` and import into a new collection. Returns (terrain objects, instance count, mesh report).
+
+    With `caves`, every `jd.cave.system@1` node comes along: its walls and speleothems as a mesh in
+    the terrain's frame, and the terrain exported with the `cave_holes` layer so it opens over the mouths."""
     project = os.path.abspath(project)
     name = os.path.splitext(os.path.basename(project))[0]
     exports = tempfile.mkdtemp(prefix="jd-blender-")
     mesh_path = os.path.join(exports, f"{layer}.glb")
-    args = ["export", "mesh", "--project", project, "--layer", layer, mesh_path]
-    if step > 0:
-        args += ["--step", str(step)]
-    if not texture:
-        args.append("--no-texture")
-    report = run_jd(binary, args)
+    graph = run_jd(binary, ["op", "graph.list", "--project", project]) if caves else {"nodes": []}
+    cave_ids = [n["id"] for n in graph.get("nodes", []) if n.get("kind") == "jd.cave.system@1"]
+    holes = any(n.get("kind", "").startswith("jd.output.height@") and (n.get("params") or {}).get("layer") == "cave_holes" for n in graph.get("nodes", []))
+    if cave_ids and holes:
+        params = {"layer": layer, "path": mesh_path, "texture": bool(texture), "holes": "cave_holes"}
+        if step > 0:
+            params["step"] = step
+        report = run_jd(binary, ["op", "terrain.export_mesh", "--project", project, "--params", json.dumps(params)])
+    else:
+        args = ["export", "mesh", "--project", project, "--layer", layer, mesh_path]
+        if step > 0:
+            args += ["--step", str(step)]
+        if not texture:
+            args.append("--no-texture")
+        report = run_jd(binary, args)
 
     collection = bpy.data.collections.new(f"JD {name}")
     context.scene.collection.children.link(collection)
@@ -82,6 +94,12 @@ def import_project(context, binary, project, layer, step, texture, scatter_mask,
         bpy.ops.import_scene.gltf(filepath=points)
         _adopt([o for o in bpy.data.objects if o not in before], collection, f"JD {name} {scatter_mask}")
         count = int(scatter["count"])
+    for i, cave in enumerate(cave_ids):
+        path = os.path.join(exports, f"cave_{i + 1}.glb")
+        run_jd(binary, ["op", "caves.export", "--project", project, "--params", json.dumps({"id": cave, "path": path})])
+        before = set(bpy.data.objects)
+        bpy.ops.import_scene.gltf(filepath=path)
+        _adopt([o for o in bpy.data.objects if o not in before], collection, f"JD {name} cave {i + 1}")
     return terrain, count, report
 
 
