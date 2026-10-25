@@ -1837,7 +1837,7 @@ export type TerrainTexturesResult = {
   "albedo_png_base64": string;
   /** Tangent-space normal map (+X east, +Y north, +Z out). */
   "normal_png_base64": string;
-  /** Roughness in G (0.92 flat → 0.62 steep rock, 0.6 above the snow line), metallic 0 in B. */
+  /** glTF ORM layout: ambient occlusion in R (1 − sky occlusion within 16 cells), roughness in G (0.92 flat → 0.62 steep rock, 0.6 above the snow line), metallic 0 in B. */
   "roughness_png_base64": string;
   /** Emissive map (PNG, base64) when a material layer emits; absent otherwise. */
   "emissive_png_base64"?: string | null;

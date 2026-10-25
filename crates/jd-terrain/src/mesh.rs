@@ -456,6 +456,9 @@ pub(crate) fn bake_emissive(
 /// the surface) and a roughness map (G channel; B metallic = 0) from the full field, sampled
 /// every `ts` cells so no side exceeds `max_px`. Row 0 = south, like the albedo.
 /// Roughness: 0.92 on flat ground, down to 0.62 on steep rock, 0.6 above the snow line.
+/// How far the baked ambient occlusion looks for cover, in cells of the source field.
+pub(crate) const AO_REACH_CELLS: f32 = 16.0;
+
 pub(crate) fn bake_normal_roughness_with(
     hf: &Heightfield,
     extent_m: [f64; 2],
@@ -476,6 +479,10 @@ pub(crate) fn bake_normal_roughness_with(
     };
     let mut nrm = Vec::with_capacity((tw * th * 3) as usize);
     let mut rough = Vec::with_capacity((tw * th * 3) as usize);
+    // Ambient occlusion = 1 − sky occlusion within 16 cells, in R: glTF's occlusion / roughness /
+    // metallic packing, so the one texture serves as occlusionTexture and metallicRoughnessTexture.
+    let cell = (sx.max(sz)) as f32;
+    let occ = crate::occlusion_mask(hf, [sx as f32, sz as f32], AO_REACH_CELLS * cell)?;
     for ty in 0..th {
         for tx in 0..tw {
             let (x, z) = ((tx * ts).min(w - 1) as i64, (ty * ts).min(h - 1) as i64);
@@ -513,7 +520,8 @@ pub(crate) fn bake_normal_roughness_with(
                     .map_or(1.0, |m| m.get(x as u32, z as u32).clamp(0.0, 1.0));
                 r += (f64::from(l.roughness) - r) * f64::from(wgt);
             }
-            rough.extend_from_slice(&[0, (r * 255.0).round() as u8, 0]);
+            let ao = 1.0 - occ.get(x as u32, z as u32).clamp(0.0, 1.0);
+            rough.extend_from_slice(&[(ao * 255.0).round() as u8, (r * 255.0).round() as u8, 0]);
         }
     }
     let png = |px: &[u8]| -> JdResult<Vec<u8>> {
@@ -783,6 +791,7 @@ pub fn export_glb_with(
             serde_json::json!({ "index": 2, "texCoord": 0 });
         m["pbrMetallicRoughness"]["roughnessFactor"] = serde_json::json!(1.0);
         m["normalTexture"] = serde_json::json!({ "index": 1, "texCoord": 0 });
+        m["occlusionTexture"] = serde_json::json!({ "index": 2, "texCoord": 0 }); // AO in R of the ORM map
         if image_views.len() > 3 {
             m["emissiveTexture"] = serde_json::json!({ "index": 3, "texCoord": 0 });
             m["emissiveFactor"] = serde_json::json!([1.0, 1.0, 1.0]);
@@ -1414,6 +1423,7 @@ pub fn write_glb_mesh(
             pad4(&mut bin, 0);
         }
         material = serde_json::json!({ "name": "terrain", "pbrMetallicRoughness": { "baseColorTexture": { "index": 0, "texCoord": 0 }, "baseColorFactor": [1.0, 1.0, 1.0, 1.0], "metallicRoughnessTexture": { "index": 2, "texCoord": 0 }, "metallicFactor": 0.0, "roughnessFactor": 1.0 }, "normalTexture": { "index": 1, "texCoord": 0 } });
+        material["occlusionTexture"] = serde_json::json!({ "index": 2, "texCoord": 0 }); // AO in R of the ORM map
         if m.emissive.is_some() {
             material["emissiveTexture"] = serde_json::json!({ "index": 3, "texCoord": 0 });
             material["emissiveFactor"] = serde_json::json!([1.0, 1.0, 1.0]);
@@ -1878,6 +1888,39 @@ mod tests {
     }
 
     #[test]
+    fn the_orm_map_carries_ambient_occlusion_in_red() {
+        let mut h = Heightfield::new(64, 64, 64, 0).expect("hf");
+        // A 60 m deep bowl: the floor sees less sky than the rim.
+        h.fill_with(|x, y| {
+            let d = ((x as f32 - 31.5).powi(2) + (y as f32 - 31.5).powi(2)).sqrt();
+            (d / 24.0).min(1.0) * 60.0
+        });
+        let (_, rough_png, px) =
+            bake_normal_roughness_with(&h, [640.0, 640.0], 64, &[]).expect("maps");
+        assert_eq!(px, [64, 64]);
+        let img = image::load_from_memory(&rough_png)
+            .expect("png")
+            .into_rgb8();
+        let floor = img.get_pixel(32, 32)[0];
+        let rim = img.get_pixel(2, 32)[0];
+        assert!(floor < rim, "AO floor {floor} vs rim {rim}");
+        assert!(rim >= 250, "an open plain is unoccluded: {rim}");
+        assert_eq!(img.get_pixel(32, 32)[2], 0, "metallic stays 0");
+        let dir = tempfile::tempdir().expect("tmp");
+        let path = dir.path().join("ao.glb");
+        export_glb_with(&h, [640.0, 640.0], &path, 1, true, &[]).expect("glb");
+        let bytes = std::fs::read(&path).expect("read");
+        let json_len = u32::from_le_bytes(bytes[12..16].try_into().expect("len")) as usize;
+        let json: serde_json::Value =
+            serde_json::from_slice(&bytes[20..20 + json_len]).expect("json");
+        assert_eq!(json["materials"][0]["occlusionTexture"]["index"], 2);
+        assert_eq!(
+            json["materials"][0]["pbrMetallicRoughness"]["metallicRoughnessTexture"]["index"],
+            2
+        );
+    }
+
+    #[test]
     fn material_layers_blend_albedo_and_roughness_by_their_masks() {
         let mut h = Heightfield::new(32, 16, 64, 0).expect("hf");
         h.fill_with(|x, _| x as f32 * 10.0);
@@ -2164,7 +2207,7 @@ mod tests {
         );
         let rough = decode(2).get_pixel(16, 8).0;
         assert!(
-            rough[0] == 0 && rough[2] == 0 && (150..=240).contains(&rough[1]),
+            rough[0] >= 200 && rough[2] == 0 && (150..=240).contains(&rough[1]), // R = ambient occlusion (open here), B = metallic 0
             "roughness texel {rough:?}"
         );
         assert_eq!(

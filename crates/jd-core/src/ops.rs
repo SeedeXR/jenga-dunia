@@ -4277,7 +4277,7 @@ pub mod terrain {
         pub albedo_png_base64: String,
         /// Tangent-space normal map (+X east, +Y north, +Z out).
         pub normal_png_base64: String,
-        /// Roughness in G (0.92 flat → 0.62 steep rock, 0.6 above the snow line), metallic 0 in B.
+        /// glTF ORM layout: ambient occlusion in R (1 − sky occlusion within 16 cells), roughness in G (0.92 flat → 0.62 steep rock, 0.6 above the snow line), metallic 0 in B.
         pub roughness_png_base64: String,
         /// Emissive map (PNG, base64) when a material layer emits; absent otherwise.
         #[serde(default, skip_serializing_if = "Option::is_none")]

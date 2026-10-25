@@ -535,6 +535,8 @@ $ jd --json op terrain.textures --project Acceptance.jdproj --params '{"material
 
 Curvature (`jd.analysis.curvature@1`), wetness, a painted mask or a product of several (`jd.math.multiply@1`) slot in the same way; the stack is the blend, the graph is where the masks come from.
 
+**Ambient occlusion.** The roughness map follows glTF's ORM packing: **R** is ambient occlusion (1 − sky occlusion within 16 cells of the source field, so gorge floors and crater bowls darken), **G** roughness, **B** metallic (0). The GLB points both `occlusionTexture` and `metallicRoughnessTexture` at it, and every engine profile writes the same map as `ao.png` (8-bit). Unit test: a 60 m bowl's floor is darker than its rim, an open plain is ≥ 250, metallic stays 0.
+
 **Emission.** A layer may carry `emissive` (linear RGB 0..1): `terrain.textures` then returns `emissive_png_base64`, an emissive map blended by the same masks and order as the albedo, `terrain.export_mesh` writes it into the GLB as `emissiveTexture` with `emissiveFactor` 1, and the engine profiles list it per layer in `materials.json` (the Landscape material or terrain shader has to take it; the manifest says so). The desktop's lava simulation layer uses it on the `heat` mask so the molten part glows in the viewport and in the export. Unit test: a layer emitting on the west half bakes a map that is its colour there and black in the east, and the GLB carries a fourth image named `terrain-emissive`.
 
 ### Water textures for engines
@@ -1142,7 +1144,7 @@ A material layer's `detail` gives it grain: a seeded, seamless 512² tile (`px`)
 $ jd --json op terrain.export_profile --project Acceptance.jdproj --params '{"profile":"unity","dir":"unity","materials":[
     {"mask":"mask_forest","albedo":[0.13,0.30,0.12],"roughness":0.95}, {"mask":"mask_rock","albedo":[0.45,0.43,0.40],"roughness":0.7},
     {"mask":"snow","albedo":[0.95,0.96,0.98],"roughness":0.45},        {"albedo":[0.42,0.52,0.20],"roughness":0.9}]}'
-files: heightmap.r16 + sidecar, weight_mask_forest.png, weight_mask_rock.png, weight_snow.png, materials.json, README.md
+files: heightmap.r16 + sidecar, weight_mask_forest.png, weight_mask_rock.png, weight_snow.png, splat_0.png, ao.png, materials.json, README.md
 materials.json → {"name":"snow","weightmap":"weight_snow.png","albedo_srgb":[0.95,0.96,0.98],"roughness":0.45,"smoothness":0.55}, …
 loss:
  - layer `material_3` has no mask (it applies everywhere): no weightmap — treat it as the base layer

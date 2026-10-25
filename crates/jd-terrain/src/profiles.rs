@@ -308,6 +308,27 @@ pub fn export_profile_with(
     for (name, m) in masks {
         write_weight(name, m, &mut files)?;
     }
+    // Ambient occlusion: 8-bit, 1 − sky occlusion within 16 cells (Unity: a custom terrain
+    // shader's AO input or a mask-map G channel; Unreal: a landscape material texture sample).
+    {
+        let sp = geo.map_or([1.0, 1.0], |g| [g.spacing[0] as f32, g.spacing[1] as f32]);
+        let occ =
+            crate::occlusion_mask(height, sp, crate::mesh::AO_REACH_CELLS * sp[0].max(sp[1]))?;
+        let mut img = image::GrayImage::new(w, h);
+        for y in 0..h {
+            for x in 0..w {
+                let v = ((1.0 - occ.get(x, y).clamp(0.0, 1.0)) * 255.0).round() as u8;
+                img.put_pixel(x, h - 1 - y, image::Luma([v]));
+            }
+        }
+        img.save(dir.join("ao.png")).map_err(|e| {
+            JdError::new(
+                jd_types::ErrorCode::E_INTERNAL,
+                format!("PNG write failed: {e}"),
+            )
+        })?;
+        files.push("ao.png".to_owned());
+    }
     // Material translation: masked layers → weightmaps + a manifest; what does not fit → `loss`.
     let mut loss = Vec::new();
     if !materials.is_empty() {
@@ -386,7 +407,7 @@ pub fn export_profile_with(
             files.push(file.clone());
             splats.push(serde_json::json!({ "file": file, "channels": chunk.iter().map(|(n, _)| *n).collect::<Vec<_>>() }));
         }
-        let manifest = serde_json::json!({ "engine": match profile { EngineProfile::Unity => "unity", EngineProfile::Unreal => "unreal" }, "layers": layers, "splatmaps": splats, "loss": loss });
+        let manifest = serde_json::json!({ "engine": match profile { EngineProfile::Unity => "unity", EngineProfile::Unreal => "unreal" }, "layers": layers, "ao": "ao.png", "splatmaps": splats, "loss": loss });
         std::fs::write(
             dir.join("materials.json"),
             serde_json::to_vec_pretty(&manifest)?,
@@ -411,7 +432,7 @@ pub fn export_profile_with(
     };
     let mut readme = readme(profile, w, h, &settings, masks, &notes);
     if !materials.is_empty() {
-        readme.push_str("\nMaterials: `materials.json` lists one entry per layer of the material stack (weightmap, albedo_srgb, roughness/smoothness, emissive) and the RGBA-packed `splat_<k>.png` maps (four layers per image, in order). Lost in translation:\n");
+        readme.push_str("\nMaterials: `materials.json` lists one entry per layer of the material stack (weightmap, albedo_srgb, roughness/smoothness, emissive) and the RGBA-packed `splat_<k>.png` maps (four layers per image, in order); `ao.png` is the terrain's ambient occlusion (8-bit, 1 − sky occlusion). Lost in translation:\n");
         for l in &loss {
             readme.push_str(&format!("- {l}\n"));
         }
@@ -587,6 +608,11 @@ mod tests {
             "the masked layers are packed four per RGBA splat map"
         );
         assert!(dir.path().join("u/splat_0.png").exists());
+        assert_eq!(manifest["ao"], "ao.png");
+        assert!(
+            dir.path().join("u/ao.png").exists(),
+            "the ambient-occlusion map is part of every profile"
+        );
         assert!(manifest["layers"][0]["weightmap"].is_null());
         assert!((manifest["layers"][1]["smoothness"].as_f64().expect("s") - 0.55).abs() < 1e-6);
         assert!(
@@ -643,6 +669,7 @@ mod tests {
                 "heightmap.r16",
                 "heightmap.r16.jd-height.json",
                 "weight_forest.png",
+                "ao.png",
                 "README.md"
             ]
         );
@@ -684,7 +711,12 @@ mod tests {
         .expect("unreal");
         assert_eq!(
             r.files,
-            ["heightmap.png", "heightmap.png.jd-height.json", "README.md"]
+            [
+                "heightmap.png",
+                "heightmap.png.jd-height.json",
+                "ao.png",
+                "README.md"
+            ]
         );
         assert_eq!(r.notes.len(), 1, "33 is not an Unreal size");
         let z = r.settings.unreal_z_scale.expect("z");
