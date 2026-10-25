@@ -9404,6 +9404,54 @@ expression: list
     }
   },
   {
+    "id": "project.write_export",
+    "description": "Write bytes (base64) to a file under the project's exports/ — viewport stills and flythrough frames from the desktop, any small artefact from an agent; the path is relative and may not leave exports/",
+    "scope": "export",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WriteExport",
+      "description": "`project.write_export` params.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "Destination under the project's exports/ (relative, no `..`): `stills/view_01.png`, `flythrough/frame_0003.png`.",
+          "type": "string"
+        },
+        "bytes_base64": {
+          "description": "The file's bytes, base64.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "bytes_base64"
+      ]
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WrittenExport",
+      "description": "`project.write_export` result.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "Absolute path written.",
+          "type": "string"
+        },
+        "bytes": {
+          "description": "Bytes written.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "path",
+        "bytes"
+      ]
+    }
+  },
+  {
     "id": "sky.bake",
     "description": "Bake a physical sky (Preetham daylight model: sun azimuth/elevation, turbidity) as an equirectangular HDRI — OpenEXR RGB f32 for engines and renderers, with a tonemapped PNG preview beside it",
     "scope": "export",
@@ -12450,6 +12498,15 @@ expression: list
           ],
           "default": null
         },
+        "camera_height_m": {
+          "description": "Camera height above the ground, metres — a standing photographer's eye (~1.6), a drone's altitude: the\nground plane in the lower image is fitted and the metric depth rescaled so the camera sits that high\n(landscape photos otherwise read ~10× too close); reported as `ground`.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float",
+          "default": null
+        },
         "max_px": {
           "description": "Long side the photograph is resized to before inference (518..=4096).",
           "type": "integer",
@@ -12533,6 +12590,19 @@ expression: list
           "description": "MoGe-2's metric scale (metres per unit of shifted z; 1 for DA3).",
           "type": "number",
           "format": "float"
+        },
+        "ground": {
+          "description": "The ground-plane fit when `camera_height_m` was given and a plane was found: `[fitted_height_m, scale, inliers]`.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "minItems": 3,
+          "maxItems": 3
         },
         "load_ms": {
           "description": "Milliseconds loading the model (0 when it was already resident).",

@@ -3975,6 +3975,11 @@ pub mod terrain {
         /// `fov_x_deg` is not given — the metric export has no camera head of its own.
         #[serde(default)]
         pub camera_model: Option<PathBuf>,
+        /// Camera height above the ground, metres — a standing photographer's eye (~1.6), a drone's altitude: the
+        /// ground plane in the lower image is fitted and the metric depth rescaled so the camera sits that high
+        /// (landscape photos otherwise read ~10× too close); reported as `ground`.
+        #[serde(default)]
+        pub camera_height_m: Option<f32>,
         /// Long side the photograph is resized to before inference (518..=4096).
         #[serde(default = "default_vision_px")]
         #[schemars(range(min = 518, max = 4096))]
@@ -4018,6 +4023,9 @@ pub mod terrain {
         pub depth_m: [f32; 2],
         /// MoGe-2's metric scale (metres per unit of shifted z; 1 for DA3).
         pub metric_scale: f32,
+        /// The ground-plane fit when `camera_height_m` was given and a plane was found: `[fitted_height_m, scale, inliers]`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub ground: Option<[f32; 3]>,
         /// Milliseconds loading the model (0 when it was already resident).
         pub load_ms: u64,
         /// Milliseconds in the session.
@@ -4044,6 +4052,24 @@ pub mod terrain {
     }
     fn default_sky_path() -> PathBuf {
         PathBuf::from("sky.exr")
+    }
+
+    /// `project.write_export` params.
+    #[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct WriteExport {
+        /// Destination under the project's exports/ (relative, no `..`): `stills/view_01.png`, `flythrough/frame_0003.png`.
+        pub path: PathBuf,
+        /// The file's bytes, base64.
+        pub bytes_base64: String,
+    }
+    /// `project.write_export` result.
+    #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct WrittenExport {
+        /// Absolute path written.
+        pub path: PathBuf,
+        /// Bytes written.
+        pub bytes: u64,
     }
 
     /// `sky.load_hdri` params.
@@ -4682,6 +4708,24 @@ pub mod terrain {
                 Ok((SkyPreviewResult { width: p.width, height: p.width / 2, png_base64: base64::engine::general_purpose::STANDARD.encode(png) }, Vec::new()))
             },
         );
+        r.register::<WriteExport, WrittenExport, _>(
+            "project.write_export",
+            "Write bytes (base64) to a file under the project's exports/ — viewport stills and flythrough frames from the desktop, any small artefact from an agent; the path is relative and may not leave exports/",
+            Scope::Export,
+            |ctx, p| {
+                use base64::Engine as _;
+                if p.path.is_absolute() || p.path.components().any(|c| matches!(c, std::path::Component::ParentDir)) || p.path.as_os_str().is_empty() {
+                    return Err(JdError::invalid("path", "must be a relative path inside exports/ (no `..`)"));
+                }
+                let bytes = base64::engine::general_purpose::STANDARD.decode(&p.bytes_base64).map_err(|e| JdError::invalid("bytes_base64", format!("not base64: {e}")))?;
+                let path = ctx.with_project(|proj| Ok(proj.root().join("exports").join(&p.path)))?;
+                if let Some(dir) = path.parent() {
+                    std::fs::create_dir_all(dir)?;
+                }
+                std::fs::write(&path, &bytes)?;
+                Ok((WrittenExport { path, bytes: bytes.len() as u64 }, Vec::new()))
+            },
+        );
         r.register::<SkyLoadHdri, SkyHdriResult, _>(
             "sky.load_hdri",
             "Read an equirectangular EXR (an HDRI, or `sky.bake`'s output) for the viewport dome: a tonemapped PNG, the brightest texel as a sun direction (azimuth clockwise from north, elevation) and the mean luminance",
@@ -4770,7 +4814,7 @@ pub mod terrain {
                     std::fs::create_dir_all(parent)?;
                 }
                 let camera = p.camera_model.as_ref().map(|c| if c.is_absolute() { Ok(c.clone()) } else { ctx.with_project(|proj| Ok(proj.root().join(c))) }).transpose()?;
-                let d = jd_vision::depth_from_image(&image, &model, p.max_px, p.num_tokens, p.fov_x_deg, camera.as_deref())?;
+                let d = jd_vision::depth_from_image_with(&image, &model, p.max_px, p.num_tokens, p.fov_x_deg, camera.as_deref(), p.camera_height_m)?;
                 if p.metric && !d.metric {
                     return Err(JdError::invalid("metric", "DA3's depth is canonical without the camera's field of view").next("Pass `fov_x_deg` or `camera_model` (the da3-base export), or use MoGe-2, which recovers it."));
                 }
@@ -4787,7 +4831,7 @@ pub mod terrain {
                     &jd_terrain::ExportOptions { format: jd_terrain::HeightmapFormat::Exr, flip_y: Some(false), range_m: None, georeference: false },
                 )?;
                 Ok((
-                    VisionDepthResult { path, px: [d.width, d.height], masked_share: d.masked_share, model: d.model.as_str().into(), metric: d.metric, fov_x_deg: d.fov_x_deg, fov_source: d.fov_source.into(), depth_m, metric_scale: d.metric_scale, load_ms: d.load_ms, infer_ms: d.infer_ms },
+                    VisionDepthResult { path, px: [d.width, d.height], masked_share: d.masked_share, model: d.model.as_str().into(), metric: d.metric, fov_x_deg: d.fov_x_deg, fov_source: d.fov_source.into(), depth_m, metric_scale: d.metric_scale, ground: d.ground.map(|g| [g.fitted_height_m, g.scale, g.inliers]), load_ms: d.load_ms, infer_ms: d.infer_ms },
                     Vec::new(),
                 ))
             },

@@ -1337,6 +1337,20 @@ export type ProjectSetSettingsResult = {
   "look": Look;
 };
 
+export type ProjectWriteExportRequest = {
+  /** Destination under the project's exports/ (relative, no `..`): `stills/view_01.png`, `flythrough/frame_0003.png`. */
+  "path": string;
+  /** The file's bytes, base64. */
+  "bytes_base64": string;
+};
+
+export type ProjectWriteExportResult = {
+  /** Absolute path written. */
+  "path": string;
+  /** Bytes written. */
+  "bytes": number;
+};
+
 export type SkyBakeRequest = {
   /** Sun azimuth, degrees clockwise from north. */
   "sun_azimuth_deg"?: number;
@@ -2016,6 +2030,10 @@ z shift only (its own estimate is the default), DA3 needs it for metres. */
 or relative to the project root) whose camera head estimates the field of view when
 `fov_x_deg` is not given — the metric export has no camera head of its own. */
   "camera_model"?: string | null;
+  /** Camera height above the ground, metres — a standing photographer's eye (~1.6), a drone's altitude: the
+ground plane in the lower image is fitted and the metric depth rescaled so the camera sits that high
+(landscape photos otherwise read ~10× too close); reported as `ground`. */
+  "camera_height_m"?: number | null;
   /** Long side the photograph is resized to before inference (518..=4096). */
   "max_px"?: number;
   /** Token budget of the model (1200..=3600): more is finer and slower. */
@@ -2044,6 +2062,8 @@ canonical units. */
   "depth_m": [number, number];
   /** MoGe-2's metric scale (metres per unit of shifted z; 1 for DA3). */
   "metric_scale": number;
+  /** The ground-plane fit when `camera_height_m` was given and a plane was found: `[fitted_height_m, scale, inliers]`. */
+  "ground"?: [number, number, number] | null;
   /** Milliseconds loading the model (0 when it was already resident). */
   "load_ms": number;
   /** Milliseconds in the session. */
@@ -2910,6 +2930,8 @@ export interface JdOps {
   "project.set_name": { request: ProjectSetNameRequest; result: ProjectSetNameResult };
   /** Change project settings (autosave interval, cache limit, preview LOD, memory budget, the world's shared wind, the world origin and CRS); fields left out keep their value — journaled like every mutation */
   "project.set_settings": { request: ProjectSetSettingsRequest; result: ProjectSetSettingsResult };
+  /** Write bytes (base64) to a file under the project's exports/ — viewport stills and flythrough frames from the desktop, any small artefact from an agent; the path is relative and may not leave exports/ */
+  "project.write_export": { request: ProjectWriteExportRequest; result: ProjectWriteExportResult };
   /** Bake a physical sky (Preetham daylight model: sun azimuth/elevation, turbidity) as an equirectangular HDRI — OpenEXR RGB f32 for engines and renderers, with a tonemapped PNG preview beside it */
   "sky.bake": { request: SkyBakeRequest; result: SkyBakeResult };
   /** Read an equirectangular EXR (an HDRI, or `sky.bake`'s output) for the viewport dome: a tonemapped PNG, the brightest texel as a sun direction (azimuth clockwise from north, elevation) and the mean luminance */

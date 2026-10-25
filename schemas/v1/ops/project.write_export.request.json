@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WriteExport",
+  "description": "`project.write_export` params.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "Destination under the project's exports/ (relative, no `..`): `stills/view_01.png`, `flythrough/frame_0003.png`.",
+      "type": "string"
+    },
+    "bytes_base64": {
+      "description": "The file's bytes, base64.",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "bytes_base64"
+  ]
+}

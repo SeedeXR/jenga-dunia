@@ -205,6 +205,11 @@
     "scope": "project-write"
   },
   {
+    "id": "project.write_export",
+    "description": "Write bytes (base64) to a file under the project's exports/ — viewport stills and flythrough frames from the desktop, any small artefact from an agent; the path is relative and may not leave exports/",
+    "scope": "export"
+  },
+  {
     "id": "sky.bake",
     "description": "Bake a physical sky (Preetham daylight model: sun azimuth/elevation, turbidity) as an equirectangular HDRI — OpenEXR RGB f32 for engines and renderers, with a tonemapped PNG preview beside it",
     "scope": "export"

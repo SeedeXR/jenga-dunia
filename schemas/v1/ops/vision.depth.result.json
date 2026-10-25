@@ -59,6 +59,19 @@
       "type": "number",
       "format": "float"
     },
+    "ground": {
+      "description": "The ground-plane fit when `camera_height_m` was given and a plane was found: `[fitted_height_m, scale, inliers]`.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "number",
+        "format": "float"
+      },
+      "minItems": 3,
+      "maxItems": 3
+    },
     "load_ms": {
       "description": "Milliseconds loading the model (0 when it was already resident).",
       "type": "integer",

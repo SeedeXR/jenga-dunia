@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WrittenExport",
+  "description": "`project.write_export` result.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "Absolute path written.",
+      "type": "string"
+    },
+    "bytes": {
+      "description": "Bytes written.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "path",
+    "bytes"
+  ]
+}
