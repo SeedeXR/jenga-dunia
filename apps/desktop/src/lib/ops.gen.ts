@@ -988,6 +988,8 @@ export type MaterialSpec = {
   "albedo": [number, number, number];
   /** Roughness 0..1. */
   "roughness"?: number;
+  /** Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night. */
+  "emissive"?: [number, number, number] | null;
   /** Tileable detail (grain repeated every `tile_m` metres): baked into the macro maps and
 the GLB by world position, returned as tiles for the viewport, written as tiles for
 the engines. */
@@ -1819,6 +1821,8 @@ export type TerrainTexturesResult = {
   "normal_png_base64": string;
   /** Roughness in G (0.92 flat → 0.62 steep rock, 0.6 above the snow line), metallic 0 in B. */
   "roughness_png_base64": string;
+  /** Emissive map (PNG, base64) when a material layer emits; absent otherwise. */
+  "emissive_png_base64"?: string | null;
   /** Detail tiles of the layers that have one. */
   "details"?: DetailOut[];
   /** The first four detail layers' masks packed into an RGBA PNG at the map size (base64),

@@ -62,7 +62,7 @@ test.describe("painted density against the real core", () => {
     expect(before).toBeGreaterThan(0);
     await page.getByTestId("scatter-paint").click();
     const strokes = panel.locator(".react-flow__node", { hasText: "jd.sculpt.strokes@1" });
-    await expect(strokes).toHaveCount(1);
+    await expect(strokes).toHaveCount(1, { timeout: 20_000 }); // add_node + two connects + list, under the suite's load
     await expect(strokes).toContainText("clamp=0…1");
     await expect(page.getByTestId("sculpt-toggle")).toContainText("Sculpting");
     // One stroke across the middle of the terrain adds 0.5 of density under the brush.

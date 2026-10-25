@@ -80,6 +80,8 @@ pub struct ProfileMaterial<'a> {
     pub albedo: [f32; 3],
     /// Roughness 0..1.
     pub roughness: f32,
+    /// Emitted light, linear RGB 0..1 (black = none).
+    pub emissive: [f32; 3],
     /// Tileable detail: written as `detail_<name>_albedo.png` / `detail_<name>_normal.png`
     /// with `tile_m` in the manifest.
     pub detail: Option<crate::detail::Detail>,
@@ -227,7 +229,7 @@ pub fn export_profile_with(
             };
             let mut entry = serde_json::json!({
                 "name": m.name, "weightmap": weightmap, "albedo_srgb": m.albedo, "roughness": m.roughness,
-                "smoothness": 1.0 - m.roughness,
+                "smoothness": 1.0 - m.roughness, "emissive": m.emissive,
             });
             if let Some(d) = &m.detail {
                 let tile = crate::detail::bake_detail(d, m.albedo)?;
@@ -253,6 +255,12 @@ pub fn export_profile_with(
         }
         loss.push("blend order: the stack lerps layers in order; engine weightmaps blend by normalised weight, so overlapping masks mix instead of the later one winning — order your masks to overlap little or pre-multiply them in the graph".to_owned());
         loss.push("weights are 8-bit (256 steps) at the heightmap's resolution".to_owned());
+        if materials
+            .iter()
+            .any(|m| m.emissive.iter().any(|c| *c > 0.0))
+        {
+            loss.push("emissive: listed per layer; a terrain layer's material must take it as an emissive colour input (Unity: a custom terrain shader; Unreal: the Landscape material's Emissive Color, weighted by the layer)".to_owned());
+        }
         match profile {
             EngineProfile::Unity => loss.push("roughness: a Unity Terrain Layer takes smoothness (= 1 − roughness, listed) through its mask map's alpha, not a scalar".to_owned()),
             EngineProfile::Unreal => loss.push("roughness: the Landscape material must expose a roughness input per layer; the scalar is listed, not applied".to_owned()),
@@ -361,6 +369,7 @@ mod tests {
                 mask: None,
                 albedo: [0.5, 0.5, 0.5],
                 roughness: 0.9,
+                emissive: [0.0; 3],
                 detail: None,
             },
             ProfileMaterial {
@@ -368,6 +377,7 @@ mod tests {
                 mask: Some(&m),
                 albedo: [0.95, 0.96, 0.98],
                 roughness: 0.45,
+                emissive: [0.0; 3],
                 detail: None,
             },
         ];
@@ -410,6 +420,7 @@ mod tests {
             mask: None,
             albedo: [0.0; 3],
             roughness: 0.5,
+            emissive: [0.0; 3],
             detail: None,
         }];
         assert!(

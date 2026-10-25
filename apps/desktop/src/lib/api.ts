@@ -94,6 +94,8 @@ export interface LayerMaps {
   albedo: ImageBitmap;
   normal: ImageBitmap;
   roughness: ImageBitmap;
+  /** Emissive map when a material layer emits (a lava flow's glow); null otherwise. */
+  emissive: ImageBitmap | null;
   px: [number, number];
   /** Detail tiles of the layers that have one, and their masks packed RGBA at the map size. */
   details: DetailTile[];
@@ -127,5 +129,6 @@ export async function layerTextures(layer: string, maxPx = 1024, materials: Mate
     (r.result.details ?? []).map(async (d) => ({ layer: d.layer, tileM: d.tile_m, px: d.px, albedo: await decode(d.albedo_png_base64), normal: await decode(d.normal_png_base64) })),
   );
   const detailWeights = r.result.detail_weights_png_base64 ? await decode(r.result.detail_weights_png_base64) : null;
-  return { maps: { albedo, normal, roughness, px: [r.result.width, r.result.height], details, detailWeights }, ms: performance.now() - t0 };
+  const emissive = r.result.emissive_png_base64 ? await decode(r.result.emissive_png_base64) : null;
+  return { maps: { albedo, normal, roughness, emissive, px: [r.result.width, r.result.height], details, detailWeights }, ms: performance.now() - t0 };
 }

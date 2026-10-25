@@ -4160,6 +4160,9 @@ pub mod terrain {
         /// Roughness 0..1.
         #[serde(default = "default_roughness")]
         pub roughness: f32,
+        /// Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.
+        #[serde(default)]
+        pub emissive: Option<[f32; 3]>,
         /// Tileable detail (grain repeated every `tile_m` metres): baked into the macro maps and
         /// the GLB by world position, returned as tiles for the viewport, written as tiles for
         /// the engines.
@@ -4251,6 +4254,7 @@ pub mod terrain {
                     mask,
                     albedo: m.albedo,
                     roughness: m.roughness,
+                    emissive: m.emissive.unwrap_or([0.0; 3]),
                     detail: detail_of(&m.detail),
                 })
             })
@@ -4274,6 +4278,9 @@ pub mod terrain {
         pub normal_png_base64: String,
         /// Roughness in G (0.92 flat → 0.62 steep rock, 0.6 above the snow line), metallic 0 in B.
         pub roughness_png_base64: String,
+        /// Emissive map (PNG, base64) when a material layer emits; absent otherwise.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub emissive_png_base64: Option<String>,
         /// Detail tiles of the layers that have one.
         #[serde(default)]
         pub details: Vec<DetailOut>,
@@ -4552,6 +4559,7 @@ pub mod terrain {
                             albedo_png_base64: b64(&maps.albedo),
                             normal_png_base64: b64(&maps.normal),
                             roughness_png_base64: b64(&maps.roughness),
+                            emissive_png_base64: maps.emissive.as_deref().map(b64),
                             details: maps.details.iter().map(|(k, t)| DetailOut { layer: *k, mask: p.materials[*k].mask.clone(), tile_m: t.tile_m, px: t.px, albedo_png_base64: b64(&t.albedo), normal_png_base64: b64(&t.normal) }).collect(),
                             detail_weights_png_base64: maps.detail_weights.as_deref().map(b64).unwrap_or_default(),
                         },
@@ -4663,7 +4671,7 @@ pub mod terrain {
                     .iter()
                     .zip(&mat_fields)
                     .enumerate()
-                    .map(|(i, (m, f))| jd_terrain::ProfileMaterial { name: m.mask.clone().unwrap_or_else(|| format!("material_{i}")), mask: f.as_ref(), albedo: m.albedo, roughness: m.roughness, detail: detail_of(&m.detail) })
+                    .map(|(i, (m, f))| jd_terrain::ProfileMaterial { name: m.mask.clone().unwrap_or_else(|| format!("material_{i}")), mask: f.as_ref(), albedo: m.albedo, roughness: m.roughness, emissive: m.emissive.unwrap_or([0.0; 3]), detail: detail_of(&m.detail) })
                     .collect();
                 let geo = ctx.with_project(|proj| {
                     let w = &proj.doc.world;

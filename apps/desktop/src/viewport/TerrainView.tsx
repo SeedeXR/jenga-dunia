@@ -698,10 +698,18 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = n
       node.normalNode = normalMap(normalTex);
       node.roughnessNode = texture(tex(maps.roughness, false), uv()).g;
       node.metalnessNode = float(0);
+      if (maps.emissive) node.emissiveNode = texture(tex(maps.emissive, true), uv()).rgb;
       mat = node;
     } else {
       mat = textured
-        ? new THREE.MeshStandardMaterial({ map: tex(maps.albedo, true), normalMap: tex(maps.normal, false), roughnessMap: tex(maps.roughness, false), roughness: 1, metalness: 0 })
+        ? new THREE.MeshStandardMaterial({
+            map: tex(maps.albedo, true),
+            normalMap: tex(maps.normal, false),
+            roughnessMap: tex(maps.roughness, false),
+            roughness: 1,
+            metalness: 0,
+            ...(maps.emissive ? { emissiveMap: tex(maps.emissive, true), emissive: new THREE.Color(1, 1, 1) } : {}),
+          })
         : new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 });
     }
     s.meshTextures = owned;

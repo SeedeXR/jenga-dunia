@@ -725,11 +725,19 @@ export const useStore = create<State>((set, get) => {
       // 6.5 × 0.6 × (max height in km) puts it at six tenths of the highest ground.
       const maxM = get().layer?.stats.max ?? 500;
       const snowTemp = Math.round(6.5 * 0.6 * (maxM / 1000) * 10) / 10;
-      const sims: Record<SimulationKind, { kind: string; params: Record<string, unknown> | null; through: boolean; publish: [string, string][]; material: MaterialSpec | null }> = {
+      const sims: Record<SimulationKind, { kind: string; params: Record<string, unknown> | null; through: boolean; publish: [string, string][]; material: MaterialSpec | null; extra?: MaterialSpec }> = {
         snow: { kind: "jd.climate.snowpack@1", params: { steps: 40, temperature_c: snowTemp }, through: false, publish: [["cover", "snow"]], material: { mask: "snow", albedo: [0.93, 0.95, 0.98], roughness: 0.6 } },
         debris: { kind: "jd.erosion.debris@1", params: null, through: true, publish: [["debris", "debris"]], material: { mask: "debris", albedo: [0.33, 0.3, 0.27], roughness: 0.95 } },
         sand: { kind: "jd.erosion.aeolian@1", params: { iterations: 60 }, through: true, publish: [], material: null },
-        lava: { kind: "jd.volcanic.lava@1", params: { eruption_s: 1800, duration_s: 1800 }, through: true, publish: [["heat", "heat"], ["lava", "lava"]], material: { mask: "lava", albedo: [0.16, 0.15, 0.15], roughness: 0.8 } },
+        lava: {
+          kind: "jd.volcanic.lava@1",
+          params: { eruption_s: 1800, duration_s: 1800 },
+          through: true,
+          publish: [["heat", "heat"], ["lava", "lava"]],
+          material: { mask: "lava", albedo: [0.16, 0.15, 0.15], roughness: 0.8 },
+          // The molten part glows: an emissive layer on the heat mask, over the basalt.
+          extra: { mask: "heat", albedo: [1.0, 0.45, 0.1], roughness: 0.7, emissive: [1.0, 0.35, 0.05] },
+        },
       };
       const sim = sims[which];
       let id: string | null;
@@ -754,7 +762,8 @@ export const useStore = create<State>((set, get) => {
         if (r.status === "ok" && r.result) await get().connectNodes(id, port, r.result.id, "in");
       }
       await loadGraph();
-      if (sim.material && !get().materials.some((m) => m.mask === sim.material?.mask)) get().setMaterials([...get().materials, sim.material]);
+      const rows = [sim.material, sim.extra].filter((m): m is MaterialSpec => !!m && !get().materials.some((x) => x.mask === m.mask));
+      if (rows.length > 0) get().setMaterials([...get().materials, ...rows]);
       // Colour by the first mask once the (live or explicit) evaluation has published it.
       pendingColor = sim.publish[0]?.[1] ?? null;
       set({ selectedNode: id });

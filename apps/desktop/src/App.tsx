@@ -821,6 +821,16 @@ export default function App() {
                 data-testid={`material-color-${i}`}
               />
               <input
+                type="color"
+                value={hexOf(m.emissive ?? [0, 0, 0])}
+                onChange={(e) => {
+                  const c = rgbOf(e.target.value);
+                  s.setMaterials(s.materials.map((x, k) => (k === i ? { ...x, emissive: c.every((v) => v === 0) ? null : c } : x)));
+                }}
+                title="Emitted light (black = none): glows in the viewport and the GLB, listed for the engines"
+                data-testid={`material-emissive-${i}`}
+              />
+              <input
                 className={`${inputCls} w-14`}
                 type="number"
                 min={0}

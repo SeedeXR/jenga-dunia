@@ -232,7 +232,7 @@ World Creator's Simulation Layers (Snow, Debris, Sand, Fluid) as one click each,
 
 ![Simulation layers: the row of four buttons, snow and lava material rows, the lava node selected in the inspector and the viewport coloured by the lava's heat](images/desktop-simlayers.png)
 
-The UI-driven test `e2e/simlayers.spec.ts` adds all four on a 128² world and checks the graph's wiring, the material rows, that the snow cover has a snow line inside the world and that the lava is still molten at the end of its eruption. The `heat` layer is drawn with a glow ramp when it colours the terrain; an emissive material for exports is an open item.
+The UI-driven test `e2e/simlayers.spec.ts` adds all four on a 128² world and checks the graph's wiring, the material rows, that the snow cover has a snow line inside the world and that the lava is still molten at the end of its eruption. Lava adds two material rows: basalt on the `lava` thickness and a glowing layer on `heat` whose **emissive** colour (the second swatch of every material row) is baked into an emissive map — the viewport glows with it, the GLB carries it as `emissiveTexture`, and the engine manifests list it per layer.
 
 ## Materials
 

@@ -57,6 +57,11 @@ test.describe("simulation layers against the real core", () => {
     await expect.poll(() => logCount(page, "graph.evaluate: ok"), { timeout: 120_000 }).toBeGreaterThan(evaluated);
     // The material row's mask option exists once the evaluation has published the layer.
     await expect(page.getByTestId("material-mask-1")).toHaveValue("lava", { timeout: 30_000 });
+    // The molten part is an emissive layer on the heat mask; the bake carries an emissive map.
+    await expect(page.getByTestId("material-mask-2")).toHaveValue("heat");
+    await expect(page.getByTestId("material-emissive-2")).toHaveValue("#ff590d");
+    const tx = (await core.callTool({ name: "terrain.textures", arguments: { layer: "height", max_px: 128, materials: [{ mask: "heat", albedo: [1, 0.45, 0.1], roughness: 0.7, emissive: [1, 0.35, 0.05] }] } })).structuredContent as { result: { emissive_png_base64?: string } };
+    expect(tx.result.emissive_png_base64?.length ?? 0).toBeGreaterThan(100);
     await expect(page.getByTestId("viewport-info")).toContainText("colour heat", { timeout: 30_000 });
     const heat = (await core.callTool({ name: "terrain.stats", arguments: { layer: "heat" } })).structuredContent as { result: { stats: { max: number } } };
     expect(heat.result.stats.max).toBeGreaterThan(0.5);

@@ -191,9 +191,11 @@ impl Look {
         for (i, m) in self.materials.iter().enumerate() {
             if !m.albedo.iter().all(|c| (0.0..=1.0).contains(c))
                 || !(0.0..=1.0).contains(&m.roughness)
+                || m.emissive
+                    .is_some_and(|e| !e.iter().all(|c| (0.0..=1.0).contains(c)))
             {
                 return Err(format!(
-                    "materials[{i}]: albedo and roughness must be within 0..1"
+                    "materials[{i}]: albedo, roughness and emissive must be within 0..1"
                 ));
             }
         }

@@ -70,6 +70,20 @@
           "format": "float",
           "default": 0.8999999761581421
         },
+        "emissive": {
+          "description": "Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "minItems": 3,
+          "maxItems": 3,
+          "default": null
+        },
         "detail": {
           "description": "Tileable detail (grain repeated every `tile_m` metres): baked into the macro maps and\nthe GLB by world position, returned as tiles for the viewport, written as tiles for\nthe engines.",
           "anyOf": [

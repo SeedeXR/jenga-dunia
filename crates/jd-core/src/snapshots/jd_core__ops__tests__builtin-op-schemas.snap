@@ -5058,6 +5058,20 @@ expression: list
               "format": "float",
               "default": 0.8999999761581421
             },
+            "emissive": {
+              "description": "Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "minItems": 3,
+              "maxItems": 3,
+              "default": null
+            },
             "detail": {
               "description": "Tileable detail (grain repeated every `tile_m` metres): baked into the macro maps and\nthe GLB by world position, returned as tiles for the viewport, written as tiles for\nthe engines.",
               "anyOf": [
@@ -5603,6 +5617,20 @@ expression: list
               "format": "float",
               "default": 0.8999999761581421
             },
+            "emissive": {
+              "description": "Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "minItems": 3,
+              "maxItems": 3,
+              "default": null
+            },
             "detail": {
               "description": "Tileable detail (grain repeated every `tile_m` metres): baked into the macro maps and\nthe GLB by world position, returned as tiles for the viewport, written as tiles for\nthe engines.",
               "anyOf": [
@@ -6139,6 +6167,20 @@ expression: list
               "format": "float",
               "default": 0.8999999761581421
             },
+            "emissive": {
+              "description": "Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "minItems": 3,
+              "maxItems": 3,
+              "default": null
+            },
             "detail": {
               "description": "Tileable detail (grain repeated every `tile_m` metres): baked into the macro maps and\nthe GLB by world position, returned as tiles for the viewport, written as tiles for\nthe engines.",
               "anyOf": [
@@ -6565,6 +6607,20 @@ expression: list
               "type": "number",
               "format": "float",
               "default": 0.8999999761581421
+            },
+            "emissive": {
+              "description": "Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "minItems": 3,
+              "maxItems": 3,
+              "default": null
             },
             "detail": {
               "description": "Tileable detail (grain repeated every `tile_m` metres): baked into the macro maps and\nthe GLB by world position, returned as tiles for the viewport, written as tiles for\nthe engines.",
@@ -7063,6 +7119,20 @@ expression: list
               "format": "float",
               "default": 0.8999999761581421
             },
+            "emissive": {
+              "description": "Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "minItems": 3,
+              "maxItems": 3,
+              "default": null
+            },
             "detail": {
               "description": "Tileable detail (grain repeated every `tile_m` metres): baked into the macro maps and\nthe GLB by world position, returned as tiles for the viewport, written as tiles for\nthe engines.",
               "anyOf": [
@@ -7279,6 +7349,20 @@ expression: list
               "type": "number",
               "format": "float",
               "default": 0.8999999761581421
+            },
+            "emissive": {
+              "description": "Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "minItems": 3,
+              "maxItems": 3,
+              "default": null
             },
             "detail": {
               "description": "Tileable detail (grain repeated every `tile_m` metres): baked into the macro maps and\nthe GLB by world position, returned as tiles for the viewport, written as tiles for\nthe engines.",
@@ -7685,6 +7769,20 @@ expression: list
               "type": "number",
               "format": "float",
               "default": 0.8999999761581421
+            },
+            "emissive": {
+              "description": "Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "minItems": 3,
+              "maxItems": 3,
+              "default": null
             },
             "detail": {
               "description": "Tileable detail (grain repeated every `tile_m` metres): baked into the macro maps and\nthe GLB by world position, returned as tiles for the viewport, written as tiles for\nthe engines.",
@@ -8112,6 +8210,20 @@ expression: list
               "type": "number",
               "format": "float",
               "default": 0.8999999761581421
+            },
+            "emissive": {
+              "description": "Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "minItems": 3,
+              "maxItems": 3,
+              "default": null
             },
             "detail": {
               "description": "Tileable detail (grain repeated every `tile_m` metres): baked into the macro maps and\nthe GLB by world position, returned as tiles for the viewport, written as tiles for\nthe engines.",
@@ -8628,6 +8740,20 @@ expression: list
               "type": "number",
               "format": "float",
               "default": 0.8999999761581421
+            },
+            "emissive": {
+              "description": "Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "minItems": 3,
+              "maxItems": 3,
+              "default": null
             },
             "detail": {
               "description": "Tileable detail (grain repeated every `tile_m` metres): baked into the macro maps and\nthe GLB by world position, returned as tiles for the viewport, written as tiles for\nthe engines.",
@@ -9289,6 +9415,20 @@ expression: list
               "format": "float",
               "default": 0.8999999761581421
             },
+            "emissive": {
+              "description": "Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "minItems": 3,
+              "maxItems": 3,
+              "default": null
+            },
             "detail": {
               "description": "Tileable detail (grain repeated every `tile_m` metres): baked into the macro maps and\nthe GLB by world position, returned as tiles for the viewport, written as tiles for\nthe engines.",
               "anyOf": [
@@ -9608,6 +9748,20 @@ expression: list
               "type": "number",
               "format": "float",
               "default": 0.8999999761581421
+            },
+            "emissive": {
+              "description": "Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "minItems": 3,
+              "maxItems": 3,
+              "default": null
             },
             "detail": {
               "description": "Tileable detail (grain repeated every `tile_m` metres): baked into the macro maps and\nthe GLB by world position, returned as tiles for the viewport, written as tiles for\nthe engines.",
@@ -10889,6 +11043,20 @@ expression: list
               "format": "float",
               "default": 0.8999999761581421
             },
+            "emissive": {
+              "description": "Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "minItems": 3,
+              "maxItems": 3,
+              "default": null
+            },
             "detail": {
               "description": "Tileable detail (grain repeated every `tile_m` metres): baked into the macro maps and\nthe GLB by world position, returned as tiles for the viewport, written as tiles for\nthe engines.",
               "anyOf": [
@@ -10984,6 +11152,13 @@ expression: list
         "roughness_png_base64": {
           "description": "Roughness in G (0.92 flat → 0.62 steep rock, 0.6 above the snow line), metallic 0 in B.",
           "type": "string"
+        },
+        "emissive_png_base64": {
+          "description": "Emissive map (PNG, base64) when a material layer emits; absent otherwise.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "details": {
           "description": "Detail tiles of the layers that have one.",

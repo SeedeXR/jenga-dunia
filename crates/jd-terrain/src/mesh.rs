@@ -234,6 +234,8 @@ pub struct BakedMaps {
     pub normal: Vec<u8>,
     /// Roughness (G) / metallic (B = 0) PNG.
     pub roughness: Vec<u8>,
+    /// Emissive PNG, only when a layer emits (black elsewhere).
+    pub emissive: Option<Vec<u8>>,
     /// Texture size in pixels.
     pub px: [u32; 2],
     /// Detail tiles of the layers that have one, with the layer's index in the stack.
@@ -254,6 +256,8 @@ pub struct MaterialLayer {
     pub albedo: [f32; 3],
     /// Roughness 0..1.
     pub roughness: f32,
+    /// Emitted light, linear RGB 0..1 (black = none): molten lava, embers, city glow.
+    pub emissive: [f32; 3],
     /// Tileable detail (grain repeated every `tile_m`): baked into the macro maps by world
     /// position and exported as tiles for the engines.
     pub detail: Option<crate::detail::Detail>,
@@ -289,11 +293,13 @@ fn validate_layers(hf: &Heightfield, layers: &[MaterialLayer]) -> JdResult<()> {
                 format!("layer {k}: mask size differs from the terrain"),
             ));
         }
-        if l.albedo.iter().any(|c| !(0.0..=1.0).contains(c)) || !(0.0..=1.0).contains(&l.roughness)
+        if l.albedo.iter().any(|c| !(0.0..=1.0).contains(c))
+            || !(0.0..=1.0).contains(&l.roughness)
+            || l.emissive.iter().any(|c| !(0.0..=1.0).contains(c))
         {
             return Err(JdError::invalid(
                 "materials",
-                format!("layer {k}: albedo and roughness must be within 0..=1"),
+                format!("layer {k}: albedo, roughness and emissive must be within 0..=1"),
             ));
         }
         if let Some(d) = &l.detail {
@@ -340,6 +346,9 @@ fn bake_maps_body(
         &|gx, gz| ((gx * ts) as f64 * sx, (gz * ts) as f64 * sz),
     )?;
     let (normal, roughness, px) = bake_normal_roughness_with(hf, extent_m, max_px, layers)?;
+    let emissive = bake_emissive(layers, tw, th, &|gx, gz| {
+        ((gx * ts).min(w - 1), (gz * ts).min(h - 1))
+    })?;
     let mut details = Vec::new();
     for (k, l) in layers.iter().enumerate() {
         if let Some(d) = &l.detail {
@@ -386,10 +395,61 @@ fn bake_maps_body(
         albedo,
         normal,
         roughness,
+        emissive,
         px,
         details,
         detail_weights,
     })
+}
+
+/// Emission map: black, then each emitting layer lerps its colour in by its mask — the same
+/// blend order as the albedo, so a glow sits exactly where its material does. `None` when no
+/// layer emits. `cell` maps a texel to the field cell it samples.
+pub(crate) fn bake_emissive(
+    layers: &[MaterialLayer],
+    tw: u32,
+    th: u32,
+    cell: &dyn Fn(u32, u32) -> (u32, u32),
+) -> JdResult<Option<Vec<u8>>> {
+    if !layers.iter().any(|l| l.emissive.iter().any(|c| *c > 0.0)) {
+        return Ok(None);
+    }
+    let mut rgb = Vec::with_capacity((tw * th * 3) as usize);
+    for gz in 0..th {
+        for gx in 0..tw {
+            let (cx, cz) = cell(gx, gz);
+            let mut e = [0.0f32; 3];
+            for l in layers {
+                let wgt = l
+                    .mask
+                    .as_ref()
+                    .map_or(1.0, |m| m.get(cx, cz).clamp(0.0, 1.0));
+                for (k, ec) in e.iter_mut().enumerate() {
+                    *ec += (l.emissive[k] - *ec) * wgt;
+                }
+            }
+            rgb.extend(
+                e.iter()
+                    .map(|v| (v * 255.0).round().clamp(0.0, 255.0) as u8),
+            );
+        }
+    }
+    let mut out = std::io::Cursor::new(Vec::new());
+    image::write_buffer_with_format(
+        &mut out,
+        &rgb,
+        tw,
+        th,
+        image::ExtendedColorType::Rgb8,
+        image::ImageFormat::Png,
+    )
+    .map_err(|e| {
+        JdError::new(
+            jd_types::ErrorCode::E_INTERNAL,
+            format!("PNG encode failed: {e}"),
+        )
+    })?;
+    Ok(Some(out.into_inner()))
 }
 
 /// Bake a tangent-space normal map (glTF convention: +X = +U east, +Y = +V north, +Z out of
@@ -647,7 +707,15 @@ pub fn export_glb_with(
         let (normal_png, rough_png, px) =
             bake_normal_roughness_with(hf, extent_m, NORMAL_MAP_CAP, materials)?;
         normal_px = Some(px);
-        for png in [albedo, normal_png, rough_png] {
+        // The albedo is one texel per exported vertex: the emissive map matches it.
+        let emissive = bake_emissive(materials, gw, gh, &|gx, gz| {
+            ((gx * step).min(fw - 1), (gz * step).min(fh - 1))
+        })?;
+        let mut pngs = vec![albedo, normal_png, rough_png];
+        if let Some(e) = emissive {
+            pngs.push(e);
+        }
+        for png in pngs {
             let off = bin.len();
             bin.extend_from_slice(&png);
             image_views.push((off, png.len()));
@@ -683,7 +751,12 @@ pub fn export_glb_with(
         views.push(serde_json::json!({ "buffer": 0, "byteOffset": tan_off, "byteLength": tan_len, "target": 34962 }));
         let tangent_view = views.len() - 1;
         let first = views.len();
-        let names = ["terrain-albedo", "terrain-normal", "terrain-roughness"];
+        let names = [
+            "terrain-albedo",
+            "terrain-normal",
+            "terrain-roughness",
+            "terrain-emissive",
+        ];
         let mut images = Vec::new();
         for (k, (off, len)) in image_views.iter().enumerate() {
             views.push(serde_json::json!({ "buffer": 0, "byteOffset": off, "byteLength": len }));
@@ -691,7 +764,11 @@ pub fn export_glb_with(
         }
         json["images"] = serde_json::Value::Array(images);
         json["samplers"] = serde_json::json!([{ "magFilter": 9729, "minFilter": 9987, "wrapS": 33071, "wrapT": 33071 }]);
-        json["textures"] = serde_json::json!([{ "sampler": 0, "source": 0 }, { "sampler": 0, "source": 1 }, { "sampler": 0, "source": 2 }]);
+        json["textures"] = serde_json::Value::Array(
+            (0..image_views.len())
+                .map(|k| serde_json::json!({ "sampler": 0, "source": k }))
+                .collect(),
+        );
         let accessors = json["accessors"]
             .as_array_mut()
             .ok_or_else(|| JdError::new(jd_types::ErrorCode::E_INTERNAL, "accessors"))?;
@@ -706,6 +783,10 @@ pub fn export_glb_with(
             serde_json::json!({ "index": 2, "texCoord": 0 });
         m["pbrMetallicRoughness"]["roughnessFactor"] = serde_json::json!(1.0);
         m["normalTexture"] = serde_json::json!({ "index": 1, "texCoord": 0 });
+        if image_views.len() > 3 {
+            m["emissiveTexture"] = serde_json::json!({ "index": 3, "texCoord": 0 });
+            m["emissiveFactor"] = serde_json::json!([1.0, 1.0, 1.0]);
+        }
     }
     let bytes = write_glb(path, &json, &bin)?;
     Ok(MeshExportReport {
@@ -1315,11 +1396,15 @@ pub fn write_glb_mesh(
         views.push(serde_json::json!({ "buffer": 0, "byteOffset": tan_off, "byteLength": tan_len, "target": 34962 }));
         accessors.push(serde_json::json!({ "bufferView": 4, "componentType": 5126, "count": n, "type": "VEC4" }));
         attributes["TANGENT"] = serde_json::json!(4);
-        for (png, name) in [
+        let mut pngs = vec![
             (&m.albedo, "terrain-albedo"),
             (&m.normal, "terrain-normal"),
             (&m.roughness, "terrain-roughness"),
-        ] {
+        ];
+        if let Some(e) = &m.emissive {
+            pngs.push((e, "terrain-emissive"));
+        }
+        for (png, name) in pngs {
             let off = bin.len();
             bin.extend_from_slice(png);
             views.push(
@@ -1329,6 +1414,10 @@ pub fn write_glb_mesh(
             pad4(&mut bin, 0);
         }
         material = serde_json::json!({ "name": "terrain", "pbrMetallicRoughness": { "baseColorTexture": { "index": 0, "texCoord": 0 }, "baseColorFactor": [1.0, 1.0, 1.0, 1.0], "metallicRoughnessTexture": { "index": 2, "texCoord": 0 }, "metallicFactor": 0.0, "roughnessFactor": 1.0 }, "normalTexture": { "index": 1, "texCoord": 0 } });
+        if m.emissive.is_some() {
+            material["emissiveTexture"] = serde_json::json!({ "index": 3, "texCoord": 0 });
+            material["emissiveFactor"] = serde_json::json!([1.0, 1.0, 1.0]);
+        }
         normal_px = Some(m.px);
     }
     let mut json = serde_json::json!({
@@ -1345,7 +1434,11 @@ pub fn write_glb_mesh(
     if !images.is_empty() {
         json["images"] = serde_json::Value::Array(images);
         json["samplers"] = serde_json::json!([{ "magFilter": 9729, "minFilter": 9987, "wrapS": 33071, "wrapT": 33071 }]);
-        json["textures"] = serde_json::json!([{ "sampler": 0, "source": 0 }, { "sampler": 0, "source": 1 }, { "sampler": 0, "source": 2 }]);
+        json["textures"] = serde_json::Value::Array(
+            (0..json["images"].as_array().map_or(0, Vec::len))
+                .map(|k| serde_json::json!({ "sampler": 0, "source": k }))
+                .collect(),
+        );
     }
     let bytes = write_glb(path, &json, &bin)?;
     Ok(MeshExportReport {
@@ -1729,6 +1822,7 @@ mod tests {
             mask: None,
             albedo: [0.5, 0.5, 0.5],
             roughness: 0.8,
+            emissive: [0.0; 3],
             detail: None,
         };
         let grainy = MaterialLayer {
@@ -1793,6 +1887,7 @@ mod tests {
             mask: Some(west),
             albedo: [1.0, 0.0, 0.0],
             roughness: 0.3,
+            emissive: [0.0; 3],
             detail: None,
         };
         let plain = bake_maps(&h, [320.0, 160.0], 64).expect("plain");
@@ -1817,9 +1912,61 @@ mod tests {
             mask: None,
             albedo: [2.0, 0.0, 0.0],
             roughness: 0.5,
+            emissive: [0.0; 3],
             detail: None,
         };
         assert!(bake_maps_with(&h, [320.0, 160.0], 64, &[bad]).is_err());
+    }
+
+    #[test]
+    fn an_emitting_layer_bakes_a_glow_map_where_its_mask_is_and_the_glb_carries_it() {
+        let mut h = Heightfield::new(32, 16, 32, 0).expect("hf");
+        h.fill_with(|x, _| x as f32);
+        let mut west = Heightfield::new(32, 16, 32, 0).expect("mask");
+        west.fill_with(|x, _| if x < 16 { 1.0 } else { 0.0 });
+        let glow = MaterialLayer {
+            mask: Some(west),
+            albedo: [0.2, 0.2, 0.2],
+            roughness: 0.7,
+            emissive: [1.0, 0.35, 0.05],
+            detail: None,
+        };
+        let maps =
+            bake_maps_with(&h, [320.0, 160.0], 64, std::slice::from_ref(&glow)).expect("bake");
+        let e = image::load_from_memory(maps.emissive.as_deref().expect("emissive map"))
+            .expect("png")
+            .to_rgb8();
+        assert_eq!(
+            e.get_pixel(4, 8).0,
+            [255, 89, 13],
+            "west glows the layer's colour"
+        );
+        assert_eq!(e.get_pixel(28, 8).0, [0, 0, 0], "east emits nothing");
+        assert!(
+            bake_maps(&h, [320.0, 160.0], 64)
+                .expect("plain")
+                .emissive
+                .is_none(),
+            "no emitting layer, no map"
+        );
+        let dir = tempfile::tempdir().expect("tmp");
+        let path = dir.path().join("glow.glb");
+        export_glb_with(
+            &h,
+            [320.0, 160.0],
+            &path,
+            1,
+            true,
+            std::slice::from_ref(&glow),
+        )
+        .expect("glb");
+        let bytes = std::fs::read(&path).expect("read");
+        let json_len = u32::from_le_bytes(bytes[12..16].try_into().expect("len")) as usize;
+        let json: serde_json::Value =
+            serde_json::from_slice(&bytes[20..20 + json_len]).expect("json");
+        assert_eq!(json["materials"][0]["emissiveTexture"]["index"], 3);
+        assert_eq!(json["images"][3]["name"], "terrain-emissive");
+        assert_eq!(json["textures"].as_array().expect("textures").len(), 4);
     }
 
     #[test]
