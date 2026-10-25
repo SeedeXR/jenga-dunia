@@ -1,12 +1,13 @@
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { Brush, FolderOpen, FolderPlus, FolderSearch, Globe, Grid3x3, Mountain, PanelBottom, PanelLeftClose, PanelLeftOpen, PanelRight, PanelRightClose, PanelRightOpen, Route, Save, Upload, Workflow } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Brush, Camera, Download, FileInput, FilePlus, FolderOpen, FolderPlus, FolderSearch, Globe, Grid3x3, Home, Maximize2, Mountain, PanelBottom, PanelLeftClose, PanelLeftOpen, PanelRight, PanelRightClose, PanelRightOpen, Play, Redo2, Route, Save, Undo2, Upload, Wand2, Workflow } from "lucide-react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import GraphPanel from "./graph/GraphPanel";
 import LayerStack from "./graph/LayerStack";
 import TerrainView, { type ViewportInfo } from "./viewport/TerrainView";
 import { type Brush as BrushTool, type NoiseSettings, useStore } from "./state";
 import type { FractalKind, HeightmapFormat, NoiseKind } from "./lib/ops.gen";
+import type { Preview } from "./lib/api";
 
 /** A resizable panel's size, kept in the browser store (`jd.layout.<key>`) and restored on launch: the
  *  inline style sets the saved px, a ResizeObserver writes every change (try/catch: storage may be off). */
@@ -96,6 +97,117 @@ export function formatFor(path: string): HeightmapFormat {
   return ext === "png" ? "png16" : ext === "r16" ? "raw_r16" : ext === "r32" ? "raw_r32" : ext === "tif" || ext === "tiff" ? "tiff32" : "exr";
 }
 
+/** Nice tick step for a span in metres: 1 / 2 / 5 × 10ⁿ giving 4–8 ticks. */
+function tickStep(span: number): number {
+  const raw = span / 6;
+  const pow = Math.pow(10, Math.floor(Math.log10(Math.max(raw, 1e-6))));
+  const m = raw / pow;
+  return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * pow;
+}
+
+const HINTS: Record<"orbit" | "sculpt" | "grid" | "road", [string, string][]> = {
+  orbit: [["Drag", "orbit"], ["Wheel", "zoom"]],
+  sculpt: [["Left drag", "stroke"], ["Right drag", "orbit"], ["Ctrl + wheel", "radius"], ["Shift + wheel", "strength"], ["Sculpting…", "back to orbit"]],
+  grid: [["Click", "toggle a cell"], ["Left drag", "add cells"], ["Alt + drag", "remove cells"], ["Right drag", "orbit"], ["Grid panel", "level / raise / lower"]],
+  road: [["Left drag", "lay the road"], ["Right drag", "orbit"], ["Drawing road…", "cancel"]],
+};
+
+/** World Creator-style viewport chrome: a compass strip, a height ruler, per-tool shortcut hints and fit / still / fullscreen buttons. */
+function ViewportChrome({ heading, distanceM, preview, seaLevelM, mode, onFit, onStill, canStill }: { heading: number; distanceM: number; preview: Preview | null; seaLevelM: number | null; mode: "orbit" | "sculpt" | "grid" | "road"; onFit: () => void; onStill: () => void; canStill: boolean }) {
+  // Compass: 180° of bearings across a 240 px strip, the camera's heading at the centre mark.
+  const W = 240;
+  const px = (deg: number) => W / 2 + ((((deg - heading + 540) % 360) - 180) * W) / 180;
+  const ticks = Array.from({ length: 24 }, (_, i) => i * 15);
+  const names: Record<number, string> = { 0: "N", 90: "E", 180: "S", 270: "W" };
+  // Ruler: the preview's height range, zero and the sea level marked, negatives below the datum.
+  const lo = preview?.min ?? 0;
+  const hi = preview?.max ?? 1;
+  const span = Math.max(hi - lo, 1e-6);
+  const step = tickStep(span);
+  const first = Math.ceil(lo / step) * step;
+  const rulerTicks: number[] = [];
+  for (let v = first; v <= hi + 1e-6 && rulerTicks.length < 40; v += step) rulerTicks.push(Number(v.toFixed(6)));
+  const y = (v: number) => 100 - ((v - lo) / span) * 100;
+  const fmt = (v: number) => (Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(v % 1000 === 0 ? 0 : 1)} km` : `${Math.round(v)} m`);
+  const fullscreen = () => {
+    const el = document.querySelector('[data-testid="viewport"]') as HTMLElement | null;
+    if (!el) return;
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void el.requestFullscreen?.();
+  };
+  return (
+    <>
+      <div className="pointer-events-none absolute top-11 left-1/2 flex -translate-x-1/2 flex-col items-center" data-testid="compass" aria-label={`heading ${Math.round(heading)}°`}>
+        <svg width={W} height={26} className="overflow-visible">
+          <rect x={0} y={0} width={W} height={26} rx={4} className="fill-jd-bg-1/80" />
+          {ticks.map((t) => {
+            const x = px(t);
+            if (x < 2 || x > W - 2) return null;
+            const major = t % 90 === 0;
+            return (
+              <g key={t}>
+                <line x1={x} y1={major ? 15 : 19} x2={x} y2={26} className="stroke-jd-fg-2" strokeWidth={1} />
+                {major && (
+                  <text x={x} y={12} textAnchor="middle" className={`text-[10px] font-semibold ${t === 0 ? "fill-jd-accent" : "fill-jd-fg-0"}`}>
+                    {names[t]}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+          <polygon points={`${W / 2 - 4},26 ${W / 2 + 4},26 ${W / 2},19`} className="fill-jd-accent" />
+        </svg>
+        <span className="mt-0.5 rounded bg-jd-bg-1/70 px-1 text-[10px] text-jd-fg-1" data-testid="compass-heading">
+          {Math.round(heading)}° · {distanceM >= 1000 ? `${(distanceM / 1000).toFixed(1)} km` : `${Math.round(distanceM)} m`}
+        </span>
+      </div>
+      {preview && (
+        // The ruler in HTML: ticks placed by percentage of the height range, text at its real size.
+        <div className="pointer-events-none absolute top-14 bottom-16 left-1 w-16" data-testid="height-ruler" aria-label={`heights ${fmt(lo)} to ${fmt(hi)}`}>
+          <div className="absolute top-0 right-1 bottom-0 w-px bg-jd-fg-2/60" />
+          {rulerTicks.map((v) => (
+            <div key={v} className="absolute right-1 flex -translate-y-1/2 items-center gap-1" style={{ top: `${y(v)}%` }}>
+              <span className={`whitespace-nowrap text-[10px] tabular-nums ${v < 0 ? "text-jd-warn" : v === 0 ? "text-jd-fg-0" : "text-jd-fg-2"}`}>{fmt(v)}</span>
+              <span className={`h-px ${v === 0 ? "w-3 bg-jd-fg-0" : "w-2 bg-jd-fg-2"}`} />
+            </div>
+          ))}
+          {seaLevelM !== null && seaLevelM >= lo && seaLevelM <= hi && (
+            <div className="absolute right-0 flex -translate-y-1/2 items-center gap-1" style={{ top: `${y(seaLevelM)}%` }} data-testid="ruler-sea">
+              <span className="text-[10px] text-sky-300">sea</span>
+              <span className="h-0.5 w-4 bg-sky-400" />
+            </div>
+          )}
+          <div className="absolute -top-5 left-0 whitespace-nowrap text-[10px] text-jd-fg-1" data-testid="ruler-max">
+            Max {fmt(hi)}
+          </div>
+          <div className="absolute -bottom-5 left-0 whitespace-nowrap text-[10px] text-jd-fg-1" data-testid="ruler-min">
+            Min {fmt(lo)}
+          </div>
+        </div>
+      )}
+      <dl className="pointer-events-none absolute bottom-2 left-1/2 grid -translate-x-1/2 grid-cols-[auto_auto] gap-x-3 gap-y-0 rounded bg-jd-bg-1/80 px-3 py-1 text-[10px] text-jd-fg-2" data-testid="viewport-hints" data-mode={mode}>
+        {HINTS[mode].map(([k, v]) => (
+          <Fragment key={k}>
+            <dt className="text-jd-fg-1">{k}</dt>
+            <dd>{v}</dd>
+          </Fragment>
+        ))}
+      </dl>
+      <span className="absolute top-2 left-2 flex gap-1">
+        <button className="btn px-1.5" title="Fit: back to the home view" onClick={onFit} data-testid="view-fit">
+          <Home size={14} />
+        </button>
+        <button className="btn px-1.5" title="Still: save this frame as exports/stills/view_<n>.png" onClick={onStill} disabled={!canStill} data-testid="view-still">
+          <Camera size={14} />
+        </button>
+        <button className="btn px-1.5" title="Fullscreen viewport (Esc leaves)" onClick={fullscreen} data-testid="view-fullscreen">
+          <Maximize2 size={14} />
+        </button>
+      </span>
+    </>
+  );
+}
+
 export default function App() {
   const s = useStore();
   const [projPath, setProjPath] = useState("");
@@ -131,7 +243,7 @@ export default function App() {
   const [hdriPath, setHdriPath] = useState("sky.exr");
   const [flyFrames, setFlyFrames] = useState(48); // an EXR in assets/ (or an absolute path) for the dome // a 0..1 layer whose cells ≥ 0.5 are holes in the exports; "" = none
   const [skyPath, setSkyPath] = useState("sky.exr");
-  const [vp, setVp] = useState<ViewportInfo>({ backend: "none", triangles: 0 });
+  const [vp, setVp] = useState<ViewportInfo>({ backend: "none", triangles: 0, heading: 326, distanceM: 5200 });
   const [showGraph, setShowGraph] = useState(true);
   const onInfo = useCallback((i: ViewportInfo) => setVp(i), []);
   const pathInput = useRef<HTMLInputElement>(null);
@@ -287,10 +399,45 @@ export default function App() {
     <div className="grid h-full grid-rows-[40px_1fr_160px] bg-jd-bg-0 text-jd-fg-0">
       {/* Top bar */}
       <header className="flex items-center gap-3 border-b border-jd-line bg-jd-bg-1 px-3">
-        <Mountain size={16} className="text-jd-accent" />
+        <img src="/jd-mark.svg" alt="Jenga Dunia" className="h-5 w-5" data-testid="brand-mark" />
         <span className="font-semibold tracking-wide">Jenga Dunia</span>
         <span className="text-xs text-jd-fg-2" data-testid="app-version">v{__JD_VERSION__}</span>
         <span className="text-xs text-jd-fg-2">{s.project ? `${s.project.name} — ${s.project.world.resolution_px[0]}² · ${s.project.world.extent_m[0]} m` : "no project"}</span>
+        <nav className="flex items-center gap-0.5 border-l border-jd-line pl-2" aria-label="Project and view actions" data-testid="toolbar">
+          {(
+            [
+              ["tb-new", FilePlus, "New project… (⌘N)", () => void pickProjectToCreate(), false],
+              ["tb-open", FolderOpen, "Open project… (⌘O)", () => void pickProjectToOpen(), false],
+              ["tb-save", Save, "Save (⌘S)", () => void s.save(), !s.project],
+              ["tb-import", FileInput, "Import a DEM, heightmap or FBX into assets/ (⌘I)", () => void pickAssetToImport(), !s.project],
+              ["tb-export", Download, "Export the heightmap… (⌘E)", () => void pickExportPath(), !s.layer],
+              null,
+              ["tb-undo", Undo2, "Undo graph edit (⌥⌘Z)", () => void s.undoGraph(), !s.project || !s.graph.undo_depth],
+              ["tb-redo", Redo2, "Redo graph edit (⇧⌥⌘Z)", () => void s.redoGraph(), !s.project || !s.graph.redo_depth],
+              null,
+              ["tb-generate", Wand2, "Generate terrain (⌘G)", () => void s.generate(), !s.project],
+              ["tb-evaluate", Play, "Evaluate the graph", () => void s.evaluateGraph(), !s.project],
+              null,
+              ["tb-still", Camera, "Save the viewport as a still (exports/stills/)", () => void s.saveStill(), !s.project || !s.viewport],
+              ["tb-fullscreen", Maximize2, "Fullscreen viewport (Esc leaves)", () => {
+                const el = document.querySelector('[data-testid="viewport"]') as HTMLElement | null;
+                if (document.fullscreenElement) void document.exitFullscreen();
+                else void el?.requestFullscreen?.();
+              }, false],
+            ] as ([string, typeof Save, string, () => void, boolean] | null)[]
+          ).map((b, i) =>
+            b === null ? (
+              <span key={`sep-${i}`} className="mx-1 h-4 w-px bg-jd-line" />
+            ) : (
+              <button key={b[0]} className="rounded p-1 text-jd-fg-1 hover:bg-jd-bg-3 hover:text-jd-fg-0 disabled:opacity-30" title={b[2]} aria-label={b[2]} onClick={b[3]} disabled={b[4] || s.busy} data-testid={b[0]}>
+                {(() => {
+                  const Icon = b[1];
+                  return <Icon size={15} />;
+                })()}
+              </button>
+            ),
+          )}
+        </nav>
         {s.lastEval && Object.keys(s.lastEval.layers).length > 1 && (
           <label className="ml-auto flex items-center gap-1 text-xs text-jd-fg-2">
             layer
@@ -578,6 +725,16 @@ export default function App() {
         <main className={`relative grid min-w-0 overflow-hidden bg-jd-bg-0 ${showGraph ? (dock.graph === "right" ? "grid-cols-[1fr_auto]" : "grid-rows-[1fr_auto]") : "grid-rows-[1fr]"}`}>
           <div className="relative min-h-0 min-w-0">
             <TerrainView fog={s.sun.fog} preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} sculpt={{ enabled: s.sculpting && (sculptNode !== undefined || s.drawing !== null), radiusM: s.drawing === "road" ? s.roadWidthM / 2 : s.brush.radius_m, onStroke: (pts) => void s.addStroke(pts), onAdjust: s.adjustBrush }} grid={s.grid.on ? { cells: s.grid.cells, selected: s.grid.selected, onSelect: s.gridSelect } : null} seaLevelM={seaLevelM} lakes={s.lakesPreview} water={water} waves={s.waves} sky={s.sky} hdri={s.hdri} post={s.post} onHandle={s.setViewportHandle} horizon={s.horizon} sun={{ azimuthDeg: s.sun.azimuth_deg, elevationDeg: s.sun.elevation_deg }} overlay={s.colorPreview} overlayName={s.colorLayer} instances={s.scatter.points ? { points: s.scatter.points, sizeM: Math.max(s.scatter.spacing_m * 0.35, (s.project?.world.extent_m[0] ?? 0) * 0.012), shape: /debris|rock|boulder|scree|talus/i.test(s.scatter.mask ?? "") ? "rock" : "cone" } : null} maps={s.maps} />
+            <ViewportChrome
+              heading={vp.heading}
+              distanceM={vp.distanceM}
+              preview={s.preview}
+              seaLevelM={seaLevelM}
+              mode={s.sculpting ? (s.drawing === "road" ? "road" : "sculpt") : s.grid.on ? "grid" : "orbit"}
+              onFit={() => s.viewport?.resetView()}
+              onStill={() => void s.saveStill()}
+              canStill={!!s.viewport && !!s.project}
+            />
             <button
               className={`btn absolute top-2 right-28 ${s.sculpting ? "text-jd-accent" : ""}`}
               title={s.sculpting ? "Sculpting: drag on the terrain to paint a stroke (click to stop)" : "Sculpt: adds a stroke node before the output and paints with the brush"}

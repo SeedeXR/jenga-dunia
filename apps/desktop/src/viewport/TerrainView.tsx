@@ -31,6 +31,10 @@ export interface ViewportInfo {
   hdri?: boolean;
   /** Post effects in force, e.g. `bloom 0.3 · vignette 0.2 · exposure 1.2`. */
   post?: string;
+  /** Compass heading the camera looks toward, degrees clockwise from north. */
+  heading: number;
+  /** Camera distance from the world's centre, metres. */
+  distanceM: number;
   /** Horizon skirt resolution per side, when one is drawn. */
   horizonPx?: number;
 }
@@ -387,6 +391,8 @@ interface SceneState {
   skirt: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | null;
   /** An imported HDRI is on the dome. */
   hdriOn: boolean;
+  /** Orbit radius of the home view (set when a preview is fitted). */
+  homeRadius: number;
   /** Post-processing pipeline when any effect is on, and its one-line description for the header. */
   post: RenderPipeline | null;
   postInfo: string | null;
@@ -411,6 +417,8 @@ export interface ViewportHandle {
   snapshot: () => Promise<Blob | null>;
   getOrbit: () => Orbit;
   setOrbit: (o: Orbit) => void;
+  /** Back to the home view (the orbit a fresh project opens with). */
+  resetView: () => void;
 }
 
 /** One report shape for every effect, so a later report never drops a field an earlier one set. */
@@ -418,6 +426,9 @@ function infoOf(s: SceneState): ViewportInfo {
   return {
     backend: s.backend,
     triangles: s.triangles,
+    // The camera sits at azimuth θ from south toward east and looks at the centre: heading = −θ.
+    heading: (((360 - (s.orbit.theta * 180) / Math.PI) % 360) + 360) % 360,
+    distanceM: s.orbit.radius,
     ...(s.sea ? { seaM: s.sea.position.y } : {}),
     ...(s.sea && s.seaWaves ? { waves: { heightM: s.seaWaves.heightM, lengthM: s.seaWaves.lengthM } } : {}),
     sun: s.sunDeg,
@@ -551,6 +562,7 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = n
       fogAmount: 0,
       skirt: null,
       hdriOn: false,
+      homeRadius: 5200,
       post: null,
       postInfo: null,
     };
@@ -562,6 +574,7 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = n
     // raycast onto the terrain mesh); the right or middle button always orbits, so a tool never
     // locks the camera.
     let dragging: "orbit" | "stroke" | "grid" | null = null;
+    let lastOrbitInfo = 0;
     let stroke: [number, number][] | null = null;
     let gridCells: Set<string> | null = null;
     let gridOp: "add" | "remove" = "add";
@@ -676,6 +689,12 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = n
       state.orbit.theta -= e.movementX * 0.005;
       state.orbit.phi = Math.min(1.5, Math.max(0.15, state.orbit.phi - e.movementY * 0.005));
       placeCamera(state);
+      // The compass and ruler follow the camera: a report at most every 100 ms while orbiting.
+      const now = performance.now();
+      if (now - lastOrbitInfo > 100) {
+        lastOrbitInfo = now;
+        onInfo?.(infoOf(state));
+      }
     };
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
@@ -816,6 +835,7 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = n
     // Camera distance and clip planes follow the world's extent so any size frames correctly.
     const size = Math.max(extentM[0], extentM[1]);
     s.orbit.radius = size * 1.3;
+    s.homeRadius = s.orbit.radius;
     s.orbit.minR = size * 0.02;
     s.orbit.maxR = size * 20;
     s.camera.near = Math.max(0.1, size * 0.001);
@@ -928,6 +948,14 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = n
         s.orbit.phi = Math.min(Math.max(o.phi, 0.05), Math.PI / 2 - 0.02);
         s.orbit.radius = Math.min(Math.max(o.radius, s.orbit.minR), s.orbit.maxR);
         placeCamera(s);
+        onInfo?.(infoOf(s));
+      },
+      resetView: () => {
+        s.orbit.theta = 0.6;
+        s.orbit.phi = 1.0;
+        s.orbit.radius = Math.min(Math.max(s.homeRadius, s.orbit.minR), s.orbit.maxR);
+        placeCamera(s);
+        onInfo?.(infoOf(s));
       },
     });
     return () => onHandle(null);
