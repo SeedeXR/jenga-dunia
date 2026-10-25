@@ -142,7 +142,8 @@ interface State {
   scatter: { mask: string | null; spacing_m: number; seed: number; grow: boolean; points: ScatterPoint[] | null };
   setScatter: (patch: Partial<{ mask: string | null; spacing_m: number; seed: number; grow: boolean }>) => void;
   placeScatter: () => Promise<void>;
-  exportScatter: () => Promise<void>;
+  /** `model`: a binary FBX in the project's assets/ to instance instead of the proxy cone. */
+  exportScatter: (model?: string) => Promise<void>;
   setBrush: (patch: Partial<Brush>) => void;
   /** Insert a sculpt node in front of the first output (or select the existing one) and enter sculpt mode. */
   startSculpting: () => Promise<void>;
@@ -189,7 +190,8 @@ interface State {
   generate: () => Promise<void>;
   exportHeightmap: (path: string, format: HeightmapFormat) => Promise<void>;
   /** `terrain.export_profile`: the height, every material mask as a weightmap and the material stack, for Unity or Unreal. */
-  exportProfile: (profile: "unity" | "unreal", dir: string) => Promise<void>;
+  /** `tiles` > 1 cuts the export into tiles × tiles engine folders sharing one height range. */
+  exportProfile: (profile: "unity" | "unreal", dir: string, tiles?: number) => Promise<void>;
   /** `terrain.export_mesh` with the material stack baked in; the extension picks the format. */
   exportMesh: (path: string, lods: number | null, targetTriangles: number | null) => Promise<void>;
   /** `sky.bake`: the viewport's sun, turbidity and clouds as an equirectangular HDRI. */
@@ -497,16 +499,27 @@ export const useStore = create<State>((set, get) => {
     };
   };
   let lookTimer: ReturnType<typeof setTimeout> | undefined;
+  let lookPending = false;
+  // A background write like autosave: `op` + `log`, never `run` — `run` flips `busy`, which
+  // disables every gated button for the round trip, and a click landing in that window is lost
+  // (seen as e2e flakes: Paint density ignored while the look was being written).
+  const writeLook = async () => {
+    lookPending = false;
+    const { project, materials, scatter, sun } = get();
+    if (!project) return;
+    await op<JdOps["project.set_look"]["result"]>("project.set_look", { materials, scatter: { mask: scatter.mask, spacing_m: scatter.spacing_m, seed: scatter.seed, grow: scatter.grow }, sun: { azimuth_deg: sun.azimuth_deg, elevation_deg: sun.elevation_deg, turbidity: sun.turbidity, clouds: sun.clouds, fog: sun.fog } }).then(log, (e) => logFailure("project.set_look", e));
+  };
   const pushLook = () => {
     clearTimeout(lookTimer);
-    lookTimer = setTimeout(() => {
-      const { project, materials, scatter, sun } = get();
-      if (!project) return;
-      // A background write like autosave: `op` + `log`, never `run` — `run` flips `busy`, which
-      // disables every gated button for the round trip, and a click landing in that window is lost
-      // (seen as e2e flakes: Paint density ignored while the look was being written).
-      op<JdOps["project.set_look"]["result"]>("project.set_look", { materials, scatter: { mask: scatter.mask, spacing_m: scatter.spacing_m, seed: scatter.seed, grow: scatter.grow }, sun: { azimuth_deg: sun.azimuth_deg, elevation_deg: sun.elevation_deg, turbidity: sun.turbidity, clouds: sun.clouds, fog: sun.fog } }).then(log, (e) => logFailure("project.set_look", e));
-    }, 400);
+    lookPending = true;
+    lookTimer = setTimeout(() => void writeLook(), 400);
+  };
+  // A save must carry the look as it is now, not as it was 400 ms ago: flush the pending write
+  // first (seen as an e2e race: Save right after a spacing edit stored the previous spacing).
+  const flushLook = async () => {
+    if (!lookPending) return;
+    clearTimeout(lookTimer);
+    await writeLook();
   };
   // Autosave: a debounced project.save after any journaled edit, so `dirty` / `journal` return to
   // false / 0 on their own (the WAL already survives crashes; this is about never losing work on
@@ -524,6 +537,7 @@ export const useStore = create<State>((set, get) => {
   };
   const autosave = async () => {
     if (get().busy || get().jobs.length > 0 || !get().project) return scheduleAutosave();
+    await flushLook();
     const r = await op<ProjectSaveResult>("project.save");
     log(r);
     if (r.status === "ok" && r.result) set({ project: r.result });
@@ -711,10 +725,10 @@ export const useStore = create<State>((set, get) => {
       log(r);
       if (r.status === "ok" && r.result) set((s) => ({ scatter: { ...s.scatter, points: r.result?.points ?? [] } }));
     },
-    exportScatter: async () => {
+    exportScatter: async (model) => {
       const { mask } = get().scatter;
       if (!mask) return;
-      log(await op("terrain.scatter", { ...scatterReq(), path: `${mask}.glb` }));
+      log(await op("terrain.scatter", { ...scatterReq(), path: `${mask}.glb`, ...(model ? { model } : {}) }));
     },
     setBrush: (patch) => set((s) => ({ brush: { ...s.brush, ...patch } })),
     startSculpting: async () => {
@@ -1003,10 +1017,10 @@ export const useStore = create<State>((set, get) => {
     exportFrames: async (frames) => {
       await run("timeline.export", { frames, dir: "frames", format: "png16" });
     },
-    exportProfile: async (profile, dir) => {
+    exportProfile: async (profile, dir, tiles) => {
       const materials = get().materials;
       const masks = [...new Set(materials.map((m) => m.mask).filter((m): m is string => !!m))];
-      await run("terrain.export_profile", { profile, dir, layer: "height", masks, materials });
+      await run("terrain.export_profile", { profile, dir, layer: "height", masks, materials, ...(tiles && tiles > 1 ? { tiles } : {}) });
     },
     exportMesh: async (path, lods, targetTriangles) => {
       await run("terrain.export_mesh", { layer: "height", path, materials: get().materials, ...(lods ? { lods } : {}), ...(targetTriangles ? { target_triangles: targetTriangles } : {}) });
@@ -1051,6 +1065,7 @@ export const useStore = create<State>((set, get) => {
       else set((s) => ({ settingsRev: s.settingsRev + 1 }));
     },
     save: async () => {
+      await flushLook();
       const r = await run("project.save");
       if (r.status === "ok" && r.result) set({ project: r.result });
     },

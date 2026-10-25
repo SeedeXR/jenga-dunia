@@ -51,6 +51,13 @@ test.describe("look and exports against the real core", () => {
     await expect(page.getByTestId("log")).toContainText("terrain.export_profile: ok", { timeout: 60_000 });
     expect(existsSync(path.join(proj, "exports", "unreal", "heightmap.png"))).toBe(true);
     expect(existsSync(path.join(proj, "exports", "unreal", "materials.json"))).toBe(true);
+    // Tiles: 2 per side writes four engine folders that share one height range, and a manifest.
+    await page.getByTestId("export-tiles").fill("2");
+    await page.getByTestId("export-engine").selectOption("unity");
+    await page.getByTestId("export-profile").click();
+    await expect.poll(() => existsSync(path.join(proj, "exports", "unity", "tiles.json")), { timeout: 60_000 }).toBe(true);
+    expect(existsSync(path.join(proj, "exports", "unity", "tile_1_1", "heightmap.r16"))).toBe(true);
+    await page.getByTestId("export-tiles").fill("1");
     await page.getByTestId("export-mesh").click();
     await expect(page.getByTestId("log")).toContainText("terrain.export_mesh: ok", { timeout: 60_000 });
     expect(existsSync(path.join(proj, "exports", "terrain.glb"))).toBe(true);

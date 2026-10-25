@@ -59,7 +59,10 @@ test.describe("hydrology nodes against the real core", () => {
     await expect(page.getByTestId("log")).toContainText("graph.connect: ok");
     await wire(page, rivers, height, "out");
     await expect(panel.locator(".react-flow__edge")).toHaveCount(2);
+    // Wait for this evaluation itself (the buttons are disabled while it runs; a click on a disabled button is lost).
+    const evaluatedBefore1 = await logCount(page, "graph.evaluate: ok");
     await page.getByTestId("graph-evaluate").click();
+    await expect.poll(() => logCount(page, "graph.evaluate: ok")).toBeGreaterThan(evaluatedBefore1);
     await expect(page.getByTestId("layer-stats")).toBeVisible();
     await expect(page.getByTestId("viewport-info")).toContainText(/ [1-9][\d,]* tris/);
 
@@ -73,7 +76,10 @@ test.describe("hydrology nodes against the real core", () => {
     await layerInput.blur();
     await expect(page.getByTestId("log")).toContainText("graph.set_param: ok");
     await wire(page, rivers, out2, "rivers");
+    // Wait for this evaluation itself (the buttons are disabled while it runs; a click on a disabled button is lost).
+    const evaluatedBefore2 = await logCount(page, "graph.evaluate: ok");
     await page.getByTestId("graph-evaluate").click();
+    await expect.poll(() => logCount(page, "graph.evaluate: ok")).toBeGreaterThan(evaluatedBefore2);
     await expect(page.getByTestId("layer-pick")).toBeVisible();
     await page.getByTestId("color-pick").selectOption("rivers");
     await expect(page.getByTestId("viewport-info")).toContainText("colour rivers");

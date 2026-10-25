@@ -125,6 +125,8 @@ export default function App() {
   const [exportPath, setExportPath] = useState("height.exr");
   const [engine, setEngine] = useState<"unity" | "unreal">("unity");
   const [meshPath, setMeshPath] = useState("terrain.glb");
+  const [tiles, setTiles] = useState(1); // 1 = one folder; 2..16 = tiles × tiles folders with tiles.json
+  const [scatterModel, setScatterModel] = useState(""); // an FBX in assets/ to instance; empty = the proxy
   const [skyPath, setSkyPath] = useState("sky.exr");
   const [vp, setVp] = useState<ViewportInfo>({ backend: "none", triangles: 0 });
   const [showGraph, setShowGraph] = useState(true);
@@ -777,7 +779,8 @@ export default function App() {
             <button className="btn" onClick={() => void s.paintDensity()} disabled={!s.scatter.mask || s.busy} title="Paint the density by hand: a clamped stroke node goes in front of the mask's output; drag on the terrain to add density (strength 0.5), negative strength to thin it" data-testid="scatter-paint">
               Paint density
             </button>
-            <button className="btn" onClick={() => void s.exportScatter()} disabled={!s.scatter.points?.length || s.busy} title="Write exports/<mask>.glb: 1 m proxy mesh instanced with EXT_mesh_gpu_instancing" data-testid="scatter-export">
+            <input className={`${inputCls} w-24`} value={scatterModel} onChange={(e) => setScatterModel(e.target.value)} placeholder="pine.fbx" title="Your own model to instance: a binary FBX in the project's assets/ (metres, +Y up; import it with ⌘I). Empty = the 1 m proxy, or a generated rock for rock-named masks" data-testid="scatter-model" />
+            <button className="btn" onClick={() => void s.exportScatter(scatterModel.trim() || undefined)} disabled={!s.scatter.points?.length || s.busy} title="Write exports/<mask>.glb: the model (or the 1 m proxy) instanced with EXT_mesh_gpu_instancing" data-testid="scatter-export">
               Export .glb
             </button>
             <span className="text-xs text-jd-fg-2" data-testid="scatter-count">{s.scatter.points ? `${s.scatter.points.length.toLocaleString()} instances` : ""}</span>
@@ -996,7 +999,8 @@ export default function App() {
                 <option value="unity">Unity</option>
                 <option value="unreal">Unreal</option>
               </select>
-              <button className="btn" disabled={!s.layer || s.busy} onClick={() => void s.exportProfile(engine, engine)} title="Write exports/<engine>/: heightmap, one weightmap per material mask, README with the import numbers, materials.json" data-testid="export-profile">
+              <input className={`${inputCls} w-12`} type="number" min={1} max={16} value={tiles} onChange={(e) => setTiles(Math.max(1, Math.min(16, Number(e.target.value) || 1)))} title="Tiles per side: 1 writes one folder; 2–16 cut the world into tiles × tiles engine folders (tile_<x>_<y>/) sharing one height range, with tiles.json — the resolution must divide" data-testid="export-tiles" />
+              <button className="btn" disabled={!s.layer || s.busy} onClick={() => void s.exportProfile(engine, engine, tiles)} title="Write exports/<engine>/: heightmap, one weightmap per material mask, RGBA splat maps, README with the import numbers, materials.json" data-testid="export-profile">
                 <Upload size={14} /> Export
               </button>
             </span>
