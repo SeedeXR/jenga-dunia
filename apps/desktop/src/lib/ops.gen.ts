@@ -1666,6 +1666,11 @@ export type NoiseParams = {
 read, which turns straight ridges and round cells into the swirled, folded shapes of
 real relief (World Creator's distortion filter, Gaea's warp). Unset = none. */
   "warp"?: DomainWarp | null;
+  /** Per-octave strengths (World Creator's octave bars), first = the coarsest octave; each 0..=2,
+at most `octaves` values (missing ones count as 1). fbm only. Empty = the plain fractal. */
+  "octave_weights"?: number[];
+  /** General strength 0..=4: scales the relief around the middle of `height_range_m` (1 = as is). */
+  "strength"?: number;
   /** Offset of the sampling origin in metres. */
   "offset_m"?: [number, number];
 };
@@ -2642,6 +2647,11 @@ export type NodeParams_jd_noise_fbm_1 = {
 read, which turns straight ridges and round cells into the swirled, folded shapes of
 real relief (World Creator's distortion filter, Gaea's warp). Unset = none. */
   "warp"?: DomainWarp | null;
+  /** Per-octave strengths (World Creator's octave bars), first = the coarsest octave; each 0..=2,
+at most `octaves` values (missing ones count as 1). fbm only. Empty = the plain fractal. */
+  "octave_weights"?: number[];
+  /** General strength 0..=4: scales the relief around the middle of `height_range_m` (1 = as is). */
+  "strength"?: number;
   /** Offset of the sampling origin in metres. */
   "offset_m"?: [number, number];
 };

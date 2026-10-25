@@ -10895,6 +10895,7 @@ expression: list
               500.0
             ],
             "warp": null,
+            "strength": 1.0,
             "offset_m": [
               0.0,
               0.0
@@ -10980,6 +10981,20 @@ expression: list
                 }
               ],
               "default": null
+            },
+            "octave_weights": {
+              "description": "Per-octave strengths (World Creator's octave bars), first = the coarsest octave; each 0..=2,\nat most `octaves` values (missing ones count as 1). fbm only. Empty = the plain fractal.",
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "float"
+              }
+            },
+            "strength": {
+              "description": "General strength 0..=4: scales the relief around the middle of `height_range_m` (1 = as is).",
+              "type": "number",
+              "format": "float",
+              "default": 1.0
             },
             "offset_m": {
               "description": "Offset of the sampling origin in metres.",

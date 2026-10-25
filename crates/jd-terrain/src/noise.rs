@@ -84,6 +84,13 @@ pub struct NoiseParams {
     /// real relief (World Creator's distortion filter, Gaea's warp). Unset = none.
     #[serde(default)]
     pub warp: Option<DomainWarp>,
+    /// Per-octave strengths (World Creator's octave bars), first = the coarsest octave; each 0..=2,
+    /// at most `octaves` values (missing ones count as 1). fbm only. Empty = the plain fractal.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub octave_weights: Vec<f32>,
+    /// General strength 0..=4: scales the relief around the middle of `height_range_m` (1 = as is).
+    #[serde(default = "default_strength")]
+    pub strength: f32,
     /// Offset of the sampling origin in metres.
     #[serde(default)]
     pub offset_m: [f32; 2],
@@ -97,6 +104,9 @@ fn default_octaves() -> u8 {
 }
 fn default_lacunarity() -> f32 {
     2.0
+}
+fn default_strength() -> f32 {
+    1.0
 }
 fn default_gain() -> f32 {
     0.5
@@ -115,6 +125,8 @@ impl Default for NoiseParams {
             octaves: default_octaves(),
             lacunarity: default_lacunarity(),
             gain: default_gain(),
+            octave_weights: Vec::new(),
+            strength: default_strength(),
             height_range_m: default_height_range(),
             warp: None,
             offset_m: [0.0, 0.0],
@@ -143,6 +155,26 @@ impl NoiseParams {
                 "lacunarity|gain",
                 "must be finite and positive",
             ));
+        }
+        if !(0.0..=4.0).contains(&self.strength) {
+            return Err(JdError::invalid("strength", "must be within 0..=4"));
+        }
+        if !self.octave_weights.is_empty() {
+            if self.octave_weights.len() > self.octaves as usize
+                || self.octave_weights.iter().any(|w| !(0.0..=2.0).contains(w))
+            {
+                return Err(JdError::invalid(
+                    "octave_weights",
+                    "at most `octaves` values, each within 0..=2",
+                ));
+            }
+            if self.fractal != FractalKind::Fbm {
+                return Err(JdError::invalid(
+                    "octave_weights",
+                    "per-octave strengths apply to the fbm fractal",
+                )
+                .next("Set `fractal` to `fbm`, or clear `octave_weights`."));
+            }
         }
         if self.height_range_m.iter().any(|v| !v.is_finite())
             || self.height_range_m[0] >= self.height_range_m[1]
@@ -219,6 +251,44 @@ impl DomainWarp {
     }
 }
 
+/// The fbm sum with a strength per octave: octave i is the base noise at seed + i and frequency ×
+/// lacunarityⁱ with amplitude gainⁱ × wᵢ, normalised by Σ|gainⁱ × wᵢ| — with every wᵢ = 1 this is
+/// FastNoise Lite's own FBm (same seeds, frequencies and bounding), so the bars only reshape it.
+struct WeightedFbm {
+    octaves: Vec<(FastNoiseLite, f32)>,
+    norm: f32,
+}
+
+impl WeightedFbm {
+    fn new(p: &NoiseParams) -> Self {
+        let mut amp = 1.0f32;
+        let mut freq = 1.0 / p.feature_size_m;
+        let mut octaves = Vec::with_capacity(p.octaves as usize);
+        for i in 0..p.octaves as usize {
+            let w = p.octave_weights.get(i).copied().unwrap_or(1.0);
+            let mut base = NoiseParams {
+                seed: p.seed.wrapping_add(i as i32),
+                fractal: FractalKind::None,
+                ..p.clone()
+            }
+            .build();
+            base.set_frequency(Some(freq));
+            octaves.push((base, amp * w));
+            amp *= p.gain;
+            freq *= p.lacunarity;
+        }
+        let norm = octaves.iter().map(|(_, a)| a.abs()).sum::<f32>().max(1e-9);
+        Self { octaves, norm }
+    }
+    fn get(&self, x: f32, y: f32) -> f32 {
+        self.octaves
+            .iter()
+            .map(|(n, a)| n.get_noise_2d(x, y) * a)
+            .sum::<f32>()
+            / self.norm
+    }
+}
+
 /// Generate a heightfield for `world` from `params`. Sampling is in world metres:
 /// pixel (x, y) → (origin + x·spacing, origin + y·spacing).
 pub fn generate_noise(world: &WorldSettings, params: &NoiseParams) -> JdResult<Heightfield> {
@@ -228,6 +298,7 @@ pub fn generate_noise(world: &WorldSettings, params: &NoiseParams) -> JdResult<H
     }
     world.validate().map_err(|m| JdError::invalid("world", m))?;
     let noise = params.build();
+    let weighted = (!params.octave_weights.is_empty()).then(|| WeightedFbm::new(params));
     let warp = params.warp.map(|w| w.build(params.seed));
     let [sx, sy] = world.spacing_m();
     let [ox, oy] = [
@@ -235,15 +306,18 @@ pub fn generate_noise(world: &WorldSettings, params: &NoiseParams) -> JdResult<H
         world.origin[1] + params.offset_m[1] as f64,
     ];
     let [lo, hi] = params.height_range_m;
-    let half = 0.5 * (hi - lo);
-    let mid = lo + half;
+    let mid = lo + 0.5 * (hi - lo);
+    let half = 0.5 * (hi - lo) * params.strength; // strength scales the relief about the middle
     let mut hf = Heightfield::from_world(world)?;
     hf.fill_with(|x, y| {
         let (mut wx, mut wy) = ((ox + x as f64 * sx) as f32, (oy + y as f64 * sy) as f32);
         if let Some(w) = &warp {
             (wx, wy) = w.domain_warp_2d(wx, wy);
         }
-        let n = noise.get_noise_2d(wx, wy); // ∈ [-1, 1]
+        let n = match &weighted {
+            Some(f) => f.get(wx, wy),
+            None => noise.get_noise_2d(wx, wy), // ∈ [-1, 1]
+        };
         mid + n * half
     });
     hf.validate_finite()?;
@@ -254,6 +328,94 @@ pub fn generate_noise(world: &WorldSettings, params: &NoiseParams) -> JdResult<H
 mod tests {
     use super::*;
     use proptest::prelude::*;
+
+    #[test]
+    fn octave_weights_of_one_match_the_plain_fbm_and_zeros_leave_the_first_octave() {
+        let world = small_world(64, 64);
+        let base = NoiseParams {
+            fractal: FractalKind::Fbm,
+            octaves: 5,
+            ..NoiseParams::default()
+        };
+        let plain = generate_noise(&world, &base).expect("plain").to_vec();
+        let ones = generate_noise(
+            &world,
+            &NoiseParams {
+                octave_weights: vec![1.0; 5],
+                ..base.clone()
+            },
+        )
+        .expect("ones")
+        .to_vec();
+        let worst = plain
+            .iter()
+            .zip(&ones)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        assert!(worst < 1e-2, "weights of 1 reproduce fbm: worst {worst} m");
+        let first = generate_noise(
+            &world,
+            &NoiseParams {
+                octave_weights: vec![1.0, 0.0, 0.0, 0.0, 0.0],
+                ..base.clone()
+            },
+        )
+        .expect("first")
+        .to_vec();
+        let single = generate_noise(
+            &world,
+            &NoiseParams {
+                fractal: FractalKind::None,
+                octaves: 1,
+                ..base.clone()
+            },
+        )
+        .expect("single")
+        .to_vec();
+        let worst = first
+            .iter()
+            .zip(&single)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        assert!(worst < 1e-2, "only the coarsest octave: worst {worst} m");
+        let flat = generate_noise(
+            &world,
+            &NoiseParams {
+                strength: 0.0,
+                ..base.clone()
+            },
+        )
+        .expect("flat")
+        .to_vec();
+        let mid = 0.5 * (base.height_range_m[0] + base.height_range_m[1]);
+        assert!(
+            flat.iter().all(|v| (v - mid).abs() < 1e-4),
+            "strength 0 is the middle height"
+        );
+        assert!(
+            generate_noise(
+                &world,
+                &NoiseParams {
+                    octave_weights: vec![1.0; 6],
+                    ..base.clone()
+                }
+            )
+            .is_err(),
+            "more weights than octaves"
+        );
+        assert!(
+            generate_noise(
+                &world,
+                &NoiseParams {
+                    fractal: FractalKind::Ridged,
+                    octave_weights: vec![1.0],
+                    ..base
+                }
+            )
+            .is_err(),
+            "fbm only"
+        );
+    }
 
     fn small_world(res: u32, tile: u32) -> WorldSettings {
         WorldSettings {

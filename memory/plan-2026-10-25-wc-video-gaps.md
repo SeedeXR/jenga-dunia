@@ -9,8 +9,8 @@ only. Engine importer scripts are not gated — run their headless checks if tou
 |---|------|--------|--------------|
 | 10 | Esc aborts a running generation | done | e2e: Esc during an evaluation logs E_CANCELLED |
 | 3 | Whole-terrain actions: Flip X / Flip Y, Rotate left / right 90°, Flatten | done | unit (node), e2e (buttons) |
-| 9 | World-border box with side walls + white shoreline contour | todo | e2e header flag + capture viewed |
-| 6 | Per-octave strength on the base noise + a general strength | todo | unit: octave weights change the field as specified |
+| 9 | World-border box with side walls + white shoreline contour | done | e2e header flag + capture viewed |
+| 6 | Per-octave strength on the base noise + a general strength | done | unit: octave weights change the field as specified |
 | 2 | Grid transforms on a selection: Duplicate, Rotate, Scale, Tilt, Push / Pull, Align | todo | unit (kernel), e2e |
 | 1 | Brush transforms: Rotate, Scale, Tilt, Push / Pull, Align | todo | unit (kernel), e2e |
 | 4 | Alpha brushes: a palette of brush shapes beyond round / square | todo | unit, e2e |
@@ -24,3 +24,4 @@ only. Engine importer scripts are not gated — run their headless checks if tou
 ## Log
 - start: plan written.
 - 10 + 3 done: global Esc cancels running jobs outside text fields (jobs.spec, two E_CANCELLED); `jd.filter.action@1` (flip_x / flip_y / rotate_left / rotate_right on square worlds / flatten) + desktop Actions row splicing it before the output (actions.spec).
+- 9 + 6 done: framed block (walls to below the lowest ground, teal rim) + marching-squares shoreline, Frame toggle, header `box` / `shore N` (vitest + chrome.spec, capture viewed); `octave_weights` + `strength` on the noise (weighted FBm reproduces the plain fractal at weights 1; the unit test caught `mid` using the scaled half), Strength slider + octave bars (octaves.spec).

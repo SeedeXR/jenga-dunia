@@ -10,7 +10,7 @@ export type ProjectSummary = ProjectOpenResult;
 export type LayerInfo = TerrainStatsResult;
 
 /** The noise inspector's fields: every generator parameter except the sampling offset. */
-export type NoiseSettings = Required<Omit<NoiseParams, "offset_m" | "warp">>;
+export type NoiseSettings = Required<Omit<NoiseParams, "offset_m" | "warp" | "octave_weights" | "strength">>;
 
 /** The viewport brush. `lower` is `raise` with a negative strength; `target_m` is flatten's height (null = under the first point). */
 export interface Brush {

@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { Brush, Camera, Download, FileInput, FilePlus, FolderOpen, FolderPlus, FolderSearch, Globe, Grid3x3, Home, Maximize2, Mountain, PanelBottom, PanelLeftClose, PanelLeftOpen, PanelRight, PanelRightClose, PanelRightOpen, Play, Redo2, Route, Save, Undo2, Upload, Wand2, Workflow } from "lucide-react";
+import { Box, Brush, Camera, Download, FileInput, FilePlus, FolderOpen, FolderPlus, FolderSearch, Globe, Grid3x3, Home, Maximize2, Mountain, PanelBottom, PanelLeftClose, PanelLeftOpen, PanelRight, PanelRightClose, PanelRightOpen, Play, Redo2, Route, Save, Undo2, Upload, Wand2, Workflow } from "lucide-react";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import GraphPanel from "./graph/GraphPanel";
 import LayerStack from "./graph/LayerStack";
@@ -113,7 +113,7 @@ const HINTS: Record<"orbit" | "sculpt" | "grid" | "road", [string, string][]> = 
 };
 
 /** World Creator-style viewport chrome: a compass strip, a height ruler, per-tool shortcut hints and fit / still / fullscreen buttons. */
-function ViewportChrome({ heading, distanceM, preview, seaLevelM, mode, onFit, onStill, canStill }: { heading: number; distanceM: number; preview: Preview | null; seaLevelM: number | null; mode: "orbit" | "sculpt" | "grid" | "road"; onFit: () => void; onStill: () => void; canStill: boolean }) {
+function ViewportChrome({ heading, distanceM, preview, seaLevelM, mode, onFit, onStill, canStill, frameOn, onFrame }: { heading: number; distanceM: number; preview: Preview | null; seaLevelM: number | null; mode: "orbit" | "sculpt" | "grid" | "road"; onFit: () => void; onStill: () => void; canStill: boolean; frameOn: boolean; onFrame: () => void }) {
   // Compass: 180° of bearings across a 240 px strip, the camera's heading at the centre mark.
   const W = 240;
   const px = (deg: number) => W / 2 + ((((deg - heading + 540) % 360) - 180) * W) / 180;
@@ -203,6 +203,9 @@ function ViewportChrome({ heading, distanceM, preview, seaLevelM, mode, onFit, o
         <button className="btn px-1.5" title="Fullscreen viewport (Esc leaves)" onClick={fullscreen} data-testid="view-fullscreen">
           <Maximize2 size={14} />
         </button>
+        <button className={`btn px-1.5 ${frameOn ? "text-jd-accent" : ""}`} title="Frame: draw the world as a block with side walls and a rim" onClick={onFrame} aria-pressed={frameOn} data-testid="view-frame">
+          <Box size={14} />
+        </button>
       </span>
     </>
   );
@@ -241,7 +244,8 @@ export default function App() {
   const [scatterModel, setScatterModel] = useState(""); // an FBX in assets/ to instance; empty = the proxy
   const [holesLayer, setHolesLayer] = useState("");
   const [hdriPath, setHdriPath] = useState("sky.exr");
-  const [flyFrames, setFlyFrames] = useState(48); // an EXR in assets/ (or an absolute path) for the dome // a 0..1 layer whose cells ≥ 0.5 are holes in the exports; "" = none
+  const [flyFrames, setFlyFrames] = useState(48);
+  const [frameOn, setFrameOn] = useState(true); // the world drawn as a framed block // an EXR in assets/ (or an absolute path) for the dome // a 0..1 layer whose cells ≥ 0.5 are holes in the exports; "" = none
   const [skyPath, setSkyPath] = useState("sky.exr");
   const [vp, setVp] = useState<ViewportInfo>({ backend: "none", triangles: 0, heading: 326, distanceM: 5200 });
   const [showGraph, setShowGraph] = useState(true);
@@ -250,6 +254,7 @@ export default function App() {
   const sculptNode = s.graph.nodes.find((n) => n.id === s.selectedNode && n.kind.startsWith("jd.sculpt.strokes@"));
   // The viewport draws the sea where the graph's sea-level node puts it (only over the height layer).
   const seaNode = s.graph.nodes.find((n) => n.kind.startsWith("jd.hydrology.sea_level@"));
+  const noiseNode = s.graph.nodes.find((n) => n.kind.startsWith("jd.noise."));
   const seaLevelM = seaNode && (s.layer === null || s.layer.layer.startsWith("height")) ? Number(seaNode.params?.level_m ?? 0) : null;
   const seaTint = seaNode?.params?.tint;
   const water = seaNode ? { visibilityM: Number(seaNode.params?.visibility_m ?? 15), tint: (Array.isArray(seaTint) && seaTint.length === 3 ? seaTint.map(Number) : [0.1, 0.35, 0.4]) as [number, number, number], breakingDepthM: s.waves?.breaking_depth_m ?? 0 } : null;
@@ -472,7 +477,7 @@ export default function App() {
           </label>
         )}
         <span className={`${s.lastEval && Object.keys(s.lastEval.layers).length > 1 ? "" : "ml-auto "}text-xs text-jd-fg-2`} data-testid="viewport-info">
-          viewport: {vp.backend} · {vp.triangles.toLocaleString()} tris{vp.seaM !== undefined ? ` · sea ${vp.seaM} m` : ""}{vp.waves ? ` · waves ${vp.waves.heightM.toFixed(1)} m / ${Math.round(vp.waves.lengthM)} m` : ""}{vp.fog ? ` · fog ${Math.round(vp.fog * 100)} %` : ""}{vp.sun ? ` · sun ${vp.sun.elevationDeg}°/${vp.sun.azimuthDeg}°` : ""}{s.colorLayer && s.colorPreview ? ` · colour ${s.colorLayer}` : ""}{vp.instances ? ` · ${vp.instances.toLocaleString()} instances` : ""}{vp.lakes ? ` · lakes ${vp.lakes.toLocaleString()} cells` : ""}{vp.pbrPx ? ` · pbr ${vp.pbrPx[0]}×${vp.pbrPx[1]}` : ""}{vp.skyPx ? ` · sky ${vp.skyPx[0]}×${vp.skyPx[1]}` : ""}{vp.hdri ? " · hdri" : ""}{vp.post ? ` · post ${vp.post}` : ""}{vp.horizonPx ? ` · horizon ${vp.horizonPx}²` : ""}
+          viewport: {vp.backend} · {vp.triangles.toLocaleString()} tris{vp.seaM !== undefined ? ` · sea ${vp.seaM} m` : ""}{vp.waves ? ` · waves ${vp.waves.heightM.toFixed(1)} m / ${Math.round(vp.waves.lengthM)} m` : ""}{vp.fog ? ` · fog ${Math.round(vp.fog * 100)} %` : ""}{vp.sun ? ` · sun ${vp.sun.elevationDeg}°/${vp.sun.azimuthDeg}°` : ""}{s.colorLayer && s.colorPreview ? ` · colour ${s.colorLayer}` : ""}{vp.instances ? ` · ${vp.instances.toLocaleString()} instances` : ""}{vp.lakes ? ` · lakes ${vp.lakes.toLocaleString()} cells` : ""}{vp.pbrPx ? ` · pbr ${vp.pbrPx[0]}×${vp.pbrPx[1]}` : ""}{vp.skyPx ? ` · sky ${vp.skyPx[0]}×${vp.skyPx[1]}` : ""}{vp.hdri ? " · hdri" : ""}{vp.frame ? " · box" : ""}{vp.shoreSegments ? ` · shore ${vp.shoreSegments.toLocaleString()}` : ""}{vp.post ? ` · post ${vp.post}` : ""}{vp.horizonPx ? ` · horizon ${vp.horizonPx}²` : ""}
           {s.previewStats ? ` · preview lod ${s.previewStats.lod}, ${(s.previewStats.bytes / 1048576).toFixed(2)} MB in ${s.previewStats.ms.toFixed(0)} ms` : ""}
         </span>
         {(s.busy || s.jobs.length > 0) &&
@@ -739,7 +744,7 @@ export default function App() {
         {/* Center: viewport (top) + node graph (bottom, toggle) */}
         <main className={`relative grid min-w-0 overflow-hidden bg-jd-bg-0 ${showGraph ? (dock.graph === "right" ? "grid-cols-[1fr_auto]" : "grid-rows-[1fr_auto]") : "grid-rows-[1fr]"}`}>
           <div className="relative min-h-0 min-w-0">
-            <TerrainView fog={s.sun.fog} preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} sculpt={{ enabled: s.sculpting && (sculptNode !== undefined || s.drawing !== null), radiusM: s.drawing === "road" ? s.roadWidthM / 2 : s.brush.radius_m, onStroke: (pts) => void s.addStroke(pts), onAdjust: s.adjustBrush }} grid={s.grid.on ? { cells: s.grid.cells, selected: s.grid.selected, onSelect: s.gridSelect } : null} seaLevelM={seaLevelM} lakes={s.lakesPreview} water={water} waves={s.waves} sky={s.sky} hdri={s.hdri} post={s.post} onHandle={s.setViewportHandle} horizon={s.horizon} sun={{ azimuthDeg: s.sun.azimuth_deg, elevationDeg: s.sun.elevation_deg }} overlay={s.colorPreview} overlayName={s.colorLayer} instances={s.scatter.points ? { points: s.scatter.points, sizeM: Math.max(s.scatter.spacing_m * 0.35, (s.project?.world.extent_m[0] ?? 0) * 0.012), shape: /debris|rock|boulder|scree|talus/i.test(s.scatter.mask ?? "") ? "rock" : "cone" } : null} maps={s.maps} />
+            <TerrainView fog={s.sun.fog} preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} sculpt={{ enabled: s.sculpting && (sculptNode !== undefined || s.drawing !== null), radiusM: s.drawing === "road" ? s.roadWidthM / 2 : s.brush.radius_m, onStroke: (pts) => void s.addStroke(pts), onAdjust: s.adjustBrush }} grid={s.grid.on ? { cells: s.grid.cells, selected: s.grid.selected, onSelect: s.gridSelect } : null} seaLevelM={seaLevelM} lakes={s.lakesPreview} water={water} waves={s.waves} sky={s.sky} hdri={s.hdri} post={s.post} onHandle={s.setViewportHandle} frame={frameOn} horizon={s.horizon} sun={{ azimuthDeg: s.sun.azimuth_deg, elevationDeg: s.sun.elevation_deg }} overlay={s.colorPreview} overlayName={s.colorLayer} instances={s.scatter.points ? { points: s.scatter.points, sizeM: Math.max(s.scatter.spacing_m * 0.35, (s.project?.world.extent_m[0] ?? 0) * 0.012), shape: /debris|rock|boulder|scree|talus/i.test(s.scatter.mask ?? "") ? "rock" : "cone" } : null} maps={s.maps} />
             <ViewportChrome
               heading={vp.heading}
               distanceM={vp.distanceM}
@@ -747,6 +752,8 @@ export default function App() {
               seaLevelM={seaLevelM}
               mode={s.sculpting ? (s.drawing === "road" ? "road" : "sculpt") : s.grid.on ? "grid" : "orbit"}
               onFit={() => s.viewport?.resetView()}
+              frameOn={frameOn}
+              onFrame={() => setFrameOn((v) => !v)}
               onStill={() => void s.saveStill()}
               canStill={!!s.viewport && !!s.project}
             />
@@ -1160,6 +1167,48 @@ export default function App() {
           <Field label="Gain">
             <input className={inputCls} type="number" step={0.05} value={s.noise.gain} onChange={(e) => s.setNoise({ gain: Number(e.target.value) })} />
           </Field>
+          {noiseNode && (
+            <>
+              <Field label={`Strength ${Number(noiseNode.params?.strength ?? 1).toFixed(2)}`}>
+                <input className="w-28" type="range" min={0} max={2} step={0.05} defaultValue={Number(noiseNode.params?.strength ?? 1)} key={`str-${noiseNode.id}-${String(noiseNode.params?.strength ?? 1)}`} onPointerUp={(e) => void s.setParam(noiseNode.id, "strength", Number((e.target as HTMLInputElement).value))} onKeyUp={(e) => void s.setParam(noiseNode.id, "strength", Number((e.target as HTMLInputElement).value))} title="General strength: scales the relief around the middle of the height range (World Creator's General Strength)" data-testid="noise-strength" />
+              </Field>
+              <div className="mb-2" data-testid="octave-bars" title="Strength per octave, coarsest first (fbm): drag a bar and release to apply; double-click to reset all to 1">
+                <div className="mb-1 flex items-center justify-between text-xs text-jd-fg-1">
+                  <span>Octaves</span>
+                  <button className="text-[10px] text-jd-fg-2 hover:text-jd-fg-0" onClick={() => void s.setParam(noiseNode.id, "octave_weights", null)} data-testid="octave-reset">
+                    reset
+                  </button>
+                </div>
+                <div className="flex h-20 items-end gap-1">
+                  {Array.from({ length: s.noise.octaves }, (_, i) => {
+                    const ws = Array.isArray(noiseNode.params?.octave_weights) ? (noiseNode.params!.octave_weights as number[]) : [];
+                    const w = ws[i] ?? 1;
+                    return (
+                      <label key={i} className="flex h-full flex-1 flex-col items-center gap-0.5">
+                        <input
+                          type="range"
+                          min={0}
+                          max={2}
+                          step={0.05}
+                          defaultValue={w}
+                          key={`oct-${i}-${w}`}
+                          className="h-full w-3 [writing-mode:vertical-lr] [direction:rtl]"
+                          disabled={s.noise.fractal !== "fbm"}
+                          onPointerUp={(e) => {
+                            const next = Array.from({ length: s.noise.octaves }, (_, k) => (k === i ? Number((e.target as HTMLInputElement).value) : (ws[k] ?? 1)));
+                            void s.setParam(noiseNode.id, "octave_weights", next);
+                          }}
+                          aria-label={`octave ${i + 1} strength`}
+                          data-testid={`octave-${i}`}
+                        />
+                        <span className="text-[9px] text-jd-fg-2">{i + 1}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          )}
           <Field label="Height min / max (m)">
             <span className="flex gap-1">
               <input className={`${inputCls} w-14`} type="number" value={s.noise.height_range_m[0]} onChange={(e) => s.setNoise({ height_range_m: [Number(e.target.value), s.noise.height_range_m[1]] })} />
