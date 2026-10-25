@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, fitView, installBridge, logCount, wire } from "./bridge";
+import { connectCore, evaluateAndWait, fitView, installBridge, logCount, wire } from "./bridge";
 
 const NOISE = "01JDGRAPH000000000000N01SE"; // starter graph ids (jd_graph::nodes)
 
@@ -49,7 +49,7 @@ test.describe("painted density against the real core", () => {
     await expect(out2).toContainText("layer=wetness");
     await wire(page, wet, out2, "out");
     const evaluated = await logCount(page, "graph.evaluate: ok");
-    await page.getByTestId("graph-evaluate").click();
+    await evaluateAndWait(page, "graph-evaluate");
     await expect.poll(() => logCount(page, "graph.evaluate: ok")).toBeGreaterThan(evaluated);
 
     // Scatter from it, then paint: the clamped stroke node appears and the brush is live.

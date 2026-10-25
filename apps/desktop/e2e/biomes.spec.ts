@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, installBridge, logCount, wire } from "./bridge";
+import { connectCore, evaluateAndWait, installBridge, logCount, wire } from "./bridge";
 
 const NOISE = "01JDGRAPH000000000000N01SE";
 const HEIGHT = "01JDGRAPH0000000000HE1GHT0";
@@ -88,7 +88,7 @@ test.describe("biome rules editor against the real core", () => {
     await layerInput.fill("snow");
     await layerInput.blur();
     await wire(page, snow, out2, "snow");
-    await page.getByTestId("graph-evaluate").click();
+    await evaluateAndWait(page, "graph-evaluate");
     await expect(page.getByTestId("layer-pick")).toBeVisible();
     await page.getByTestId("color-pick").selectOption("snow");
     await expect(page.getByTestId("viewport-info")).toContainText("colour snow");

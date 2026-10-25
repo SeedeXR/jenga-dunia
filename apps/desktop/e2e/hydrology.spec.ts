@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, fitView, installBridge, logCount, selectNode, wire } from "./bridge";
+import { connectCore, evaluateAndWait, fitView, installBridge, logCount, selectNode, wire } from "./bridge";
 
 const NOISE = "01JDGRAPH000000000000N01SE"; // starter graph ids (jd_graph::nodes)
 const HEIGHT = "01JDGRAPH0000000000HE1GHT0";
@@ -61,7 +61,7 @@ test.describe("hydrology nodes against the real core", () => {
     await expect(panel.locator(".react-flow__edge")).toHaveCount(2);
     // Wait for this evaluation itself (the buttons are disabled while it runs; a click on a disabled button is lost).
     const evaluatedBefore1 = await logCount(page, "graph.evaluate: ok");
-    await page.getByTestId("graph-evaluate").click();
+    await evaluateAndWait(page, "graph-evaluate");
     await expect.poll(() => logCount(page, "graph.evaluate: ok")).toBeGreaterThan(evaluatedBefore1);
     await expect(page.getByTestId("layer-stats")).toBeVisible();
     await expect(page.getByTestId("viewport-info")).toContainText(/ [1-9][\d,]* tris/);
@@ -78,7 +78,7 @@ test.describe("hydrology nodes against the real core", () => {
     await wire(page, rivers, out2, "rivers");
     // Wait for this evaluation itself (the buttons are disabled while it runs; a click on a disabled button is lost).
     const evaluatedBefore2 = await logCount(page, "graph.evaluate: ok");
-    await page.getByTestId("graph-evaluate").click();
+    await evaluateAndWait(page, "graph-evaluate");
     await expect.poll(() => logCount(page, "graph.evaluate: ok")).toBeGreaterThan(evaluatedBefore2);
     await expect(page.getByTestId("layer-pick")).toBeVisible();
     await page.getByTestId("color-pick").selectOption("rivers");
@@ -169,7 +169,7 @@ test.describe("hydrology nodes against the real core", () => {
     await expect(out3).toContainText("layer=seabed");
     await wire(page, seabed, out3, "seabed");
     const evaluated = await logCount(page, "graph.evaluate: ok");
-    await page.getByTestId("graph-evaluate").click();
+    await evaluateAndWait(page, "graph-evaluate");
     await expect.poll(() => logCount(page, "graph.evaluate: ok")).toBeGreaterThan(evaluated);
     await page.getByTestId("color-pick").selectOption("seabed");
     await expect(page.getByTestId("viewport-info")).toContainText("colour seabed");
@@ -205,7 +205,7 @@ test.describe("hydrology nodes against the real core", () => {
     await expect(out4).toContainText("layer=floor");
     await wire(page, bathy, out4, "out");
     const evaluated2 = await logCount(page, "graph.evaluate: ok");
-    await page.getByTestId("graph-evaluate").click();
+    await evaluateAndWait(page, "graph-evaluate");
     await expect.poll(() => logCount(page, "graph.evaluate: ok")).toBeGreaterThan(evaluated2);
     await page.getByTestId("layer-pick").selectOption("floor");
     await expect(page.getByTestId("layer-stats")).toContainText("230.1 m", { timeout: 20_000 }); // mean rose from 229.4 m: hollows filled (the stats wait behind a live-preview evaluate on a loaded machine)

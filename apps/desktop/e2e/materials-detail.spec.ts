@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, installBridge, logCount } from "./bridge";
+import { connectCore, evaluateAndWait, installBridge, logCount } from "./bridge";
 
 // Detail tiles against the real core: a material layer with detail re-bakes the maps, the core
 // returns the tile and the packed weights, and the viewport renders them through the TSL
@@ -28,7 +28,7 @@ test.describe("material detail tiles", () => {
     await page.getByLabel("Resolution (px)").fill("128");
     await page.getByTestId("new-project").click();
     await expect(page.locator("header")).toContainText("World — 128²");
-    await page.getByTestId("generate").click();
+    await evaluateAndWait(page, "generate");
     await expect(page.getByTestId("viewport-info")).toContainText("pbr", { timeout: 60_000 });
 
     const baked = await logCount(page, "terrain.textures: ok");

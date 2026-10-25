@@ -135,6 +135,20 @@ export async function selectNode(node: Locator): Promise<void> {
 }
 
 /** How many lines of the op log contain `text` (assert on a count, not on text that an earlier op already logged). */
-export function logCount(page: Page, text: string): Promise<number> {
+export function logCount(page: Page, text: string | RegExp): Promise<number> {
   return page.getByTestId("log").locator("div", { hasText: text }).count();
+}
+
+const EVALUATED = /graph\.evaluate: ok|terrain\.generate: ok/;
+
+/**
+ * Click Generate or Evaluate and wait for that evaluation to finish. The live preview can show
+ * `layer-stats` and a triangle count before the explicit run returns, and while it runs the app
+ * is busy: every gated button is disabled, and a click on a disabled button is lost (seen as
+ * suite-only "flakes" in graph, hydrology and paint). Counting the op's own log line is exact.
+ */
+export async function evaluateAndWait(page: Page, button: "generate" | "graph-evaluate", timeout = 120_000): Promise<void> {
+  const before = await logCount(page, EVALUATED);
+  await page.getByTestId(button).click();
+  await expect.poll(() => logCount(page, EVALUATED), { timeout }).toBeGreaterThan(before);
 }

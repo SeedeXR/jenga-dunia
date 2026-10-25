@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, installBridge } from "./bridge";
+import { connectCore, evaluateAndWait, installBridge } from "./bridge";
 
 test.describe("tasks and diagnostics panel against the real core", () => {
   let ws: string;
@@ -29,7 +29,7 @@ test.describe("tasks and diagnostics panel against the real core", () => {
     await page.getByLabel("Resolution (px)").fill("128");
     await page.getByTestId("new-project").click();
     await expect(page.locator("header")).toContainText("World — 128²");
-    await page.getByTestId("generate").click();
+    await evaluateAndWait(page, "generate");
     await expect(page.getByTestId("layer-stats")).toBeVisible();
     // One layer in the cache; GC keeps it and reports the project's limit.
     await page.getByTestId("diag-gc").click();

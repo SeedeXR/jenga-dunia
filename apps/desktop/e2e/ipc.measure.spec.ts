@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, installBridge } from "./bridge";
+import { connectCore, evaluateAndWait, installBridge } from "./bridge";
 
 // Measurement, not a gate: JD_MEASURE=1 runs it and prints the header's preview IPC numbers for
 // docs/spec/performance-targets.md (u16 preview bytes over the MCP bridge → viewport, with decode).
@@ -27,7 +27,7 @@ test.describe("preview IPC measurement", () => {
       await page.getByLabel("Resolution (px)").fill(String(res));
       await page.getByTestId("new-project").click();
       await expect(page.locator("header")).toContainText(`World — ${res}²`);
-      await page.getByTestId("generate").click();
+      await evaluateAndWait(page, "generate");
       await expect(page.getByTestId("layer-stats")).toBeVisible({ timeout: 120_000 });
       const info = page.getByTestId("viewport-info");
       await expect(info).toContainText(/preview lod \d+, [\d.]+ MB in \d+ ms/, { timeout: 120_000 });

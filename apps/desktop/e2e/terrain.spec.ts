@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, installBridge, wire } from "./bridge";
+import { connectCore, evaluateAndWait, installBridge, wire } from "./bridge";
 
 test.describe("desktop UI against the real core", () => {
   let ws: string;
@@ -32,7 +32,7 @@ test.describe("desktop UI against the real core", () => {
     expect(existsSync(path.join(proj, "project.json"))).toBe(true);
 
     await page.getByTestId("seed").fill("7");
-    await page.getByTestId("generate").click();
+    await evaluateAndWait(page, "generate");
     await expect(page.getByTestId("layer-stats")).toBeVisible();
     // The landform readout (terrain.measure) sits under the stats and lists the dominant geomorphons.
     await page.getByTestId("measure").click();
@@ -122,7 +122,7 @@ test.describe("desktop UI against the real core", () => {
     const height = panel.locator(".react-flow__node", { hasText: "jd.output.height@1" });
     await wire(page, input, height);
     await expect(page.getByTestId("log")).toContainText("graph.connect: ok");
-    await page.getByTestId("graph-evaluate").click();
+    await evaluateAndWait(page, "graph-evaluate");
     await expect(page.getByTestId("log")).toContainText("graph.evaluate: ok");
     // Same heights (EXR is lossless): min/max and mean match; time and hash lines may differ.
     for (const m of [/([\d.]+ \/ [\d.]+ m)/, /mean\s+([\d.]+ m)/]) {

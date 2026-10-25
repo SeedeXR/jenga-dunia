@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, installBridge } from "./bridge";
+import { connectCore, evaluateAndWait, installBridge } from "./bridge";
 
 const NOISE = "01JDGRAPH000000000000N01SE"; // starter graph ids (jd_graph::nodes)
 
@@ -87,7 +87,7 @@ test.describe("node graph editor against the real core", () => {
     await expect(page.getByTestId("log")).toContainText("graph.move_node: ok");
 
     // Evaluate publishes the output layer and refreshes stats + viewport.
-    await page.getByTestId("graph-evaluate").click();
+    await evaluateAndWait(page, "graph-evaluate");
     await expect(page.getByTestId("layer-stats")).toBeVisible();
     await expect(page.getByTestId("viewport-info")).toContainText(/ [1-9][\d,]* tris/);
     // The live preview may have shown those already: wait for the explicit evaluation itself, since

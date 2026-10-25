@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, installBridge, selectNode, wire } from "./bridge";
+import { connectCore, evaluateAndWait, installBridge, selectNode, wire } from "./bridge";
 
 const NOISE = "01JDGRAPH000000000000N01SE"; // starter graph ids (jd_graph::nodes)
 const HEIGHT = "01JDGRAPH0000000000HE1GHT0";
@@ -54,7 +54,7 @@ test.describe("climate nodes against the real core", () => {
     await layer.fill("rain");
     await layer.blur();
     await wire(page, rain, out, "rain");
-    await page.getByTestId("graph-evaluate").click();
+    await evaluateAndWait(page, "graph-evaluate");
     await expect(page.getByTestId("log")).toContainText("graph.evaluate: ok", { timeout: 30_000 });
     await expect(page.getByTestId("layer-pick")).toBeVisible();
     await page.getByTestId("color-pick").selectOption("rain");

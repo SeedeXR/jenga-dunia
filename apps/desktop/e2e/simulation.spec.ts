@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, fitView, installBridge, logCount, selectNode, wire } from "./bridge";
+import { connectCore, evaluateAndWait, fitView, installBridge, logCount, selectNode, wire } from "./bridge";
 
 const NOISE = "01JDGRAPH000000000000N01SE"; // starter graph ids (jd_graph::nodes)
 const HEIGHT = "01JDGRAPH0000000000HE1GHT0";
@@ -29,7 +29,7 @@ test.describe("debris and lava simulations against the real core", () => {
     await page.getByLabel("Resolution (px)").fill("128");
     await page.getByTestId("new-project").click();
     await expect(page.locator("header")).toContainText("World — 128²");
-    await page.getByTestId("generate").click();
+    await evaluateAndWait(page, "generate");
     await expect(page.getByTestId("layer-stats")).toBeVisible();
 
     const panel = page.getByTestId("graph-panel");
@@ -83,7 +83,7 @@ test.describe("debris and lava simulations against the real core", () => {
     await wire(page, lava, out2, "heat");
 
     const evaluated = await logCount(page, "graph.evaluate: ok");
-    await page.getByTestId("graph-evaluate").click();
+    await evaluateAndWait(page, "graph-evaluate");
     await expect.poll(() => logCount(page, "graph.evaluate: ok"), { timeout: 120_000 }).toBeGreaterThan(evaluated);
 
     // The core agrees: lava erupted at the summit and is still molten at the end of the eruption.

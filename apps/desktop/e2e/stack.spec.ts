@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, installBridge, logCount } from "./bridge";
+import { connectCore, evaluateAndWait, installBridge, logCount } from "./bridge";
 
 /** The layer stack against the real core: the chain feeding the height output as rows, "+" splices
  *  a node, the eye bypasses it, the arrows re-order it, the bin removes it and closes the gap. */
@@ -26,7 +26,7 @@ test.describe("layer stack against the real core", () => {
     await page.getByLabel("Resolution (px)").fill("128");
     await page.getByTestId("new-project").click();
     await expect(page.locator("header")).toContainText("World — 128²");
-    await page.getByTestId("generate").click();
+    await evaluateAndWait(page, "generate");
     await expect(page.getByTestId("layer-stats")).toBeVisible();
     const chain = page.getByTestId("layer-chain").locator("li");
     await expect(chain).toHaveCount(1); // the noise alone feeds the output
@@ -69,7 +69,7 @@ test.describe("layer stack against the real core", () => {
     await expect(chain).toHaveCount(2);
     const v2 = await view();
     expect(v2.result.edges.find((e) => e.to.node === terrace.id && e.to.port === "in")?.from.node).toBe(v2.result.nodes.find((n) => n.kind === "jd.noise.fbm@1")!.id);
-    await page.getByTestId("graph-evaluate").click();
+    await evaluateAndWait(page, "graph-evaluate");
     await expect.poll(() => logCount(page, "graph.evaluate: ok"), { timeout: 60_000 }).toBeGreaterThan(evaluated);
     // A side branch (snow) appears under the chain, not in it.
     await page.getByTestId("sim-snow").click();

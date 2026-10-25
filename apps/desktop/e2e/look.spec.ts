@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, installBridge, logCount } from "./bridge";
+import { connectCore, evaluateAndWait, installBridge, logCount } from "./bridge";
 
 /** The look — materials, scatter settings, sun — is saved with the project (scene.json → look)
  *  and comes back when the project is reopened; the Export section writes engine folders, meshes
@@ -28,7 +28,7 @@ test.describe("look and exports against the real core", () => {
     await page.getByLabel("Resolution (px)").fill("128");
     await page.getByTestId("new-project").click();
     await expect(page.locator("header")).toContainText("World — 128²");
-    await page.getByTestId("generate").click();
+    await evaluateAndWait(page, "generate");
     await expect(page.getByTestId("layer-stats")).toBeVisible();
 
     // A material layer, a sun and a scatter spacing: each setter journals project.set_look (debounced).

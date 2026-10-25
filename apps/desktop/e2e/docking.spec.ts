@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, installBridge } from "./bridge";
+import { connectCore, evaluateAndWait, installBridge } from "./bridge";
 
 // Docking and the viewport detail option against the real core: side panels collapse to a strip,
 // the graph docks beside or under the viewport, both survive a reload through the browser store;
@@ -71,7 +71,7 @@ test.describe("docking and preview detail", () => {
     await page.getByTestId("project-path").fill(proj);
     await page.getByTestId("open-project").click();
     await expect(page.locator("header")).toContainText("World — 2048²");
-    await page.getByTestId("generate").click();
+    await evaluateAndWait(page, "generate");
     await expect(page.getByTestId("viewport-info")).toContainText("preview lod 1, 2.00 MB", { timeout: 120_000 });
     await page.getByTestId("setting-preview-px").selectOption("2048");
     await expect(page.getByTestId("viewport-info")).toContainText("preview lod 0, 8.00 MB", { timeout: 120_000 });

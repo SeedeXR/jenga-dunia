@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, installBridge, logCount, selectNode, wire } from "./bridge";
+import { connectCore, evaluateAndWait, installBridge, logCount, selectNode, wire } from "./bridge";
 
 const HEIGHT = "01JDGRAPH0000000000HE1GHT0";
 
@@ -30,7 +30,7 @@ test.describe("gate pattern against the real core", () => {
     const inspector = page.getByTestId("graph-inspector");
     // Evaluate the starter graph once: it publishes `height`, the layer the second chain reads
     // back (the CLI quickstart does the same with a coarse `height#lod2`).
-    await page.getByTestId("graph-evaluate").click();
+    await evaluateAndWait(page, "graph-evaluate");
     await expect(page.getByTestId("log")).toContainText("graph.evaluate: ok", { timeout: 30_000 });
 
     await page.getByTestId("graph-kind").selectOption("jd.input.layer@1");
@@ -55,7 +55,7 @@ test.describe("gate pattern against the real core", () => {
     await expect(only.locator("option")).toHaveCount(3); // all, height, fine
     await only.selectOption("fine");
     const before = await logCount(page, "graph.evaluate: ok");
-    await page.getByTestId("graph-evaluate").click();
+    await evaluateAndWait(page, "graph-evaluate");
     await expect.poll(() => logCount(page, "graph.evaluate: ok"), { timeout: 30_000 }).toBeGreaterThan(before);
     await expect(page.getByTestId("layer-pick")).toBeVisible();
     await expect(page.getByTestId("layer-pick").locator("option", { hasText: "fine" })).toHaveCount(1);

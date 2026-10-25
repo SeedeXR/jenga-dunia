@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, fitView, installBridge, logCount, selectNode, wire } from "./bridge";
+import { connectCore, evaluateAndWait, fitView, installBridge, logCount, selectNode, wire } from "./bridge";
 
 const NOISE = "01JDGRAPH000000000000N01SE"; // starter graph ids (jd_graph::nodes)
 const HEIGHT = "01JDGRAPH0000000000HE1GHT0";
@@ -51,7 +51,7 @@ test.describe("timeline against the real core", () => {
     await fitView(page, height);
     await wire(page, thermal, height, "out"); // replaces the starter noise → height edge
     const evaluated = await logCount(page, "graph.evaluate: ok");
-    await page.getByTestId("graph-evaluate").click();
+    await evaluateAndWait(page, "graph-evaluate");
     await expect.poll(() => logCount(page, "graph.evaluate: ok")).toBeGreaterThan(evaluated);
     const stats = page.getByTestId("layer-stats");
     const hashAt0 = (await stats.textContent())?.match(/hash([0-9a-f]+)/)?.[1];

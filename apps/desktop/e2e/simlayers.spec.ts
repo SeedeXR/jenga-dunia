@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, installBridge, logCount } from "./bridge";
+import { connectCore, evaluateAndWait, installBridge, logCount } from "./bridge";
 
 /** One-click simulation layers against the real core: Snow beside the height output, Lava, Debris and
  *  Sand in front of it; masks published as layers, materials added, the viewport coloured by them. */
@@ -27,7 +27,7 @@ test.describe("simulation layers against the real core", () => {
     await page.getByLabel("Resolution (px)").fill("128");
     await page.getByTestId("new-project").click();
     await expect(page.locator("header")).toContainText("World — 128²");
-    await page.getByTestId("generate").click();
+    await evaluateAndWait(page, "generate");
     await expect(page.getByTestId("layer-stats")).toBeVisible();
     const panel = page.getByTestId("graph-panel");
 
@@ -36,7 +36,7 @@ test.describe("simulation layers against the real core", () => {
     await expect(panel.locator(".react-flow__node", { hasText: "jd.climate.snowpack@1" })).toBeVisible();
     await expect(panel.locator(".react-flow__node")).toHaveCount(4);
     await expect(panel.locator(".react-flow__edge")).toHaveCount(3);
-    await page.getByTestId("graph-evaluate").click();
+    await evaluateAndWait(page, "graph-evaluate");
     await expect(page.getByTestId("viewport-info")).toContainText("colour snow", { timeout: 60_000 });
     await expect(page.getByTestId("material-mask-0")).toHaveValue("snow", { timeout: 30_000 });
     const snow = (await core.callTool({ name: "terrain.stats", arguments: { layer: "snow" } })).structuredContent as { result: { stats: { max: number; mean: number } } };
@@ -53,7 +53,7 @@ test.describe("simulation layers against the real core", () => {
     await expect(panel.locator(".react-flow__node")).toHaveCount(7);
     await expect(panel.locator(".react-flow__edge")).toHaveCount(6); // every output wired before evaluating
     const evaluated = await logCount(page, "graph.evaluate: ok");
-    await page.getByTestId("graph-evaluate").click();
+    await evaluateAndWait(page, "graph-evaluate");
     await expect.poll(() => logCount(page, "graph.evaluate: ok"), { timeout: 120_000 }).toBeGreaterThan(evaluated);
     // The material row's mask option exists once the evaluation has published the layer.
     await expect(page.getByTestId("material-mask-1")).toHaveValue("lava", { timeout: 30_000 });
