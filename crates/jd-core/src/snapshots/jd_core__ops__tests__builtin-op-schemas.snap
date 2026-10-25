@@ -5083,6 +5083,18 @@ expression: list
                 }
               ],
               "default": null
+            },
+            "texture": {
+              "description": "An image texture set from the project's assets/ (tileable PNGs): the albedo is sampled\ninto the maps by world position and the set is written as the layer's tile for the\nengines; `detail` wins when both are given.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TextureSpec"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             }
           },
           "additionalProperties": false,
@@ -5135,6 +5147,41 @@ expression: list
             }
           },
           "additionalProperties": false
+        },
+        "TextureSpec": {
+          "description": "An image texture set for a material layer.",
+          "type": "object",
+          "properties": {
+            "albedo": {
+              "description": "Tileable albedo PNG (sRGB) in the project's assets/ (or an absolute path).",
+              "type": "string"
+            },
+            "normal": {
+              "description": "Tangent-space normal PNG (+Y up), optional.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "tile_m": {
+              "description": "Metres per repeat.",
+              "type": "number",
+              "format": "float"
+            },
+            "px": {
+              "description": "Exported tile side in pixels (16..=4096; the images are resampled to it).",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0,
+              "default": 1024
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "albedo",
+            "tile_m"
+          ]
         },
         "ScatterLook": {
           "description": "Scatter settings of the look.",
@@ -5642,6 +5689,18 @@ expression: list
                 }
               ],
               "default": null
+            },
+            "texture": {
+              "description": "An image texture set from the project's assets/ (tileable PNGs): the albedo is sampled\ninto the maps by world position and the set is written as the layer's tile for the\nengines; `detail` wins when both are given.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TextureSpec"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             }
           },
           "additionalProperties": false,
@@ -5694,6 +5753,41 @@ expression: list
             }
           },
           "additionalProperties": false
+        },
+        "TextureSpec": {
+          "description": "An image texture set for a material layer.",
+          "type": "object",
+          "properties": {
+            "albedo": {
+              "description": "Tileable albedo PNG (sRGB) in the project's assets/ (or an absolute path).",
+              "type": "string"
+            },
+            "normal": {
+              "description": "Tangent-space normal PNG (+Y up), optional.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "tile_m": {
+              "description": "Metres per repeat.",
+              "type": "number",
+              "format": "float"
+            },
+            "px": {
+              "description": "Exported tile side in pixels (16..=4096; the images are resampled to it).",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0,
+              "default": 1024
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "albedo",
+            "tile_m"
+          ]
         },
         "ScatterLook": {
           "description": "Scatter settings of the look.",
@@ -6192,6 +6286,18 @@ expression: list
                 }
               ],
               "default": null
+            },
+            "texture": {
+              "description": "An image texture set from the project's assets/ (tileable PNGs): the albedo is sampled\ninto the maps by world position and the set is written as the layer's tile for the\nengines; `detail` wins when both are given.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TextureSpec"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             }
           },
           "additionalProperties": false,
@@ -6244,6 +6350,41 @@ expression: list
             }
           },
           "additionalProperties": false
+        },
+        "TextureSpec": {
+          "description": "An image texture set for a material layer.",
+          "type": "object",
+          "properties": {
+            "albedo": {
+              "description": "Tileable albedo PNG (sRGB) in the project's assets/ (or an absolute path).",
+              "type": "string"
+            },
+            "normal": {
+              "description": "Tangent-space normal PNG (+Y up), optional.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "tile_m": {
+              "description": "Metres per repeat.",
+              "type": "number",
+              "format": "float"
+            },
+            "px": {
+              "description": "Exported tile side in pixels (16..=4096; the images are resampled to it).",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0,
+              "default": 1024
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "albedo",
+            "tile_m"
+          ]
         },
         "ScatterLook": {
           "description": "Scatter settings of the look.",
@@ -6633,6 +6774,18 @@ expression: list
                 }
               ],
               "default": null
+            },
+            "texture": {
+              "description": "An image texture set from the project's assets/ (tileable PNGs): the albedo is sampled\ninto the maps by world position and the set is written as the layer's tile for the\nengines; `detail` wins when both are given.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TextureSpec"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             }
           },
           "additionalProperties": false,
@@ -6685,6 +6838,41 @@ expression: list
             }
           },
           "additionalProperties": false
+        },
+        "TextureSpec": {
+          "description": "An image texture set for a material layer.",
+          "type": "object",
+          "properties": {
+            "albedo": {
+              "description": "Tileable albedo PNG (sRGB) in the project's assets/ (or an absolute path).",
+              "type": "string"
+            },
+            "normal": {
+              "description": "Tangent-space normal PNG (+Y up), optional.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "tile_m": {
+              "description": "Metres per repeat.",
+              "type": "number",
+              "format": "float"
+            },
+            "px": {
+              "description": "Exported tile side in pixels (16..=4096; the images are resampled to it).",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0,
+              "default": 1024
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "albedo",
+            "tile_m"
+          ]
         },
         "ScatterLook": {
           "description": "Scatter settings of the look.",
@@ -7144,6 +7332,18 @@ expression: list
                 }
               ],
               "default": null
+            },
+            "texture": {
+              "description": "An image texture set from the project's assets/ (tileable PNGs): the albedo is sampled\ninto the maps by world position and the set is written as the layer's tile for the\nengines; `detail` wins when both are given.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TextureSpec"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             }
           },
           "additionalProperties": false,
@@ -7196,6 +7396,41 @@ expression: list
             }
           },
           "additionalProperties": false
+        },
+        "TextureSpec": {
+          "description": "An image texture set for a material layer.",
+          "type": "object",
+          "properties": {
+            "albedo": {
+              "description": "Tileable albedo PNG (sRGB) in the project's assets/ (or an absolute path).",
+              "type": "string"
+            },
+            "normal": {
+              "description": "Tangent-space normal PNG (+Y up), optional.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "tile_m": {
+              "description": "Metres per repeat.",
+              "type": "number",
+              "format": "float"
+            },
+            "px": {
+              "description": "Exported tile side in pixels (16..=4096; the images are resampled to it).",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0,
+              "default": 1024
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "albedo",
+            "tile_m"
+          ]
         },
         "ScatterLook": {
           "description": "Scatter settings of the look.",
@@ -7375,6 +7610,18 @@ expression: list
                 }
               ],
               "default": null
+            },
+            "texture": {
+              "description": "An image texture set from the project's assets/ (tileable PNGs): the albedo is sampled\ninto the maps by world position and the set is written as the layer's tile for the\nengines; `detail` wins when both are given.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TextureSpec"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             }
           },
           "additionalProperties": false,
@@ -7427,6 +7674,41 @@ expression: list
             }
           },
           "additionalProperties": false
+        },
+        "TextureSpec": {
+          "description": "An image texture set for a material layer.",
+          "type": "object",
+          "properties": {
+            "albedo": {
+              "description": "Tileable albedo PNG (sRGB) in the project's assets/ (or an absolute path).",
+              "type": "string"
+            },
+            "normal": {
+              "description": "Tangent-space normal PNG (+Y up), optional.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "tile_m": {
+              "description": "Metres per repeat.",
+              "type": "number",
+              "format": "float"
+            },
+            "px": {
+              "description": "Exported tile side in pixels (16..=4096; the images are resampled to it).",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0,
+              "default": 1024
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "albedo",
+            "tile_m"
+          ]
         },
         "ScatterLook": {
           "description": "Scatter settings of the look.",
@@ -7795,6 +8077,18 @@ expression: list
                 }
               ],
               "default": null
+            },
+            "texture": {
+              "description": "An image texture set from the project's assets/ (tileable PNGs): the albedo is sampled\ninto the maps by world position and the set is written as the layer's tile for the\nengines; `detail` wins when both are given.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TextureSpec"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             }
           },
           "additionalProperties": false,
@@ -7847,6 +8141,41 @@ expression: list
             }
           },
           "additionalProperties": false
+        },
+        "TextureSpec": {
+          "description": "An image texture set for a material layer.",
+          "type": "object",
+          "properties": {
+            "albedo": {
+              "description": "Tileable albedo PNG (sRGB) in the project's assets/ (or an absolute path).",
+              "type": "string"
+            },
+            "normal": {
+              "description": "Tangent-space normal PNG (+Y up), optional.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "tile_m": {
+              "description": "Metres per repeat.",
+              "type": "number",
+              "format": "float"
+            },
+            "px": {
+              "description": "Exported tile side in pixels (16..=4096; the images are resampled to it).",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0,
+              "default": 1024
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "albedo",
+            "tile_m"
+          ]
         },
         "ScatterLook": {
           "description": "Scatter settings of the look.",
@@ -8236,6 +8565,18 @@ expression: list
                 }
               ],
               "default": null
+            },
+            "texture": {
+              "description": "An image texture set from the project's assets/ (tileable PNGs): the albedo is sampled\ninto the maps by world position and the set is written as the layer's tile for the\nengines; `detail` wins when both are given.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TextureSpec"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             }
           },
           "additionalProperties": false,
@@ -8288,6 +8629,41 @@ expression: list
             }
           },
           "additionalProperties": false
+        },
+        "TextureSpec": {
+          "description": "An image texture set for a material layer.",
+          "type": "object",
+          "properties": {
+            "albedo": {
+              "description": "Tileable albedo PNG (sRGB) in the project's assets/ (or an absolute path).",
+              "type": "string"
+            },
+            "normal": {
+              "description": "Tangent-space normal PNG (+Y up), optional.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "tile_m": {
+              "description": "Metres per repeat.",
+              "type": "number",
+              "format": "float"
+            },
+            "px": {
+              "description": "Exported tile side in pixels (16..=4096; the images are resampled to it).",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0,
+              "default": 1024
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "albedo",
+            "tile_m"
+          ]
         },
         "ScatterLook": {
           "description": "Scatter settings of the look.",
@@ -8766,6 +9142,18 @@ expression: list
                 }
               ],
               "default": null
+            },
+            "texture": {
+              "description": "An image texture set from the project's assets/ (tileable PNGs): the albedo is sampled\ninto the maps by world position and the set is written as the layer's tile for the\nengines; `detail` wins when both are given.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TextureSpec"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             }
           },
           "additionalProperties": false,
@@ -8818,6 +9206,41 @@ expression: list
             }
           },
           "additionalProperties": false
+        },
+        "TextureSpec": {
+          "description": "An image texture set for a material layer.",
+          "type": "object",
+          "properties": {
+            "albedo": {
+              "description": "Tileable albedo PNG (sRGB) in the project's assets/ (or an absolute path).",
+              "type": "string"
+            },
+            "normal": {
+              "description": "Tangent-space normal PNG (+Y up), optional.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "tile_m": {
+              "description": "Metres per repeat.",
+              "type": "number",
+              "format": "float"
+            },
+            "px": {
+              "description": "Exported tile side in pixels (16..=4096; the images are resampled to it).",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0,
+              "default": 1024
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "albedo",
+            "tile_m"
+          ]
         },
         "ScatterLook": {
           "description": "Scatter settings of the look.",
@@ -9468,6 +9891,18 @@ expression: list
                 }
               ],
               "default": null
+            },
+            "texture": {
+              "description": "An image texture set from the project's assets/ (tileable PNGs): the albedo is sampled\ninto the maps by world position and the set is written as the layer's tile for the\nengines; `detail` wins when both are given.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TextureSpec"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             }
           },
           "additionalProperties": false,
@@ -9520,6 +9955,41 @@ expression: list
             }
           },
           "additionalProperties": false
+        },
+        "TextureSpec": {
+          "description": "An image texture set for a material layer.",
+          "type": "object",
+          "properties": {
+            "albedo": {
+              "description": "Tileable albedo PNG (sRGB) in the project's assets/ (or an absolute path).",
+              "type": "string"
+            },
+            "normal": {
+              "description": "Tangent-space normal PNG (+Y up), optional.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "tile_m": {
+              "description": "Metres per repeat.",
+              "type": "number",
+              "format": "float"
+            },
+            "px": {
+              "description": "Exported tile side in pixels (16..=4096; the images are resampled to it).",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0,
+              "default": 1024
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "albedo",
+            "tile_m"
+          ]
         }
       }
     },
@@ -9820,6 +10290,18 @@ expression: list
                 }
               ],
               "default": null
+            },
+            "texture": {
+              "description": "An image texture set from the project's assets/ (tileable PNGs): the albedo is sampled\ninto the maps by world position and the set is written as the layer's tile for the\nengines; `detail` wins when both are given.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TextureSpec"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             }
           },
           "additionalProperties": false,
@@ -9872,6 +10354,41 @@ expression: list
             }
           },
           "additionalProperties": false
+        },
+        "TextureSpec": {
+          "description": "An image texture set for a material layer.",
+          "type": "object",
+          "properties": {
+            "albedo": {
+              "description": "Tileable albedo PNG (sRGB) in the project's assets/ (or an absolute path).",
+              "type": "string"
+            },
+            "normal": {
+              "description": "Tangent-space normal PNG (+Y up), optional.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "tile_m": {
+              "description": "Metres per repeat.",
+              "type": "number",
+              "format": "float"
+            },
+            "px": {
+              "description": "Exported tile side in pixels (16..=4096; the images are resampled to it).",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0,
+              "default": 1024
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "albedo",
+            "tile_m"
+          ]
         }
       }
     },
@@ -11164,6 +11681,18 @@ expression: list
                 }
               ],
               "default": null
+            },
+            "texture": {
+              "description": "An image texture set from the project's assets/ (tileable PNGs): the albedo is sampled\ninto the maps by world position and the set is written as the layer's tile for the\nengines; `detail` wins when both are given.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TextureSpec"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             }
           },
           "additionalProperties": false,
@@ -11216,6 +11745,41 @@ expression: list
             }
           },
           "additionalProperties": false
+        },
+        "TextureSpec": {
+          "description": "An image texture set for a material layer.",
+          "type": "object",
+          "properties": {
+            "albedo": {
+              "description": "Tileable albedo PNG (sRGB) in the project's assets/ (or an absolute path).",
+              "type": "string"
+            },
+            "normal": {
+              "description": "Tangent-space normal PNG (+Y up), optional.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "tile_m": {
+              "description": "Metres per repeat.",
+              "type": "number",
+              "format": "float"
+            },
+            "px": {
+              "description": "Exported tile side in pixels (16..=4096; the images are resampled to it).",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0,
+              "default": 1024
+            }
+          },
+          "additionalProperties": false,
+          "required": [
+            "albedo",
+            "tile_m"
+          ]
         }
       }
     },

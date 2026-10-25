@@ -177,6 +177,103 @@ fn png(rgb: &[u8], n: u32) -> JdResult<Vec<u8>> {
     Ok(out.into_inner())
 }
 
+/// An image texture set for a material layer: a tileable albedo PNG (sRGB) and an optional
+/// tangent-space normal PNG, repeated every `tile_m` metres — World Creator's texture sets. It
+/// feeds the same [`DetailTile`] path as the procedural grain, so the viewport, the GLB bake
+/// and the engine profiles need nothing new.
+#[derive(Debug, Clone)]
+pub struct TextureSet {
+    /// Albedo, sRGB.
+    pub albedo: image::RgbImage,
+    /// Tangent-space normal (+Y up), or None for a flat tile.
+    pub normal: Option<image::RgbImage>,
+    /// Metres per repeat.
+    pub tile_m: f32,
+    /// Exported tile side in pixels (the images are resampled to it).
+    pub px: u32,
+}
+
+impl TextureSet {
+    /// Load the PNGs (`normal` optional) and validate.
+    pub fn load(
+        albedo: &std::path::Path,
+        normal: Option<&std::path::Path>,
+        tile_m: f32,
+        px: u32,
+    ) -> JdResult<Self> {
+        let read = |path: &std::path::Path| -> JdResult<image::RgbImage> {
+            image::open(path).map(|img| img.into_rgb8()).map_err(|e| {
+                JdError::new(jd_types::ErrorCode::E_FORMAT_CORRUPT, format!("texture {}: {e}", path.display()))
+                    .next("Texture sets are PNG files in the project's assets/ (import them with project.import_asset).")
+            })
+        };
+        let set = Self {
+            albedo: read(albedo)?,
+            normal: normal.map(read).transpose()?,
+            tile_m,
+            px,
+        };
+        set.validate()?;
+        Ok(set)
+    }
+
+    /// Positive repeat, a usable tile size, non-empty images.
+    pub fn validate(&self) -> JdResult<()> {
+        if !(self.tile_m > 0.0 && self.tile_m.is_finite()) {
+            return Err(JdError::invalid("texture.tile_m", "must be positive"));
+        }
+        if !(16..=4096).contains(&self.px) {
+            return Err(JdError::invalid("texture.px", "must be within 16..=4096"));
+        }
+        if self.albedo.width() == 0
+            || self.albedo.height() == 0
+            || self
+                .normal
+                .as_ref()
+                .is_some_and(|n| n.width() == 0 || n.height() == 0)
+        {
+            return Err(JdError::invalid("texture", "images must not be empty"));
+        }
+        Ok(())
+    }
+
+    /// The albedo texel under a world position (nearest, wrapping every `tile_m`), sRGB 0..1.
+    pub fn albedo_at(&self, x_m: f64, z_m: f64) -> [f32; 3] {
+        let (w, h) = (self.albedo.width(), self.albedo.height());
+        let u = (x_m / f64::from(self.tile_m)).rem_euclid(1.0);
+        let v = (z_m / f64::from(self.tile_m)).rem_euclid(1.0);
+        let px = self.albedo.get_pixel(
+            ((u * f64::from(w)) as u32).min(w - 1),
+            ((v * f64::from(h)) as u32).min(h - 1),
+        );
+        [
+            f32::from(px[0]) / 255.0,
+            f32::from(px[1]) / 255.0,
+            f32::from(px[2]) / 255.0,
+        ]
+    }
+
+    /// The set as an exportable tile at `px` (a flat normal when none was given).
+    pub fn tile(&self) -> JdResult<DetailTile> {
+        self.validate()?;
+        let n = self.px;
+        let alb =
+            image::imageops::resize(&self.albedo, n, n, image::imageops::FilterType::Triangle);
+        let nrm = match &self.normal {
+            Some(img) => {
+                image::imageops::resize(img, n, n, image::imageops::FilterType::Triangle).into_raw()
+            }
+            None => [128u8, 128, 255].repeat((n * n) as usize),
+        };
+        Ok(DetailTile {
+            albedo: png(alb.as_raw(), n)?,
+            normal: png(&nrm, n)?,
+            px: n,
+            tile_m: self.tile_m,
+        })
+    }
+}
+
 /// The relief's slope at a world position, in tile units per tile, for the macro bakes:
 /// `(dr/du, dr/dv)` and the relief itself.
 pub fn relief_at_world(d: &Detail, x_m: f64, z_m: f64) -> (f32, f32, f32) {
@@ -194,6 +291,53 @@ pub fn relief_at_world(d: &Detail, x_m: f64, z_m: f64) -> (f32, f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_texture_set_samples_by_world_position_and_exports_a_tile() {
+        // Two columns: red on the west half of each repeat, blue on the east.
+        let albedo = image::RgbImage::from_fn(2, 2, |x, _| {
+            if x == 0 {
+                image::Rgb([255, 0, 0])
+            } else {
+                image::Rgb([0, 0, 255])
+            }
+        });
+        let set = TextureSet {
+            albedo,
+            normal: None,
+            tile_m: 10.0,
+            px: 16,
+        };
+        assert_eq!(set.albedo_at(2.0, 3.0), [1.0, 0.0, 0.0]);
+        assert_eq!(set.albedo_at(7.0, 3.0), [0.0, 0.0, 1.0]);
+        assert_eq!(
+            set.albedo_at(12.0, 3.0),
+            [1.0, 0.0, 0.0],
+            "wraps every tile_m"
+        );
+        let tile = set.tile().expect("tile");
+        assert_eq!(tile.px, 16);
+        let img = image::load_from_memory(&tile.albedo)
+            .expect("png")
+            .into_rgb8();
+        assert_eq!((img.width(), img.height()), (16, 16));
+        let nrm = image::load_from_memory(&tile.normal)
+            .expect("png")
+            .into_rgb8();
+        assert_eq!(
+            nrm.get_pixel(3, 3).0,
+            [128, 128, 255],
+            "flat normal when none is given"
+        );
+        assert!(
+            TextureSet {
+                px: 8,
+                ..set.clone()
+            }
+            .tile()
+            .is_err()
+        );
+    }
 
     #[test]
     fn the_tile_wraps_and_the_relief_varies() {

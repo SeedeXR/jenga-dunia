@@ -187,6 +187,13 @@ pub(crate) fn bake_albedo(
                 for (ck, lk) in c.iter_mut().zip(&l.albedo) {
                     *ck += (lk - *ck) * wgt;
                 }
+                // Texture set: the image's texel at this world position stands in for the flat colour.
+                if let Some(t) = &l.texture {
+                    let (xm, zm) = world_m(gx, gz);
+                    for (ck, tk) in c.iter_mut().zip(&t.albedo_at(xm, zm)) {
+                        *ck += (tk - *ck) * wgt;
+                    }
+                }
                 // Detail: the tile's relief at this texel's world position darkens and
                 // lightens the colour, as it does in the exported tile.
                 if let Some(d) = &l.detail {
@@ -261,6 +268,9 @@ pub struct MaterialLayer {
     /// Tileable detail (grain repeated every `tile_m`): baked into the macro maps by world
     /// position and exported as tiles for the engines.
     pub detail: Option<crate::detail::Detail>,
+    /// An image texture set (albedo + optional normal, repeated every `tile_m`): the albedo is
+    /// sampled into the macro maps by world position and the set is exported as the layer's tile.
+    pub texture: Option<std::sync::Arc<crate::detail::TextureSet>>,
 }
 
 /// Bake albedo, normal and roughness maps from the full field, sampled every `ts` cells so no
@@ -304,6 +314,9 @@ fn validate_layers(hf: &Heightfield, layers: &[MaterialLayer]) -> JdResult<()> {
         }
         if let Some(d) = &l.detail {
             d.validate(k)?;
+        }
+        if let Some(t) = &l.texture {
+            t.validate()?;
         }
     }
     Ok(())
@@ -353,6 +366,8 @@ fn bake_maps_body(
     for (k, l) in layers.iter().enumerate() {
         if let Some(d) = &l.detail {
             details.push((k, crate::detail::bake_detail(d, l.albedo)?));
+        } else if let Some(t) = &l.texture {
+            details.push((k, t.tile()?));
         }
     }
     let detail_weights = if details.is_empty() {
@@ -1955,6 +1970,7 @@ mod tests {
             roughness: 0.8,
             emissive: [0.0; 3],
             detail: None,
+            texture: None,
         };
         let grainy = MaterialLayer {
             detail: Some(crate::detail::Detail {
@@ -1964,6 +1980,7 @@ mod tests {
                 seed: 3,
                 px: 64,
             }),
+            texture: None,
             ..plain.clone()
         };
         let a = bake_maps_with(&hf, [640.0, 640.0], 64, std::slice::from_ref(&plain)).unwrap();
@@ -2003,6 +2020,7 @@ mod tests {
                 px: 4,
                 ..Default::default()
             }),
+            texture: None,
             ..plain
         };
         assert!(bake_maps_with(&hf, [640.0, 640.0], 64, &[bad]).is_err());
@@ -2096,6 +2114,7 @@ mod tests {
             roughness: 0.3,
             emissive: [0.0; 3],
             detail: None,
+            texture: None,
         };
         let plain = bake_maps(&h, [320.0, 160.0], 64).expect("plain");
         let layered =
@@ -2121,6 +2140,7 @@ mod tests {
             roughness: 0.5,
             emissive: [0.0; 3],
             detail: None,
+            texture: None,
         };
         assert!(bake_maps_with(&h, [320.0, 160.0], 64, &[bad]).is_err());
     }
@@ -2137,6 +2157,7 @@ mod tests {
             roughness: 0.7,
             emissive: [1.0, 0.35, 0.05],
             detail: None,
+            texture: None,
         };
         let maps =
             bake_maps_with(&h, [320.0, 160.0], 64, std::slice::from_ref(&glow)).expect("bake");

@@ -4176,6 +4176,30 @@ pub mod terrain {
         /// the engines.
         #[serde(default)]
         pub detail: Option<DetailSpec>,
+        /// An image texture set from the project's assets/ (tileable PNGs): the albedo is sampled
+        /// into the maps by world position and the set is written as the layer's tile for the
+        /// engines; `detail` wins when both are given.
+        #[serde(default)]
+        pub texture: Option<TextureSpec>,
+    }
+
+    /// An image texture set for a material layer.
+    #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct TextureSpec {
+        /// Tileable albedo PNG (sRGB) in the project's assets/ (or an absolute path).
+        pub albedo: PathBuf,
+        /// Tangent-space normal PNG (+Y up), optional.
+        #[serde(default)]
+        pub normal: Option<PathBuf>,
+        /// Metres per repeat.
+        pub tile_m: f32,
+        /// Exported tile side in pixels (16..=4096; the images are resampled to it).
+        #[serde(default = "texture_px")]
+        pub px: u32,
+    }
+    fn texture_px() -> u32 {
+        1024
     }
 
     /// A layer's tileable detail.
@@ -4214,6 +4238,26 @@ pub mod terrain {
     fn default_detail_px() -> u32 {
         512
     }
+    /// Load a texture set's PNGs from the project's assets/ (absolute paths as given).
+    fn texture_of(
+        ctx: &Context,
+        t: &Option<TextureSpec>,
+    ) -> JdResult<Option<std::sync::Arc<jd_terrain::TextureSet>>> {
+        let Some(t) = t else { return Ok(None) };
+        let under = ctx.with_project(|proj| {
+            let asset = |f: &PathBuf| {
+                if f.is_absolute() {
+                    f.clone()
+                } else {
+                    proj.root().join("assets").join(f)
+                }
+            };
+            Ok((asset(&t.albedo), t.normal.as_ref().map(asset)))
+        })?;
+        let set = jd_terrain::TextureSet::load(&under.0, under.1.as_deref(), t.tile_m, t.px)?;
+        Ok(Some(std::sync::Arc::new(set)))
+    }
+
     fn detail_of(d: &Option<DetailSpec>) -> Option<jd_terrain::detail::Detail> {
         d.as_ref().map(|d| jd_terrain::detail::Detail {
             tile_m: d.tile_m,
@@ -4264,6 +4308,7 @@ pub mod terrain {
                     roughness: m.roughness,
                     emissive: m.emissive.unwrap_or([0.0; 3]),
                     detail: detail_of(&m.detail),
+                    texture: texture_of(ctx, &m.texture)?,
                 })
             })
             .collect()
@@ -4675,12 +4720,14 @@ pub mod terrain {
                 }
                 let refs: Vec<(String, &jd_terrain::Heightfield)> = masks.iter().map(|(n, hf)| (n.clone(), hf)).collect();
                 let mat_fields: Vec<Option<jd_terrain::Heightfield>> = p.materials.iter().map(|m| m.mask.as_ref().map(|n| ctx.with_layer(n, |hf| Ok(hf.clone()))).transpose()).collect::<JdResult<_>>()?;
+                let textures: Vec<Option<std::sync::Arc<jd_terrain::TextureSet>>> = p.materials.iter().map(|m| texture_of(ctx, &m.texture)).collect::<JdResult<_>>()?;
                 let stack: Vec<jd_terrain::ProfileMaterial<'_>> = p
                     .materials
                     .iter()
                     .zip(&mat_fields)
+                    .zip(&textures)
                     .enumerate()
-                    .map(|(i, (m, f))| jd_terrain::ProfileMaterial { name: m.mask.clone().unwrap_or_else(|| format!("material_{i}")), mask: f.as_ref(), albedo: m.albedo, roughness: m.roughness, emissive: m.emissive.unwrap_or([0.0; 3]), detail: detail_of(&m.detail) })
+                    .map(|(i, ((m, f), t))| jd_terrain::ProfileMaterial { name: m.mask.clone().unwrap_or_else(|| format!("material_{i}")), mask: f.as_ref(), albedo: m.albedo, roughness: m.roughness, emissive: m.emissive.unwrap_or([0.0; 3]), detail: detail_of(&m.detail), texture: t.clone() })
                     .collect();
                 let geo = ctx.with_project(|proj| {
                     let w = &proj.doc.world;

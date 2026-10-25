@@ -85,6 +85,8 @@ pub struct ProfileMaterial<'a> {
     /// Tileable detail: written as `detail_<name>_albedo.png` / `detail_<name>_normal.png`
     /// with `tile_m` in the manifest.
     pub detail: Option<crate::detail::Detail>,
+    /// Image texture set (exported as the layer's tile when there is no procedural detail).
+    pub texture: Option<std::sync::Arc<crate::detail::TextureSet>>,
 }
 
 /// Write the profile for `height` with `masks` (name, 0..1 field) as weightmaps.
@@ -155,6 +157,7 @@ pub fn export_profile_tiled(
                     roughness: m.roughness,
                     emissive: m.emissive,
                     detail: m.detail,
+                    texture: m.texture.clone(),
                 })
                 .collect();
             let cut_holes = holes
@@ -400,8 +403,12 @@ pub fn export_profile_with_holes(
                 "name": m.name, "weightmap": weightmap, "albedo_srgb": m.albedo, "roughness": m.roughness,
                 "smoothness": 1.0 - m.roughness, "emissive": m.emissive,
             });
-            if let Some(d) = &m.detail {
-                let tile = crate::detail::bake_detail(d, m.albedo)?;
+            let tile = match (&m.detail, &m.texture) {
+                (Some(d), _) => Some(crate::detail::bake_detail(d, m.albedo)?),
+                (None, Some(t)) => Some(t.tile()?),
+                (None, None) => None,
+            };
+            if let Some(tile) = tile {
                 let (fa, fn_) = (
                     format!("detail_{}_albedo.png", m.name),
                     format!("detail_{}_normal.png", m.name),
@@ -412,12 +419,15 @@ pub fn export_profile_with_holes(
                 files.push(fn_.clone());
                 entry["detail_albedo"] = serde_json::json!(fa);
                 entry["detail_normal"] = serde_json::json!(fn_);
-                entry["tile_m"] = serde_json::json!(d.tile_m);
+                entry["tile_m"] = serde_json::json!(tile.tile_m);
                 entry["detail_px"] = serde_json::json!(tile.px);
             }
             layers.push(entry);
         }
-        if materials.iter().any(|m| m.detail.is_some()) {
+        if materials
+            .iter()
+            .any(|m| m.detail.is_some() || m.texture.is_some())
+        {
             loss.push("detail tiles: `detail_<name>_albedo.png` (the colour with its grain) and `detail_<name>_normal.png` (tangent space, +Y up) repeat every `tile_m` metres — Unity: TerrainLayer diffuse + normal with tileSize = tile_m (the headless importer does this); Unreal: the layer's material samples them with UV × extent ÷ tile_m".to_owned());
         } else {
             loss.push("flat colours: both engines paint terrain layers with textures, not colours — assign a texture per layer and use `albedo_srgb` as its tint, or give the layer a `detail`".to_owned());
@@ -575,6 +585,7 @@ mod tests {
             roughness: 0.9,
             emissive: [0.0; 3],
             detail: None,
+            texture: None,
         }];
         let r = export_profile_with_holes(
             EngineProfile::Unreal,
@@ -684,6 +695,7 @@ mod tests {
                 roughness: 0.9,
                 emissive: [0.0; 3],
                 detail: None,
+                texture: None,
             },
             ProfileMaterial {
                 name: "snow".into(),
@@ -692,6 +704,7 @@ mod tests {
                 roughness: 0.45,
                 emissive: [0.0; 3],
                 detail: None,
+                texture: None,
             },
         ];
         let dir = tempfile::tempdir().expect("tmp");
@@ -746,6 +759,7 @@ mod tests {
             roughness: 0.5,
             emissive: [0.0; 3],
             detail: None,
+            texture: None,
         }];
         assert!(
             export_profile_with(

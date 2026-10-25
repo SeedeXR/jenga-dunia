@@ -12,6 +12,7 @@ pub mod coastal;
 pub mod debris;
 pub mod decimate;
 pub mod detail;
+pub use detail::TextureSet;
 mod dist;
 pub mod droplet;
 pub mod export;

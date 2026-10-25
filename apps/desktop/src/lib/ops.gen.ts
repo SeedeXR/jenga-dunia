@@ -981,6 +981,17 @@ export type DetailSpec = {
   "px"?: number;
 };
 
+export type TextureSpec = {
+  /** Tileable albedo PNG (sRGB) in the project's assets/ (or an absolute path). */
+  "albedo": string;
+  /** Tangent-space normal PNG (+Y up), optional. */
+  "normal"?: string | null;
+  /** Metres per repeat. */
+  "tile_m": number;
+  /** Exported tile side in pixels (16..=4096; the images are resampled to it). */
+  "px"?: number;
+};
+
 export type MaterialSpec = {
   /** 0..1 mask layer that weights this material (omit for everywhere). */
   "mask"?: string | null;
@@ -994,6 +1005,10 @@ export type MaterialSpec = {
 the GLB by world position, returned as tiles for the viewport, written as tiles for
 the engines. */
   "detail"?: DetailSpec | null;
+  /** An image texture set from the project's assets/ (tileable PNGs): the albedo is sampled
+into the maps by world position and the set is written as the layer's tile for the
+engines; `detail` wins when both are given. */
+  "texture"?: TextureSpec | null;
 };
 
 export type ScatterLook = {
