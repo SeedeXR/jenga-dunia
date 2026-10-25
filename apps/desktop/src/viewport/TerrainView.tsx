@@ -7,10 +7,15 @@ import { MeshStandardNodeMaterial, RenderPipeline, WebGPURenderer, type Node } f
 import { float, length, mix, normalMap, pass, smoothstep, texture, uv, vec2 } from "three/tsl";
 import { bloom } from "three/addons/tsl/display/BloomNode.js";
 import type { LayerMaps, Preview } from "../lib/api";
+import type { CaveView } from "../state";
 
 export interface ViewportInfo {
   backend: "webgpu" | "webgl2" | "none";
   triangles: number;
+  /** Cave triangles drawn (walls + speleothems), when any. */
+  caveTriangles?: number;
+  /** Terrain see-through 0..1, when on. */
+  xray?: number;
   /** Sea plane height in metres when one is drawn. */
   seaM?: number;
   /** Sun direction currently lighting the scene, degrees. */
@@ -90,6 +95,10 @@ interface Props {
   /** Scatter instances (layer metres: u east, v north from the south edge, z height, r 0..1) drawn as
    *  `sizeM`-tall cones — a preview marker, the exported GLB carries 1 m proxies. */
   instances?: { points: { u: number; v: number; z: number; r: number; age?: number }[]; sizeM: number; shape?: "cone" | "rock" } | null;
+  /** Caves under the terrain (walls, speleothems, entrances; terrain frame), from `caves.mesh`. */
+  caves?: CaveView[] | null;
+  /** See-through terrain 0..1 so caves show (0 = solid); the framed block's walls hide while on. */
+  xray?: number;
 }
 
 /** Fog planes from the world size and the slider: 0 → a faint aerial perspective (2×…12× the world), 1 → the view closes within the world. */
@@ -459,6 +468,10 @@ interface SceneState {
   sunDeg: { azimuthDeg: number; elevationDeg: number };
   orbit: { theta: number; phi: number; radius: number; minR: number; maxR: number };
   instances: THREE.InstancedMesh<THREE.BufferGeometry, THREE.MeshStandardMaterial> | null;
+  /** Cave meshes and entrance markers drawn. */
+  caves: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>[];
+  caveTriangles: number;
+  xray: number;
   /** Size of the baked maps currently on the terrain material. */
   pbrPx: [number, number] | null;
   /** Size of the sky texture on the dome, when one is applied. */
@@ -536,6 +549,8 @@ function infoOf(s: SceneState): ViewportInfo {
     ...(s.sea && s.seaWaves ? { waves: { heightM: s.seaWaves.heightM, lengthM: s.seaWaves.lengthM } } : {}),
     sun: s.sunDeg,
     ...(s.instances ? { instances: s.instances.count } : {}),
+    ...(s.caveTriangles ? { caveTriangles: s.caveTriangles } : {}),
+    ...(s.xray > 0 ? { xray: s.xray } : {}),
     ...(s.lakes ? { lakes: s.lakeCells } : {}),
     ...(s.pbrPx ? { pbrPx: s.pbrPx } : {}),
     ...(s.skyPx ? { skyPx: s.skyPx } : {}),
@@ -578,7 +593,7 @@ function sampleHeight(p: Preview, ext: [number, number], u: number, v: number): 
   return p.min + ((p.data[y * p.width + x] ?? 0) / 65535) * (p.max - p.min);
 }
 
-export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = null, seaLevelM = null, lakes = null, hdri = null, post = null, onHandle, frame = true, rain = 0, water = null, waves = null, sky = null, horizon = null, sun, overlay = null, overlayName = null, instances = null, maps = null, fog }: Props) {
+export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = null, seaLevelM = null, lakes = null, hdri = null, post = null, onHandle, frame = true, rain = 0, water = null, waves = null, sky = null, horizon = null, sun, overlay = null, overlayName = null, instances = null, maps = null, fog, caves = null, xray = 0 }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<SceneState | null>(null);
   // Latest sculpt props without re-creating the renderer effect.
@@ -660,6 +675,9 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = n
       sunDeg: { azimuthDeg: 140, elevationDeg: 35 },
       orbit: { theta: 0.6, phi: 1.0, radius: 5200, minR: 200, maxR: 100000 },
       instances: null,
+      caves: [],
+      caveTriangles: 0,
+      xray: 0,
       gridLines: null,
       gridSel: null,
       pbrPx: null,
@@ -871,6 +889,10 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = n
       if (state.instances) {
         state.instances.geometry.dispose();
         state.instances.material.dispose();
+      }
+      for (const c of state.caves) {
+        c.geometry.dispose();
+        c.material.dispose();
       }
       renderer.dispose();
       el.removeChild(renderer.domElement);
@@ -1327,6 +1349,82 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = n
     // render and onInfo → setState would otherwise loop ("Maximum update depth exceeded").
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [instances?.points, instances?.sizeM, instances?.shape, extentM, onInfo]);
+
+  // Caves: walls in rock colour (flooded parts, under the water level, in blue-green), speleothems in
+  // flowstone cream, an orange marker at each entrance (blue under water). Double-sided: seen from
+  // outside through the x-rayed terrain and from inside a passage.
+  useEffect(() => {
+    const s = sceneRef.current;
+    if (!s) return;
+    for (const c of s.caves) {
+      s.scene.remove(c);
+      c.geometry.dispose();
+      c.material.dispose();
+    }
+    s.caves = [];
+    s.caveTriangles = 0;
+    const add = (positions: Float32Array, normals: Float32Array, indices: Uint32Array, colour: (y: number) => [number, number, number], glow: number) => {
+      if (indices.length === 0) return;
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+      geo.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
+      const col = new Float32Array(positions.length);
+      for (let i = 0; i < positions.length; i += 3) col.set(colour(positions[i + 1]!), i);
+      geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+      geo.setIndex(new THREE.BufferAttribute(indices, 1));
+      geo.computeBoundingSphere();
+      const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, side: THREE.DoubleSide, emissive: s.xray > 0 ? glow : 0x000000 });
+      mat.userData.glow = glow;
+      const mesh = new THREE.Mesh(geo, mat);
+      // X-ray on: the caves draw over the terrain (a map of what lies underground); off: depth as usual.
+      mesh.renderOrder = 2;
+      mat.depthTest = s.xray === 0;
+      s.scene.add(mesh);
+      s.caves.push(mesh);
+      s.caveTriangles += indices.length / 3;
+    };
+    for (const c of caves ?? []) {
+      const wl = c.waterLevelM;
+      add(c.walls.positions, c.walls.normals, c.walls.indices, (y) => (wl !== null && y < wl ? [0.2, 0.42, 0.52] : [0.6, 0.53, 0.45]), wl !== null && c.walls.positions.length > 0 && c.walls.positions[1]! < wl ? 0x1aa0c8 : 0xff8a30);
+      add(c.spel.positions, c.spel.normals, c.spel.indices, () => [0.86, 0.8, 0.68], 0xfff0c0);
+      if (extentM) {
+        const r = Math.max(2, Math.min(extentM[0], extentM[1]) * 0.006);
+        for (const e of c.entrances) {
+          const geo = new THREE.SphereGeometry(r, 12, 8);
+          const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: e.underwater ? 0x3a8fd0 : 0xf08a24, emissive: e.underwater ? 0x0a2a44 : 0x401800 }));
+          m.position.set(e.at[0] - extentM[0] / 2, e.at[2] + r, extentM[1] / 2 - e.at[1]);
+          s.scene.add(m);
+          s.caves.push(m as unknown as THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>);
+        }
+      }
+    }
+    onInfo?.(infoOf(s));
+  }, [caves, extentM, onInfo]);
+
+  // X-ray: the terrain turns see-through and the block's walls hide, so the caves show.
+  useEffect(() => {
+    const s = sceneRef.current;
+    if (!s) return;
+    s.xray = xray;
+    // Touch the terrain material only when the see-through state changes: needsUpdate rebuilds its shader.
+    const m = s.mesh?.material;
+    if (m && (m.transparent !== xray > 0 || m.opacity !== 1 - xray)) {
+      m.transparent = xray > 0;
+      m.opacity = 1 - xray;
+      m.depthWrite = xray < 0.5;
+      m.needsUpdate = true;
+    }
+    if (s.frameGroup) s.frameGroup.visible = xray === 0;
+    for (const c of s.caves) {
+      // X-ray: drawn over the terrain and glowing, so even a sub-pixel passage reads as a line.
+      if (c.material.depthTest !== (xray === 0)) {
+        c.material.depthTest = xray === 0;
+        if (typeof c.material.userData.glow === "number") c.material.emissive.setHex(xray > 0 ? c.material.userData.glow : 0x000000);
+        c.material.needsUpdate = true;
+      }
+    }
+    onInfo?.(infoOf(s));
+  }, [xray, preview, maps, overlay, caves, onInfo]);
 
   return <div ref={host} className="h-full w-full" data-testid="viewport" />;
 }

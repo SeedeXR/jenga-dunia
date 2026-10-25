@@ -3,6 +3,56 @@ import { create } from "zustand";
 import type { Edge, GraphEvaluateResult, GraphListResult, HeightmapFormat, JdOps, JobInfo as JobInfoGen, NodeDefInfo, NodeView, NoiseParams, OceanWavesRequest, OceanWavesResult, OpId, ProjectOpenResult, ProjectSaveResult, ScatterPoint, TerrainStatsResult } from "./lib/ops.gen";
 import { horizonPreview, layerPreview, layerTextures, op, skyPreview, type JdError, type LayerMaps, type Preview, type Response, type Warning, hdriPreview, writeExport } from "./lib/api";
 import { orbitAt } from "./lib/camera";
+import type { CavesMeshResult, Entrance } from "./lib/ops.gen";
+
+/** Cave kinds of `jd.cave.system@1`. */
+export type CaveKindName = "karst" | "lava_tube" | "sea_cave" | "mountain" | "mine" | "tunnel" | "catacombs";
+/** Default reach per kind, metres (scaled down on small worlds). */
+const CAVE_REACH: Record<CaveKindName, number> = { karst: 600, lava_tube: 800, sea_cave: 400, mountain: 300, mine: 250, tunnel: 400, catacombs: 120 };
+interface MeshData {
+  positions: Float32Array;
+  normals: Float32Array;
+  indices: Uint32Array;
+}
+/** A cave as the viewport draws it (terrain frame: x east, y up, z south, centred). */
+export interface CaveView {
+  id: string;
+  kind: string;
+  walls: MeshData;
+  spel: MeshData;
+  waterLevelM: number | null;
+  entrances: Entrance[];
+  lengthM: number;
+  notes: string[];
+  voxelM: number;
+  speleothems: number;
+  error?: string;
+}
+const bytesOf = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+const f32Of = (b64: string) => {
+  const b = bytesOf(b64);
+  return new Float32Array(b.buffer, b.byteOffset, b.byteLength / 4);
+};
+const u32Of = (b64: string) => {
+  const b = bytesOf(b64);
+  return new Uint32Array(b.buffer, b.byteOffset, b.byteLength / 4);
+};
+const meshOf = (m: { positions_base64: string; normals_base64: string; indices_base64: string } | undefined): MeshData =>
+  m ? { positions: f32Of(m.positions_base64), normals: f32Of(m.normals_base64), indices: u32Of(m.indices_base64) } : { positions: new Float32Array(), normals: new Float32Array(), indices: new Uint32Array() };
+function caveView(id: string, kind: string, r: CavesMeshResult | null): CaveView {
+  return {
+    id,
+    kind,
+    walls: meshOf(r?.walls),
+    spel: meshOf(r?.speleothems),
+    waterLevelM: r?.water_level_m ?? null,
+    entrances: r?.entrances ?? [],
+    lengthM: r?.length_m ?? 0,
+    notes: r?.notes ?? [],
+    voxelM: r?.voxel_m ?? 0,
+    speleothems: r?.speleothem_count ?? 0,
+  };
+}
 import { storedLang } from "./lib/i18n";
 import { adaptLodBias } from "./lib/previewLod";
 import type { MaterialSpec, MediaMetadataResult, TerrainMeasureResult } from "./lib/ops.gen";
@@ -203,11 +253,29 @@ interface State {
   /** Paint the scatter mask: a clamped (0..1) stroke node in front of the mask's output, brush strength 0.5, sculpt mode on. */
   paintDensity: () => Promise<void>;
   /** What the next viewport drag draws: a road (a spline node in front of the height output), or nothing (brush strokes). */
-  drawing: "road" | null;
+  drawing: "road" | "cave" | null;
   /** Arm the next drag to lay a road; the road's width in metres comes from `roadWidthM`. */
   startRoad: () => void;
   roadWidthM: number;
   setRoadWidth: (m: number) => void;
+  /** Cave systems (`jd.cave.system@1` nodes) as viewport meshes, refreshed after each evaluation. */
+  caves: CaveView[];
+  showCaves: boolean;
+  setShowCaves: (on: boolean) => void;
+  /** Terrain see-through 0..1 so the caves under it show (0 = solid). */
+  xray: number;
+  setXray: (x: number) => void;
+  /** The cave whose entrances the next viewport clicks place. */
+  caveTarget: string | null;
+  /** Splice a cave node of `kind` in front of the height output and publish its holes and plan. */
+  addCave: (kind: CaveKindName) => Promise<void>;
+  /** Clicks on the terrain now add entrances to cave `id` (until the tool is switched off). */
+  startCaveEntrance: (id: string) => void;
+  removeCaveEntrance: (id: string, i: number) => Promise<void>;
+  /** `caves.export` of one cave (.glb / .fbx / .json under exports/). */
+  exportCave: (id: string, path: string) => Promise<void>;
+  /** Re-mesh the caves; with an evaluation report, caves whose node hash and lod did not change are kept. */
+  refreshCaves: (lod?: number, report?: EvalReport) => Promise<void>;
   /** Append a stroke to the selected sculpt node (journaled: undo removes the whole stroke). */
   addStroke: (points: [number, number][]) => Promise<void>;
   setNoise: (patch: Partial<NoiseSettings>) => void;
@@ -467,6 +535,34 @@ export const useStore = create<State>((set, get) => {
     await showLayer(keep ?? names[0]!);
     await refreshScatter();
     await get().refreshHorizon();
+    void get().refreshCaves(report.lod, report);
+  };
+  let caveGen = 0;
+  const caveHashes = new Map<string, string>();
+  // Publish a cave's `holes` / `plan` as a layer; a second cave joins the first through a max node.
+  const publishCaveLayer = async (cave: string, port: "holes" | "plan", layer: string) => {
+    const g = get().graph;
+    const pos = g.nodes.find((n) => n.id === cave)?.ui?.position ?? [0, 0];
+    const outNode = g.nodes.find((n) => n.kind.startsWith("jd.output.height@") && String(n.params?.layer ?? "") === layer);
+    graphGen++;
+    if (!outNode) {
+      const r = await run("graph.add_node", { kind: "jd.output.height@1", params: { layer }, position: [pos[0] + 340, pos[1] + (port === "holes" ? 120 : 260)] });
+      if (r.status === "ok" && r.result) await get().connectNodes(cave, port, r.result.id, "in");
+    } else {
+      const feed = g.edges.find((e) => e.to.node === outNode.id && e.to.port === "in");
+      if (!feed) {
+        await get().connectNodes(cave, port, outNode.id, "in");
+      } else {
+        const r = await run("graph.add_node", { kind: "jd.math.max@1", position: [pos[0] + 170, pos[1] + (port === "holes" ? 120 : 260)] });
+        if (r.status === "ok" && r.result) {
+          const mx = r.result.id;
+          await get().connectNodes(feed.from.node, feed.from.port, mx, "in");
+          await get().connectNodes(cave, port, mx, "b");
+          await get().connectNodes(mx, "out", outNode.id, "in");
+        }
+      }
+    }
+    await loadGraph();
   };
   // Preview LOD keeps live evaluations ≤ 512² so edits feel immediate; Evaluate/export use lod 0.
   const previewLod = () => {
@@ -993,7 +1089,76 @@ export const useStore = create<State>((set, get) => {
     roadWidthM: 12,
     setRoadWidth: (m) => set({ roadWidthM: m }),
     startRoad: () => set({ drawing: "road", sculpting: true }),
+    caves: [],
+    showCaves: true,
+    setShowCaves: (on) => {
+      set({ showCaves: on });
+      if (on) void get().refreshCaves();
+      else set({ caves: [] });
+    },
+    xray: 0,
+    setXray: (x) => set({ xray: Math.min(0.95, Math.max(0, x)) }),
+    caveTarget: null,
+    addCave: async (kind) => {
+      const e = get().project?.world.extent_m ?? [1000, 1000];
+      const n = get().graph.nodes.filter((x) => x.kind.startsWith("jd.cave.system@")).length;
+      // Reach scaled to the world so a small world still holds the cave; the mouths come from the terrain until you place them.
+      const reach = Math.round(Math.min(CAVE_REACH[kind], 0.6 * Math.min(e[0], e[1])));
+      const id = await spliceBefore("height", "jd.cave.system@1", { kind, seed: n + 1, reach_m: Math.max(20, reach) });
+      if (!id) return;
+      await publishCaveLayer(id, "holes", "cave_holes");
+      await publishCaveLayer(id, "plan", "cave_plan");
+      // A tunnel needs its two portals: start placing right away.
+      set({ selectedNode: id, caveTarget: id, ...(kind === "tunnel" ? { drawing: "cave" as const, sculpting: true } : {}) });
+    },
+    startCaveEntrance: (id) => set({ drawing: "cave", sculpting: true, caveTarget: id, selectedNode: id }),
+    removeCaveEntrance: async (id, i) => {
+      const node = get().graph.nodes.find((x) => x.id === id);
+      const list = ((node?.params?.entrances as [number, number][] | undefined) ?? []).filter((_, k) => k !== i);
+      await mutate("graph.set_param", { id, key: "entrances", value: list });
+    },
+    exportCave: async (id, path) => {
+      await run("caves.export", { id, path });
+    },
+    refreshCaves: async (lod, report) => {
+      const gen = ++caveGen;
+      const nodes = get().graph.nodes.filter((x) => x.kind.startsWith("jd.cave.system@"));
+      if (!get().showCaves || nodes.length === 0 || !get().project) {
+        if (get().caves.length) set({ caves: [] });
+        caveHashes.clear();
+        return;
+      }
+      const at = lod ?? previewLod();
+      const hashOf = (id: string) => report?.nodes.find((x) => x.node === id)?.hash;
+      const out: CaveView[] = [];
+      for (const n of nodes) {
+        // Unchanged cave (same node hash = same params and inputs, same lod): keep its meshes.
+        const h = hashOf(n.id);
+        const prev = get().caves.find((c) => c.id === n.id);
+        if (h && prev && !prev.error && caveHashes.get(n.id) === `${h}@${at}`) {
+          out.push(prev);
+          continue;
+        }
+        const r = await op<CavesMeshResult>("caves.mesh", { id: n.id, lod: at }).catch(() => null);
+        if (gen !== caveGen) return; // a newer refresh is running
+        const kind = String(n.params?.kind ?? "karst");
+        if (r?.status === "ok" && r.result) {
+          out.push(caveView(n.id, kind, r.result));
+          if (h) caveHashes.set(n.id, `${h}@${at}`);
+        }
+        else out.push({ ...caveView(n.id, kind, null), error: r?.error?.message ?? "caves.mesh failed" });
+      }
+      set({ caves: out });
+    },
     addStroke: async (points) => {
+      if (get().drawing === "cave") {
+        // Each click on the terrain places one entrance of the target cave; the tool stays on.
+        const id = get().caveTarget;
+        const p = points[points.length - 1];
+        if (!id || !p) return;
+        await mutate("graph.append_param", { id, key: "entrances", value: [Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10] });
+        return;
+      }
       if (get().drawing === "road") {
         // One drag = one road: a spline node spliced in front of the height output; back to orbiting after.
         set({ drawing: null, sculpting: false });

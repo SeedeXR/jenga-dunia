@@ -1,11 +1,11 @@
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { Blend, Box, Brush, Camera, Circle, CircleDot, Download, Droplets, FileInput, FilePlus, Flame, FolderOpen, FolderPlus, FolderSearch, Gem, GitBranch, Globe, Grid2x2, Grid3x3, Grip, Home, Layers, Maximize2, Mountain, PanelBottom, PanelLeftClose, PanelLeftOpen, PanelRight, PanelRightClose, PanelRightOpen, Pickaxe, Play, Redo2, Route, Save, Snowflake, Sparkles, Thermometer, Undo2, Upload, Wand2, WavesVertical, Wind, Workflow } from "lucide-react";
+import { Blend, Box, Brush, Camera, Circle, CircleDot, Download, Droplets, FileInput, FilePlus, Flame, Flashlight, FolderOpen, FolderPlus, FolderSearch, Gem, GitBranch, Globe, Grid2x2, Grid3x3, Grip, Home, Layers, Maximize2, Mountain, PanelBottom, PanelLeftClose, PanelLeftOpen, PanelRight, PanelRightClose, PanelRightOpen, Pickaxe, Play, Redo2, Route, Save, Snowflake, Sparkles, Thermometer, Undo2, Upload, Wand2, WavesVertical, Wind, Workflow } from "lucide-react";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import GraphPanel from "./graph/GraphPanel";
 import LayerStack from "./graph/LayerStack";
 import TerrainView, { type ViewportInfo } from "./viewport/TerrainView";
-import { type Brush as BrushTool, type NoiseSettings, useStore } from "./state";
+import { type Brush as BrushTool, type CaveKindName, type NoiseSettings, useStore } from "./state";
 import type { FractalKind, HeightmapFormat, NoiseKind } from "./lib/ops.gen";
 import type { Preview } from "./lib/api";
 import { LANGS, type Lang, translate } from "./lib/i18n";
@@ -53,6 +53,17 @@ function readDock(): Dock {
     return { left: false, right: false, graph: "bottom" };
   }
 }
+
+/** Cave kinds offered in the Caves panel. */
+const CAVE_KINDS: [CaveKindName, string][] = [
+  ["karst", "Karst (limestone)"],
+  ["mountain", "Hill / mountain"],
+  ["lava_tube", "Lava tube"],
+  ["sea_cave", "Sea cave"],
+  ["mine", "Mine"],
+  ["tunnel", "Road tunnel"],
+  ["catacombs", "Catacombs"],
+];
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -106,15 +117,16 @@ function tickStep(span: number): number {
   return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * pow;
 }
 
-const HINTS: Record<"orbit" | "sculpt" | "grid" | "road", [string, string][]> = {
+const HINTS: Record<"orbit" | "sculpt" | "grid" | "road" | "cave", [string, string][]> = {
   orbit: [["Drag", "orbit"], ["Wheel", "zoom"]],
   sculpt: [["Left drag", "stroke"], ["Right drag", "orbit"], ["Ctrl + wheel", "radius"], ["Shift + wheel", "strength"], ["Sculpting…", "back to orbit"]],
   grid: [["Click", "toggle a cell"], ["Left drag", "add cells"], ["Alt + drag", "remove cells"], ["Right drag", "orbit"], ["Grid panel", "level / raise / lower"]],
   road: [["Left drag", "lay the road"], ["Right drag", "orbit"], ["Drawing road…", "cancel"]],
+  cave: [["Click", "place a cave entrance"], ["Right drag", "orbit"], ["Placing…", "stop"]],
 };
 
 /** World Creator-style viewport chrome: a compass strip, a height ruler, per-tool shortcut hints and fit / still / fullscreen buttons. */
-function ViewportChrome({ heading, distanceM, preview, seaLevelM, mode, onFit, onStill, canStill, frameOn, onFrame }: { heading: number; distanceM: number; preview: Preview | null; seaLevelM: number | null; mode: "orbit" | "sculpt" | "grid" | "road"; onFit: () => void; onStill: () => void; canStill: boolean; frameOn: boolean; onFrame: () => void }) {
+function ViewportChrome({ heading, distanceM, preview, seaLevelM, mode, onFit, onStill, canStill, frameOn, onFrame }: { heading: number; distanceM: number; preview: Preview | null; seaLevelM: number | null; mode: "orbit" | "sculpt" | "grid" | "road" | "cave"; onFit: () => void; onStill: () => void; canStill: boolean; frameOn: boolean; onFrame: () => void }) {
   // Compass: 180° of bearings across a 240 px strip, the camera's heading at the centre mark.
   const W = 240;
   const px = (deg: number) => W / 2 + ((((deg - heading + 540) % 360) - 180) * W) / 180;
@@ -215,6 +227,8 @@ function ViewportChrome({ heading, distanceM, preview, seaLevelM, mode, onFit, o
 export default function App() {
   const s = useStore();
   const tr = (text: string) => translate(s.lang, text);
+  const [caveKind, setCaveKind] = useState<CaveKindName>("karst");
+  const caveNodes = s.graph.nodes.filter((n) => n.kind.startsWith("jd.cave.system@"));
   const [projPath, setProjPath] = useState("");
   const [importPath, setImportPath] = useState("");
   const [geo, setGeo] = useState({ lon: 36.82, lat: -1.29, radius: 2000, provider: "terrarium" as "terrarium" | "copernicus" | "opentopography" });
@@ -495,7 +509,7 @@ export default function App() {
           </label>
         )}
         <span className={`${s.lastEval && Object.keys(s.lastEval.layers).length > 1 ? "" : "ml-auto "}text-xs text-jd-fg-2`} data-testid="viewport-info">
-          viewport: {vp.backend} · {vp.triangles.toLocaleString()} tris{vp.seaM !== undefined ? ` · sea ${vp.seaM} m` : ""}{vp.waves ? ` · waves ${vp.waves.heightM.toFixed(1)} m / ${Math.round(vp.waves.lengthM)} m` : ""}{vp.fog ? ` · fog ${Math.round(vp.fog * 100)} %` : ""}{vp.sun ? ` · sun ${vp.sun.elevationDeg}°/${vp.sun.azimuthDeg}°` : ""}{s.colorLayer && s.colorPreview ? ` · colour ${s.colorLayer}` : ""}{vp.instances ? ` · ${vp.instances.toLocaleString()} instances` : ""}{vp.lakes ? ` · lakes ${vp.lakes.toLocaleString()} cells` : ""}{vp.pbrPx ? ` · pbr ${vp.pbrPx[0]}×${vp.pbrPx[1]}` : ""}{vp.skyPx ? ` · sky ${vp.skyPx[0]}×${vp.skyPx[1]}` : ""}{vp.hdri ? " · hdri" : ""}{vp.frame ? " · box" : ""}{vp.rain ? ` · rain ${Math.round(vp.rain * 100)} %` : ""}{vp.shoreSegments ? ` · shore ${vp.shoreSegments.toLocaleString()}` : ""}{vp.post ? ` · post ${vp.post}` : ""}{vp.horizonPx ? ` · horizon ${vp.horizonPx}²` : ""}
+          viewport: {vp.backend} · {vp.triangles.toLocaleString()} tris{vp.seaM !== undefined ? ` · sea ${vp.seaM} m` : ""}{vp.waves ? ` · waves ${vp.waves.heightM.toFixed(1)} m / ${Math.round(vp.waves.lengthM)} m` : ""}{vp.fog ? ` · fog ${Math.round(vp.fog * 100)} %` : ""}{vp.sun ? ` · sun ${vp.sun.elevationDeg}°/${vp.sun.azimuthDeg}°` : ""}{s.colorLayer && s.colorPreview ? ` · colour ${s.colorLayer}` : ""}{vp.instances ? ` · ${vp.instances.toLocaleString()} instances` : ""}{vp.caveTriangles ? ` · caves ${vp.caveTriangles.toLocaleString()} tris` : ""}{vp.xray ? ` · x-ray ${Math.round(vp.xray * 100)} %` : ""}{vp.lakes ? ` · lakes ${vp.lakes.toLocaleString()} cells` : ""}{vp.pbrPx ? ` · pbr ${vp.pbrPx[0]}×${vp.pbrPx[1]}` : ""}{vp.skyPx ? ` · sky ${vp.skyPx[0]}×${vp.skyPx[1]}` : ""}{vp.hdri ? " · hdri" : ""}{vp.frame ? " · box" : ""}{vp.rain ? ` · rain ${Math.round(vp.rain * 100)} %` : ""}{vp.shoreSegments ? ` · shore ${vp.shoreSegments.toLocaleString()}` : ""}{vp.post ? ` · post ${vp.post}` : ""}{vp.horizonPx ? ` · horizon ${vp.horizonPx}²` : ""}
           {s.previewStats ? ` · preview lod ${s.previewStats.lod}, ${(s.previewStats.bytes / 1048576).toFixed(2)} MB in ${s.previewStats.ms.toFixed(0)} ms` : ""}
         </span>
         {(s.busy || s.jobs.length > 0) &&
@@ -772,7 +786,7 @@ export default function App() {
         {/* Center: viewport (top) + node graph (bottom, toggle) */}
         <main className={`relative my-2 grid min-w-0 overflow-hidden rounded-xl bg-jd-bg-0 ring-1 ring-white/5 ${showGraph ? (dock.graph === "right" ? "grid-cols-[1fr_auto]" : "grid-rows-[1fr_auto]") : "grid-rows-[1fr]"}`}>
           <div className="relative min-h-0 min-w-0">
-            <TerrainView fog={s.sun.fog} preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} sculpt={{ enabled: s.sculpting && (sculptNode !== undefined || s.drawing !== null), radiusM: s.drawing === "road" ? s.roadWidthM / 2 : s.brush.radius_m, onStroke: (pts) => void s.addStroke(pts), onAdjust: s.adjustBrush }} grid={s.grid.on ? { cells: s.grid.cells, selected: s.grid.selected, onSelect: s.gridSelect } : null} seaLevelM={seaLevelM} lakes={s.lakesPreview} water={water} waves={s.waves} sky={s.sky} rain={s.sun.rain} hdri={s.hdri} post={s.post} onHandle={s.setViewportHandle} frame={frameOn} horizon={s.horizon} sun={{ azimuthDeg: s.sun.azimuth_deg, elevationDeg: s.sun.elevation_deg }} overlay={s.colorPreview} overlayName={s.colorLayer} instances={s.scatter.points ? { points: s.scatter.points, sizeM: Math.max(s.scatter.spacing_m * 0.35, (s.project?.world.extent_m[0] ?? 0) * 0.012), shape: /debris|rock|boulder|scree|talus/i.test(s.scatter.mask ?? "") ? "rock" : "cone" } : null} maps={s.maps} />
+            <TerrainView fog={s.sun.fog} preview={s.preview} extentM={s.project ? s.project.world.extent_m : null} onInfo={onInfo} sculpt={{ enabled: s.sculpting && (sculptNode !== undefined || s.drawing !== null), radiusM: s.drawing === "road" ? s.roadWidthM / 2 : s.drawing === "cave" ? Math.max(4, (s.project?.world.extent_m[0] ?? 1000) * 0.006) : s.brush.radius_m, onStroke: (pts) => void s.addStroke(pts), onAdjust: s.adjustBrush }} grid={s.grid.on ? { cells: s.grid.cells, selected: s.grid.selected, onSelect: s.gridSelect } : null} seaLevelM={seaLevelM} lakes={s.lakesPreview} water={water} waves={s.waves} sky={s.sky} rain={s.sun.rain} hdri={s.hdri} post={s.post} onHandle={s.setViewportHandle} frame={frameOn} horizon={s.horizon} sun={{ azimuthDeg: s.sun.azimuth_deg, elevationDeg: s.sun.elevation_deg }} overlay={s.colorPreview} overlayName={s.colorLayer} instances={s.scatter.points ? { points: s.scatter.points, sizeM: Math.max(s.scatter.spacing_m * 0.35, (s.project?.world.extent_m[0] ?? 0) * 0.012), shape: /debris|rock|boulder|scree|talus/i.test(s.scatter.mask ?? "") ? "rock" : "cone" } : null} maps={s.maps} caves={s.showCaves ? s.caves : null} xray={s.xray} />
             <nav className="jd-panel absolute top-1/2 right-2 z-10 flex -translate-y-1/2 flex-col gap-0.5 p-1" aria-label="Add a layer" data-testid="layer-strip">
               {(
                 [
@@ -789,6 +803,7 @@ export default function App() {
                   ["strip-sand", Wind, "Simulation layer: wind-blown sand", () => void s.addSimulation("sand")],
                   ["strip-debris", Pickaxe, "Simulation layer: rockfall debris", () => void s.addSimulation("debris")],
                   ["strip-lava", Flame, "Simulation layer: lava flow", () => void s.addSimulation("lava")],
+                  ["strip-cave", Flashlight, "Cave: a karst cave under the terrain (jd.cave.system); other kinds in the Caves panel", () => void s.addCave("karst")],
                 ] as const
               ).map(([tid, Icon, title, onClick]) => (
                 <button key={tid} className="rounded-md p-1.5 text-jd-accent transition-colors hover:bg-jd-bg-3 hover:text-jd-fg-0 disabled:opacity-30" title={title} aria-label={title} onClick={onClick} disabled={!s.project || s.busy} data-testid={tid}>
@@ -801,7 +816,7 @@ export default function App() {
               distanceM={vp.distanceM}
               preview={s.preview}
               seaLevelM={seaLevelM}
-              mode={s.sculpting ? (s.drawing === "road" ? "road" : "sculpt") : s.grid.on ? "grid" : "orbit"}
+              mode={s.sculpting ? (s.drawing === "road" ? "road" : s.drawing === "cave" ? "cave" : "sculpt") : s.grid.on ? "grid" : "orbit"}
               onFit={() => s.viewport?.resetView()}
               frameOn={frameOn}
               onFrame={() => setFrameOn((v) => !v)}
@@ -1174,6 +1189,73 @@ export default function App() {
             </button>
             <span className="text-xs text-jd-fg-2" data-testid="scatter-count">{s.scatter.points ? `${s.scatter.points.length.toLocaleString()} instances` : ""}</span>
           </div>
+          <h2 className="mt-4 mb-2 jd-section">{tr("Caves")}</h2>
+          <div className="mb-1 flex items-center gap-1">
+            <select className={`${inputCls} w-36`} value={caveKind} onChange={(e) => setCaveKind(e.target.value as CaveKindName)} title="Kind of cave: what drives where it goes and its shape (docs/research/caves.md)" data-testid="cave-kind">
+              {CAVE_KINDS.map(([k, label]) => (
+                <option key={k} value={k}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <button className="btn" onClick={() => void s.addCave(caveKind)} disabled={!s.project || s.busy} title="Add a cave system (a jd.cave.system node in front of the height output; its entrance holes and plan are published as cave_holes / cave_plan)" data-testid="cave-add">
+              Add cave
+            </button>
+          </div>
+          <Field label="Show caves">
+            <input type="checkbox" checked={s.showCaves} onChange={(e) => s.setShowCaves(e.target.checked)} title="Draw the caves under the terrain (walls, speleothems, entrance markers)" data-testid="caves-show" />
+          </Field>
+          <Field label="Map">
+            <button className={`btn ${s.colorLayer === "cave_plan" ? "text-jd-accent" : ""}`} onClick={() => void s.setColorLayer(s.colorLayer === "cave_plan" ? null : "cave_plan")} disabled={!s.lastEval?.layers?.cave_plan} title="Colour the terrain with the caves' footprint (the cave_plan layer): where something lies underground" data-testid="caves-map">
+              {s.colorLayer === "cave_plan" ? "Footprint on" : "Footprint"}
+            </button>
+          </Field>
+          <Field label={`X-ray ${Math.round(s.xray * 100)} %`}>
+            <input className="w-28" type="range" min={0} max={0.9} step={0.05} value={s.xray} onChange={(e) => s.setXray(Number(e.target.value))} title="See through the terrain to the caves under it" data-testid="caves-xray" />
+          </Field>
+          {caveNodes.map((n, ci) => {
+            const v = s.caves.find((c) => c.id === n.id);
+            const entrances = (n.params?.entrances as [number, number][] | undefined) ?? [];
+            const placing = s.drawing === "cave" && s.caveTarget === n.id;
+            const label = CAVE_KINDS.find(([k]) => k === String(n.params?.kind ?? "karst"))?.[1] ?? "Cave";
+            return (
+              <div key={n.id} className={`mb-2 rounded-md border p-1.5 text-[11px] ${s.selectedNode === n.id ? "border-jd-accent/40" : "border-white/5"}`} data-testid={`cave-${ci}`}>
+                <div className="flex items-center gap-1">
+                  <button className="flex-1 text-left leading-snug text-jd-fg-0" onClick={() => s.setSelectedNode(n.id)} title="Select the cave node: the inspector edits kind, seed, size, reach, cover, levels, sea level, speleothems and roughness" data-testid={`cave-summary-${ci}`}>
+                    {label} · {v ? (v.error ? v.error : `${(v.lengthM / 1000).toFixed(2)} km · ${v.entrances.length} entrance${v.entrances.length === 1 ? "" : "s"}${v.speleothems ? ` · ${v.speleothems} speleothems` : ""}${v.waterLevelM !== null ? ` · water ${v.waterLevelM.toFixed(0)} m` : ""}`) : "…"}
+                  </button>
+                  <button className={`btn px-1.5 ${placing ? "text-jd-accent" : ""}`} onClick={() => (placing ? s.setSculpting(false) : s.startCaveEntrance(n.id))} disabled={s.busy} aria-pressed={placing} title={placing ? "Click the terrain to add entrances; click here to stop" : "Place entrances by clicking the terrain (sinkholes, mouths, portals — a tunnel takes two)"} data-testid={`cave-place-${ci}`}>
+                    {placing ? "Placing…" : "Place"}
+                  </button>
+                  <button className="btn px-1.5" onClick={() => void s.exportCave(n.id, `cave_${ci + 1}.glb`)} disabled={s.busy} title={`Write exports/cave_${ci + 1}.glb (walls + speleothems, the terrain export's frame)`} data-testid={`cave-export-${ci}`}>
+                    .glb
+                  </button>
+                  <button className="btn px-1.5" onClick={() => void s.exportCave(n.id, `cave_${ci + 1}.fbx`)} disabled={s.busy} title={`Write exports/cave_${ci + 1}.fbx (for Unity)`} data-testid={`cave-export-fbx-${ci}`}>
+                    .fbx
+                  </button>
+                </div>
+                {entrances.length > 0 && (
+                  <ol className="mt-1 ml-1 text-jd-fg-1">
+                    {entrances.map((e, i) => (
+                      <li key={i} className="flex items-center gap-1" data-testid={`cave-entrance-${ci}-${i}`}>
+                        <span className="flex-1 tabular-nums">
+                          {i + 1}. {Math.round(e[0])} m E, {Math.round(e[1])} m N
+                        </span>
+                        <button className="btn px-1 py-0 text-jd-error" onClick={() => void s.removeCaveEntrance(n.id, i)} disabled={s.busy} title="Remove this entrance" data-testid={`cave-entrance-remove-${ci}-${i}`}>
+                          ×
+                        </button>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+                {v?.notes.map((t, i) => (
+                  <p key={i} className="mt-0.5 text-jd-warn" data-testid={`cave-note-${ci}-${i}`}>
+                    {t}
+                  </p>
+                ))}
+              </div>
+            );
+          })}
           <h2 className="mt-4 mb-2 jd-section">{tr("Actions")}</h2>
           <div className="mb-1 flex flex-wrap gap-1" data-testid="terrain-actions">
             {(

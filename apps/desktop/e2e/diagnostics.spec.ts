@@ -33,7 +33,7 @@ test.describe("tasks and diagnostics panel against the real core", () => {
     await expect(page.getByTestId("layer-stats")).toBeVisible();
     // One layer in the cache; GC keeps it and reports the project's limit.
     await page.getByTestId("diag-gc").click();
-    await expect(page.getByTestId("log")).toContainText("project.cache_gc: ok");
+    await expect(page.getByTestId("log")).toContainText("project.cache_gc: ok", { timeout: 30_000 }); // queued behind the evaluation on a loaded machine
     await expect(page.getByTestId("diag-results")).toContainText(/1 blobs · 0\.1 MB · evicted 0 · limit 2048 MB/);
 
     await page.getByTestId("diag-bench").click();

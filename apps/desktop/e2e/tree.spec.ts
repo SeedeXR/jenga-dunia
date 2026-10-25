@@ -27,7 +27,7 @@ test.describe("layer tree and icon strip against the real core", () => {
     await page.getByTestId("new-project").click();
     await expect(page.locator("header")).toContainText("World — 128²");
     await evaluateAndWait(page, "generate");
-    await expect(page.getByTestId("layer-strip").locator("button")).toHaveCount(10);
+    await expect(page.getByTestId("layer-strip").locator("button")).toHaveCount(11);
 
     const chain = page.getByTestId("layer-chain").locator("li");
     await page.getByTestId("strip-terrace").click();
