@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
-import { buildSeaGeometry, gerstner, waterColour } from "./TerrainView";
+import { buildFrame, buildSeaGeometry, buildShoreline, gerstner, waterColour } from "./TerrainView";
 import type { Preview } from "../lib/api";
 
 // A 4×4 preview sloping west → east from 0 to 300 m (u16 quantised over min..max).
@@ -78,5 +78,25 @@ describe("gerstner", () => {
     const surf = buildSeaGeometry(ramp(), [300, 300], 110, { visibilityM: 15, tint: [0.1, 0.35, 0.4], breakingDepthM: 50 }).getAttribute("color");
     expect(surf.getX(1)).toBeGreaterThan(calm.getX(1) + 0.3);
     expect(surf.getW(1)).toBeGreaterThan(calm.getW(1));
+  });
+});
+
+describe("shoreline and frame", () => {
+  it("the shoreline runs north–south where the west→east ramp crosses the sea", () => {
+    // The ramp is 0, 100, 200, 300 m across the columns; a 150 m sea crosses between columns 1 and 2.
+    const seg = buildShoreline(ramp(), [300, 300], 150);
+    expect(seg.length).toBe(3 * 6); // three cells down the crossing column, one segment each
+    for (let k = 0; k < seg.length; k += 3) expect(seg[k]).toBeCloseTo(0, 5); // x = 0: half-way across the 300 m world
+    expect(buildShoreline(ramp(), [300, 300], 400).length).toBe(0); // above every height: no shore
+  });
+
+  it("the frame walks the boundary once: walls down to the base, a rim on top and bottom", () => {
+    const { walls, rim } = buildFrame(ramp(), [300, 300], -50);
+    const ring = 4 * (4 - 1); // boundary vertices of a 4×4 grid
+    expect(walls.getAttribute("position").count).toBe(ring * 6);
+    expect(rim.length).toBe(ring * 4 * 3);
+    const ys = Array.from({ length: rim.length / 3 }, (_, k) => rim[k * 3 + 1]!);
+    expect(Math.min(...ys)).toBe(-50);
+    expect(Math.max(...ys)).toBeCloseTo(300, 3);
   });
 });

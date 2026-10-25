@@ -31,6 +31,10 @@ export interface ViewportInfo {
   hdri?: boolean;
   /** Post effects in force, e.g. `bloom 0.3 · vignette 0.2 · exposure 1.2`. */
   post?: string;
+  /** The world is drawn as a framed block. */
+  frame?: boolean;
+  /** Shoreline contour segments drawn at the sea level. */
+  shoreSegments?: number;
   /** Compass heading the camera looks toward, degrees clockwise from north. */
   heading: number;
   /** Camera distance from the world's centre, metres. */
@@ -65,6 +69,8 @@ interface Props {
   sky?: { bitmap: ImageBitmap; px: [number, number] } | null;
   /** An imported HDRI (`sky.load_hdri`, same layout): drawn instead of the physical sky while set. */
   hdri?: { bitmap: ImageBitmap; px: [number, number] } | null;
+  /** Draw the world as a framed block: side walls and a rim (default on). */
+  frame?: boolean;
   /** Post effects: tone-mapping exposure (1 = none), bloom strength (0 = off), vignette amount (0 = off). */
   post?: { exposure: number; bloom: number; vignette: number } | null;
   /** Hands the parent a handle for stills and flythroughs: a PNG of the current frame, and the orbit camera. */
@@ -353,6 +359,74 @@ export function buildLakesGeometry(terrain: Preview, lakes: Preview, extent: [nu
   return { geometry: geo, cells };
 }
 
+/** Height of preview vertex (i, j) in metres, j = 0 the north row as PlaneGeometry lays it out. */
+function heightAt(p: Preview, i: number, j: number): number {
+  const q = p.data[(p.height - 1 - j) * p.width + i] ?? 0;
+  return p.min + (q / 65535) * (p.max - p.min || 1);
+}
+
+/** Vertex (i, j) of the preview grid in the terrain frame (centred, +X east, +Z south). */
+function gridXZ(p: Preview, extent: [number, number], i: number, j: number): [number, number] {
+  return [-extent[0] / 2 + (i / (p.width - 1)) * extent[0], -extent[1] / 2 + (j / (p.height - 1)) * extent[1]];
+}
+
+/**
+ * The shoreline: where the terrain crosses `seaM`, by marching squares on the preview grid — one
+ * segment per cell edge pair the contour passes, interpolated along the edges, drawn just above
+ * the water. Returns line-segment positions (x, y, z per vertex, two vertices per segment).
+ */
+export function buildShoreline(p: Preview, extent: [number, number], seaM: number): Float32Array {
+  const out: number[] = [];
+  const y = seaM + Math.max(0.2, (p.max - p.min) * 0.002);
+  const cross = (i0: number, j0: number, i1: number, j1: number): [number, number] | null => {
+    const a = heightAt(p, i0, j0) - seaM;
+    const b = heightAt(p, i1, j1) - seaM;
+    if ((a < 0) === (b < 0)) return null;
+    const t = a / (a - b);
+    const [x0, z0] = gridXZ(p, extent, i0, j0);
+    const [x1, z1] = gridXZ(p, extent, i1, j1);
+    return [x0 + (x1 - x0) * t, z0 + (z1 - z0) * t];
+  };
+  for (let j = 0; j < p.height - 1; j++) {
+    for (let i = 0; i < p.width - 1; i++) {
+      // Edges of the cell in order: top, right, bottom, left; a contour enters on one, leaves on another.
+      const hits = [cross(i, j, i + 1, j), cross(i + 1, j, i + 1, j + 1), cross(i, j + 1, i + 1, j + 1), cross(i, j, i, j + 1)].filter((h): h is [number, number] => h !== null);
+      for (let k = 0; k + 1 < hits.length; k += 2) out.push(hits[k]![0], y, hits[k]![1], hits[k + 1]![0], y, hits[k + 1]![1]);
+    }
+  }
+  return new Float32Array(out);
+}
+
+/**
+ * The world as a block (World Creator's framed terrain): four side walls from the terrain's edge
+ * profile down to `baseY`, and the rim — the edge profile plus the base rectangle — as line segments.
+ */
+export function buildFrame(p: Preview, extent: [number, number], baseY: number): { walls: THREE.BufferGeometry; rim: Float32Array } {
+  // The boundary walked once around: north row west → east, east column north → south, …
+  const ring: [number, number][] = [];
+  for (let i = 0; i < p.width; i++) ring.push([i, 0]);
+  for (let j = 1; j < p.height; j++) ring.push([p.width - 1, j]);
+  for (let i = p.width - 2; i >= 0; i--) ring.push([i, p.height - 1]);
+  for (let j = p.height - 2; j > 0; j--) ring.push([0, j]);
+  const pos: number[] = [];
+  const rim: number[] = [];
+  for (let k = 0; k < ring.length; k++) {
+    const [i0, j0] = ring[k]!;
+    const [i1, j1] = ring[(k + 1) % ring.length]!;
+    const [x0, z0] = gridXZ(p, extent, i0, j0);
+    const [x1, z1] = gridXZ(p, extent, i1, j1);
+    const y0 = heightAt(p, i0, j0);
+    const y1 = heightAt(p, i1, j1);
+    // Two triangles per boundary step, facing outwards either way (the material is double-sided).
+    pos.push(x0, y0, z0, x1, y1, z1, x1, baseY, z1, x0, y0, z0, x1, baseY, z1, x0, baseY, z0);
+    rim.push(x0, y0, z0, x1, y1, z1, x0, baseY, z0, x1, baseY, z1);
+  }
+  const walls = new THREE.BufferGeometry();
+  walls.setAttribute("position", new THREE.BufferAttribute(new Float32Array(pos), 3));
+  walls.computeVertexNormals();
+  return { walls, rim: new Float32Array(rim) };
+}
+
 interface SceneState {
   renderer: WebGPURenderer;
   scene: THREE.Scene;
@@ -393,6 +467,9 @@ interface SceneState {
   hdriOn: boolean;
   /** Orbit radius of the home view (set when a preview is fitted). */
   homeRadius: number;
+  /** The framed block (walls + rim) and the shoreline contour, when drawn. */
+  frameGroup: THREE.Group | null;
+  shoreline: THREE.LineSegments<THREE.BufferGeometry, THREE.LineBasicMaterial> | null;
   /** Post-processing pipeline when any effect is on, and its one-line description for the header. */
   post: RenderPipeline | null;
   postInfo: string | null;
@@ -438,6 +515,8 @@ function infoOf(s: SceneState): ViewportInfo {
     ...(s.skyPx ? { skyPx: s.skyPx } : {}),
     ...(s.hdriOn ? { hdri: true } : {}),
     ...(s.postInfo ? { post: s.postInfo } : {}),
+    ...(s.frameGroup ? { frame: true } : {}),
+    ...(s.shoreline ? { shoreSegments: (s.shoreline.geometry.attributes.position?.count ?? 0) / 2 } : {}),
     ...(s.fogAmount > 0 ? { fog: s.fogAmount } : {}),
     ...(s.skirt ? { horizonPx: Math.round(Math.sqrt((s.skirt.geometry.attributes.position?.count ?? 0))) } : {}),
   };
@@ -472,7 +551,7 @@ function sampleHeight(p: Preview, ext: [number, number], u: number, v: number): 
   return p.min + ((p.data[y * p.width + x] ?? 0) / 65535) * (p.max - p.min);
 }
 
-export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = null, seaLevelM = null, lakes = null, hdri = null, post = null, onHandle, water = null, waves = null, sky = null, horizon = null, sun, overlay = null, overlayName = null, instances = null, maps = null, fog }: Props) {
+export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = null, seaLevelM = null, lakes = null, hdri = null, post = null, onHandle, frame = true, water = null, waves = null, sky = null, horizon = null, sun, overlay = null, overlayName = null, instances = null, maps = null, fog }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<SceneState | null>(null);
   // Latest sculpt props without re-creating the renderer effect.
@@ -563,6 +642,8 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = n
       skirt: null,
       hdriOn: false,
       homeRadius: 5200,
+      frameGroup: null,
+      shoreline: null,
       post: null,
       postInfo: null,
     };
@@ -1080,6 +1161,48 @@ export default function TerrainView({ preview, extentM, onInfo, sculpt, grid = n
     onInfo?.(infoOf(s));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seaLevelM, water?.visibilityM, water?.tint?.[0], water?.tint?.[1], water?.tint?.[2], water?.breakingDepthM, waves, extentM, preview, onInfo]);
+
+  // Frame and shoreline: the world as a block with teal rim lines, and a white contour where the
+  // terrain meets the sea — rebuilt with the preview (they follow its edge and its heights).
+  useEffect(() => {
+    const s = sceneRef.current;
+    if (!s) return;
+    for (const key of ["frameGroup", "shoreline"] as const) {
+      const obj = s[key];
+      if (!obj) continue;
+      s.scene.remove(obj);
+      obj.traverse((o) => {
+        const m = o as THREE.Mesh;
+        m.geometry?.dispose();
+        (m.material as THREE.Material | undefined)?.dispose();
+      });
+      s[key] = null;
+    }
+    if (preview && extentM && preview.width > 1 && preview.height > 1) {
+      if (frame) {
+        const base = preview.min - Math.max(10, (preview.max - preview.min) * 0.15);
+        const { walls, rim } = buildFrame(preview, extentM, base);
+        const group = new THREE.Group();
+        group.add(new THREE.Mesh(walls, new THREE.MeshStandardMaterial({ color: 0x2a2f36, roughness: 0.95, side: THREE.DoubleSide })));
+        const rimGeo = new THREE.BufferGeometry();
+        rimGeo.setAttribute("position", new THREE.BufferAttribute(rim, 3));
+        group.add(new THREE.LineSegments(rimGeo, new THREE.LineBasicMaterial({ color: 0x3fd0c9 })));
+        s.frameGroup = group;
+        s.scene.add(group);
+      }
+      if (seaLevelM !== null && seaLevelM > preview.min && seaLevelM < preview.max) {
+        const seg = buildShoreline(preview, extentM, seaLevelM);
+        if (seg.length > 0) {
+          const g = new THREE.BufferGeometry();
+          g.setAttribute("position", new THREE.BufferAttribute(seg, 3));
+          s.shoreline = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 }));
+          s.scene.add(s.shoreline);
+        }
+      }
+    }
+    onInfo?.(infoOf(s));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preview, extentM, frame, seaLevelM, onInfo]);
 
   // Lakes: standing water from the fill node's depth layer, rebuilt with the preview it lies on.
   useEffect(() => {

@@ -58,6 +58,23 @@ test.describe("viewport chrome against the real core", () => {
 
     await page.screenshot({ path: testInfo.outputPath("chrome.png") }); // tutorial image source
 
+    // Frame: on by default, the button turns it off and on.
+    await expect(page.getByTestId("viewport-info")).toContainText(" · box");
+    await page.getByTestId("view-frame").click();
+    await expect(page.getByTestId("viewport-info")).not.toContainText(" · box");
+    await page.getByTestId("view-frame").click();
+    await expect(page.getByTestId("viewport-info")).toContainText(" · box");
+
+    // Shoreline: a sea-level node at mid-height draws the contour (no evaluation needed: it follows the node).
+    await page.getByTestId("graph-kind").selectOption("jd.hydrology.sea_level@1");
+    await page.getByTestId("graph-add").click();
+    const sea = page.getByTestId("graph-panel").locator(".react-flow__node", { hasText: "jd.hydrology.sea_level@1" });
+    await sea.click({ force: true });
+    const level = page.getByTestId("graph-inspector").locator("label", { hasText: "level_m" }).locator("input");
+    await level.fill("250");
+    await level.blur();
+    await expect(page.getByTestId("viewport-info")).toContainText(/ · shore [\d,]+/);
+
     // Hints follow the tool.
     await expect(page.getByTestId("viewport-hints")).toHaveAttribute("data-mode", "orbit");
     await page.getByTestId("grid-toggle").click();
