@@ -448,6 +448,171 @@
     }
   },
   {
+    "kind": "jd.cave.system@1",
+    "description": "A cave system under the terrain — `kind`: karst (sinkholes → spring through phreatic tubes and vadose canyons, chambers, stalactites and stalagmites), lava_tube (under a flow path, skylights), sea_cave (at sea level into cliffs, arches), mountain (wandering caves under hills), mine (adit rising 1 in 200, crosscuts, levels, shaft), tunnel (two portals), catacombs (a shallow maze). `entrances` are the points you place; an optional `water` depth layer (lakes, rivers, the sea) floods what lies under it and puts springs under water; an optional `inlets` mask (the karst node's `sinkholes`) gives a karst cave its sinkholes. Outputs the terrain unchanged, the `holes` mask over the entrances (wire it to the exports) and the `plan` footprint; `caves.mesh` / `caves.export` build the 3-D walls",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      },
+      {
+        "name": "water",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "inlets",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "holes",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "plan",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "CaveParams",
+      "description": "Cave settings (the editable cave: a `jd.cave.system@1` node's params).",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "Kind of cave.",
+          "$ref": "#/$defs/CaveKind",
+          "default": "karst"
+        },
+        "seed": {
+          "description": "Seed.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "entrances": {
+          "description": "Entrances you place, `[u, v]` metres (east, north): karst sinkholes (inlets), the vent of a\nlava tube, sea-cave or mountain-cave mouths, a mine's portal, a tunnel's two portals, the\ncatacombs' stair. Empty: chosen from the terrain.",
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            },
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "default": []
+        },
+        "size": {
+          "description": "Passage size multiplier, 0.25..=4.",
+          "type": "number",
+          "format": "float",
+          "default": 1.0
+        },
+        "reach_m": {
+          "description": "How far the system reaches, metres (karst spread, tube / cave / adit length, catacomb side).",
+          "type": "number",
+          "format": "float",
+          "default": 400.0
+        },
+        "cover_m": {
+          "description": "Rock over the passages, metres (0 = the kind's default).",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        },
+        "complexity": {
+          "description": "Branching: karst inlets when none are placed, mountain branches, mine crosscuts, sea caves.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 3
+        },
+        "levels": {
+          "description": "Levels: karst inception horizons, mine levels.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 2
+        },
+        "sea_level_m": {
+          "description": "Sea level, metres (sea caves and flooding when no water layer is wired).",
+          "type": "number",
+          "format": "float",
+          "default": 0.0
+        },
+        "speleothems": {
+          "description": "Speleothem drip sites per 100 m² of dry floor (negative = the kind's default).",
+          "type": "number",
+          "format": "float",
+          "default": -1.0
+        },
+        "roughness": {
+          "description": "Wall roughness 0..=2 (1 = the kind's natural roughness).",
+          "type": "number",
+          "format": "float",
+          "default": 1.0
+        }
+      },
+      "additionalProperties": false,
+      "$defs": {
+        "CaveKind": {
+          "description": "Kind of cave.",
+          "oneOf": [
+            {
+              "description": "Limestone solution cave: sinkholes → spring, tubes, canyons, chambers, speleothems.",
+              "type": "string",
+              "const": "karst"
+            },
+            {
+              "description": "Lava tube under a flow path, with skylights.",
+              "type": "string",
+              "const": "lava_tube"
+            },
+            {
+              "description": "Sea cave cut at sea level into a cliff (an arch through a headland).",
+              "type": "string",
+              "const": "sea_cave"
+            },
+            {
+              "description": "Wandering caves under hills and in mountains.",
+              "type": "string",
+              "const": "mountain"
+            },
+            {
+              "description": "A mine: adit, crosscuts, levels, shaft.",
+              "type": "string",
+              "const": "mine"
+            },
+            {
+              "description": "A road tunnel between two portals.",
+              "type": "string",
+              "const": "tunnel"
+            },
+            {
+              "description": "Catacombs: a shallow maze of galleries and rooms.",
+              "type": "string",
+              "const": "catacombs"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
     "kind": "jd.climate.rain@1",
     "description": "Orographic rain: moisture rides the wind across the field; air holds less water the higher it climbs (`moisture_scale_m`), so windward slopes condense the excess as rain, descending air rains nothing (the shadow), flat ground takes a drizzle (`base_per_km`) and dry air re-moistens over `recovery_km`, and with `delay_km` the condensed water is carried that far downwind before it falls (onto the crest and over it) — `rain` 0..1 (the field's 99th percentile at 1; feed `jd.erosion.hydraulic@1`'s `rain` or a biome rule), `snowfall` (the share that falls where the lapsed `temperature_c` is below `snow_below_c`; key the temperature for a season) and `moisture` 0..1, the relative humidity of the air leaving each cell",
     "inputs": [

@@ -4,6 +4,392 @@ expression: list
 ---
 [
   {
+    "id": "caves.export",
+    "description": "Write a `jd.cave.system@1` node's cave (walls + speleothems) at full resolution as .glb or .fbx in the terrain export frame, so it drops under the terrain mesh / engine terrain as is — or its skeleton as .json (passages, chambers, entrances, speleothems, water level) for gameplay",
+    "scope": "export",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "CaveExport",
+      "description": "`caves.export` params.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "The `jd.cave.system@1` node.",
+          "$ref": "#/$defs/NodeId"
+        },
+        "path": {
+          "description": "`.glb` or `.fbx` (the walls), `.json` (the skeleton: passages, chambers, entrances,\nspeleothems, water level); relative paths land in the project's `exports/`.",
+          "type": "string"
+        },
+        "voxel_m": {
+          "description": "Voxel size, metres (omitted = automatic).",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float",
+          "default": null
+        },
+        "speleothems": {
+          "description": "Include the speleothems (default true).",
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "path"
+      ],
+      "$defs": {
+        "NodeId": {
+          "description": "Identifies a graph node.",
+          "type": "string"
+        }
+      }
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "CaveExportResult",
+      "description": "`caves.export` result.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "File written.",
+          "type": "string"
+        },
+        "triangles": {
+          "description": "Triangles written.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "bytes": {
+          "description": "Bytes written.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "voxel_m": {
+          "description": "Voxel size used, metres.",
+          "type": "number",
+          "format": "float"
+        },
+        "length_m": {
+          "description": "Total passage length, metres.",
+          "type": "number",
+          "format": "float"
+        },
+        "entrances": {
+          "description": "Where the cave opens.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Entrance"
+          }
+        },
+        "notes": {
+          "description": "What the generator wants you to know.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "path",
+        "triangles",
+        "bytes",
+        "voxel_m",
+        "length_m",
+        "entrances",
+        "notes"
+      ],
+      "$defs": {
+        "Entrance": {
+          "description": "Where a cave opens.",
+          "type": "object",
+          "properties": {
+            "at": {
+              "description": "Position `[u, v, z]` on the surface, metres.",
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "minItems": 3,
+              "maxItems": 3
+            },
+            "kind": {
+              "description": "Kind.",
+              "$ref": "#/$defs/EntranceKind"
+            },
+            "underwater": {
+              "description": "Below the system's water level (a diver's entrance).",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "at",
+            "kind",
+            "underwater"
+          ]
+        },
+        "EntranceKind": {
+          "description": "How a cave meets the surface.",
+          "oneOf": [
+            {
+              "description": "A doline / sinkhole swallowing water into the cave (karst inlet).",
+              "type": "string",
+              "const": "sinkhole"
+            },
+            {
+              "description": "A cave mouth at the foot of a slope or cliff; a mine adit; a tunnel portal.",
+              "type": "string",
+              "const": "portal"
+            },
+            {
+              "description": "A roof collapse into a lava tube.",
+              "type": "string",
+              "const": "skylight"
+            },
+            {
+              "description": "Where the cave's water comes out: a spring, often under a lake, river or the sea.",
+              "type": "string",
+              "const": "resurgence"
+            },
+            {
+              "description": "A wave-cut notch at sea level.",
+              "type": "string",
+              "const": "sea_cave"
+            },
+            {
+              "description": "A vertical shaft from the surface.",
+              "type": "string",
+              "const": "shaft"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "id": "caves.mesh",
+    "description": "The 3-D walls and speleothems of a `jd.cave.system@1` node as mesh arrays for a viewport (terrain export frame), with its entrances, water level, length and the generator's notes",
+    "scope": "project-read",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "CaveMeshParams",
+      "description": "`caves.mesh` params.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "The `jd.cave.system@1` node.",
+          "$ref": "#/$defs/NodeId"
+        },
+        "lod": {
+          "description": "Evaluation lod (0 = full resolution; a viewport passes its preview lod).",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 0
+        },
+        "voxel_m": {
+          "description": "Voxel size, metres (omitted = about five voxels across the narrowest passage, coarser so\nthe walls stay near 400 k triangles).",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float",
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "$defs": {
+        "NodeId": {
+          "description": "Identifies a graph node.",
+          "type": "string"
+        }
+      }
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "CaveMeshResult",
+      "description": "`caves.mesh` result.",
+      "type": "object",
+      "properties": {
+        "walls": {
+          "description": "The cave walls (normals face into the cave).",
+          "$ref": "#/$defs/MeshArrays"
+        },
+        "speleothems": {
+          "description": "Stalactites, stalagmites and columns.",
+          "$ref": "#/$defs/MeshArrays"
+        },
+        "voxel_m": {
+          "description": "Voxel size used, metres.",
+          "type": "number",
+          "format": "float"
+        },
+        "water_level_m": {
+          "description": "Water level, metres: flooded below.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        },
+        "length_m": {
+          "description": "Total passage length, metres.",
+          "type": "number",
+          "format": "float"
+        },
+        "passages": {
+          "description": "Passages and chambers.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "chambers": {
+          "description": "Chambers.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "entrances": {
+          "description": "Where the cave opens.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Entrance"
+          }
+        },
+        "speleothem_count": {
+          "description": "Speleothems placed.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "notes": {
+          "description": "What the generator wants you to know.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "walls",
+        "speleothems",
+        "voxel_m",
+        "length_m",
+        "passages",
+        "chambers",
+        "entrances",
+        "speleothem_count",
+        "notes"
+      ],
+      "$defs": {
+        "MeshArrays": {
+          "description": "A mesh as little-endian arrays in the terrain export frame (x east, y up, z south).",
+          "type": "object",
+          "properties": {
+            "positions_base64": {
+              "description": "f32 xyz per vertex, base64.",
+              "type": "string"
+            },
+            "normals_base64": {
+              "description": "f32 unit normals per vertex, base64.",
+              "type": "string"
+            },
+            "indices_base64": {
+              "description": "u32 triangle indices, base64.",
+              "type": "string"
+            },
+            "triangles": {
+              "description": "Triangle count.",
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "positions_base64",
+            "normals_base64",
+            "indices_base64",
+            "triangles"
+          ]
+        },
+        "Entrance": {
+          "description": "Where a cave opens.",
+          "type": "object",
+          "properties": {
+            "at": {
+              "description": "Position `[u, v, z]` on the surface, metres.",
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "minItems": 3,
+              "maxItems": 3
+            },
+            "kind": {
+              "description": "Kind.",
+              "$ref": "#/$defs/EntranceKind"
+            },
+            "underwater": {
+              "description": "Below the system's water level (a diver's entrance).",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "at",
+            "kind",
+            "underwater"
+          ]
+        },
+        "EntranceKind": {
+          "description": "How a cave meets the surface.",
+          "oneOf": [
+            {
+              "description": "A doline / sinkhole swallowing water into the cave (karst inlet).",
+              "type": "string",
+              "const": "sinkhole"
+            },
+            {
+              "description": "A cave mouth at the foot of a slope or cliff; a mine adit; a tunnel portal.",
+              "type": "string",
+              "const": "portal"
+            },
+            {
+              "description": "A roof collapse into a lava tube.",
+              "type": "string",
+              "const": "skylight"
+            },
+            {
+              "description": "Where the cave's water comes out: a spring, often under a lake, river or the sea.",
+              "type": "string",
+              "const": "resurgence"
+            },
+            {
+              "description": "A wave-cut notch at sea level.",
+              "type": "string",
+              "const": "sea_cave"
+            },
+            {
+              "description": "A vertical shaft from the surface.",
+              "type": "string",
+              "const": "shaft"
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
     "id": "diag.bench",
     "description": "Run a benchmark scene (S1: fBm + ridged + add + thermal×50) with the real kernels; per-stage wall time, peak RSS, content hash",
     "scope": "none",

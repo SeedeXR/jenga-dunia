@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CaveExport",
+  "description": "`caves.export` params.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "The `jd.cave.system@1` node.",
+      "$ref": "#/$defs/NodeId"
+    },
+    "path": {
+      "description": "`.glb` or `.fbx` (the walls), `.json` (the skeleton: passages, chambers, entrances,\nspeleothems, water level); relative paths land in the project's `exports/`.",
+      "type": "string"
+    },
+    "voxel_m": {
+      "description": "Voxel size, metres (omitted = automatic).",
+      "type": [
+        "number",
+        "null"
+      ],
+      "format": "float",
+      "default": null
+    },
+    "speleothems": {
+      "description": "Include the speleothems (default true).",
+      "type": "boolean",
+      "default": true
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "path"
+  ],
+  "$defs": {
+    "NodeId": {
+      "description": "Identifies a graph node.",
+      "type": "string"
+    }
+  }
+}

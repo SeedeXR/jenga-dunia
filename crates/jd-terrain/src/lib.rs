@@ -7,6 +7,8 @@
 
 pub mod aeolian;
 pub mod bathymetry;
+pub mod cavegen;
+pub mod caves;
 pub mod climate;
 pub mod coastal;
 pub mod debris;
@@ -49,6 +51,14 @@ pub mod yardang;
 
 pub use aeolian::{AeolianParams, aeolian_transport, aeolian_transport_with};
 pub use bathymetry::{BathymetryParams, bathymetry, bathymetry_with};
+pub use cavegen::{
+    CaveKind, CaveParams, Generated, Ground, cave_in_terrain, generate_cave, mask_points,
+};
+pub use caves::{
+    CaveField, CaveSystem, Chamber, Entrance, EntranceKind, Passage, Profile, Speleothem,
+    SpeleothemKind, SpeleothemParams, append_mesh, auto_voxel_for, auto_voxel_m, cave_mesh,
+    cave_plan, entrance_holes, place_speleothems, speleothem_mesh, wall_area_m2,
+};
 pub use climate::{SnowParams, snow_cover};
 pub use coastal::{CoastalParams, coastal_erode, coastal_erode_budget, coastal_erode_with};
 pub use debris::{DebrisParams, DebrisResult, rockfall};

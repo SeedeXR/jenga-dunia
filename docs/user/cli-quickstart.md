@@ -1228,6 +1228,36 @@ $ jd op terrain.export_profile --project Cave.jdproj --params '{"profile":"unity
 
 Any 0..1 layer — a painted mask (`jd.sculpt.strokes@1` with `clamp`), a class mask, a pattern — serves as `holes`: cells at or above 0.5 are left out. `terrain.export_mesh` drops those quads from every format (the report's `triangles` shrinks accordingly; the LOD chain keeps the holes at every level), which is how cave and tunnel mouths and building footprints open a terrain. `terrain.export_profile` writes `holes.png` (255 = hole, row 0 north) and names it in `materials.json`: the Unity import script calls `TerrainData.SetHoles` with it (one cell per quad, so colliders skip the holes too); for Unreal, import it as the landscape's **Visibility** weight layer (the README says so). Unit tests: a 4 × 4 hole in a 16² field removes 32 triangles from the grid mesh, the GLB and the OBJ; the profile's `holes.png` has the north row first; a mask of the wrong size is refused.
 
+### Caves
+
+```
+$ jd op graph.add_node --project Hills.jdproj --save \
+    --params '{"kind":"jd.cave.system@1","params":{"kind":"karst","seed":3,"reach_m":900}}'
+# wire it between the terrain and the height output, and publish its holes and plan:
+#   noise.out → cave.in · cave.out → height.in · cave.holes → output "cave_holes" · cave.plan → output "cave_plan"
+$ jd op graph.evaluate --project Hills.jdproj
+$ jd op caves.export --project Hills.jdproj --params '{"id":"<cave id>","path":"cave.glb"}'
+triangles 839 284   voxel 0.40 m   length 2 260 m   7.4 s
+entrances: sinkhole (100, 1668, 327) · sinkhole (308, 1492, 398) · sinkhole (356, 1812, 251) · resurgence (620, 996, 54)
+$ jd op terrain.export_mesh --project Hills.jdproj --params '{"layer":"height","path":"terrain.glb","holes":"cave_holes"}'
+```
+
+A cave is a node, `jd.cave.system@1` ([ADR-0016](../adr/0016-caves-as-an-implicit-volume-beside-the-heightfield.md), research in [docs/research/caves.md](../research/caves.md)). Its params are the editable cave — `kind`, `seed`, the `entrances` you place (`[u, v]` metres east and north), `size`, `reach_m`, `cover_m`, `complexity`, `levels`, `sea_level_m`, `speleothems` (drip sites per 100 m², −1 = the kind's default) and `roughness` — so undo, save and the inspector work as for any node. It passes the terrain through, outputs a **`holes`** mask where the cave breaks the surface (feed it to `holes` on the mesh and engine exports, so the terrain opens exactly over the mouths) and a **`plan`** footprint for a map overlay. Optional inputs: **`water`**, a water depth (a lake's, a river's, the sea's) that floods what lies under its surface and puts springs and mouths under water, and **`inlets`**, a mask (the karst node's `sinkholes`) whose cells become a karst cave's sinkholes.
+
+The kinds and what drives them:
+
+| kind | Built from | Shape |
+|---|---|---|
+| `karst` | sinkholes on gentle high ground (or yours) → a spring at the foot of relief or in the nearest water; inception horizons from the water table up; two fracture sets | a branchwork: each sinkhole's water follows the cheapest path, existing conduits 4× cheaper, so tributaries merge into a trunk; round phreatic tubes (wider than tall) at the water table, flooded; keyhole canyons above it; shafts under the sinkholes; chambers at junctions; stalactites, stalagmites and columns in the dry parts |
+| `lava_tube` | a vent (yours, or the highest ground) | follows the flow downhill with inertia a few metres under the surface (`cover_m`), 8 m wide by default, skylights every 120–250 m, small lavacicles |
+| `sea_cave` | cliffs rising from the water (`sea_level_m` or the `water` layer) | tall narrow arches cut 15–150 m into the cliff along the uphill direction, floor a metre under the sea, tapering; an arch when it breaks out the other side |
+| `mountain` | slopes of 18–50° (or your mouths) | wandering tunnels that dive in, keep `cover_m` of rock overhead, branch and open into chambers |
+| `mine` | a portal on a hillside | an adit 2.4 m × 2.6 m rising 1 in 200 so it drains, crosscuts with stopes, `levels` deeper drifts, and a shaft from the surface to the bottom level |
+| `tunnel` | two portals | a straight road tunnel 10 m wide; notes when the grade passes 4 % or the rock cover gets thin |
+| `catacombs` | a stair entrance | a maze of 1.2 m galleries on an 8 m grid at `cover_m` (15 m) depth with loops and ossuary rooms, reached by a 35° stair |
+
+`caves.mesh` returns the walls and speleothems as arrays for a viewport (the desktop uses it), with the entrances, water level, length and the generator's notes; `caves.export` writes them at full resolution as `.glb` or `.fbx` in the terrain export's frame (x east, y up, z south, centred — the cave drops under `terrain.glb` as is), or the skeleton as `.json` (passages, chambers, entrances, speleothems, water level) for gameplay. The walls are a signed distance meshed with surface nets on a sparse voxel grid (a voxel size that keeps about five voxels across the narrowest passage, coarsened to stay near 400 k triangles for a viewport and 1 M for an export; pass `voxel_m` to choose), Taubin-smoothed, and dropped above the ground. Measured above: a 2 km karst system on a 2 km, 256² world evaluates in 0.2 s and exports in 7.4 s; a mine with 624 m of drifts in 0.7 s (85 k triangles). Tests: a buried tube meshes closed at its size with inward normals, an arch has a flat floor, the terrain opens only where the cave breaks the surface, speleothems hang from dry ceilings over their stalagmites, one test per kind with its geology (the mine's adit rises 1 in 200; a spring under a lake is an underwater entrance with the water table at the lake surface), and the op test opens the terrain, meshes and exports GLB, FBX and JSON. Limits: on a coarse grid a mouth is at least one cell wide; man-made edges are softened by about half a voxel.
+
 ### GIS text formats: ASC and XYZ
 
 ```

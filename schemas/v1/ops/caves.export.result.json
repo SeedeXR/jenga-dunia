@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CaveExportResult",
+  "description": "`caves.export` result.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "File written.",
+      "type": "string"
+    },
+    "triangles": {
+      "description": "Triangles written.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "bytes": {
+      "description": "Bytes written.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0
+    },
+    "voxel_m": {
+      "description": "Voxel size used, metres.",
+      "type": "number",
+      "format": "float"
+    },
+    "length_m": {
+      "description": "Total passage length, metres.",
+      "type": "number",
+      "format": "float"
+    },
+    "entrances": {
+      "description": "Where the cave opens.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Entrance"
+      }
+    },
+    "notes": {
+      "description": "What the generator wants you to know.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "path",
+    "triangles",
+    "bytes",
+    "voxel_m",
+    "length_m",
+    "entrances",
+    "notes"
+  ],
+  "$defs": {
+    "Entrance": {
+      "description": "Where a cave opens.",
+      "type": "object",
+      "properties": {
+        "at": {
+          "description": "Position `[u, v, z]` on the surface, metres.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "kind": {
+          "description": "Kind.",
+          "$ref": "#/$defs/EntranceKind"
+        },
+        "underwater": {
+          "description": "Below the system's water level (a diver's entrance).",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "at",
+        "kind",
+        "underwater"
+      ]
+    },
+    "EntranceKind": {
+      "description": "How a cave meets the surface.",
+      "oneOf": [
+        {
+          "description": "A doline / sinkhole swallowing water into the cave (karst inlet).",
+          "type": "string",
+          "const": "sinkhole"
+        },
+        {
+          "description": "A cave mouth at the foot of a slope or cliff; a mine adit; a tunnel portal.",
+          "type": "string",
+          "const": "portal"
+        },
+        {
+          "description": "A roof collapse into a lava tube.",
+          "type": "string",
+          "const": "skylight"
+        },
+        {
+          "description": "Where the cave's water comes out: a spring, often under a lake, river or the sea.",
+          "type": "string",
+          "const": "resurgence"
+        },
+        {
+          "description": "A wave-cut notch at sea level.",
+          "type": "string",
+          "const": "sea_cave"
+        },
+        {
+          "description": "A vertical shaft from the surface.",
+          "type": "string",
+          "const": "shaft"
+        }
+      ]
+    }
+  }
+}

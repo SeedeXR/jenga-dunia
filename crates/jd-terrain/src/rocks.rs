@@ -58,19 +58,19 @@ impl Default for RockParams {
     }
 }
 
-fn mix(mut x: u64) -> u64 {
+pub(crate) fn mix(mut x: u64) -> u64 {
     x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
     let mut z = x;
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
     z ^ (z >> 31)
 }
-fn unit(h: u64) -> f32 {
+pub(crate) fn unit(h: u64) -> f32 {
     (h >> 40) as f32 / (1u64 << 24) as f32
 }
 
 /// Seeded value noise on the integer lattice, trilinear, smoothstep-eased, in −1..1.
-fn value_noise(seed: u64, p: [f32; 3]) -> f32 {
+pub(crate) fn value_noise(seed: u64, p: [f32; 3]) -> f32 {
     let f = |x: f32| x.floor();
     let (x0, y0, z0) = (f(p[0]), f(p[1]), f(p[2]));
     let ease = |t: f32| t * t * (3.0 - 2.0 * t);

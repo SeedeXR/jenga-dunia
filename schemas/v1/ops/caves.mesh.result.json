@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CaveMeshResult",
+  "description": "`caves.mesh` result.",
+  "type": "object",
+  "properties": {
+    "walls": {
+      "description": "The cave walls (normals face into the cave).",
+      "$ref": "#/$defs/MeshArrays"
+    },
+    "speleothems": {
+      "description": "Stalactites, stalagmites and columns.",
+      "$ref": "#/$defs/MeshArrays"
+    },
+    "voxel_m": {
+      "description": "Voxel size used, metres.",
+      "type": "number",
+      "format": "float"
+    },
+    "water_level_m": {
+      "description": "Water level, metres: flooded below.",
+      "type": [
+        "number",
+        "null"
+      ],
+      "format": "float"
+    },
+    "length_m": {
+      "description": "Total passage length, metres.",
+      "type": "number",
+      "format": "float"
+    },
+    "passages": {
+      "description": "Passages and chambers.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "chambers": {
+      "description": "Chambers.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "entrances": {
+      "description": "Where the cave opens.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Entrance"
+      }
+    },
+    "speleothem_count": {
+      "description": "Speleothems placed.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    },
+    "notes": {
+      "description": "What the generator wants you to know.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "walls",
+    "speleothems",
+    "voxel_m",
+    "length_m",
+    "passages",
+    "chambers",
+    "entrances",
+    "speleothem_count",
+    "notes"
+  ],
+  "$defs": {
+    "MeshArrays": {
+      "description": "A mesh as little-endian arrays in the terrain export frame (x east, y up, z south).",
+      "type": "object",
+      "properties": {
+        "positions_base64": {
+          "description": "f32 xyz per vertex, base64.",
+          "type": "string"
+        },
+        "normals_base64": {
+          "description": "f32 unit normals per vertex, base64.",
+          "type": "string"
+        },
+        "indices_base64": {
+          "description": "u32 triangle indices, base64.",
+          "type": "string"
+        },
+        "triangles": {
+          "description": "Triangle count.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "positions_base64",
+        "normals_base64",
+        "indices_base64",
+        "triangles"
+      ]
+    },
+    "Entrance": {
+      "description": "Where a cave opens.",
+      "type": "object",
+      "properties": {
+        "at": {
+          "description": "Position `[u, v, z]` on the surface, metres.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "kind": {
+          "description": "Kind.",
+          "$ref": "#/$defs/EntranceKind"
+        },
+        "underwater": {
+          "description": "Below the system's water level (a diver's entrance).",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "at",
+        "kind",
+        "underwater"
+      ]
+    },
+    "EntranceKind": {
+      "description": "How a cave meets the surface.",
+      "oneOf": [
+        {
+          "description": "A doline / sinkhole swallowing water into the cave (karst inlet).",
+          "type": "string",
+          "const": "sinkhole"
+        },
+        {
+          "description": "A cave mouth at the foot of a slope or cliff; a mine adit; a tunnel portal.",
+          "type": "string",
+          "const": "portal"
+        },
+        {
+          "description": "A roof collapse into a lava tube.",
+          "type": "string",
+          "const": "skylight"
+        },
+        {
+          "description": "Where the cave's water comes out: a spring, often under a lake, river or the sea.",
+          "type": "string",
+          "const": "resurgence"
+        },
+        {
+          "description": "A wave-cut notch at sea level.",
+          "type": "string",
+          "const": "sea_cave"
+        },
+        {
+          "description": "A vertical shaft from the surface.",
+          "type": "string",
+          "const": "shaft"
+        }
+      ]
+    }
+  }
+}

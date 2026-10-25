@@ -236,51 +236,36 @@ pub fn export_fbx(
     export_fbx_with_holes(hf, extent_m, path, step, texture, None)
 }
 
-/// [`export_fbx`] leaving out the quads a 0..1 `holes` mask marks (≥ 0.5).
-pub fn export_fbx_with_holes(
-    hf: &Heightfield,
-    extent_m: [f64; 2],
+/// Write one mesh object as a binary FBX 7.4 document (metres, +Y up): `polygons` in FBX form
+/// (the last corner of each polygon stored as `-(index + 1)`), `corners` the plain vertex index
+/// per polygon corner (for the UVs), an optional embedded diffuse PNG or a flat colour. Returns
+/// the file's size in bytes.
+#[allow(clippy::too_many_arguments)]
+fn write_mesh_document(
     path: &Path,
-    step: u32,
-    texture: bool,
-    holes: Option<&Heightfield>,
-) -> JdResult<MeshExportReport> {
-    let mesh = GridMesh::build_with(hf, extent_m, step, holes)?;
-    let [gw, gh] = mesh.grid;
+    name: &str,
+    positions: &[f32],
+    normals: &[f32],
+    uvs: &[f32],
+    polygons: Vec<i32>,
+    corners: Vec<i32>,
+    color: [f64; 3],
+    texture: Option<Vec<u8>>,
+) -> JdResult<u64> {
     let creator = format!("jenga-dunia {}", env!("CARGO_PKG_VERSION"));
-
-    // Quads a→b→d→c are counter-clockwise from +Y (row c is north of row a, at −Z); the last
-    // corner of each polygon is stored as `-(index + 1)`.
-    let mut polygons: Vec<i32> = Vec::with_capacity(((gw - 1) * (gh - 1) * 4) as usize);
-    let mut corners: Vec<i32> = Vec::with_capacity(polygons.capacity());
-    for gz in 0..gh - 1 {
-        for gx in 0..gw - 1 {
-            if !crate::mesh::quad_kept(holes, step, gx, gz) {
-                continue;
-            }
-            let a = (gz * gw + gx) as i32;
-            let (b, c, d) = (a + 1, a + gw as i32, a + gw as i32 + 1);
-            polygons.extend_from_slice(&[a, b, d, -(c + 1)]);
-            corners.extend_from_slice(&[a, b, d, c]);
-        }
-    }
-    let n_vertices = gw * gh;
-    let n_quads = (polygons.len() / 4) as u32;
-
+    let textured = texture.is_some();
     let mut geometry_kids = vec![
         N::leaf("GeometryVersion", vec![P::I32(124)]),
         N::leaf(
             "Vertices",
-            vec![P::ArrF64(
-                mesh.positions.iter().map(|&v| f64::from(v)).collect(),
-            )],
+            vec![P::ArrF64(positions.iter().map(|&v| f64::from(v)).collect())],
         ),
         N::leaf("PolygonVertexIndex", vec![P::ArrI32(polygons)]),
         layer_element(
             "LayerElementNormal",
             "Normals",
             "",
-            mesh.normals.iter().map(|&v| f64::from(v)).collect(),
+            normals.iter().map(|&v| f64::from(v)).collect(),
         ),
         N::tree(
             "LayerElementUV",
@@ -294,7 +279,7 @@ pub fn export_fbx_with_holes(
                 N::leaf("ReferenceInformationType", vec![P::s("IndexToDirect")]),
                 N::leaf(
                     "UV",
-                    vec![P::ArrF64(mesh.uvs.iter().map(|&v| f64::from(v)).collect())],
+                    vec![P::ArrF64(uvs.iter().map(|&v| f64::from(v)).collect())],
                 ),
                 N::leaf("UVIndex", vec![P::ArrI32(corners)]),
             ],
@@ -337,7 +322,7 @@ pub fn export_fbx_with_holes(
             "Geometry",
             vec![
                 P::I64(ID_GEOMETRY),
-                P::Str(object_name("terrain", "Geometry")),
+                P::Str(object_name(name, "Geometry")),
                 P::s("Mesh"),
             ],
             geometry_kids,
@@ -346,7 +331,7 @@ pub fn export_fbx_with_holes(
             "Model",
             vec![
                 P::I64(ID_MODEL),
-                P::Str(object_name("terrain", "Model")),
+                P::Str(object_name(name, "Model")),
                 P::s("Mesh"),
             ],
             vec![
@@ -372,7 +357,7 @@ pub fn export_fbx_with_holes(
             "Material",
             vec![
                 P::I64(ID_MATERIAL),
-                P::Str(object_name("terrain", "Material")),
+                P::Str(object_name(name, "Material")),
                 P::s(""),
             ],
             vec![
@@ -383,10 +368,7 @@ pub fn export_fbx_with_holes(
                     "Properties70",
                     vec![],
                     vec![
-                        p70_color(
-                            "DiffuseColor",
-                            if texture { [1.0; 3] } else { [0.55, 0.5, 0.45] },
-                        ),
+                        p70_color("DiffuseColor", if textured { [1.0; 3] } else { color }),
                         p70_color("SpecularColor", [0.05; 3]),
                         p70_f64("SpecularFactor", 0.05),
                         p70_f64("ShininessExponent", 2.0),
@@ -407,21 +389,7 @@ pub fn export_fbx_with_holes(
         object_type("Model", 1, Some("FbxNode")),
         object_type("Material", 1, Some("FbxSurfacePhong")),
     ];
-    if texture {
-        let [min_h, max_h] = mesh.height_range;
-        let sample = |gx: u32, gz: u32| mesh.positions[((gz * gw + gx) * 3 + 1) as usize];
-        let normal_y = |gx: u32, gz: u32| mesh.normals[((gz * gw + gx) * 3 + 1) as usize];
-        let png = bake_albedo(
-            &sample,
-            &normal_y,
-            gw,
-            gh,
-            min_h,
-            max_h,
-            &[],
-            &|gx, gz| (gx, gz),
-            &|_, _| (0.0, 0.0),
-        )?; // FBX carries the base ramp only
+    if let Some(png) = texture {
         let file = "terrain-albedo.png";
         objects.push(N::tree(
             "Video",
@@ -554,7 +522,7 @@ pub fn export_fbx_with_holes(
         N::tree("Connections", vec![], connections),
     ];
 
-    let mut out = Vec::with_capacity(mesh.positions.len() * 8 * 3 + 4096);
+    let mut out = Vec::with_capacity(positions.len() * 8 * 3 + 4096);
     out.extend_from_slice(MAGIC);
     out.extend_from_slice(&VERSION.to_le_bytes());
     for node in &top {
@@ -575,6 +543,111 @@ pub fn export_fbx_with_holes(
         fs::create_dir_all(parent)?;
     }
     fs::write(path, &out)?;
+    Ok(out.len() as u64)
+}
+
+/// Write a triangle mesh (cave walls, speleothems, props) as a binary FBX 7.4 file in the terrain
+/// export's frame, with a flat Phong colour.
+pub fn export_fbx_mesh(
+    mesh: &GridMesh,
+    path: &Path,
+    name: &str,
+    color: [f64; 3],
+) -> JdResult<MeshExportReport> {
+    let tris = mesh.indices.as_chunks::<3>().0;
+    let mut polygons = Vec::with_capacity(mesh.indices.len());
+    let mut corners = Vec::with_capacity(mesh.indices.len());
+    for t in tris {
+        let [a, b, c] = t.map(|i| i as i32);
+        polygons.extend_from_slice(&[a, b, -(c + 1)]);
+        corners.extend_from_slice(&[a, b, c]);
+    }
+    let bytes = write_mesh_document(
+        path,
+        name,
+        &mesh.positions,
+        &mesh.normals,
+        &mesh.uvs,
+        polygons,
+        corners,
+        color,
+        None,
+    )?;
+    Ok(MeshExportReport {
+        lods: Vec::new(),
+        path: path.to_path_buf(),
+        format: "fbx".into(),
+        vertices: (mesh.positions.len() / 3) as u32,
+        triangles: tris.len() as u32,
+        topology: None,
+        step: 1,
+        bytes,
+        extent_m: [0.0, 0.0],
+        texture_px: None,
+        normal_px: None,
+    })
+}
+
+/// [`export_fbx`] leaving out the quads a 0..1 `holes` mask marks (≥ 0.5).
+pub fn export_fbx_with_holes(
+    hf: &Heightfield,
+    extent_m: [f64; 2],
+    path: &Path,
+    step: u32,
+    texture: bool,
+    holes: Option<&Heightfield>,
+) -> JdResult<MeshExportReport> {
+    let mesh = GridMesh::build_with(hf, extent_m, step, holes)?;
+    let [gw, gh] = mesh.grid;
+
+    // Quads a→b→d→c are counter-clockwise from +Y (row c is north of row a, at −Z); the last
+    // corner of each polygon is stored as `-(index + 1)`.
+    let mut polygons: Vec<i32> = Vec::with_capacity(((gw - 1) * (gh - 1) * 4) as usize);
+    let mut corners: Vec<i32> = Vec::with_capacity(polygons.capacity());
+    for gz in 0..gh - 1 {
+        for gx in 0..gw - 1 {
+            if !crate::mesh::quad_kept(holes, step, gx, gz) {
+                continue;
+            }
+            let a = (gz * gw + gx) as i32;
+            let (b, c, d) = (a + 1, a + gw as i32, a + gw as i32 + 1);
+            polygons.extend_from_slice(&[a, b, d, -(c + 1)]);
+            corners.extend_from_slice(&[a, b, d, c]);
+        }
+    }
+    let n_vertices = gw * gh;
+    let n_quads = (polygons.len() / 4) as u32;
+
+    let png = if texture {
+        let [min_h, max_h] = mesh.height_range;
+        let sample = |gx: u32, gz: u32| mesh.positions[((gz * gw + gx) * 3 + 1) as usize];
+        let normal_y = |gx: u32, gz: u32| mesh.normals[((gz * gw + gx) * 3 + 1) as usize];
+        let png = bake_albedo(
+            &sample,
+            &normal_y,
+            gw,
+            gh,
+            min_h,
+            max_h,
+            &[],
+            &|gx, gz| (gx, gz),
+            &|_, _| (0.0, 0.0),
+        )?; // FBX carries the base ramp only
+        Some(png)
+    } else {
+        None
+    };
+    let bytes = write_mesh_document(
+        path,
+        "terrain",
+        &mesh.positions,
+        &mesh.normals,
+        &mesh.uvs,
+        polygons,
+        corners,
+        [0.55, 0.5, 0.45],
+        png,
+    )?;
     Ok(MeshExportReport {
         lods: Vec::new(),
         path: path.to_path_buf(),
@@ -583,7 +656,7 @@ pub fn export_fbx_with_holes(
         triangles: n_quads * 2,
         topology: None,
         step,
-        bytes: out.len() as u64,
+        bytes,
         extent_m,
         texture_px: texture.then_some([gw, gh]),
         normal_px: None,

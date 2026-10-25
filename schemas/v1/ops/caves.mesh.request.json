@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CaveMeshParams",
+  "description": "`caves.mesh` params.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "The `jd.cave.system@1` node.",
+      "$ref": "#/$defs/NodeId"
+    },
+    "lod": {
+      "description": "Evaluation lod (0 = full resolution; a viewport passes its preview lod).",
+      "type": "integer",
+      "format": "uint8",
+      "minimum": 0,
+      "maximum": 255,
+      "default": 0
+    },
+    "voxel_m": {
+      "description": "Voxel size, metres (omitted = about five voxels across the narrowest passage, coarser so\nthe walls stay near 400 k triangles).",
+      "type": [
+        "number",
+        "null"
+      ],
+      "format": "float",
+      "default": null
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id"
+  ],
+  "$defs": {
+    "NodeId": {
+      "description": "Identifies a graph node.",
+      "type": "string"
+    }
+  }
+}

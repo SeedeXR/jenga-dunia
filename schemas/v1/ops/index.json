@@ -1,5 +1,15 @@
 [
   {
+    "id": "caves.export",
+    "description": "Write a `jd.cave.system@1` node's cave (walls + speleothems) at full resolution as .glb or .fbx in the terrain export frame, so it drops under the terrain mesh / engine terrain as is — or its skeleton as .json (passages, chambers, entrances, speleothems, water level) for gameplay",
+    "scope": "export"
+  },
+  {
+    "id": "caves.mesh",
+    "description": "The 3-D walls and speleothems of a `jd.cave.system@1` node as mesh arrays for a viewport (terrain export frame), with its entrances, water level, length and the generator's notes",
+    "scope": "project-read"
+  },
+  {
     "id": "diag.bench",
     "description": "Run a benchmark scene (S1: fBm + ridged + add + thermal×50) with the real kernels; per-stage wall time, peak RSS, content hash",
     "scope": "none"

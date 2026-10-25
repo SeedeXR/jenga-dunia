@@ -1229,6 +1229,267 @@ pub mod graph {
         #[serde(default)]
         pub lod: Option<u8>,
     }
+    /// `caves.mesh` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct CaveMeshParams {
+        /// The `jd.cave.system@1` node.
+        pub id: NodeId,
+        /// Evaluation lod (0 = full resolution; a viewport passes its preview lod).
+        #[serde(default)]
+        pub lod: u8,
+        /// Voxel size, metres (omitted = about five voxels across the narrowest passage, coarser so
+        /// the walls stay near 400 k triangles).
+        #[serde(default)]
+        pub voxel_m: Option<f32>,
+    }
+    /// A mesh as little-endian arrays in the terrain export frame (x east, y up, z south).
+    #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct MeshArrays {
+        /// f32 xyz per vertex, base64.
+        pub positions_base64: String,
+        /// f32 unit normals per vertex, base64.
+        pub normals_base64: String,
+        /// u32 triangle indices, base64.
+        pub indices_base64: String,
+        /// Triangle count.
+        pub triangles: u32,
+    }
+    fn mesh_arrays(m: &jd_terrain::mesh::GridMesh) -> MeshArrays {
+        use base64::Engine as _;
+        let enc = |b: Vec<u8>| base64::engine::general_purpose::STANDARD.encode(b);
+        MeshArrays {
+            positions_base64: enc(m.positions.iter().flat_map(|v| v.to_le_bytes()).collect()),
+            normals_base64: enc(m.normals.iter().flat_map(|v| v.to_le_bytes()).collect()),
+            indices_base64: enc(m.indices.iter().flat_map(|v| v.to_le_bytes()).collect()),
+            triangles: (m.indices.len() / 3) as u32,
+        }
+    }
+    /// `caves.mesh` result.
+    #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct CaveMeshResult {
+        /// The cave walls (normals face into the cave).
+        pub walls: MeshArrays,
+        /// Stalactites, stalagmites and columns.
+        pub speleothems: MeshArrays,
+        /// Voxel size used, metres.
+        pub voxel_m: f32,
+        /// Water level, metres: flooded below.
+        pub water_level_m: Option<f32>,
+        /// Total passage length, metres.
+        pub length_m: f32,
+        /// Passages and chambers.
+        pub passages: u32,
+        /// Chambers.
+        pub chambers: u32,
+        /// Where the cave opens.
+        pub entrances: Vec<jd_terrain::Entrance>,
+        /// Speleothems placed.
+        pub speleothem_count: u32,
+        /// What the generator wants you to know.
+        pub notes: Vec<String>,
+    }
+    /// `caves.export` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct CaveExport {
+        /// The `jd.cave.system@1` node.
+        pub id: NodeId,
+        /// `.glb` or `.fbx` (the walls), `.json` (the skeleton: passages, chambers, entrances,
+        /// speleothems, water level); relative paths land in the project's `exports/`.
+        pub path: PathBuf,
+        /// Voxel size, metres (omitted = automatic).
+        #[serde(default)]
+        pub voxel_m: Option<f32>,
+        /// Include the speleothems (default true).
+        #[serde(default = "yes_caves")]
+        pub speleothems: bool,
+    }
+    fn yes_caves() -> bool {
+        true
+    }
+    /// `caves.export` result.
+    #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct CaveExportResult {
+        /// File written.
+        pub path: PathBuf,
+        /// Triangles written.
+        pub triangles: u32,
+        /// Bytes written.
+        pub bytes: u64,
+        /// Voxel size used, metres.
+        pub voxel_m: f32,
+        /// Total passage length, metres.
+        pub length_m: f32,
+        /// Where the cave opens.
+        pub entrances: Vec<jd_terrain::Entrance>,
+        /// What the generator wants you to know.
+        pub notes: Vec<String>,
+    }
+
+    /// Generate a cave node's system from its evaluated inputs.
+    fn build_cave(
+        ctx: &Context,
+        id: &NodeId,
+        lod: u8,
+    ) -> JdResult<(
+        jd_terrain::Generated,
+        std::sync::Arc<jd_terrain::Heightfield>,
+        [f64; 2],
+    )> {
+        let (graph, world, root) = ctx.with_project(|pr| {
+            Ok((
+                pr.graph.clone(),
+                pr.doc.world.clone(),
+                pr.root().to_path_buf(),
+            ))
+        })?;
+        let node = graph
+            .nodes
+            .get(id)
+            .ok_or_else(|| JdError::new(ErrorCode::E_INPUT_INVALID, format!("no node `{id}`")))?;
+        if node.kind.0 != "jd.cave.system@1" {
+            return Err(JdError::invalid(
+                "id",
+                format!("`{id}` is a {}, not a jd.cave.system@1 node", node.kind.0),
+            ));
+        }
+        let cp: jd_terrain::CaveParams =
+            serde_json::from_value(serde_json::Value::Object(node.params.clone()))
+                .map_err(|e| JdError::invalid("params", e.to_string()))?;
+        let tiered = cache_for(ctx, &root);
+        let (outputs, _) = Evaluator::new(registry(), &tiered)
+            .with_layers(ctx.layer_loader(&root))
+            .evaluate_with(&graph, &world, lod, Some(&root.join("assets")))?;
+        let input = |port: &str| {
+            graph
+                .edges
+                .iter()
+                .find(|e| &e.to.node == id && e.to.port == port)
+                .and_then(|e| outputs.get(&(e.from.node.clone(), e.from.port.clone())))
+                .map(|v| v.as_field().clone())
+        };
+        let hf = input("in").ok_or_else(|| {
+            JdError::invalid("id", "the cave node has no terrain wired to `in`")
+                .next("Connect a terrain output to the cave node's `in` port.")
+        })?;
+        let (water, inlets) = (input("water"), input("inlets"));
+        let made = jd_terrain::cave_in_terrain(
+            &cp,
+            &hf,
+            world.extent_m,
+            water.as_deref(),
+            inlets.as_deref(),
+        )?;
+        Ok((made, hf, world.extent_m))
+    }
+
+    /// Mesh the walls; without an explicit voxel size, coarsen until the cave fits the budget.
+    fn cave_walls(
+        sys: &jd_terrain::CaveSystem,
+        hf: &jd_terrain::Heightfield,
+        extent: [f64; 2],
+        voxel: Option<f32>,
+        max_triangles: u32,
+    ) -> JdResult<(jd_terrain::mesh::GridMesh, f32)> {
+        let mut v = voxel.unwrap_or_else(|| jd_terrain::auto_voxel_for(sys, max_triangles));
+        for _ in 0..6 {
+            match jd_terrain::cave_mesh(sys, hf, extent, v) {
+                Ok(m) => return Ok((m, v)),
+                Err(e) if voxel.is_none() && e.code == ErrorCode::E_INPUT_INVALID => v *= 1.6,
+                Err(e) => return Err(e),
+            }
+        }
+        jd_terrain::cave_mesh(sys, hf, extent, v).map(|m| (m, v))
+    }
+
+    fn register_caves(r: &mut Registry) {
+        r.register::<CaveMeshParams, CaveMeshResult, _>(
+            "caves.mesh",
+            "The 3-D walls and speleothems of a `jd.cave.system@1` node as mesh arrays for a viewport (terrain export frame), with its entrances, water level, length and the generator's notes",
+            Scope::ProjectRead,
+            |ctx, p| {
+                let (made, hf, extent) = build_cave(ctx, &p.id, p.lod)?;
+                let (walls, voxel_m) = cave_walls(&made.system, &hf, extent, p.voxel_m, 400_000)?;
+                let spel = jd_terrain::speleothem_mesh(&made.system.speleothems, extent, made.system.seed);
+                let mut warnings = Vec::new();
+                if walls.indices.len() / 3 > 2_000_000 {
+                    warnings.push(Warning::new("W_LARGE_MESH", "more than 2 M wall triangles: pass a larger voxel_m for an interactive view"));
+                }
+                let s = &made.system;
+                Ok((
+                    CaveMeshResult {
+                        walls: mesh_arrays(&walls),
+                        speleothems: mesh_arrays(&spel),
+                        voxel_m,
+                        water_level_m: s.water_level_m,
+                        length_m: s.length_m(),
+                        passages: s.passages.len() as u32,
+                        chambers: s.chambers.len() as u32,
+                        entrances: s.entrances.clone(),
+                        speleothem_count: s.speleothems.len() as u32,
+                        notes: made.notes,
+                    },
+                    warnings,
+                ))
+            },
+        );
+        r.register::<CaveExport, CaveExportResult, _>(
+            "caves.export",
+            "Write a `jd.cave.system@1` node's cave (walls + speleothems) at full resolution as .glb or .fbx in the terrain export frame, so it drops under the terrain mesh / engine terrain as is — or its skeleton as .json (passages, chambers, entrances, speleothems, water level) for gameplay",
+            Scope::Export,
+            |ctx, p| {
+                let path = ctx.with_project(|proj| Ok(if p.path.is_absolute() { p.path.clone() } else { proj.root().join("exports").join(&p.path) }))?;
+                let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
+                if !matches!(ext.as_str(), "glb" | "fbx" | "json") {
+                    return Err(JdError::new(ErrorCode::E_FORMAT_UNSUPPORTED, "caves export as .glb, .fbx or .json (the skeleton)"));
+                }
+                let (made, hf, extent) = build_cave(ctx, &p.id, 0)?;
+                if ext == "json" {
+                    // The skeleton for gameplay: passages, chambers, entrances, speleothems, water level
+                    // in (u, v, z) metres from the south-west corner.
+                    if let Some(dir) = path.parent() {
+                        std::fs::create_dir_all(dir)?;
+                    }
+                    let doc = serde_json::json!({ "frame": "u east, v north from the south-west corner, z up, metres", "extent_m": extent, "notes": made.notes, "cave": made.system });
+                    let bytes = serde_json::to_vec_pretty(&doc).map_err(|e| JdError::new(ErrorCode::E_INTERNAL, e.to_string()))?;
+                    std::fs::write(&path, &bytes)?;
+                    return Ok((
+                        CaveExportResult { path, triangles: 0, bytes: bytes.len() as u64, voxel_m: 0.0, length_m: made.system.length_m(), entrances: made.system.entrances.clone(), notes: made.notes },
+                        Vec::new(),
+                    ));
+                }
+                let (mut mesh, voxel_m) = cave_walls(&made.system, &hf, extent, p.voxel_m, 1_000_000)?;
+                if p.speleothems {
+                    jd_terrain::append_mesh(&mut mesh, &jd_terrain::speleothem_mesh(&made.system.speleothems, extent, made.system.seed));
+                }
+                if mesh.indices.is_empty() {
+                    return Err(JdError::invalid("id", "the cave has no walls under the terrain"));
+                }
+                if let Some(dir) = path.parent() {
+                    std::fs::create_dir_all(dir)?;
+                }
+                let report = if ext == "glb" {
+                    jd_terrain::mesh::write_glb_mesh(&mesh, extent, &path, 1, None)?
+                } else {
+                    jd_terrain::fbx::export_fbx_mesh(&mesh, &path, "cave", [0.42, 0.40, 0.38])?
+                };
+                Ok((
+                    CaveExportResult {
+                        path,
+                        triangles: report.triangles,
+                        bytes: report.bytes,
+                        voxel_m,
+                        length_m: made.system.length_m(),
+                        entrances: made.system.entrances.clone(),
+                        notes: made.notes,
+                    },
+                    Vec::new(),
+                ))
+            },
+        );
+    }
+
     fn preview_port() -> String {
         "out".to_owned()
     }
@@ -1739,6 +2000,7 @@ pub mod graph {
 
     /// Register graph ops.
     pub fn register_all(r: &mut Registry) {
+        register_caves(r);
         r.register::<NodePreview, crate::ops::terrain::PreviewResult, _>(
             "graph.node_preview",
             "A small u16 preview (base64) of one node's output port — the graph evaluated at a coarse lod through the cache, so a hover thumbnail costs a cache hit after the first look",
@@ -3502,6 +3764,112 @@ pub mod graph {
                 .find(|n| n["id"] == noise_id)
                 .expect("noise");
             assert_eq!(moved["ui"]["position"], serde_json::json!([10.0, 20.0]));
+        }
+
+        #[test]
+        fn a_cave_node_opens_the_terrain_and_meshes_and_exports_its_cave() {
+            use crate::envelope::Status;
+            let reg = Registry::with_builtins();
+            let dir = tempfile::tempdir().expect("tmp");
+            let ctx = Context::default();
+            let world = jd_types::WorldSettings {
+                resolution_px: [128, 128],
+                extent_m: [1024.0, 1024.0],
+                tile_size: 64,
+                halo: 0,
+                ..Default::default()
+            };
+            call(
+                &reg,
+                &ctx,
+                "project.create",
+                serde_json::json!({ "path": dir.path().join("cave.jdproj"), "name": "Cave", "world": world }),
+            );
+            let nodes = call(&reg, &ctx, "graph.list", serde_json::json!({}))
+                .result
+                .expect("list")["nodes"]
+                .clone();
+            let id_of = |kind: &str| {
+                nodes
+                    .as_array()
+                    .expect("nodes")
+                    .iter()
+                    .find(|n| n["kind"] == kind)
+                    .expect(kind)["id"]
+                    .clone()
+            };
+            let (noise, height) = (id_of("jd.noise.fbm@1"), id_of("jd.output.height@1"));
+            let add = |kind: &str, params: serde_json::Value| {
+                call(
+                    &reg,
+                    &ctx,
+                    "graph.add_node",
+                    serde_json::json!({ "kind": kind, "params": params }),
+                )
+                .result
+                .expect("add")["id"]
+                    .clone()
+            };
+            let connect = |from: &serde_json::Value, fp: &str, to: &serde_json::Value, tp: &str| {
+                let r = call(
+                    &reg,
+                    &ctx,
+                    "graph.connect",
+                    serde_json::json!({ "from": from, "from_port": fp, "to": to, "to_port": tp }),
+                );
+                assert_eq!(r.status, Status::Ok, "{:?}", r.error);
+            };
+            let cave = add(
+                "jd.cave.system@1",
+                serde_json::json!({ "kind": "mountain", "seed": 2, "reach_m": 250, "entrances": [[300.0, 500.0]] }),
+            );
+            connect(&noise, "out", &cave, "in");
+            connect(&cave, "out", &height, "in");
+            let holes = add(
+                "jd.output.height@1",
+                serde_json::json!({ "layer": "cave_holes" }),
+            );
+            connect(&cave, "holes", &holes, "in");
+            let ev = call(&reg, &ctx, "graph.evaluate", serde_json::json!({}));
+            assert_eq!(ev.status, Status::Ok, "{:?}", ev.error);
+            let st = call(
+                &reg,
+                &ctx,
+                "terrain.stats",
+                serde_json::json!({ "layer": "cave_holes" }),
+            )
+            .result
+            .expect("stats");
+            assert!(
+                st["stats"]["max"].as_f64() == Some(1.0),
+                "the mouth opens the terrain: {st}"
+            );
+            let m = call(
+                &reg,
+                &ctx,
+                "caves.mesh",
+                serde_json::json!({ "id": cave, "lod": 0 }),
+            );
+            assert_eq!(m.status, Status::Ok, "{:?}", m.error);
+            let m = m.result.expect("mesh");
+            assert!(m["walls"]["triangles"].as_u64().expect("tris") > 1000);
+            assert!(m["length_m"].as_f64().expect("len") > 150.0);
+            assert_eq!(m["entrances"][0]["kind"], "portal");
+            for name in ["cave.glb", "cave.fbx", "cave.json"] {
+                let r = call(
+                    &reg,
+                    &ctx,
+                    "caves.export",
+                    serde_json::json!({ "id": cave, "path": name }),
+                );
+                assert_eq!(r.status, Status::Ok, "{:?}", r.error);
+                assert!(dir.path().join("cave.jdproj/exports").join(name).is_file());
+            }
+            let wrong = call(&reg, &ctx, "caves.mesh", serde_json::json!({ "id": noise }));
+            assert_eq!(
+                wrong.error.map(|e| e.code),
+                Some(ErrorCode::E_INPUT_INVALID)
+            );
         }
 
         #[test]
