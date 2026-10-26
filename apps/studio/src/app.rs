@@ -75,6 +75,8 @@ enum Msg {
     Log(String, Level),
     /// Baked maps for a layer (`terrain.textures`, decoded on the worker) and the bake's time.
     Maps(String, Result<crate::viewport::Maps, String>, u64),
+    /// The horizon skirt's preview (`terrain.horizon`).
+    Horizon(Result<jd_terrain::preview::Preview, String>),
     /// The physical-sky preview (`sky.preview`, decoded) for this sun.
     Sky(SunLook, Result<crate::viewport::Image, String>),
 }
@@ -146,6 +148,7 @@ pub struct StudioApp {
     editor: Option<Editor>,
     editor_error: Option<String>,
     sky_for: Option<SunLook>,
+    show_horizon: bool,
 }
 
 impl StudioApp {
@@ -187,6 +190,7 @@ impl StudioApp {
             editor: None,
             editor_error: None,
             sky_for: None,
+            show_horizon: false,
         };
         // The desktop bakes the sky on mount, project or not.
         app.fetch_sky(SunLook::of(&Value::Null));
@@ -418,6 +422,14 @@ impl StudioApp {
                         }
                     }
                 }
+                Msg::Horizon(preview) => {
+                    self.reads = self.reads.saturating_sub(1);
+                    match preview {
+                        Ok(pv) if self.show_horizon => self.viewport.set_horizon(Some((&pv, 3.0))),
+                        Ok(_) => {}
+                        Err(e) => self.log(format!("terrain.horizon: {e}"), Level::Error),
+                    }
+                }
                 Msg::Sky(sun, sky) => {
                     self.reads = self.reads.saturating_sub(1);
                     match sky {
@@ -537,6 +549,7 @@ impl StudioApp {
                     Some(Ok((pv, bytes))) => {
                         self.viewport.set_terrain(&pv, extent);
                         self.fetch_maps();
+                        self.fetch_horizon();
                         self.preview = Some((
                             lod,
                             bytes as f64 / 1_048_576.0,
@@ -572,6 +585,26 @@ impl StudioApp {
                 (None, None) => Err("no result".into()),
             };
             let _ = tx.send(Msg::Sky(sun, sky));
+            ctx.request_repaint();
+        });
+    }
+
+    /// The desktop's `refreshHorizon`: the noise continued over 3 × the world at 256².
+    fn fetch_horizon(&mut self) {
+        if !self.show_horizon || self.project.is_none() {
+            return;
+        }
+        let request = Self::request("terrain.horizon", json!({ "scale": 3.0, "px": 256 }));
+        let (server, tx, ctx) = (self.server.clone(), self.tx.clone(), self.ctx.clone());
+        self.reads += 1;
+        std::thread::spawn(move || {
+            let r = server.invoke(request);
+            let preview = match (&r.result, &r.error) {
+                (Some(v), _) => decode_preview(v).map(|(p, _)| p),
+                (None, Some(e)) => Err(format!("{} {}", e.code.as_str(), e.message)),
+                (None, None) => Err("no result".into()),
+            };
+            let _ = tx.send(Msg::Horizon(preview));
             ctx.request_repaint();
         });
     }
@@ -783,11 +816,19 @@ impl StudioApp {
                 if self.busy > 0 {
                     ui.label(RichText::new("working…").size(12.0).color(color::ACCENT));
                 }
-                ui.label(
-                    RichText::new(self.viewport_info())
-                        .size(12.0)
-                        .color(color::FG2),
-                );
+                // The readout takes what the toolbar and the layer picker leave, truncated with an
+                // ellipsis rather than running under the toolbar.
+                let picker = if self.layers.len() > 1 { 200.0 } else { 0.0 };
+                let room = (ui.available_width() - picker).max(0.0);
+                let info = self.viewport_info();
+                ui.allocate_ui(egui::vec2(room, ui.available_height()), |ui| {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.add(
+                            egui::Label::new(RichText::new(info).size(12.0).color(color::FG2))
+                                .truncate(),
+                        );
+                    });
+                });
                 if self.layers.len() > 1 {
                     let mut selected = self.layer.clone();
                     egui::ComboBox::from_id_salt("layer-pick")
@@ -834,6 +875,9 @@ impl StudioApp {
         }
         if self.viewport.frame && self.viewport.info().is_some() {
             s += " · box";
+        }
+        if let Some(px) = self.viewport.horizon_px() {
+            s += &format!(" · horizon {px}²");
         }
         if let Some((lod, mb, ms)) = self.preview {
             s += &format!(" · preview lod {lod}, {mb:.2} MB in {ms} ms");
@@ -985,6 +1029,14 @@ impl StudioApp {
             Action::Fullscreen => self.set_fullscreen(ctx, !self.fullscreen),
             Action::Frame => self.viewport.set_frame(!self.viewport.frame),
             Action::Graph => self.open_editor(),
+            Action::Horizon => {
+                self.show_horizon = !self.show_horizon;
+                if self.show_horizon {
+                    self.fetch_horizon();
+                } else {
+                    self.viewport.set_horizon(None);
+                }
+            }
             Action::Insert(k) => self.add_layer(crate::chrome::STRIP[k].3),
         }
     }
@@ -1371,6 +1423,7 @@ impl eframe::App for StudioApp {
                     distance_m: cam.radius,
                     range_m: self.viewport.info().map(|i| i.range_m),
                     frame: self.viewport.frame,
+                    horizon: self.show_horizon,
                     enabled: self.project.is_some() && self.busy == 0,
                     can_still: self.project.is_some() && self.viewport.info().is_some(),
                 };

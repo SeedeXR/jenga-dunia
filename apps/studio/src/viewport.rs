@@ -470,6 +470,70 @@ struct Mesh {
     rim: Option<(wgpu::Buffer, u32)>,
 }
 
+/// A preview as the desktop's `buildTerrainGeometry`: a grid over `extent_m` centred on the
+/// origin, row 0 to the south (+z), absolute heights, the height ramp blended to rock by slope.
+fn grid_mesh(pv: &Preview, extent_m: [f32; 2]) -> (Vec<Vertex>, Vec<u32>) {
+    let (w, h) = (pv.width.max(2), pv.height.max(2));
+    let q =
+        |x: u32, y: u32| pv.data[(y.min(pv.height - 1) * pv.width + x.min(pv.width - 1)) as usize];
+    let at = |x: u32, y: u32| pv.min + f32::from(q(x, y)) / 65535.0 * (pv.max - pv.min);
+    let (dx, dz) = (extent_m[0] / (w - 1) as f32, extent_m[1] / (h - 1) as f32);
+    let mut vertices = Vec::with_capacity((w * h) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            // Central differences (one-sided at the border).
+            let (l, r) = (at(x.saturating_sub(1), y), at(x + 1, y));
+            let (south, north) = (at(x, y.saturating_sub(1)), at(x, y + 1));
+            let nx = (l - r) / (dx * (x.min(w - 2) + 1 - x.saturating_sub(1)) as f32);
+            let nz = (north - south) / (dz * (y.min(h - 2) + 1 - y.saturating_sub(1)) as f32);
+            let normal = normalize([nx, 1.0, nz]);
+            let slope = ((1.0 - normal[1]) * 1.4).clamp(0.0, 1.0);
+            let c = ramp(q(x, y));
+            vertices.push(Vertex {
+                pos: [
+                    x as f32 * dx - extent_m[0] / 2.0,
+                    at(x, y),
+                    extent_m[1] / 2.0 - y as f32 * dz,
+                ],
+                normal,
+                color: [0, 1, 2].map(|i| c[i] + (ROCK[i] - c[i]) * slope),
+                uv: [x as f32 / (w - 1) as f32, y as f32 / (h - 1) as f32],
+            });
+        }
+    }
+    let mut indices = Vec::with_capacity(((w - 1) * (h - 1) * 6) as usize);
+    for y in 0..h - 1 {
+        for x in 0..w - 1 {
+            let i = y * w + x;
+            indices.extend_from_slice(&[i, i + w, i + 1, i + 1, i + w, i + w + 1]);
+        }
+    }
+    (vertices, indices)
+}
+
+/// The desktop's horizon skirt: the noise continued over `scale` × the world, the ramp colours a
+/// touch dimmer (× 0.85), never the maps, and the triangles over the world itself dropped so the
+/// real terrain shows through the hole.
+fn skirt_mesh(pv: &Preview, world_m: [f32; 2], scale: f32) -> (Vec<Vertex>, Vec<u32>) {
+    let (mut vertices, indices) = grid_mesh(pv, [world_m[0] * scale, world_m[1] * scale]);
+    for v in &mut vertices {
+        v.color = v.color.map(|c| c * 0.85);
+        v.uv = [-1.0, -1.0];
+    }
+    let kept: Vec<u32> = indices
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .filter(|t| {
+            let c = |k: usize| t.iter().map(|&i| vertices[i as usize].pos[k]).sum::<f32>() / 3.0;
+            c(0).abs() > world_m[0] / 2.0 || c(2).abs() > world_m[1] / 2.0
+        })
+        .flatten()
+        .copied()
+        .collect();
+    (vertices, kept)
+}
+
 /// The framed block of a preview (the desktop's `buildFrame`): walls from the edge profile down
 /// to `base`, flat-shaded facing out, and the rim — the edge profile and the base rectangle.
 fn frame_geometry(vertices: &[Vertex], w: u32, h: u32, base: f32) -> Frame {
@@ -510,6 +574,9 @@ pub struct Viewport {
     mesh: Option<Mesh>,
     pending: Option<(Vec<Vertex>, Vec<u32>, Option<Frame>)>,
     pending_maps: Option<Option<Maps>>,
+    pending_skirt: Option<Option<(Vec<Vertex>, Vec<u32>)>>,
+    skirt: Option<(wgpu::Buffer, wgpu::Buffer, u32)>,
+    skirt_px: Option<u32>,
     /// The preview shown and its extent (the frame toggle rebuilds from it).
     shown: Option<(Preview, [f32; 2])>,
     pending_sky: Option<Option<Image>>,
@@ -536,6 +603,9 @@ impl Default for Viewport {
             mesh: None,
             pending: None,
             pending_maps: None,
+            pending_skirt: None,
+            skirt: None,
+            skirt_px: None,
             shown: None,
             pending_sky: None,
             info: None,
@@ -559,44 +629,7 @@ impl Viewport {
     pub fn set_terrain(&mut self, pv: &Preview, extent_m: [f32; 2]) {
         self.shown = Some((pv.clone(), extent_m));
         let (w, h) = (pv.width.max(2), pv.height.max(2));
-        let q = |x: u32, y: u32| {
-            pv.data[(y.min(pv.height - 1) * pv.width + x.min(pv.width - 1)) as usize]
-        };
-        let at = |x: u32, y: u32| pv.min + f32::from(q(x, y)) / 65535.0 * (pv.max - pv.min);
-        let (dx, dz) = (extent_m[0] / (w - 1) as f32, extent_m[1] / (h - 1) as f32);
-        let mut vertices = Vec::with_capacity((w * h) as usize);
-        for y in 0..h {
-            for x in 0..w {
-                let height = at(x, y);
-                // Central differences (one-sided at the border). The preview's row 0 is the south
-                // edge (+z), as in the desktop, so z falls as the row index grows.
-                let (l, r) = (at(x.saturating_sub(1), y), at(x + 1, y));
-                let (south, north) = (at(x, y.saturating_sub(1)), at(x, y + 1));
-                let nx = (l - r) / (dx * (x.min(w - 2) + 1 - x.saturating_sub(1)) as f32);
-                let nz = (north - south) / (dz * (y.min(h - 2) + 1 - y.saturating_sub(1)) as f32);
-                let normal = normalize([nx, 1.0, nz]);
-                // Steep faces read as rock regardless of altitude (the desktop's slope blend).
-                let slope = ((1.0 - normal[1]) * 1.4).clamp(0.0, 1.0);
-                let c = ramp(q(x, y));
-                vertices.push(Vertex {
-                    pos: [
-                        x as f32 * dx - extent_m[0] / 2.0,
-                        height,
-                        extent_m[1] / 2.0 - y as f32 * dz,
-                    ],
-                    normal,
-                    color: [0, 1, 2].map(|i| c[i] + (ROCK[i] - c[i]) * slope),
-                    uv: [x as f32 / (w - 1) as f32, y as f32 / (h - 1) as f32],
-                });
-            }
-        }
-        let mut indices = Vec::with_capacity(((w - 1) * (h - 1) * 6) as usize);
-        for y in 0..h - 1 {
-            for x in 0..w - 1 {
-                let i = y * w + x;
-                indices.extend_from_slice(&[i, i + w, i + 1, i + 1, i + w, i + w + 1]);
-            }
-        }
+        let (vertices, indices) = grid_mesh(pv, extent_m);
         let refit = self.info.as_ref().is_none_or(|i| i.extent_m != extent_m);
         self.info = Some(TerrainInfo {
             size: [pv.width, pv.height],
@@ -635,6 +668,7 @@ impl Viewport {
     /// Drop the terrain (no project, or no layer).
     pub fn clear(&mut self) {
         self.shown = None;
+        self.set_horizon(None);
         self.mesh = None;
         self.pending = None;
         self.info = None;
@@ -648,6 +682,22 @@ impl Viewport {
         self.emissive = maps.as_ref().is_some_and(|m| m.emissive.is_some());
         self.pending_maps = Some(maps);
         self.dirty = true;
+    }
+
+    /// The horizon skirt: this preview of the noise over `scale` × the world (`None`: off).
+    pub fn set_horizon(&mut self, horizon: Option<(&Preview, f32)>) {
+        let world = self.info.as_ref().map(|i| i.extent_m);
+        self.skirt_px = horizon.map(|(pv, _)| pv.width);
+        self.pending_skirt = Some(match (horizon, world) {
+            (Some((pv, scale)), Some(world)) => Some(skirt_mesh(pv, world, scale)),
+            _ => None,
+        });
+        self.dirty = true;
+    }
+
+    /// The skirt's samples per side while it is shown.
+    pub fn horizon_px(&self) -> Option<u32> {
+        self.skirt_px
     }
 
     /// The physical-sky preview on the dome (`None`: the gradient).
@@ -784,6 +834,32 @@ impl Viewport {
         if rebind {
             gpu.bind_group = bind_group(rs, gpu);
         }
+        if let Some(skirt) = self.pending_skirt.take() {
+            use wgpu::util::DeviceExt as _;
+            self.skirt = skirt.map(|(v, i)| {
+                let buf = |label, contents: &[u8], usage| {
+                    rs.device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some(label),
+                            contents,
+                            usage,
+                        })
+                };
+                (
+                    buf(
+                        "skirt vertices",
+                        bytemuck::cast_slice(&v),
+                        wgpu::BufferUsages::VERTEX,
+                    ),
+                    buf(
+                        "skirt indices",
+                        bytemuck::cast_slice(&i),
+                        wgpu::BufferUsages::INDEX,
+                    ),
+                    i.len() as u32,
+                )
+            });
+        }
         if let Some((v, i, frame)) = self.pending.take() {
             self.mesh = Some(upload(rs, &v, &i, frame.as_ref()));
         }
@@ -917,6 +993,12 @@ impl Viewport {
             pass.set_pipeline(&gpu.sky);
             pass.draw(0..3, 0..1);
             pass.set_pipeline(&gpu.terrain);
+            // The skirt first (the desktop's renderOrder −0.5), then the world.
+            if let Some((v, i, n)) = &self.skirt {
+                pass.set_vertex_buffer(0, v.slice(..));
+                pass.set_index_buffer(i.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..*n, 0, 0..1);
+            }
             pass.set_vertex_buffer(0, mesh.vertices.slice(..));
             pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..mesh.count, 0, 0..1);
@@ -1416,6 +1498,26 @@ mod tests {
         let (_, u, f) = cam.basis(1.5);
         let top = normalize([f[0] + u[0], f[1] + u[1], f[2] + u[2]]);
         assert!((dot(top, f).acos() - 25f32.to_radians()).abs() < 1e-4);
+    }
+
+    #[test]
+    fn the_skirt_leaves_a_hole_where_the_world_is() {
+        let pv = Preview {
+            width: 9,
+            height: 9,
+            min: 0.0,
+            max: 10.0,
+            data: vec![30000; 81],
+        };
+        let (v, i) = skirt_mesh(&pv, [100.0, 100.0], 3.0);
+        assert_eq!(v.len(), 81);
+        assert!(v.iter().all(|x| x.uv == [-1.0, -1.0]));
+        // 8 × 8 cells of 37.5 m over 300 m: the centre cells (|centroid| < 50 m) are gone.
+        assert!(i.len() < 8 * 8 * 6 && !i.is_empty());
+        for t in i.as_chunks::<3>().0 {
+            let c = |k: usize| t.iter().map(|&j| v[j as usize].pos[k]).sum::<f32>() / 3.0;
+            assert!(c(0).abs() > 50.0 || c(2).abs() > 50.0);
+        }
     }
 
     #[test]

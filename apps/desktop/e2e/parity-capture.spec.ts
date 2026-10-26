@@ -27,6 +27,13 @@ test("parity capture: desktop", async ({ page }) => {
     await expect(page.getByTestId("viewport-info")).toContainText("sky");
     await page.waitForTimeout(1000);
     await page.screenshot({ path: path.join(out!, "desktop.png") });
+    // The horizon skirt (JD_PARITY_HORIZON=1).
+    if (process.env.JD_PARITY_HORIZON) {
+      await page.getByTestId("horizon-toggle").click();
+      await expect(page.getByTestId("viewport-info")).toContainText("horizon 256²", { timeout: 30_000 });
+      await page.waitForTimeout(1000);
+      await page.screenshot({ path: path.join(out!, "desktop-horizon.png") });
+    }
   } finally {
     rmSync(ws, { recursive: true, force: true });
   }

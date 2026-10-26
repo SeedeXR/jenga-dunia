@@ -24,6 +24,8 @@ pub enum Action {
     Frame,
     /// Show the node graph (the Editor window).
     Graph,
+    /// Horizon skirt on / off.
+    Horizon,
     /// Insert this node before the height output (the layer strip).
     Insert(usize),
 }
@@ -119,6 +121,8 @@ pub struct State {
     pub range_m: Option<[f32; 2]>,
     /// Framed block on.
     pub frame: bool,
+    /// Horizon skirt on.
+    pub horizon: bool,
     /// A project is open and nothing is running (the desktop's `!s.project || s.busy`).
     pub enabled: bool,
     /// Still possible (a terrain is shown).
@@ -207,7 +211,7 @@ pub fn show(ui: &mut Ui, rect: Rect, st: &State) -> Option<Action> {
         x += 32.0;
     }
     // Top right: Graph, Sculpt (right-28), Road (right-52), Horizon (right-72), Grid (right-[23.5rem]).
-    // ponytail: Sculpt, Road, Horizon and Grid are the next P3 slices; shown disabled until then.
+    // ponytail: Sculpt, Road and Grid are the next P3 slices; shown disabled until then.
     for (right, icon, label, tip, act) in [
         (
             8.0,
@@ -235,7 +239,7 @@ pub fn show(ui: &mut Ui, rect: Rect, st: &State) -> Option<Action> {
             "horizon",
             "Horizon",
             "Horizon: continue the noise beyond the world's border as a coarse skirt (same seed, so it matches at the edge; erosion is not continued)",
-            None,
+            Some(Action::Horizon),
         ),
         (
             376.0,
@@ -256,7 +260,8 @@ pub fn show(ui: &mut Ui, rect: Rect, st: &State) -> Option<Action> {
             vec2(w, 24.0),
         );
         let enabled = act.is_some() && (act == Some(Action::Graph) || st.enabled);
-        if chip(ui, r, icon, Some(label), tip, enabled, false).clicked() {
+        let on = act == Some(Action::Horizon) && st.horizon;
+        if chip(ui, r, icon, Some(label), tip, enabled, on).clicked() {
             action = act;
         }
     }

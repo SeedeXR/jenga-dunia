@@ -163,6 +163,14 @@ fn the_viewport_chrome_inserts_layers_frames_and_fits() {
         .click();
     h.run_steps(2);
     assert!(h.state().viewport.frame);
+    // Horizon: the noise continued over 3 × the world as a 256² skirt; off again removes it.
+    h.get_by_label("Horizon: continue the noise beyond the world's border as a coarse skirt (same seed, so it matches at the edge; erosion is not continued)").click();
+    h.run_steps(1);
+    settle(&mut h, |a| a.viewport.horizon_px().is_some());
+    assert_eq!(h.state().viewport.horizon_px(), Some(256));
+    h.get_by_label("Horizon: continue the noise beyond the world's border as a coarse skirt (same seed, so it matches at the edge; erosion is not continued)").click();
+    h.run_steps(2);
+    assert_eq!(h.state().viewport.horizon_px(), None);
     // Orbit away, then Fit: back to θ 0.6.
     h.state_mut().viewport.camera.theta = 2.0;
     h.get_by_label("Fit: back to the home view").click();
@@ -260,4 +268,12 @@ fn capture_for_docs() {
             && a.viewport.sky_px().is_some()
     });
     h.render().expect("render").save(&out).expect("save png");
+    // The horizon skirt (JD_STUDIO_HORIZON=1): `<capture>-horizon.png` beside it.
+    if std::env::var_os("JD_STUDIO_HORIZON").is_some() {
+        h.get_by_label("Horizon: continue the noise beyond the world's border as a coarse skirt (same seed, so it matches at the edge; erosion is not continued)").click();
+        h.run_steps(1);
+        settle(&mut h, |a| a.viewport.horizon_px().is_some());
+        let out = out.replace(".png", "-horizon.png");
+        h.render().expect("render").save(&out).expect("save png");
+    }
 }

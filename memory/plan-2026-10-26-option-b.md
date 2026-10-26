@@ -116,4 +116,9 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   layer strip is fully live through the same ops. Bug fixed on the way: adding a simulation twice
   published its layer twice and broke evaluation; re-published layers now merge with max.
   Studio's live evaluation uses the desktop's previewLod (⌈log₂(res / 512)⌉).
+- P3 slice 3: the Horizon skirt (terrain.horizon 3× / 256², ramp × 0.85, no maps, the world's
+  footprint cut out, drawn first) — toggle, readout `horizon 256²`, side-by-side checked with
+  JD_PARITY_HORIZON / JD_STUDIO_HORIZON captures; the header readout now truncates beside the
+  toolbar instead of running under it. Left in P3: Grid, Road, Sculpt tools (raycasting), sea,
+  lakes, scatter instances, caves + x-ray, colour overlays, rain, post, stills of flythroughs.
 
