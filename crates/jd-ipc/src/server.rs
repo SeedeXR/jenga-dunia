@@ -192,6 +192,7 @@ impl Shared {
 
     fn invoke(&self, request: Request) -> Response {
         let op = request.op.clone();
+        let client = request.client.as_ref().map(|c| c.kind.clone());
         let scope = self.registry.get(&op).map(|o| o.scope);
         let response = self.registry.invoke(&self.ctx, request);
         // ponytail: detached jobs (`accepted`) change the project later; their `job` events land
@@ -204,7 +205,8 @@ impl Shared {
         if response.status == Status::Ok && changes {
             self.emit(
                 "project_changed",
-                json!({ "op": op, "request_id": response.request_id, "scope": scope }),
+                // `client`: who wrote (a window skips its own writes, its reply refreshes it).
+                json!({ "op": op, "request_id": response.request_id, "scope": scope, "client": client }),
             );
         }
         response

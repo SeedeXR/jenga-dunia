@@ -213,6 +213,10 @@ fn project_writes_and_emitted_events_reach_every_client() {
         assert_eq!(d["op"], "test.write");
         assert_eq!(d["scope"], "project-write");
         assert!(d["request_id"].is_string());
+        assert_eq!(
+            d["client"], "gui-test",
+            "the writer, so a window can skip its own writes"
+        );
     }
     // Only the write announced a change.
     assert_eq!(
