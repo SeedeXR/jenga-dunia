@@ -571,6 +571,62 @@ fn the_colour_picker_draws_a_layer_on_the_terrain_and_back() {
     assert!(!h.state().viewport_readout().contains(" · colour"));
 }
 
+#[test]
+fn the_caves_section_adds_shows_x_rays_maps_and_exports_a_cave() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window(engine(dir.path()));
+    settle(&mut h, |a| a.viewport.info().is_some());
+    // Add cave (karst, the first kind): the node goes in, the graph evaluates, the cave is meshed.
+    h.get_by_label("Add cave").scroll_to_me();
+    h.run();
+    h.get_by_label("Add cave").click();
+    h.run_steps(1);
+    settle(&mut h, |a| a.viewport.cave_triangles() > 0);
+    let readout = h.state().viewport_readout();
+    let tris = h.state().viewport.cave_triangles();
+    assert!(
+        readout.contains(&format!(" · caves {} tris", thousands(tris as usize))),
+        "{readout}"
+    );
+    // The cave's line: `Karst (limestone) · 1.24 km · 2 entrances …`.
+    h.get(egui_kittest::kittest::by().label_contains("Karst (limestone) · "))
+        .scroll_to_me();
+    h.get(egui_kittest::kittest::by().label_contains(" km · "));
+    // X-ray 20 %: the readout says so and the terrain turns see-through.
+    let (_, before) = covered(&mut h);
+    h.get_by_role_and_label(eframe::egui::accesskit::Role::Slider, "X-ray 0 %")
+        .focus();
+    h.run();
+    for _ in 0..4 {
+        h.key_press(eframe::egui::Key::ArrowRight);
+        h.run();
+    }
+    assert!(h.state().viewport_readout().contains(" · x-ray 20 %"));
+    let (_, after) = covered(&mut h);
+    let changed = before.iter().zip(&after).filter(|(a, b)| a != b).count();
+    assert!(
+        changed * 10 > before.len(),
+        "only {changed} of {} pixels changed",
+        before.len()
+    );
+    // Footprint: the cave_plan layer as the colour.
+    h.get_by_label("Footprint").scroll_to_me();
+    h.run();
+    h.get_by_label("Footprint").click();
+    h.run_steps(1);
+    settle(&mut h, |a| a.viewport.overlay_on());
+    assert!(h.state().viewport_readout().contains(" · colour cave_plan"));
+    h.get_by_label("Footprint on");
+    // .glb: the walls and speleothems into exports/cave_1.glb.
+    h.get_by_label(".glb").click();
+    h.run_steps(1);
+    settle(&mut h, |a| {
+        a.log_lines()
+            .any(|l| l.text.starts_with("caves.export: ok"))
+    });
+    assert!(dir.path().join("Kit.jdproj/exports/cave_1.glb").exists());
+}
+
 /// `JD_STUDIO_CAPTURE=<png> cargo test -p jd-studio --test window -- --ignored capture`: the
 /// window rendered offscreen (no screen capture involved) on the project the desktop's
 /// `e2e/parity-capture.spec.ts` builds — same world, seed and starter graph — at the same
@@ -629,6 +685,23 @@ fn capture_for_docs() {
         h.run_steps(1);
         settle(&mut h, |a| a.viewport.instance_count() > 0);
         let out = out.replace(".png", "-scatter.png");
+        h.render().expect("render").save(&out).expect("save png");
+    }
+    // A cave (JD_STUDIO_CAVE=1), as the desktop's JD_PARITY_CAVE: `<capture>-cave.png`.
+    if std::env::var_os("JD_STUDIO_CAVE").is_some() {
+        h.get_by_label("Add cave").scroll_to_me();
+        h.run();
+        h.get_by_label("Add cave").click();
+        h.run_steps(1);
+        settle(&mut h, |a| a.viewport.cave_triangles() > 0);
+        h.get_by_role_and_label(eframe::egui::accesskit::Role::Slider, "X-ray 0 %")
+            .focus();
+        h.run();
+        for _ in 0..4 {
+            h.key_press(eframe::egui::Key::ArrowRight);
+            h.run();
+        }
+        let out = out.replace(".png", "-cave.png");
         h.render().expect("render").save(&out).expect("save png");
     }
     // The post effects (JD_STUDIO_POST=1), as the desktop's JD_PARITY_POST: `<capture>-post.png`.

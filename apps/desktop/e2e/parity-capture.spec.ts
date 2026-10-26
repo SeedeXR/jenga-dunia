@@ -42,6 +42,15 @@ test("parity capture: desktop", async ({ page }) => {
       await page.waitForTimeout(1000);
       await page.screenshot({ path: path.join(out!, "desktop-scatter.png") });
     }
+    // A cave (JD_PARITY_CAVE=1): Add cave (karst), then x-ray 20 %.
+    if (process.env.JD_PARITY_CAVE) {
+      await page.getByTestId("cave-add").click();
+      await expect(page.getByTestId("viewport-info")).toContainText(" · caves ", { timeout: 60_000 });
+      await page.getByTestId("caves-xray").fill("0.2");
+      await expect(page.getByTestId("viewport-info")).toContainText("x-ray 20 %");
+      await page.waitForTimeout(1000);
+      await page.screenshot({ path: path.join(out!, "desktop-cave.png") });
+    }
     // The post effects (JD_PARITY_POST=1): exposure 1.5, bloom 0.6, vignette 0.5.
     if (process.env.JD_PARITY_POST) {
       await page.getByTestId("post-exposure").fill("1.5");

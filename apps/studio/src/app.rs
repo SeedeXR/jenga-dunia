@@ -68,6 +68,11 @@ enum Tag {
 
 type Step = Box<dyn FnOnce(&[Response]) -> Option<Request> + Send>;
 
+type CaveMeshes = Vec<(
+    String,
+    Result<(crate::viewport::CaveMesh, CaveSummary), String>,
+)>;
+
 enum Msg {
     Reply {
         tag: Tag,
@@ -83,6 +88,9 @@ enum Msg {
     Log(String, Level),
     /// Baked maps for a layer (`terrain.textures`, decoded on the worker) and the bake's time.
     Maps(String, Result<crate::viewport::Maps, String>, u64),
+    /// `caves.mesh` for every cave node (fetch generation, then per node its id and the mesh with
+    /// its summary, or the error).
+    Caves(u64, CaveMeshes),
     /// The colour layer's preview (`name`, then the preview or the error).
     Color(String, Result<jd_terrain::preview::Preview, String>),
     /// The `lakes` depth layer's preview, for the terrain preview of this layer.
@@ -197,6 +205,42 @@ pub struct StudioApp {
     /// The toolbar's colour layer (the desktop's `colorLayer`): drawn on the terrain instead of
     /// the height ramp.
     color_layer: Option<String>,
+    /// The Caves section: the kind to add, Show caves, X-ray, each cave node's `caves.mesh`
+    /// summary, and the generation of the newest mesh fetch (older ones are dropped).
+    cave_kind: usize,
+    show_caves: bool,
+    xray: f64,
+    caves: Vec<CaveRow>,
+    cave_gen: u64,
+}
+
+/// The desktop's cave kinds (`CAVE_KINDS`): node kind and label.
+const CAVE_KINDS: [(&str, &str); 9] = [
+    ("karst", "Karst (limestone)"),
+    ("mountain", "Hill / mountain"),
+    ("lava_tube", "Lava tube"),
+    ("sea_cave", "Sea cave"),
+    ("mine", "Mine"),
+    ("tunnel", "Road tunnel"),
+    ("catacombs", "Catacombs"),
+    ("maze", "Maze (gypsum)"),
+    ("flank_margin", "Coastal chambers"),
+];
+
+/// One cave node as the panel lists it: `caves.mesh`'s summary, or why it failed.
+#[derive(Debug, Clone)]
+struct CaveRow {
+    id: String,
+    summary: Result<CaveSummary, String>,
+}
+
+#[derive(Debug, Clone)]
+struct CaveSummary {
+    length_m: f64,
+    entrances: usize,
+    speleothems: u64,
+    water_level_m: Option<f64>,
+    notes: Vec<String>,
 }
 
 /// The look's scatter settings as the panel edits them (number fields as typed).
@@ -300,6 +344,11 @@ impl StudioApp {
             scatter_points: None,
             scatter_model: String::new(),
             color_layer: None,
+            cave_kind: 0,
+            show_caves: true,
+            xray: 0.0,
+            caves: Vec::new(),
+            cave_gen: 0,
         };
         // The desktop bakes the sky on mount, project or not.
         app.fetch_sky(SunLook::of(&Value::Null));
@@ -546,6 +595,25 @@ impl StudioApp {
                         }
                     }
                 }
+                Msg::Caves(cave_gen, caves) => {
+                    self.reads = self.reads.saturating_sub(1);
+                    // A newer fetch is running, or Show caves went off: stale.
+                    if cave_gen != self.cave_gen || !self.show_caves {
+                        continue;
+                    }
+                    let meshes: Vec<_> = caves
+                        .iter()
+                        .filter_map(|(_, r)| r.as_ref().ok().map(|(m, _)| m.clone()))
+                        .collect();
+                    self.viewport.set_caves(&meshes);
+                    self.caves = caves
+                        .into_iter()
+                        .map(|(id, r)| CaveRow {
+                            id,
+                            summary: r.map(|(_, s)| s),
+                        })
+                        .collect();
+                }
                 Msg::Color(name, pv) => {
                     self.reads = self.reads.saturating_sub(1);
                     // Another colour chosen (or none) while fetching: stale.
@@ -766,6 +834,7 @@ impl StudioApp {
                         self.fetch_horizon();
                         self.fetch_lakes(lod);
                         self.fetch_color(lod);
+                        self.fetch_caves(lod);
                         self.preview = Some((
                             lod,
                             bytes as f64 / 1_048_576.0,
@@ -932,6 +1001,261 @@ impl StudioApp {
             let _ = tx.send(Msg::Lakes(layer, pv));
             ctx.request_repaint();
         });
+    }
+
+    /// The cave nodes of the graph, in order.
+    fn cave_nodes(&self) -> Vec<Value> {
+        self.graph["nodes"]
+            .as_array()
+            .map(|n| {
+                n.iter()
+                    .filter(|n| {
+                        n["kind"]
+                            .as_str()
+                            .is_some_and(|k| k.starts_with("jd.cave.system@"))
+                    })
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The desktop's `refreshCaves`: `caves.mesh` for each cave node at the terrain's LOD, on one
+    /// worker; none while Show caves is off.
+    // ponytail: every cave is re-meshed when the terrain shows; the desktop keeps a cave whose
+    // node hash is unchanged — add that when Studio has the evaluation report's hashes.
+    fn fetch_caves(&mut self, lod: u32) {
+        self.cave_gen += 1;
+        let ids: Vec<String> = self
+            .cave_nodes()
+            .iter()
+            .filter_map(|n| n["id"].as_str().map(str::to_owned))
+            .collect();
+        if !self.show_caves || ids.is_empty() {
+            self.caves.clear();
+            return self.viewport.set_caves(&[]);
+        }
+        let (server, tx, ctx, cave_gen) = (
+            self.server.clone(),
+            self.tx.clone(),
+            self.ctx.clone(),
+            self.cave_gen,
+        );
+        self.reads += 1;
+        std::thread::spawn(move || {
+            let out = ids
+                .into_iter()
+                .map(|id| {
+                    let r =
+                        server.invoke(Self::request("caves.mesh", json!({ "id": id, "lod": lod })));
+                    let mesh = match (&r.result, &r.error) {
+                        (Some(v), _) => cave_mesh(v),
+                        (None, Some(e)) => Err(e.message.clone()),
+                        (None, None) => Err("caves.mesh failed".into()),
+                    };
+                    (id, mesh)
+                })
+                .collect();
+            let _ = tx.send(Msg::Caves(cave_gen, out));
+            ctx.request_repaint();
+        });
+    }
+
+    /// One cave's line as the desktop writes it: `1.24 km · 2 entrances · 31 speleothems · water
+    /// 120 m`, the error, or `…` while it is meshed.
+    fn cave_line(&self, id: &str) -> (String, Vec<String>) {
+        match self.caves.iter().find(|c| c.id == id).map(|r| &r.summary) {
+            None => ("…".to_owned(), Vec::new()),
+            Some(Err(e)) => (e.clone(), Vec::new()),
+            Some(Ok(v)) => {
+                let mut t = format!(
+                    "{:.2} km · {} entrance{}",
+                    v.length_m / 1000.0,
+                    v.entrances,
+                    if v.entrances == 1 { "" } else { "s" }
+                );
+                if v.speleothems > 0 {
+                    t += &format!(" · {} speleothems", v.speleothems);
+                }
+                if let Some(w) = v.water_level_m {
+                    t += &format!(" · water {w:.0} m");
+                }
+                (t, v.notes.clone())
+            }
+        }
+    }
+
+    /// The right column's Caves section (the desktop's, in its order).
+    fn caves_card(&mut self, ui: &mut egui::Ui) {
+        look::section(ui, "Caves");
+        let can_add = self.project.is_some() && self.busy == 0;
+        let mut add = false;
+        ui.horizontal(|ui| {
+            let mut k = self.cave_kind;
+            egui::ComboBox::from_id_salt("cave-kind")
+                .width(144.0)
+                .selected_text(RichText::new(CAVE_KINDS[k].1).size(12.0))
+                .show_ui(ui, |ui| {
+                    for (i, (_, label)) in CAVE_KINDS.iter().enumerate() {
+                        ui.selectable_value(&mut k, i, *label);
+                    }
+                })
+                .response
+                .on_hover_text("Kind of cave: what drives where it goes and its shape (docs/research/caves.md)")
+                .widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::accesskit::Role::ComboBox, true, "Cave kind")
+                });
+            self.cave_kind = k;
+            add = look::button(ui, None, "Add cave", false, can_add)
+                .on_hover_text("Add a cave system (a jd.cave.system node in front of the height output; its entrance holes and plan are published as cave_holes / cave_plan)")
+                .clicked();
+        });
+        if add {
+            self.add_layer(crate::chrome::Add::Cave(CAVE_KINDS[self.cave_kind].0));
+        }
+        let mut show = self.show_caves;
+        look::field(ui, "Show caves", |ui| {
+            look::checkbox(ui, &mut show, "Show caves").on_hover_text(
+                "Draw the caves under the terrain (walls, speleothems, entrance markers)",
+            );
+        });
+        if show != self.show_caves {
+            self.show_caves = show;
+            let lod = self.preview.map_or(0, |(lod, ..)| lod);
+            self.fetch_caves(lod);
+        }
+        let footprint = self.color_layer.as_deref() == Some("cave_plan");
+        let has_plan = self.layers.iter().any(|l| l == "cave_plan");
+        let mut toggle = false;
+        look::field(ui, "Map", |ui| {
+            let text = if footprint {
+                "Footprint on"
+            } else {
+                "Footprint"
+            };
+            let fg = if footprint { color::ACCENT } else { color::FG0 };
+            toggle = ui
+                .add_enabled(has_plan, egui::Button::new(RichText::new(text).size(12.0).color(fg)))
+                .on_hover_text("Colour the terrain with the caves' footprint (the cave_plan layer): where something lies underground")
+                .clicked();
+        });
+        if toggle {
+            self.set_color_layer((!footprint).then(|| "cave_plan".to_owned()));
+        }
+        let label = format!("X-ray {} %", (self.xray * 100.0).round());
+        let mut xray = self.xray;
+        look::field(ui, &label, |ui| {
+            ui.add(
+                crate::widgets::Range::new(&mut xray, 0.0..=0.9, &label)
+                    .step(0.05)
+                    .reset(0.0),
+            )
+            .on_hover_text("See through the terrain to the caves under it");
+        });
+        if xray != self.xray {
+            self.xray = (xray * 100.0).round() / 100.0;
+            self.viewport.set_xray(self.xray as f32);
+        }
+        // One box per cave node: its line, the exports, the entrances, the generator's notes.
+        let busy = self.busy > 0;
+        let mut action: Option<(&str, Value)> = None;
+        for (ci, node) in self.cave_nodes().iter().enumerate() {
+            let id = node["id"].as_str().unwrap_or_default().to_owned();
+            let kind = node["params"]["kind"].as_str().unwrap_or("karst");
+            let label = CAVE_KINDS
+                .iter()
+                .find(|(k, _)| *k == kind)
+                .map_or("Cave", |(_, l)| l);
+            let (line, notes) = self.cave_line(&id);
+            let entrances: Vec<[f64; 2]> = node["params"]["entrances"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .map(|e| [e[0].as_f64().unwrap_or(0.0), e[1].as_f64().unwrap_or(0.0)])
+                        .collect()
+                })
+                .unwrap_or_default();
+            egui::Frame::new()
+                .stroke(Stroke::new(1.0, egui::Color32::from_white_alpha(13)))
+                .corner_radius(6.0)
+                .inner_margin(Margin::same(6))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            for ext in ["fbx", "glb"] {
+                                let tip = if ext == "glb" {
+                                    format!("Write exports/cave_{}.glb (walls + speleothems, the terrain export's frame)", ci + 1)
+                                } else {
+                                    format!("Write exports/cave_{}.fbx (for Unity)", ci + 1)
+                                };
+                                if look::button(ui, None, &format!(".{ext}"), false, !busy)
+                                    .on_hover_text(tip)
+                                    .clicked()
+                                {
+                                    action = Some((
+                                        "caves.export",
+                                        json!({ "id": id, "path": format!("cave_{}.{ext}", ci + 1) }),
+                                    ));
+                                }
+                            }
+                            // ponytail: entrance placing (a click on the terrain) lands with the
+                            // viewport tools; the button is shown, off until then.
+                            look::button(ui, None, "Place", false, false).on_hover_text(
+                                "Place entrances by clicking the terrain (sinkholes, mouths, portals — a tunnel takes two)",
+                            );
+                            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(format!("{label} · {line}")).size(11.0).color(color::FG0),
+                                    )
+                                    .wrap(),
+                                );
+                            });
+                        });
+                    });
+                    for (i, e) in entrances.iter().enumerate() {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new(format!("{}. {} m E, {} m N", i + 1, e[0].round(), e[1].round()))
+                                    .size(11.0)
+                                    .color(color::FG1),
+                            );
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                let remove = ui
+                                    .add_enabled(
+                                        !busy,
+                                        egui::Button::new(RichText::new("×").size(11.0).color(color::ERROR)),
+                                    )
+                                    .on_hover_text("Remove this entrance");
+                                let name = format!("Remove entrance {} of cave {}", i + 1, ci + 1);
+                                remove.widget_info(|| {
+                                    egui::WidgetInfo::labeled(egui::accesskit::Role::Button, !busy, &name)
+                                });
+                                if remove.clicked() {
+                                    let rest: Vec<[f64; 2]> = entrances
+                                        .iter()
+                                        .enumerate()
+                                        .filter(|(k, _)| *k != i)
+                                        .map(|(_, e)| *e)
+                                        .collect();
+                                    action = Some((
+                                        "graph.set_param",
+                                        json!({ "id": id, "key": "entrances", "value": rest }),
+                                    ));
+                                }
+                            });
+                        });
+                    }
+                    for n in &notes {
+                        ui.label(RichText::new(n).size(11.0).color(color::WARN));
+                    }
+                });
+            ui.add_space(8.0);
+        }
+        if let Some((op, params)) = action {
+            self.invoke(Tag::User, op, params);
+        }
     }
 
     /// The desktop's `setColorLayer`: the overlay goes until the new layer's preview arrives.
@@ -1896,6 +2220,15 @@ impl StudioApp {
                 thousands(self.viewport.instance_count() as u64)
             );
         }
+        if self.viewport.cave_triangles() > 0 {
+            s += &format!(
+                " · caves {} tris",
+                thousands(self.viewport.cave_triangles())
+            );
+        }
+        if self.xray > 0.0 {
+            s += &format!(" · x-ray {} %", (self.xray * 100.0).round());
+        }
         if self.viewport.lake_cells() > 0 {
             s += &format!(
                 " · lakes {} cells",
@@ -2365,6 +2698,71 @@ fn format_for(path: &str) -> &'static str {
 }
 
 /// A JSON number as JavaScript prints it (4096, not 4096.0).
+/// `caves.mesh`'s result: the arrays decoded for the viewport, and the panel's summary.
+fn cave_mesh(v: &Value) -> Result<(crate::viewport::CaveMesh, CaveSummary), String> {
+    use base64::Engine as _;
+    let bytes = |m: &Value, k: &str| {
+        base64::engine::general_purpose::STANDARD
+            .decode(m[k].as_str().unwrap_or_default())
+            .map_err(|e| format!("{k}: {e}"))
+    };
+    let words = |b: Vec<u8>| -> Vec<[u8; 4]> { b.as_chunks::<4>().0.to_vec() };
+    let arrays = |m: &Value| -> Result<crate::viewport::MeshArrays, String> {
+        Ok(crate::viewport::MeshArrays {
+            positions: words(bytes(m, "positions_base64")?)
+                .into_iter()
+                .map(f32::from_le_bytes)
+                .collect(),
+            normals: words(bytes(m, "normals_base64")?)
+                .into_iter()
+                .map(f32::from_le_bytes)
+                .collect(),
+            indices: words(bytes(m, "indices_base64")?)
+                .into_iter()
+                .map(u32::from_le_bytes)
+                .collect(),
+        })
+    };
+    let water = v["water_level_m"].as_f64();
+    let entrances: Vec<([f32; 3], bool)> = v["entrances"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .map(|e| {
+                    let at = |i: usize| e["at"][i].as_f64().unwrap_or(0.0) as f32;
+                    (
+                        [at(0), at(1), at(2)],
+                        e["underwater"].as_bool().unwrap_or(false),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let summary = CaveSummary {
+        length_m: v["length_m"].as_f64().unwrap_or(0.0),
+        entrances: entrances.len(),
+        speleothems: v["speleothem_count"].as_u64().unwrap_or(0),
+        water_level_m: water,
+        notes: v["notes"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|n| n.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default(),
+    };
+    Ok((
+        crate::viewport::CaveMesh {
+            walls: arrays(&v["walls"])?,
+            speleothems: arrays(&v["speleothems"])?,
+            water_level_m: water.map(|w| w as f32),
+            entrances,
+        },
+        summary,
+    ))
+}
+
 /// A flythrough key as the desktop lists it: `326° · 33° up · 2.7 km`.
 fn fly_key_text(k: &Camera) -> String {
     let heading = (360.0 - k.theta.to_degrees()).rem_euclid(360.0).round();
@@ -2462,6 +2860,8 @@ impl eframe::App for StudioApp {
                         self.sun_card(ui, frame);
                         ui.add_space(12.0);
                         self.scatter_card(ui);
+                        ui.add_space(12.0);
+                        self.caves_card(ui);
                     });
                 });
             egui::Panel::left("panel-left")

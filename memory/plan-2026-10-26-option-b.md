@@ -163,5 +163,19 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   layer); its preview at the terrain's LOD recolours the mesh with the desktop's overlayColor
   (class maps 0..32 → golden-angle HSL palette, `heat` → lava ramp, else the mask gradient), the
   maps off while it is on (readout `colour X`, no `pbr`); dropped when the layer is no longer
-  published. Next: Caves (+ x-ray, Footprint = colour cave_plan), Actions, Simulation layers,
-  Materials, Noise, Export; then the left column (Real world, Reference image, Layers, Settings).
+  published.
+- P4 slice 5 (Caves) + P3 caves / x-ray: kind + Add cave (graph.add_cave via add_layer), Show
+  caves, Map → Footprint (colour cave_plan), X-ray 0..0.9, one box per cave node (line, .glb /
+  .fbx via caves.export, entrances with remove via graph.set_param, notes). caves.mesh per node
+  after each terrain show (stale fetches dropped by generation); viewport: walls blue-green below
+  the water level else rock, cream speleothems, three's SphereGeometry(r, 12, 8) entrance
+  markers; x-ray = three's order (markers, caves with no depth test and their glow, then the
+  terrain blended at 1 − x-ray, depth written below 0.5), the block's walls and rim hidden.
+  Readout `caves N tris · x-ray N %`. Parity capture JD_PARITY_CAVE / JD_STUDIO_CAVE: same cave
+  and markers; triangle counts differ only by LOD (the desktop shows its live preview at lod 1 —
+  live evaluation in Studio is still to port). Entrance placing (Place) waits for the viewport
+  click tools. CI: wire()'s 2.5 s log poll was too short on the runner (one log query ≈ 1.5 s
+  while the page renders; trace-checked) → 10 s.
+  Next: Actions, Simulation layers, Materials, Noise, Export; then the left column (Real world,
+  Reference image, Layers, Settings); the viewport click tools (cave entrances, sculpt, grid,
+  road); live evaluation.

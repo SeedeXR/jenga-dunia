@@ -31,6 +31,17 @@ struct Vertex {
     uv: [f32; 2],
 }
 
+/// A cave or entrance-marker vertex: albedo, emissive glow, and (roughness, glow always on).
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct CaveVertex {
+    pos: [f32; 3],
+    normal: [f32; 3],
+    color: [f32; 3],
+    glow: [f32; 3],
+    extra: [f32; 2],
+}
+
 /// A coloured point of a line or of the sea (linear RGB and alpha).
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -312,7 +323,8 @@ struct Uniforms {
     fog: [f32; 4],
     /// x: baked maps on, y: emissive map on, z: sky texture on, w: sky radius (metres).
     flags: [f32; 4],
-    /// x: seconds, y: wave components, z: waves animate (0 / 1), w unused.
+    /// x: seconds, y: wave components, z: waves animate (0 / 1), w: x-ray 0..0.9 (the terrain's
+    /// opacity is 1 − w, the caves glow while it is above 0).
     time: [f32; 4],
     /// Up to three Gerstner components: [amplitude, wavelength, direction°, speed], [phase, …].
     waves: [[f32; 4]; 6],
@@ -440,6 +452,42 @@ fn fs_main(i: VsOut) -> @location(0) vec4<f32> {
         }
     }
     let c = shade(albedo, n, i.world, roughness, 0.0, flat_n) + emissive;
+    // X-ray: the see-through pipelines blend the terrain at 1 − x-ray.
+    return vec4<f32>(fogged(c, i.world), 1.0 - u.time.w);
+}
+
+// Caves and their entrance markers (three's MeshStandardMaterial, double-sided: the normal turns
+// to face the eye on back faces). `extra.x` roughness; the glow is emissive always (`extra.y` 1,
+// the markers) or only while the terrain is x-rayed (the walls and speleothems).
+struct CaveOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) world: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) color: vec3<f32>,
+    @location(3) glow: vec3<f32>,
+    @location(4) extra: vec2<f32>,
+};
+
+@vertex
+fn cave_vs(@location(0) pos: vec3<f32>, @location(1) normal: vec3<f32>, @location(2) color: vec3<f32>, @location(3) glow: vec3<f32>, @location(4) extra: vec2<f32>) -> CaveOut {
+    var o: CaveOut;
+    o.clip = u.view_proj * vec4<f32>(pos, 1.0);
+    o.world = pos;
+    o.normal = normal;
+    o.color = color;
+    o.glow = glow;
+    o.extra = extra;
+    return o;
+}
+
+@fragment
+fn cave_fs(i: CaveOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    var n = normalize(i.normal);
+    if (!front) {
+        n = -n;
+    }
+    let lit = select(0.0, 1.0, u.time.w > 0.0);
+    let c = shade(i.color, n, i.world, i.extra.x, 0.0, n) + i.glow * max(i.extra.y, lit);
     return vec4<f32>(fogged(c, i.world), 1.0);
 }
 
@@ -834,6 +882,10 @@ pub struct TerrainInfo {
 
 struct Gpu {
     terrain: wgpu::RenderPipeline,
+    /// X-ray: the terrain blended at 1 − x-ray, writing depth below 0.5 (three's depthWrite).
+    terrain_see: [wgpu::RenderPipeline; 2],
+    /// Caves depth-tested, and over the terrain while x-rayed (no depth test, no depth write).
+    caves: [wgpu::RenderPipeline; 2],
     instances: wgpu::RenderPipeline,
     lines: wgpu::RenderPipeline,
     sea: wgpu::RenderPipeline,
@@ -880,6 +932,66 @@ struct Mesh {
 
 /// A preview as the desktop's `buildTerrainGeometry`: a grid over `extent_m` centred on the
 /// origin, row 0 to the south (+z), absolute heights, the height ramp blended to rock by slope.
+/// Indexed triangles: f32 xyz positions and normals, u32 indices (`caves.mesh`'s arrays).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MeshArrays {
+    /// xyz per vertex.
+    pub positions: Vec<f32>,
+    /// Unit normals per vertex (walls: facing into the cave).
+    pub normals: Vec<f32>,
+    /// Triangle indices.
+    pub indices: Vec<u32>,
+}
+
+/// One cave system as `caves.mesh` returns it: walls and speleothems already in the terrain frame,
+/// the entrances in layer metres (`[u, v, z]`, underwater or not).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CaveMesh {
+    /// The passages' walls.
+    pub walls: MeshArrays,
+    /// Stalactites, stalagmites and columns.
+    pub speleothems: MeshArrays,
+    /// Flooded below this height.
+    pub water_level_m: Option<f32>,
+    /// Where the cave opens.
+    pub entrances: Vec<([f32; 3], bool)>,
+}
+
+/// three's `SphereGeometry(r, 12, 8)`: (positions, normals, indices), poles skipped as three does.
+fn sphere(r: f32) -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u32>) {
+    let (ws, hs) = (12_u32, 8_u32);
+    let (mut pos, mut nrm, mut idx) = (Vec::new(), Vec::new(), Vec::new());
+    for iy in 0..=hs {
+        let v = iy as f32 / hs as f32;
+        for ix in 0..=ws {
+            let u = ix as f32 / ws as f32;
+            let (st, ct) = (v * std::f32::consts::PI).sin_cos();
+            let (sp, cp) = (u * std::f32::consts::TAU).sin_cos();
+            let n = [-cp * st, ct, sp * st];
+            pos.push(n.map(|c| c * r));
+            nrm.push(n);
+        }
+    }
+    let at = |ix: u32, iy: u32| iy * (ws + 1) + ix;
+    for iy in 0..hs {
+        for ix in 0..ws {
+            let (a, b, c, d) = (
+                at(ix + 1, iy),
+                at(ix, iy),
+                at(ix, iy + 1),
+                at(ix + 1, iy + 1),
+            );
+            if iy != 0 {
+                idx.extend([a, b, d]);
+            }
+            if iy != hs - 1 {
+                idx.extend([b, c, d]);
+            }
+        }
+    }
+    (pos, nrm, idx)
+}
+
 /// Scatter instances for the viewport: points in layer metres (u east, v north from the south
 /// edge, z height, r 0..1, age 0..1) drawn as one shape — the desktop's 1 m proxy cone, or a rock
 /// for rock-named masks.
@@ -1271,6 +1383,12 @@ pub struct Viewport {
     pending_instances: Option<Option<ScatterGeometry>>,
     instances: Option<(wgpu::Buffer, u32, wgpu::Buffer, u32)>,
     instance_count: usize,
+    /// Caves: walls + speleothems (x-ray glow), and the entrance markers, each (vertices, indices)
+    /// to upload, then on the GPU; their wall and speleothem triangles; the x-ray amount.
+    pending_caves: Option<[(Vec<CaveVertex>, Vec<u32>); 2]>,
+    caves: [Option<(wgpu::Buffer, wgpu::Buffer, u32)>; 2],
+    cave_triangles: u64,
+    xray: f32,
     skirt: Option<(wgpu::Buffer, wgpu::Buffer, u32)>,
     skirt_px: Option<u32>,
     /// The preview shown and its extent (the frame toggle rebuilds from it).
@@ -1322,6 +1440,10 @@ impl Default for Viewport {
             pending_instances: None,
             instances: None,
             instance_count: 0,
+            pending_caves: None,
+            caves: [None, None],
+            cave_triangles: 0,
+            xray: 0.0,
             skirt: None,
             skirt_px: None,
             shown: None,
@@ -1622,6 +1744,93 @@ impl Viewport {
         self.dirty = true;
     }
 
+    /// The caves under the terrain (the desktop's colours: rock walls, blue-green below the water
+    /// level, cream speleothems; an orange marker at each entrance, blue under water).
+    pub fn set_caves(&mut self, caves: &[CaveMesh]) {
+        let extent = self.shown.as_ref().map(|(_, e)| *e);
+        let (mut cave, mut marks) = ((Vec::new(), Vec::new()), (Vec::new(), Vec::new()));
+        let mut triangles = 0;
+        for c in caves {
+            let wl = c.water_level_m;
+            let flooded_start =
+                wl.is_some_and(|w| c.walls.positions.get(1).is_some_and(|y| *y < w));
+            let wall_glow = hex(if flooded_start { 0x1aa0c8 } else { 0xff8a30 });
+            let parts = [
+                (&c.walls, wall_glow, true),
+                (&c.speleothems, hex(0xfff0c0), false),
+            ];
+            for (m, glow, wall) in parts {
+                let (verts, idx): &mut (Vec<CaveVertex>, Vec<u32>) = &mut cave;
+                let base = verts.len() as u32;
+                for (p, n) in m
+                    .positions
+                    .as_chunks::<3>()
+                    .0
+                    .iter()
+                    .zip(m.normals.as_chunks::<3>().0)
+                {
+                    let color = match (wall, wl) {
+                        (false, _) => [0.86, 0.8, 0.68],
+                        (true, Some(w)) if p[1] < w => [0.2, 0.42, 0.52],
+                        (true, _) => [0.6, 0.53, 0.45],
+                    };
+                    verts.push(CaveVertex {
+                        pos: *p,
+                        normal: *n,
+                        color,
+                        glow,
+                        extra: [0.95, 0.0],
+                    });
+                }
+                idx.extend(m.indices.iter().map(|i| base + i));
+                triangles += m.indices.len() as u64 / 3;
+            }
+            if let Some(e) = extent {
+                let r = (e[0].min(e[1]) * 0.006).max(2.0);
+                let (pos, nrm, idx) = sphere(r);
+                for &(at, underwater) in &c.entrances {
+                    let (color, glow) = if underwater {
+                        (0x3a8fd0, 0x0a2a44)
+                    } else {
+                        (0xf08a24, 0x401800)
+                    };
+                    let base = marks.0.len() as u32;
+                    marks
+                        .0
+                        .extend(pos.iter().zip(&nrm).map(|(p, n)| CaveVertex {
+                            pos: [
+                                p[0] + at[0] - e[0] / 2.0,
+                                p[1] + at[2] + r,
+                                p[2] + e[1] / 2.0 - at[1],
+                            ],
+                            normal: *n,
+                            color: hex(color),
+                            glow: hex(glow),
+                            extra: [1.0, 1.0],
+                        }));
+                    marks.1.extend(idx.iter().map(|i| base + i));
+                }
+            }
+        }
+        self.cave_triangles = triangles;
+        self.pending_caves = Some([cave, marks]);
+        self.dirty = true;
+    }
+
+    /// See through the terrain to the caves (0 solid … 0.9); the framed block hides while on.
+    pub fn set_xray(&mut self, xray: f32) {
+        let xray = xray.clamp(0.0, 0.9);
+        if xray != self.xray {
+            self.xray = xray;
+            self.dirty = true;
+        }
+    }
+
+    /// Wall and speleothem triangles of the caves drawn.
+    pub fn cave_triangles(&self) -> u64 {
+        self.cave_triangles
+    }
+
     /// Scatter instances drawn.
     pub fn instance_count(&self) -> usize {
         self.instance_count
@@ -1785,6 +1994,34 @@ impl Viewport {
         }
         if rebind {
             gpu.bind_group = bind_group(rs, gpu);
+        }
+        if let Some(pending) = self.pending_caves.take() {
+            use wgpu::util::DeviceExt as _;
+            self.caves = pending.map(|(v, i)| {
+                (!i.is_empty()).then(|| {
+                    let buf = |label, contents: &[u8], usage| {
+                        rs.device
+                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some(label),
+                                contents,
+                                usage,
+                            })
+                    };
+                    (
+                        buf(
+                            "cave vertices",
+                            bytemuck::cast_slice(&v),
+                            wgpu::BufferUsages::VERTEX,
+                        ),
+                        buf(
+                            "cave indices",
+                            bytemuck::cast_slice(&i),
+                            wgpu::BufferUsages::INDEX,
+                        ),
+                        i.len() as u32,
+                    )
+                })
+            });
         }
         if let Some(pending) = self.pending_instances.take() {
             use wgpu::util::DeviceExt as _;
@@ -2016,7 +2253,7 @@ impl Viewport {
                 self.started.elapsed().as_secs_f32(),
                 self.sea.as_ref().map_or(0, |s| s.waves.len().min(3)) as f32,
                 f32::from(u8::from(self.waves_animate())),
-                0.0,
+                self.xray,
             ],
             waves: {
                 let mut w = [[0.0; 4]; 6];
@@ -2090,12 +2327,33 @@ impl Viewport {
                 pass.set_index_buffer(i.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..*n, 0, 0..1);
             }
+            let xray = self.xray > 0.0;
+            // Opaque before transparent, as three sorts them: in x-ray the markers, then the caves
+            // over everything, then the terrain blended on top; otherwise the terrain first.
+            let draw_caves = |pass: &mut wgpu::RenderPass, over: bool| {
+                for (k, part) in self.caves.iter().enumerate() {
+                    if let Some((v, i, n)) = part {
+                        // The markers (k = 1) are always depth-tested.
+                        pass.set_pipeline(&gpu.caves[usize::from(over && k == 0)]);
+                        pass.set_vertex_buffer(0, v.slice(..));
+                        pass.set_index_buffer(i.slice(..), wgpu::IndexFormat::Uint32);
+                        pass.draw_indexed(0..*n, 0, 0..1);
+                    }
+                }
+            };
+            if xray {
+                draw_caves(&mut pass, true);
+                pass.set_pipeline(&gpu.terrain_see[usize::from(self.xray >= 0.5)]);
+            }
             pass.set_vertex_buffer(0, mesh.vertices.slice(..));
             pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..mesh.count, 0, 0..1);
-            if let Some((walls, n)) = &mesh.walls {
-                pass.set_vertex_buffer(0, walls.slice(..));
-                pass.draw(0..*n, 0..1);
+            if !xray {
+                if let Some((walls, n)) = &mesh.walls {
+                    pass.set_vertex_buffer(0, walls.slice(..));
+                    pass.draw(0..*n, 0..1);
+                }
+                draw_caves(&mut pass, false);
             }
             if let Some((shape, n, at, count)) = &self.instances {
                 pass.set_pipeline(&gpu.instances);
@@ -2104,7 +2362,7 @@ impl Viewport {
                 pass.draw(0..*n, 0..*count);
             }
             pass.set_pipeline(&gpu.lines);
-            if let Some((rim, n)) = &mesh.rim {
+            if let Some((rim, n)) = mesh.rim.as_ref().filter(|_| !xray) {
                 pass.set_vertex_buffer(0, rim.slice(..));
                 pass.draw(0..*n, 0..1);
             }
@@ -2406,6 +2664,92 @@ fn create_gpu(rs: &RenderState) -> Gpu {
         multiview_mask: None,
         cache: None,
     });
+    // The see-through terrain and the caves: the terrain's layout and stages, other depth and blend.
+    let mesh_pipeline = |label: &str,
+                         vs: &str,
+                         fs: &str,
+                         buffers: &[Option<wgpu::VertexBufferLayout>],
+                         compare: wgpu::CompareFunction,
+                         write: bool,
+                         blend: Option<wgpu::BlendState>| {
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some(label),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some(vs),
+                compilation_options: Default::default(),
+                buffers,
+            },
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH,
+                depth_write_enabled: Some(write),
+                depth_compare: Some(compare),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample,
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some(fs),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: post::HDR,
+                    blend,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        })
+    };
+    let terrain_layout = [Some(wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<Vertex>() as u64,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &attributes,
+    })];
+    let see = |label, write| {
+        mesh_pipeline(
+            label,
+            "vs_main",
+            "fs_main",
+            &terrain_layout,
+            wgpu::CompareFunction::Less,
+            write,
+            Some(wgpu::BlendState::ALPHA_BLENDING),
+        )
+    };
+    let terrain_see = [
+        see("terrain x-ray", true),
+        see("terrain x-ray, no depth", false),
+    ];
+    let cave_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x3, 3 => Float32x3, 4 => Float32x2];
+    let cave_layout = [Some(wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<CaveVertex>() as u64,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &cave_attributes,
+    })];
+    let caves = [
+        mesh_pipeline(
+            "caves",
+            "cave_vs",
+            "cave_fs",
+            &cave_layout,
+            wgpu::CompareFunction::Less,
+            true,
+            None,
+        ),
+        mesh_pipeline(
+            "caves x-ray",
+            "cave_vs",
+            "cave_fs",
+            &cave_layout,
+            wgpu::CompareFunction::Always,
+            false,
+            None,
+        ),
+    ];
     let line_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4];
     let blended = [Some(wgpu::ColorTargetState {
         format: post::HDR,
@@ -2537,6 +2881,8 @@ fn create_gpu(rs: &RenderState) -> Gpu {
     });
     let mut gpu = Gpu {
         terrain,
+        terrain_see,
+        caves,
         instances,
         lines,
         sea,
