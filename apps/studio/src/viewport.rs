@@ -68,6 +68,82 @@ pub struct Sea {
     pub waves_m: Option<[f32; 2]>,
 }
 
+/// A point of the lakes surface: position, normal, colour and alpha.
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct LakeVertex {
+    pos: [f32; 3],
+    normal: [f32; 3],
+    color: [f32; 4],
+}
+
+/// The lakes grid (vertices, indices) and its wet cell count.
+type LakesGeometry = (Vec<LakeVertex>, Vec<u32>, usize);
+
+/// The desktop's `buildLakesGeometry`: each vertex `depth` above the terrain where the fill node's
+/// depth is positive (> 5 cm), tucked under it elsewhere, coloured like the sea by depth; `None`
+/// when nothing is wet or the grids differ. Returns the mesh and the wet cell count.
+fn lakes_mesh(
+    terrain: &Preview,
+    lakes: &Preview,
+    extent_m: [f32; 2],
+    look: &Sea,
+) -> Option<(Vec<LakeVertex>, Vec<u32>, usize)> {
+    if (terrain.width, terrain.height) != (lakes.width, lakes.height) {
+        return None;
+    }
+    let (ground, indices) = grid_mesh(terrain, extent_m);
+    let t_range = (terrain.max - terrain.min).max(f32::EPSILON);
+    let l_range = if lakes.max - lakes.min == 0.0 {
+        1.0
+    } else {
+        lakes.max - lakes.min
+    };
+    let (w, h) = (
+        terrain.width.max(2) as usize,
+        terrain.height.max(2) as usize,
+    );
+    let mut wet = 0;
+    let mut v: Vec<LakeVertex> = ground
+        .iter()
+        .enumerate()
+        .map(|(i, g)| {
+            let depth =
+                lakes.min + f32::from(lakes.data[i.min(lakes.data.len() - 1)]) / 65535.0 * l_range;
+            let (rgb, mut alpha) = water_colour(depth.max(0.0), look);
+            let mut y = g.pos[1] - t_range * 0.01 - 1.0;
+            if depth > 0.05 {
+                y = g.pos[1] + depth;
+                wet += 1;
+            } else {
+                alpha = 0.0;
+            }
+            LakeVertex {
+                pos: [g.pos[0], y, g.pos[2]],
+                normal: [0.0, 1.0, 0.0],
+                color: [rgb[0], rgb[1], rgb[2], alpha],
+            }
+        })
+        .collect();
+    if wet == 0 {
+        return None;
+    }
+    // Normals of the water surface (three's computeVertexNormals on the displaced grid).
+    let ys: Vec<f32> = v.iter().map(|p| p.pos[1]).collect();
+    let (dx, dz) = (extent_m[0] / (w - 1) as f32, extent_m[1] / (h - 1) as f32);
+    for y in 0..h {
+        for x in 0..w {
+            let at = |x: usize, y: usize| ys[y.min(h - 1) * w + x.min(w - 1)];
+            let nx = (at(x.saturating_sub(1), y) - at(x + 1, y))
+                / (dx * (x.min(w - 2) + 1 - x.saturating_sub(1)) as f32);
+            let nz = (at(x, y + 1) - at(x, y.saturating_sub(1)))
+                / (dz * (y.min(h - 2) + 1 - y.saturating_sub(1)) as f32);
+            v[y * w + x].normal = normalize([nx, 1.0, nz]);
+        }
+    }
+    Some((v, indices, wet))
+}
+
 /// The sea grid (vertices, indices) and its shoreline segments.
 type SeaGeometry = (Vec<ColorVertex>, Vec<u32>, Vec<ColorVertex>);
 
@@ -356,6 +432,17 @@ fn sea_vs(@location(0) pos: vec3<f32>, @location(1) color: vec4<f32>) -> SeaOut 
     return o;
 }
 
+// Lakes: standing water lit like the sea, never moved by the wind sea.
+@vertex
+fn lake_vs(@location(0) pos: vec3<f32>, @location(1) normal: vec3<f32>, @location(2) color: vec4<f32>) -> SeaOut {
+    var o: SeaOut;
+    o.clip = u.view_proj * vec4<f32>(pos, 1.0);
+    o.world = pos;
+    o.normal = normal;
+    o.color = color;
+    return o;
+}
+
 @fragment
 fn sea_fs(i: SeaOut) -> @location(0) vec4<f32> {
     let n = normalize(i.normal);
@@ -632,6 +719,7 @@ struct Gpu {
     terrain: wgpu::RenderPipeline,
     lines: wgpu::RenderPipeline,
     sea: wgpu::RenderPipeline,
+    lakes: wgpu::RenderPipeline,
     sky: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     uniforms: wgpu::Buffer,
@@ -853,6 +941,10 @@ pub struct Viewport {
     rect: Rect,
     renders: u64,
     sea: Option<Sea>,
+    lakes: Option<Preview>,
+    pending_lakes: Option<Option<LakesGeometry>>,
+    lakes_mesh: Option<(wgpu::Buffer, wgpu::Buffer, u32)>,
+    lake_cells: usize,
     pending_sea: Option<Option<SeaGeometry>>,
     sea_mesh: Option<(wgpu::Buffer, wgpu::Buffer, u32)>,
     shore: Option<(wgpu::Buffer, u32)>,
@@ -886,6 +978,10 @@ impl Default for Viewport {
             rect: Rect::NOTHING,
             renders: 0,
             sea: None,
+            lakes: None,
+            pending_lakes: None,
+            lakes_mesh: None,
+            lake_cells: 0,
             pending_sea: None,
             sea_mesh: None,
             shore: None,
@@ -921,6 +1017,7 @@ impl Viewport {
         self.pending = Some((vertices, indices, frame));
         self.dirty = true;
         self.rebuild_sea();
+        self.rebuild_lakes();
     }
 
     /// Draw the world as a framed block or not (the viewport's Frame button).
@@ -1011,6 +1108,7 @@ impl Viewport {
         }
         self.sea = sea;
         self.rebuild_sea();
+        self.rebuild_lakes();
     }
 
     fn rebuild_sea(&mut self) {
@@ -1031,6 +1129,38 @@ impl Viewport {
         self.shore_segments = built.as_ref().map_or(0, |b| b.2.len() / 2);
         self.pending_sea = Some(built);
         self.dirty = true;
+    }
+
+    /// Standing water from a `lakes` depth layer at the shown preview's size (`None`: none).
+    pub fn set_lakes(&mut self, lakes: Option<Preview>) {
+        if self.lakes == lakes {
+            return;
+        }
+        self.lakes = lakes;
+        self.rebuild_lakes();
+    }
+
+    fn rebuild_lakes(&mut self) {
+        let look = self.sea.clone().unwrap_or(Sea {
+            level_m: 0.0,
+            visibility_m: 15.0,
+            tint: [0.1, 0.35, 0.4],
+            breaking_depth_m: 0.0,
+            waves: Vec::new(),
+            waves_m: None,
+        });
+        let built = match (&self.lakes, &self.shown) {
+            (Some(l), Some((pv, extent))) => lakes_mesh(pv, l, *extent, &look),
+            _ => None,
+        };
+        self.lake_cells = built.as_ref().map_or(0, |b| b.2);
+        self.pending_lakes = Some(built);
+        self.dirty = true;
+    }
+
+    /// Wet cells of the lakes drawn.
+    pub fn lake_cells(&self) -> usize {
+        self.lake_cells
     }
 
     /// The sea shown: its level, and the wind sea's height and wavelength when it has one.
@@ -1238,6 +1368,32 @@ impl Viewport {
                         )
                     });
         }
+        if let Some(lakes) = self.pending_lakes.take() {
+            use wgpu::util::DeviceExt as _;
+            self.lakes_mesh = lakes.map(|(v, i, _)| {
+                let buf = |label, contents: &[u8], usage| {
+                    rs.device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some(label),
+                            contents,
+                            usage,
+                        })
+                };
+                (
+                    buf(
+                        "lake vertices",
+                        bytemuck::cast_slice(&v),
+                        wgpu::BufferUsages::VERTEX,
+                    ),
+                    buf(
+                        "lake indices",
+                        bytemuck::cast_slice(&i),
+                        wgpu::BufferUsages::INDEX,
+                    ),
+                    i.len() as u32,
+                )
+            });
+        }
         if self.waves_animate() {
             self.dirty = true;
             ui.ctx().request_repaint();
@@ -1417,7 +1573,13 @@ impl Viewport {
                 pass.set_vertex_buffer(0, shore.slice(..));
                 pass.draw(0..*n, 0..1);
             }
-            // Transparent last, as three sorts it: the sea.
+            // Transparent last, as three sorts it: the lakes, then the sea.
+            if let Some((v, i, n)) = &self.lakes_mesh {
+                pass.set_pipeline(&gpu.lakes);
+                pass.set_vertex_buffer(0, v.slice(..));
+                pass.set_index_buffer(i.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..*n, 0, 0..1);
+            }
             if let Some((v, i, n)) = &self.sea_mesh {
                 pass.set_pipeline(&gpu.sea);
                 pass.set_vertex_buffer(0, v.slice(..));
@@ -1669,6 +1831,38 @@ fn create_gpu(rs: &RenderState) -> Gpu {
         step_mode: wgpu::VertexStepMode::Vertex,
         attributes: &line_attributes,
     };
+    let lake_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x4];
+    let lakes = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("lakes"),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("lake_vs"),
+            compilation_options: Default::default(),
+            buffers: &[Some(wgpu::VertexBufferLayout {
+                array_stride: std::mem::size_of::<LakeVertex>() as u64,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &lake_attributes,
+            })],
+        },
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::Less),
+            stencil: Default::default(),
+            bias: Default::default(),
+        }),
+        multisample,
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("sea_fs"),
+            compilation_options: Default::default(),
+            targets: &blended,
+        }),
+        multiview_mask: None,
+        cache: None,
+    });
     let sea = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("sea"),
         layout: Some(&pipeline_layout),
@@ -1759,6 +1953,7 @@ fn create_gpu(rs: &RenderState) -> Gpu {
         terrain,
         lines,
         sea,
+        lakes,
         sky,
         layout,
         uniforms,
@@ -2027,6 +2222,53 @@ mod tests {
             "{:?}",
             shore.iter().map(|p| p.pos).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn lakes_stand_on_the_ground_where_the_fill_is_wet() {
+        let terrain = Preview {
+            width: 3,
+            height: 3,
+            min: 100.0,
+            max: 110.0,
+            data: vec![0; 9],
+        };
+        let mut depth = vec![0u16; 9];
+        depth[4] = 65535; // the centre is 2 m deep
+        let lakes = Preview {
+            width: 3,
+            height: 3,
+            min: 0.0,
+            max: 2.0,
+            data: depth,
+        };
+        let look = Sea {
+            level_m: 0.0,
+            visibility_m: 15.0,
+            tint: [0.1, 0.35, 0.4],
+            breaking_depth_m: 0.0,
+            waves: vec![],
+            waves_m: None,
+        };
+        let (v, i, wet) = lakes_mesh(&terrain, &lakes, [20.0, 20.0], &look).expect("wet");
+        assert_eq!((wet, i.len()), (1, 4 * 6));
+        assert_eq!(v[4].pos[1], 102.0);
+        assert!(v[4].color[3] > 0.3 && v[0].color[3] == 0.0);
+        assert!(v[0].pos[1] < 100.0, "dry cells hide under the ground");
+        // Nothing wet, or another grid size: no lakes.
+        let dry = Preview {
+            data: vec![0; 9],
+            ..lakes.clone()
+        };
+        assert!(lakes_mesh(&terrain, &dry, [20.0, 20.0], &look).is_none());
+        let other = Preview {
+            width: 2,
+            height: 2,
+            min: 0.0,
+            max: 1.0,
+            data: vec![1; 4],
+        };
+        assert!(lakes_mesh(&terrain, &other, [20.0, 20.0], &look).is_none());
     }
 
     #[test]

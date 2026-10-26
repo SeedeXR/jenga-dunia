@@ -75,6 +75,8 @@ enum Msg {
     Log(String, Level),
     /// Baked maps for a layer (`terrain.textures`, decoded on the worker) and the bake's time.
     Maps(String, Result<crate::viewport::Maps, String>, u64),
+    /// The `lakes` depth layer's preview, for the terrain preview of this layer.
+    Lakes(String, Result<Option<jd_terrain::preview::Preview>, String>),
     /// The wind sea for a wind (`ocean.waves`).
     Waves([Option<f64>; 3], Box<Response>),
     /// The horizon skirt's preview (`terrain.horizon`).
@@ -429,6 +431,16 @@ impl StudioApp {
                         }
                     }
                 }
+                Msg::Lakes(layer, lakes) => {
+                    self.reads = self.reads.saturating_sub(1);
+                    if self.layer.as_deref() != Some(layer.as_str()) {
+                        continue;
+                    }
+                    match lakes {
+                        Ok(pv) => self.viewport.set_lakes(pv),
+                        Err(e) => self.log(format!("layer_preview (lakes): {e}"), Level::Error),
+                    }
+                }
                 Msg::Waves(wind, r) => {
                     self.reads = self.reads.saturating_sub(1);
                     self.log_response(&r);
@@ -566,6 +578,7 @@ impl StudioApp {
                         self.viewport.set_terrain(&pv, extent);
                         self.fetch_maps();
                         self.fetch_horizon();
+                        self.fetch_lakes(lod);
                         self.preview = Some((
                             lod,
                             bytes as f64 / 1_048_576.0,
@@ -700,6 +713,38 @@ impl StudioApp {
             }
         });
         self.viewport.set_sea(sea);
+    }
+
+    /// The desktop's standing water: a published `lakes` layer (`lakes#lod<N>` beside a live
+    /// preview) is the fill node's depth map, fetched at the shown preview's lod.
+    fn fetch_lakes(&mut self, lod: u32) {
+        let Some(layer) = self.layer.clone() else {
+            return;
+        };
+        let live = layer.contains('#');
+        let base = |n: &String| n.split('#').next() == Some("lakes");
+        let lakes = self
+            .layers
+            .iter()
+            .find(|n| base(n) && n.contains('#') == live)
+            .or_else(|| self.layers.iter().find(|n| base(n)))
+            .cloned();
+        let Some(lakes) = lakes else {
+            return self.viewport.set_lakes(None);
+        };
+        let request = Self::request("terrain.preview", json!({ "layer": lakes, "lod": lod }));
+        let (server, tx, ctx) = (self.server.clone(), self.tx.clone(), self.ctx.clone());
+        self.reads += 1;
+        std::thread::spawn(move || {
+            let r = server.invoke(request);
+            let pv = match (&r.result, &r.error) {
+                (Some(v), _) => decode_preview(v).map(|(p, _)| Some(p)),
+                (None, Some(e)) => Err(format!("{} {}", e.code.as_str(), e.message)),
+                (None, None) => Ok(None),
+            };
+            let _ = tx.send(Msg::Lakes(layer, pv));
+            ctx.request_repaint();
+        });
     }
 
     /// The desktop's `refreshHorizon`: the noise continued over 3 × the world at 256².
@@ -995,6 +1040,12 @@ impl StudioApp {
             let az = sun["azimuth_deg"].as_f64().unwrap_or(140.0);
             let el = sun["elevation_deg"].as_f64().unwrap_or(35.0);
             s += &format!(" · sun {el}°/{az}°");
+        }
+        if self.viewport.lake_cells() > 0 {
+            s += &format!(
+                " · lakes {} cells",
+                thousands(self.viewport.lake_cells() as u64)
+            );
         }
         if let Some([w, h]) = self.viewport.maps_px() {
             s += &format!(" · pbr {w}×{h}");
