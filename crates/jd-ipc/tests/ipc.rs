@@ -26,6 +26,12 @@ fn registry() -> Registry {
         Scope::ProjectWrite,
         |_, p| Ok((p, vec![])),
     );
+    r.register::<Value, Value, _>(
+        "graph.evaluate",
+        "an evaluation report",
+        Scope::ProjectWrite,
+        |_, _| Ok((json!({ "lod": 1, "duration_ms": 5, "layers": {} }), vec![])),
+    );
     r.register::<Value, Value, _>("test.fail", "always fails", Scope::None, |_, _| {
         Err(JdError::new(ErrorCode::E_INPUT_INVALID, "nope"))
     });
@@ -256,6 +262,12 @@ fn project_writes_and_emitted_events_reach_every_client() {
         json!({ "nodes": ["n1"], "source": "viewport" }),
     );
     assert_eq!(wait_for(&ev_b, "selection")["nodes"][0], "n1");
+    // An evaluation's report reaches the other windows, named by who ran it.
+    a.call(Request::new("graph.evaluate", json!({ "lod": 1 })))
+        .expect("graph.evaluate");
+    let ev = wait_for(&ev_b, "evaluated");
+    assert_eq!(ev["report"]["lod"], 1);
+    assert_eq!(ev["client"], "gui-test");
 }
 
 #[test]

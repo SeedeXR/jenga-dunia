@@ -282,10 +282,13 @@ interface State {
   exportCave: (id: string, path: string) => Promise<void>;
   /** Re-mesh the caves; with an evaluation report, caves whose node hash and lod did not change are kept. */
   refreshCaves: (lod?: number, report?: EvalReport) => Promise<void>;
+  /** Show an evaluation another window ran (Studio's `evaluated` event): as after one's own. */
+  adoptEvaluation: (report: EvalReport) => Promise<void>;
   /** Append a stroke to the selected sculpt node (journaled: undo removes the whole stroke). */
   addStroke: (points: [number, number][]) => Promise<void>;
   setNoise: (patch: Partial<NoiseSettings>) => void;
-  loadGraph: () => Promise<void>;
+  /** Re-read the graph; `evaluate: false` for another window's edit (that window evaluates it). */
+  loadGraph: (evaluate?: boolean) => Promise<void>;
   addNode: (kind: string) => Promise<void>;
   removeNode: (id: string) => Promise<void>;
   moveNode: (id: string, position: [number, number]) => Promise<void>;
@@ -696,25 +699,25 @@ export const useStore = create<State>((set, get) => {
     }
     set((s) => ({ noise: { ...s.noise, ...patch } }));
   };
-  const applyGraph = (r: Response<GraphView>) => {
+  const applyGraph = (r: Response<GraphView>, evaluate = true) => {
     if (r.status === "ok" && r.result) {
       set({ graph: r.result });
       syncNoise(r.result);
-      liveEvaluate();
+      if (evaluate) liveEvaluate();
       scheduleAutosave();
     }
   };
   // Every mutation bumps this before its request goes out; a graph.list that started earlier may
   // describe an older graph and is dropped (seen as e2e flakes: a late list hid a just-added node).
   let graphGen = 0;
-  const loadGraph = async () => {
+  const loadGraph = async (evaluate = true) => {
     if (get().graphKinds.length === 0) {
       const k = await run("graph.kinds");
       if (k.status === "ok" && k.result) set({ graphKinds: k.result });
     }
     const gen = graphGen;
     const r = await run("graph.list");
-    if (gen === graphGen) applyGraph(r);
+    if (gen === graphGen) applyGraph(r, evaluate);
   };
   const mutate = async <K extends OpId>(id: K, params?: JdOps[K]["request"]) => {
     graphGen++;
@@ -1043,6 +1046,7 @@ export const useStore = create<State>((set, get) => {
     exportCave: async (id, path) => {
       await run("caves.export", { id, path });
     },
+    adoptEvaluation: (report) => adopt(report),
     refreshCaves: async (lod, report) => {
       const gen = ++caveGen;
       const nodes = get().graph.nodes.filter((x) => x.kind.startsWith("jd.cave.system@"));

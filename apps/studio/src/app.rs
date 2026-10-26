@@ -202,6 +202,8 @@ pub struct StudioApp {
     pbr: bool,
     look_due: Option<Instant>,
     sky_due: Option<Instant>,
+    /// The preview LOD bias the Live target drives (the desktop's `previewLodBias`).
+    lod_bias: u32,
     /// The physical sky's last image, and an HDRI that replaces it on the dome.
     sky_img: Option<crate::viewport::Image>,
     hdri_path: String,
@@ -785,6 +787,7 @@ impl StudioApp {
             pbr: true,
             look_due: None,
             sky_due: None,
+            lod_bias: 0,
             sky_img: None,
             hdri_path: "sky.exr".into(),
             hdri: None,
@@ -1026,6 +1029,11 @@ impl StudioApp {
                     self.busy = self.busy.saturating_sub(1);
                     for r in &responses {
                         self.log_response(r);
+                        if r.op == "graph.evaluate"
+                            && let Some(report) = &r.result
+                        {
+                            self.adapt_lod(report);
+                        }
                         // A tunnel just added: its portals are placed by clicking the terrain.
                         if r.op == "graph.add_cave"
                             && std::mem::take(&mut self.tunnel_pending)
@@ -2672,7 +2680,11 @@ impl StudioApp {
             self.refresh();
         }
         look::field(ui, "Live target (ms)", |ui| {
-            look::input(ui, &mut self.preview_target_ms, 112.0, "", "Live target (ms)").on_hover_text("Live preview target per evaluation, ms (0 = off): the preview LOD steps coarser while evaluations run over it and finer again when they are well under; this app setting is not part of the project");
+            let target = look::input(ui, &mut self.preview_target_ms, 112.0, "", "Live target (ms)").on_hover_text("Live preview target per evaluation, ms (0 = off): the preview LOD steps coarser while evaluations run over it and finer again when they are well under; this app setting is not part of the project");
+            // A new target starts from the default LOD again (the desktop's setPreviewTarget).
+            if target.changed() {
+                self.lod_bias = 0;
+            }
         });
         let origin = [
             w["origin"][0].as_f64().unwrap_or(0.0),
@@ -5374,8 +5386,18 @@ impl StudioApp {
         }
     }
 
-    /// The desktop's `previewLod`: live evaluations stay ≤ 512² (its adaptive bias arrives with
-    /// live evaluation in Studio).
+    /// An evaluation at the current preview LOD moves the bias (`adapt_lod_bias`); others, e.g.
+    /// a full evaluation of a larger world, say nothing about the preview's cost.
+    fn adapt_lod(&mut self, report: &Value) {
+        if report["lod"].as_u64() != Some(u64::from(self.preview_lod())) {
+            return;
+        }
+        let target = self.preview_target_ms.trim().parse().unwrap_or(0.0);
+        let ms = report["duration_ms"].as_f64().unwrap_or(0.0);
+        self.lod_bias = adapt_lod_bias(self.lod_bias, ms, target);
+    }
+
+    /// The desktop's `previewLod`: live evaluations stay ≤ 512², plus the Live target's bias.
     fn preview_lod(&self) -> u32 {
         let res = self.project.as_ref().map_or(512.0, |p| {
             let r = &p["world"]["resolution_px"];
@@ -5383,7 +5405,7 @@ impl StudioApp {
                 .unwrap_or(512.0)
                 .max(r[1].as_f64().unwrap_or(512.0))
         });
-        (res / 512.0).log2().ceil().max(0.0) as u32
+        (res / 512.0).log2().ceil().max(0.0) as u32 + self.lod_bias
     }
 
     /// A layer-strip button: the shared workflow op (as the desktop), then a live evaluation.
@@ -5952,9 +5974,33 @@ impl eframe::App for StudioApp {
     }
 }
 
+/// The desktop's `adaptLodBias` (lib/previewLod.ts): over the target → one LOD coarser, under a
+/// quarter of it → one finer, never below the default nor above 4; a target of 0 = off.
+fn adapt_lod_bias(bias: u32, ms: f64, target: f64) -> u32 {
+    if target.is_nan() || target <= 0.0 {
+        0
+    } else if ms > target {
+        (bias + 1).min(4)
+    } else if ms * 4.0 < target {
+        bias.saturating_sub(1)
+    } else {
+        bias
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_live_target_moves_the_preview_lod_like_the_desktop() {
+        assert_eq!(adapt_lod_bias(0, 300.0, 200.0), 1);
+        assert_eq!(adapt_lod_bias(4, 300.0, 200.0), 4);
+        assert_eq!(adapt_lod_bias(2, 40.0, 200.0), 1);
+        assert_eq!(adapt_lod_bias(0, 40.0, 200.0), 0);
+        assert_eq!(adapt_lod_bias(2, 100.0, 200.0), 2);
+        assert_eq!(adapt_lod_bias(3, 900.0, 0.0), 0);
+    }
 
     #[test]
     fn readouts_print_like_the_desktop() {

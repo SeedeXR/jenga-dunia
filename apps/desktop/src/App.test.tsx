@@ -269,14 +269,24 @@ describe("App", () => {
     // The Editor's own selection goes out as ui.select.
     useStore.getState().setSelectedNode("01NOISE");
     await waitFor(() => expect(calls.some((c) => (c.args as { request?: { op: string; params: { nodes: string[] } } }).request?.op === "ui.select")).toBe(true));
-    // A graph edit by Studio reloads the graph; the Editor's own is already applied.
+    // A graph edit by Studio reloads the graph; the Editor's own is already applied. (A project
+    // is open, so live evaluation is armed: its first evaluation runs before the edit.)
+    fireEvent.change(screen.getByTestId("project-path"), { target: { value: "/tmp/Sync.jdproj" } });
+    fireEvent.click(screen.getByTestId("new-project"));
+    await waitFor(() => expect(calls.some((c) => (c.args as { request?: { op: string } }).request?.op === "graph.evaluate")).toBe(true));
     calls.length = 0;
     emit("project_changed", { op: "graph.splice", client: "gui-studio" });
     await waitFor(() => expect(calls.some((c) => (c.args as { request?: { op: string } }).request?.op === "graph.list")).toBe(true));
+    // … without evaluating it again: Studio evaluates its own edits (its report arrives below).
+    await new Promise((r) => setTimeout(r, 250));
+    expect(calls.some((c) => (c.args as { request?: { op: string } }).request?.op === "graph.evaluate")).toBe(false);
     calls.length = 0;
     emit("project_changed", { op: "graph.splice", client: "gui-editor" });
     await new Promise((r) => setTimeout(r, 20));
     expect(calls.some((c) => (c.args as { request?: { op: string } }).request?.op === "graph.list")).toBe(false);
+    // An evaluation Studio ran shows here: its first layer's stats.
+    emit("evaluated", { report: { lod: 1, duration_ms: 5, nodes: [], layers: { height: {} } }, client: "gui-studio" });
+    await waitFor(() => expect(calls.some((c) => (c.args as { request?: { op: string; params: { layer?: string } } }).request?.op === "terrain.stats")).toBe(true));
   });
 
   it("a world preset fills resolution and extent (Unreal 2049²)", async () => {

@@ -107,9 +107,9 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   **Decisions:** (1) workflows with logic (add simulation / cave layers with their materials and
   published layers, sculpt / road / grid node set-up) move into jd-core ops that both UIs call,
   instead of a second Rust copy of state.ts (one implementation, one test); the desktop switches to
-  them in the same commit, its e2e unchanged. (2) Live evaluation moves to Studio (engine side)
-  for edits from either window, at the desktop's adaptive preview lod; until then each window
-  evaluates after its own edits.
+  them in the same commit, its e2e unchanged. (2) Live evaluation: each window evaluates its own
+  edits at the desktop's adaptive preview lod, the other adopts the result (`evaluated` event;
+  revised from "moves to Studio", see the live-evaluation slice below).
 - P4 slice 1 (decision 1 executed): `graph.splice`, `graph.add_simulation`, `graph.add_cave` in
   jd-core (unit-tested); the desktop's spliceBefore / addSimulation / addCave now call them (its
   e2e tree, caves, road, actions, simulation pass; road asserts `graph.splice: ok`), and Studio's
@@ -239,4 +239,11 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   what Studio selects, sends its own selection, and reloads its graph on another client's graph.*
   write (it listened to no engine event before — Studio's stack / sculpt / splice edits did not
   show in the Editor's graph). Studio follows the Editor's selection (stack row highlight).
-  Next: live evaluation in Studio; then P5 (default switch, packaging, docs).
+- Live evaluation (decision 2 revised): every jd-ipc peer is a window (`gui-<role>`), so there is
+  no headless writer for Studio to evaluate for; instead each window evaluates its own edits and
+  the server broadcasts `evaluated { report, client }` so the other window adopts it. Bug fixed on
+  the way: the Editor's graph reload on a Studio edit ran the Editor's own live evaluation too
+  (two evaluations per edit); a reload for another window's edit no longer evaluates. Studio's
+  preview LOD now takes the Live target's adaptive bias (the desktop's adaptLodBias, unit-tested),
+  moved by any evaluation at the current preview LOD.
+  Next: P5 (default switch, packaging, docs).

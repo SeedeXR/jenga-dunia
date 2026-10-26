@@ -219,6 +219,13 @@ impl Shared {
             scope,
             Some(Scope::ProjectWrite | Scope::FsWrite | Scope::Destructive)
         ) || matches!(op.as_str(), "project.open" | "project.close");
+        if response.status == Status::Ok && op == "graph.evaluate" {
+            // The report (layers, lod, duration): a window adopts an evaluation another ran.
+            self.emit(
+                "evaluated",
+                json!({ "report": response.result, "client": client }),
+            );
+        }
         if response.status == Status::Ok && changes {
             self.emit(
                 "project_changed",

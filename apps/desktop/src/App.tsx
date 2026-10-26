@@ -5,7 +5,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import GraphPanel from "./graph/GraphPanel";
 import LayerStack from "./graph/LayerStack";
 import TerrainView, { type ViewportInfo } from "./viewport/TerrainView";
-import { type Brush as BrushTool, type CaveKindName, type NoiseSettings, useStore } from "./state";
+import { type Brush as BrushTool, type CaveKindName, type EvalReport, type NoiseSettings, useStore } from "./state";
 import type { FractalKind, HeightmapFormat, NoiseKind } from "./lib/ops.gen";
 import type { Preview } from "./lib/api";
 import { LANGS, type Lang, translate } from "./lib/i18n";
@@ -357,15 +357,17 @@ export default function App() {
     };
   }, []);
 
-  // Connected to Studio (ADR-0017): a graph edit made there reloads the graph here, and Studio's
-  // selection (a layer row, a viewport pick) selects the node here.
+  // Connected to Studio (ADR-0017): a graph edit made there reloads the graph here, an evaluation
+  // run there shows here, and Studio's selection (a layer row, a viewport pick) selects the node here.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
-    type EngineEvent = { topic: string; data: { op?: string; client?: string | null; nodes?: string[]; source?: string | null } };
+    type EngineEvent = { topic: string; data: { op?: string; client?: string | null; nodes?: string[]; source?: string | null; report?: EvalReport } };
     listen<EngineEvent>("engine-event", ({ payload: { topic, data } }) => {
       const st = useStore.getState();
-      if (topic === "project_changed" && data.client !== "gui-editor" && data.op?.startsWith("graph.")) void st.loadGraph();
+      const other = data.client !== "gui-editor";
+      if (topic === "project_changed" && other && data.op?.startsWith("graph.") && data.op !== "graph.evaluate") void st.loadGraph(false);
+      if (topic === "evaluated" && other && data.report) void st.adoptEvaluation(data.report);
       if (topic === "selection" && data.source !== "gui-editor") st.setSelectedNode(data.nodes?.[0] ?? null);
     })
       .then((u) => {
