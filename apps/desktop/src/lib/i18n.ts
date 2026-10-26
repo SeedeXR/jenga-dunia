@@ -2,6 +2,8 @@
 // a missing translation falls back to English. Kiswahili and French are first drafts — corrections
 // welcome (docs/user/desktop-app.md). The choice persists in the browser store.
 
+import dict from "./i18n.json";
+
 export type Lang = "en" | "sw" | "fr";
 export const LANGS: { code: Lang; label: string }[] = [
   { code: "en", label: "English" },
@@ -9,56 +11,8 @@ export const LANGS: { code: Lang; label: string }[] = [
   { code: "fr", label: "Français" },
 ];
 
-const DICT: Record<Exclude<Lang, "en">, Record<string, string>> = {
-  sw: {
-    Project: "Mradi",
-    "Reference image": "Picha ya marejeo",
-    Layers: "Tabaka",
-    Settings: "Mipangilio",
-    Tasks: "Kazi",
-    Diagnostics: "Uchunguzi",
-    Brush: "Brashi",
-    Grid: "Gridi",
-    Sun: "Jua",
-    Scatter: "Tawanya",
-    Caves: "Mapango",
-    Actions: "Vitendo",
-    "Simulation layers": "Tabaka za uigaji",
-    Materials: "Nyenzo",
-    "Terrain · Noise": "Ardhi · Kelele",
-    Export: "Hamisha",
-    Language: "Lugha",
-    New: "Mpya",
-    Open: "Fungua",
-    Save: "Hifadhi",
-    Generate: "Tengeneza",
-    Evaluate: "Kokotoa",
-  },
-  fr: {
-    Project: "Projet",
-    "Reference image": "Image de référence",
-    Layers: "Calques",
-    Settings: "Réglages",
-    Tasks: "Tâches",
-    Diagnostics: "Diagnostics",
-    Brush: "Pinceau",
-    Grid: "Grille",
-    Sun: "Soleil",
-    Scatter: "Dispersion",
-    Caves: "Grottes",
-    Actions: "Actions",
-    "Simulation layers": "Calques de simulation",
-    Materials: "Matériaux",
-    "Terrain · Noise": "Terrain · Bruit",
-    Export: "Exporter",
-    Language: "Langue",
-    New: "Nouveau",
-    Open: "Ouvrir",
-    Save: "Enregistrer",
-    Generate: "Générer",
-    Evaluate: "Évaluer",
-  },
-};
+// The translations live in i18n.json, which Studio (apps/studio/src/i18n.rs) embeds as well.
+const DICT: Record<Exclude<Lang, "en">, Record<string, string>> = dict;
 
 /** The language stored for this browser (English when none, or storage is blocked). */
 export function storedLang(): Lang {
