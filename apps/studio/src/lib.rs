@@ -2,6 +2,7 @@
 //! context, served to the Editor over `jd-ipc` — and its window: the 3-D viewport and panels.
 
 pub mod app;
+pub mod chrome;
 pub mod editor;
 pub mod look;
 pub mod theme;

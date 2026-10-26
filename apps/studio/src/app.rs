@@ -968,16 +968,117 @@ impl StudioApp {
             ),
         };
         if look::icon_button(ui, "workflow", &tip, !running).clicked() {
-            match &mut self.editor {
-                Some(e) => e.reopen(),
-                None => match editor::locate(None) {
-                    Ok(path) => self.start_editor(path),
-                    Err(msg) => {
-                        self.log(msg.clone(), Level::Error);
-                        self.editor_error = Some(msg);
-                    }
-                },
+            self.open_editor();
+        }
+    }
+
+    fn chrome_action(
+        &mut self,
+        action: crate::chrome::Action,
+        ctx: &egui::Context,
+        frame: &eframe::Frame,
+    ) {
+        use crate::chrome::Action;
+        match action {
+            Action::Fit => self.viewport.fit(),
+            Action::Still => self.save_still(frame),
+            Action::Fullscreen => self.set_fullscreen(ctx, !self.fullscreen),
+            Action::Frame => self.viewport.set_frame(!self.viewport.frame),
+            Action::Graph => self.open_editor(),
+            Action::Insert(k) => {
+                if let Some(kind) = crate::chrome::STRIP[k].3 {
+                    let params = (kind == "jd.shape.primitive@1").then(|| {
+                        let e = self.project.as_ref().map_or([1000.0, 1000.0], |p| {
+                            [p["world"]["extent_m"][0].as_f64().unwrap_or(1000.0), p["world"]["extent_m"][1].as_f64().unwrap_or(1000.0)]
+                        });
+                        let max = self.viewport.info().map_or(500.0, |i| f64::from(i.range_m[1]));
+                        json!({ "shape": "cone", "center_m": [e[0] / 2.0, e[1] / 2.0], "size_m": [e[0] / 3.0, e[1] / 3.0], "height_range_m": [0.0, (max / 3.0).max(50.0)], "op": "max" })
+                    });
+                    self.splice_before("height", kind, params);
+                }
             }
+        }
+    }
+
+    /// The desktop's `spliceBefore`: a node between the height output and whatever fed it,
+    /// stacked under the output in the graph; then a live evaluation at the preview lod.
+    fn splice_before(&mut self, layer: &str, kind: &str, params: Option<Value>) {
+        let output = self.graph["nodes"].as_array().and_then(|nodes| {
+            nodes
+                .iter()
+                .find(|n| {
+                    n["kind"]
+                        .as_str()
+                        .is_some_and(|k| k.starts_with("jd.output.height@"))
+                        && n["params"]["layer"].as_str().unwrap_or("height") == layer
+                })
+                .cloned()
+        });
+        let Some(output) = output else {
+            return self.log(format!("no `{layer}` output in the graph"), Level::Error);
+        };
+        let out_id = output["id"].clone();
+        let feed = self.graph["edges"].as_array().and_then(|edges| {
+            edges
+                .iter()
+                .find(|e| e["to"]["node"] == out_id && e["to"]["port"] == "in")
+                .cloned()
+        });
+        let pos = [
+            output["ui"]["position"][0].as_f64().unwrap_or(0.0),
+            output["ui"]["position"][1].as_f64().unwrap_or(0.0),
+        ];
+        let below = self.graph["nodes"].as_array().map_or(0, |nodes| {
+            nodes
+                .iter()
+                .filter(|n| (n["ui"]["position"][0].as_f64().unwrap_or(0.0) - pos[0]).abs() < 1.0)
+                .count()
+        });
+        let mut add = json!({ "kind": kind, "position": [pos[0], pos[1] + 140.0 * below as f64] });
+        if let Some(p) = params {
+            add["params"] = p;
+        }
+        let lod = self
+            .project
+            .as_ref()
+            .and_then(|p| p["settings"]["preview_lod"].as_u64())
+            .unwrap_or(0);
+        let id_of = |done: &[Response]| {
+            done.first()
+                .and_then(|r| r.result.as_ref())
+                .map(|v| v["id"].clone())
+        };
+        let mut steps: Vec<Step> = vec![Box::new(move |_| {
+            Some(Self::request("graph.add_node", add))
+        })];
+        if let Some(feed) = feed {
+            steps.push(Box::new(move |done| {
+                Some(Self::request("graph.connect", json!({ "from": feed["from"]["node"], "from_port": feed["from"]["port"], "to": id_of(done)?, "to_port": "in" })))
+            }));
+        }
+        steps.push(Box::new(move |done| {
+            Some(Self::request(
+                "graph.connect",
+                json!({ "from": id_of(done)?, "from_port": "out", "to": out_id, "to_port": "in" }),
+            ))
+        }));
+        steps.push(Box::new(move |_| {
+            Some(Self::request("graph.evaluate", json!({ "lod": lod })))
+        }));
+        self.chain(steps);
+    }
+
+    fn open_editor(&mut self) {
+        match &mut self.editor {
+            Some(e) if !matches!(e.status, editor::Status::Running(_)) => e.reopen(),
+            Some(_) => {}
+            None => match editor::locate(None) {
+                Ok(path) => self.start_editor(path),
+                Err(msg) => {
+                    self.log(msg.clone(), Level::Error);
+                    self.editor_error = Some(msg);
+                }
+            },
         }
     }
 
@@ -1293,7 +1394,22 @@ impl eframe::App for StudioApp {
         };
         egui::CentralPanel::default()
             .frame(bg.inner_margin(margin))
-            .show(ui, |ui| self.viewport.show(ui, frame.wgpu_render_state()));
+            .show(ui, |ui| {
+                self.viewport.show(ui, frame.wgpu_render_state());
+                let cam = self.viewport.camera;
+                let st = crate::chrome::State {
+                    // The desktop's heading: the camera sits at θ from south towards east.
+                    heading: (360.0 - cam.theta.to_degrees()).rem_euclid(360.0),
+                    distance_m: cam.radius,
+                    range_m: self.viewport.info().map(|i| i.range_m),
+                    frame: self.viewport.frame,
+                    enabled: self.project.is_some() && self.busy == 0,
+                    can_still: self.project.is_some() && self.viewport.info().is_some(),
+                };
+                if let Some(action) = crate::chrome::show(ui, self.viewport.rect(), &st) {
+                    self.chrome_action(action, ui.ctx(), frame);
+                }
+            });
     }
 
     fn on_exit(&mut self) {

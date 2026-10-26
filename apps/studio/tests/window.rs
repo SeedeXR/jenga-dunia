@@ -144,6 +144,68 @@ fn a_write_from_the_editor_refreshes_the_window() {
     assert_eq!(h.state().layer(), Some("height"));
 }
 
+#[test]
+fn the_viewport_chrome_inserts_layers_frames_and_fits() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = engine(dir.path());
+    let probe = server.clone();
+    let mut h = window(server);
+    settle(&mut h, |a| a.viewport.info().is_some());
+    // The compass and the ruler read the camera and the layer, as the desktop's.
+    h.get_by_label("Fit: back to the home view");
+    assert!(h.state().viewport.frame);
+    // Frame off and on again: the block and the readout follow.
+    h.get_by_label("Frame: draw the world as a block with side walls and a rim")
+        .click();
+    h.run_steps(2);
+    assert!(!h.state().viewport.frame);
+    h.get_by_label("Frame: draw the world as a block with side walls and a rim")
+        .click();
+    h.run_steps(2);
+    assert!(h.state().viewport.frame);
+    // Orbit away, then Fit: back to θ 0.6.
+    h.state_mut().viewport.camera.theta = 2.0;
+    h.get_by_label("Fit: back to the home view").click();
+    h.run_steps(2);
+    assert_eq!(h.state().viewport.camera.theta, 0.6);
+    // The layer strip splices a terrace filter in front of the height output and re-evaluates.
+    h.get_by_label("Filter: terraces (jd.filter.terrace)")
+        .click();
+    h.run_steps(1);
+    settle(&mut h, |a| !a.busy());
+    let g = probe
+        .invoke(Request::new("graph.list", json!({})))
+        .result
+        .unwrap();
+    let nodes = g["nodes"].as_array().unwrap();
+    let terrace = nodes
+        .iter()
+        .find(|n| n["kind"] == "jd.filter.terrace@1")
+        .expect("terrace node");
+    let output = nodes
+        .iter()
+        .find(|n| n["kind"].as_str().unwrap().starts_with("jd.output.height@"))
+        .unwrap();
+    let edges = g["edges"].as_array().unwrap();
+    assert!(
+        edges
+            .iter()
+            .any(|e| e["from"]["node"] == terrace["id"] && e["to"]["node"] == output["id"]),
+        "{edges:?}"
+    );
+    assert!(
+        edges
+            .iter()
+            .any(|e| e["to"]["node"] == terrace["id"] && e["to"]["port"] == "in"),
+        "{edges:?}"
+    );
+    assert!(
+        h.state()
+            .log_lines()
+            .any(|l| l.text == "graph.evaluate: ok")
+    );
+}
+
 /// `JD_STUDIO_CAPTURE=<png> cargo test -p jd-studio --test window -- --ignored capture`: the
 /// window rendered offscreen (no screen capture involved) on the project the desktop's
 /// `e2e/parity-capture.spec.ts` builds — same world, seed and starter graph — at the same

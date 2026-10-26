@@ -510,6 +510,8 @@ pub struct Viewport {
     mesh: Option<Mesh>,
     pending: Option<(Vec<Vertex>, Vec<u32>, Option<Frame>)>,
     pending_maps: Option<Option<Maps>>,
+    /// The preview shown and its extent (the frame toggle rebuilds from it).
+    shown: Option<(Preview, [f32; 2])>,
     pending_sky: Option<Option<Image>>,
     info: Option<TerrainInfo>,
     /// The camera; set it and the next frame re-renders.
@@ -534,6 +536,7 @@ impl Default for Viewport {
             mesh: None,
             pending: None,
             pending_maps: None,
+            shown: None,
             pending_sky: None,
             info: None,
             camera: Camera::fit([1.0, 1.0]),
@@ -554,6 +557,7 @@ impl Viewport {
     /// Show this preview of a layer covering `extent_m`. The camera re-frames when the ground's
     /// extent changes (a new project), not on every refresh.
     pub fn set_terrain(&mut self, pv: &Preview, extent_m: [f32; 2]) {
+        self.shown = Some((pv.clone(), extent_m));
         let (w, h) = (pv.width.max(2), pv.height.max(2));
         let q = |x: u32, y: u32| {
             pv.data[(y.min(pv.height - 1) * pv.width + x.min(pv.width - 1)) as usize]
@@ -612,8 +616,25 @@ impl Viewport {
         self.dirty = true;
     }
 
+    /// Draw the world as a framed block or not (the viewport's Frame button).
+    pub fn set_frame(&mut self, on: bool) {
+        self.frame = on;
+        if let Some((pv, extent)) = self.shown.take() {
+            self.set_terrain(&pv, extent);
+        }
+    }
+
+    /// Back to the home view (the viewport's Fit button).
+    pub fn fit(&mut self) {
+        if let Some(i) = &self.info {
+            self.camera = Camera::fit(i.extent_m);
+            self.dirty = true;
+        }
+    }
+
     /// Drop the terrain (no project, or no layer).
     pub fn clear(&mut self) {
+        self.shown = None;
         self.mesh = None;
         self.pending = None;
         self.info = None;
@@ -794,25 +815,6 @@ impl Viewport {
                 .corner_radius(12.0)
                 .paint_at(ui, rect);
             crate::look::ring(ui, rect);
-        }
-        if let Some(i) = &self.info {
-            let text = format!(
-                "{} x {} samples  |  {:.0} x {:.0} m  |  {:.0} to {:.0} m  |  {:.2} M triangles",
-                i.size[0],
-                i.size[1],
-                i.extent_m[0],
-                i.extent_m[1],
-                i.range_m[0],
-                i.range_m[1],
-                i.triangles as f64 / 1e6
-            );
-            painter.text(
-                rect.left_bottom() + egui::vec2(10.0, -10.0),
-                Align2::LEFT_BOTTOM,
-                text,
-                FontId::proportional(12.0),
-                color::FG2,
-            );
         }
     }
 

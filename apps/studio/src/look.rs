@@ -106,6 +106,23 @@ pub fn icon(name: &str) -> ImageSource<'static> {
         "workflow",
         "panel-left-close",
         "panel-left-open",
+        "home",
+        "box",
+        "brush",
+        "route",
+        "grid-3x-3",
+        "horizon",
+        "mountain",
+        "layers",
+        "blend",
+        "thermometer",
+        "droplets",
+        "git-branch",
+        "snowflake",
+        "wind",
+        "pickaxe",
+        "flame",
+        "flashlight",
     )
 }
 
@@ -137,6 +154,17 @@ pub fn button(
 /// The toolbar's icon buttons: a 15 px icon in `fg-1`, `p-1.5`, `hover:bg-jd-bg-3`; the
 /// tooltip is also the accessible name.
 pub fn icon_button(ui: &mut Ui, icon_name: &str, tip: &str, enabled: bool) -> Response {
+    icon_button_tinted(ui, icon_name, tip, enabled, color::FG1)
+}
+
+/// [`icon_button`] in another resting colour (the layer strip's `text-jd-accent`).
+pub fn icon_button_tinted(
+    ui: &mut Ui,
+    icon_name: &str,
+    tip: &str,
+    enabled: bool,
+    rest: Color32,
+) -> Response {
     let size = vec2(27.0, 27.0);
     let (rect, resp) = ui.allocate_exact_size(
         size,
@@ -154,7 +182,7 @@ pub fn icon_button(ui: &mut Ui, icon_name: &str, tip: &str, enabled: bool) -> Re
         let tint = match (enabled, hovered) {
             (false, _) => color::FG1.gamma_multiply(0.3),
             (true, true) => color::FG0,
-            (true, false) => color::FG1,
+            (true, false) => rest,
         };
         egui::Image::new(icon(icon_name)).tint(tint).paint_at(
             ui,

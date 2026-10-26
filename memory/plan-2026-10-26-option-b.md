@@ -99,4 +99,15 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   Next in P3: viewport chrome (inner toolbar: home / still / fullscreen / frame; Grid, Horizon,
   Road, Sculpt, Hide graph; compass strip; height ruler; hints; layer strip), then sea, lakes,
   scatter, caves, overlays, rain, post, sculpt / grid / road / cave tools, flythrough.
+- P3 slice 2 (viewport chrome): fit / still / fullscreen / frame (top left), the compass strip
+  (heading = −θ, distance), the height ruler (tickStep, Max / Min, negatives warn), the hints, the
+  tool buttons (Grid, Horizon, Road, Sculpt — disabled until their slices — and Graph, which opens
+  the Editor) and the layer strip (cone, terraces, smooth, thermal, hydraulic, rivers splice
+  before the output exactly as `spliceBefore`, then evaluate at the preview lod).
+  **Decisions:** (1) workflows with logic (add simulation / cave layers with their materials and
+  published layers, sculpt / road / grid node set-up) move into jd-core ops that both UIs call,
+  instead of a second Rust copy of state.ts (one implementation, one test); the desktop switches to
+  them in the same commit, its e2e unchanged. (2) Live evaluation moves to Studio (engine side)
+  for edits from either window, at the desktop's adaptive preview lod; until then each window
+  evaluates after its own edits.
 
