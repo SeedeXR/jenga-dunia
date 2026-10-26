@@ -473,6 +473,42 @@ const logDir = path.join(proj, "logs");
 }
 mark(15, "VERIFIED", "this report records the numbers; conversion losses: PNG16 quantisation (W_EXPORT_LOSS), USD without textures (step 4), FBX albedo only (no normal/roughness maps)");
 
+// ── 19 (beyond §20; owner request 2026-10-25): caves under the same world ──────────────────────
+{
+  // A mountain cave on a side branch of the height chain, so items 1–18 see the same terrain.
+  const graph = op("graph.list", {}, false);
+  const feed = graph.edges.find((e) => e.to.node === heightOut && e.to.port === "in");
+  const cave = addNode("jd.cave.system@1", { kind: "mountain", seed: 7, reach_m: quick ? 200 : 300, complexity: 2 });
+  connect(feed.from.node, feed.from.port, cave, "in");
+  for (const [port, layer] of [["holes", "cave_holes"], ["plan", "cave_plan"]]) connect(cave, port, addNode("jd.output.height@1", { layer }), "in");
+  const t0 = t();
+  op("graph.evaluate", {});
+  const holes = op("terrain.stats", { layer: "cave_holes" }, false).stats;
+  const glb = op("caves.export", { id: cave, path: "caves/cave.glb" }, false);
+  op("caves.export", { id: cave, path: "caves/cave.json" }, false);
+  const skel = JSON.parse(readFileSync(path.join(proj, "exports", "caves", "cave.json"), "utf8"));
+  const opened = op("terrain.export_mesh", { layer: "height", path: "caves/terrain_open.glb", holes: "cave_holes" }, false);
+  let ok = holes.max === 1 && glb.triangles > 1000 && glb.length_m > 100 && skel.cave.entrances.length >= 1;
+  let evidence = `jd.cave.system@1 (mountain) on the same terrain: ${glb.length_m.toFixed(0)} m of passage, ${glb.entrances.length} mouth(s) (${glb.entrances.map((e) => e.kind).join(", ")}); the terrain opens over them (cave_holes: ${Math.round(holes.mean * res * res)} cells, max ${holes.max}); caves.export GLB ${glb.triangles.toLocaleString("en")} triangles at ${glb.voxel_m.toFixed(2)} m voxels and the skeleton as JSON (${skel.cave.passages.length} passages, ${skel.cave.chambers.length} chambers) in ${ms(t0)}; terrain.export_mesh with the holes: ${opened.triangles.toLocaleString("en")} triangles`;
+  if (existsSync("scripts/unity-import-check.sh") && (process.env.UNITY || existsSync("/Applications/Unity/Hub/Editor"))) {
+    // Engine placement: the Unity profile carries the cave; Unity's importer places it and measures the entrances.
+    try {
+      op("terrain.export_profile", { profile: "unity", dir: "unity-caves", layer: "height", caves: true }, false);
+      execFileSync("bash", ["scripts/unity-import-check.sh", path.join(proj, "exports", "unity-caves")], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 900_000 });
+      const rep = JSON.parse(readFileSync(path.join(proj, "exports", "unity-caves", "jd-unity-import.json"), "utf8"));
+      const placed = rep.ok && rep.caves >= 1 && rep.cave_entrance_max_dist_m < 12;
+      ok = ok && placed;
+      evidence += `<br>Unity ${rep.unity} headless: ${rep.caves} cave mesh(es), ${rep.cave_triangles?.toLocaleString("en")} triangles placed under the terrain with colliders, every entrance within ${rep.cave_entrance_max_dist_m?.toFixed(2)} m of the placed mesh, ${rep.holes} hole cells via SetHoles`;
+    } catch (e) {
+      ok = false;
+      evidence += `<br>Unity placement failed: ${String(e).slice(0, 300)}`;
+    }
+  } else {
+    evidence += "<br>engine placement: scripts/unity-import-check.sh / unreal-import-check.sh where the engines are installed (not on this machine)";
+  }
+  mark(19, ok ? "VERIFIED" : "FAILED", evidence);
+}
+
 // ── Report ─────────────────────────────────────────────────────────────────────────────────────
 const names = {
   1: "Landscape with mountains, valleys, a river and a coastal region", 2: "Procedural erosion and hydrological modifications", 3: "At least two distinct biomes",
@@ -480,12 +516,13 @@ const names = {
   8: "Export to GLB/glTF", 9: "USD / USDZ", 10: "FBX through a verified implementation", 11: "Validate exports against format specifications", 12: "Import into Blender",
   13: "Unity, Unreal and a browser viewer", 14: "Geometry, scale, material fidelity, texture integrity, scene structure", 15: "Record losses, performance, compatibility",
   16: "Reproduce through the CLI", 17: "Reproduce through MCP", 18: "Logs, cancellation and recovery",
+  19: "Caves: generated under the terrain, opening it, exported, placed in an engine (beyond §20)",
 };
 say("## §20 items");
 say("");
 say("| # | item | status | evidence |");
 say("|---|---|---|---|");
-for (let n = 1; n <= 18; n++) {
+for (let n = 1; n <= 19; n++) {
   const it = items.get(n) ?? { status: "UNVERIFIED", evidence: ["not exercised"] };
   say(`| ${n} | ${names[n]} | **${it.status}** | ${it.evidence.join("<br>")} |`);
 }

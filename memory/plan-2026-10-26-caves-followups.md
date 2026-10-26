@@ -12,7 +12,7 @@ full gates, a commit (Opus 5.5 trailer), push; hosted CI checked after the last 
 | 5 | Lava tubes: stacked upper levels and braids (side tubes that split and rejoin within ~140 m) | done | unit |
 | 6 | Sea caves: blowholes (a shaft from the inland end to the surface) and raised caves at old sea levels | done (`old_sea_levels_m`) | unit |
 | 7 | Network check: karst skeleton statistics (average vertex degree 1.8–2.6, orientation entropy 0.8–1.0, branch length 8–331 m — Paris 2021 Table 2) as a test | done (needed side passages: branch length was 351 m) | unit over several seeds |
-| 8 | Acceptance item 19: caves (karst node, holes open the terrain, mesh + JSON export, Unity profile placement when a Unity project is set) | todo | acceptance run VERIFIED |
+| 8 | Acceptance item 19: caves (karst node, holes open the terrain, mesh + JSON export, Unity profile placement when a Unity project is set) | done (full run 19 VERIFIED; Unity entrances within 4.69 m) | acceptance run VERIFIED |
 | 9 | Cave walls: project surface-nets vertices onto the isosurface (Newton steps along the gradient) so man-made edges lose the staircase ridges | done (root cause was a zero seam in the arch SDF) | unit: vertex distance to the surface; render viewed |
 
 Out of scope (owner / hardware / decided): translations review, Blender Extensions submission,
@@ -32,3 +32,5 @@ Known limit kept: on a coarse terrain grid a mouth is at least one cell wide.
 ## Log
 - start: plan written.
 - 5348ec8: items 1, 2, 7, 9.
+- aa64c9f: items 3–6 (cenote collapse resized after its test caught a floor above the water).
+- item 8: acceptance item 19 — full run 19 VERIFIED, quick run (CI) item 19 VERIFIED.
