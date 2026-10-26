@@ -34,6 +34,7 @@ fn every_ui_character_has_a_glyph() {
     assert!(text.contains('⟲') && text.contains('⌘'), "{text}");
     for family in [
         egui::FontFamily::Proportional,
+        egui::FontFamily::Monospace,
         egui::FontFamily::Name("semibold".into()),
     ] {
         let text = text.clone();

@@ -84,13 +84,18 @@ pub fn install(ctx: &egui::Context) {
     ctx.add_font(FontInsert::new(
         "jd-arrows",
         FontData::from_static(ARROWS),
-        [FontFamily::Proportional, FontFamily::Name(SEMIBOLD.into())]
-            .into_iter()
-            .map(|family| InsertFontFamily {
-                family,
-                priority: FontPriority::Lowest,
-            })
-            .collect(),
+        // Monospace too: the log shows the engine's messages (e.g. "2ⁿ+1" from an export).
+        [
+            FontFamily::Proportional,
+            FontFamily::Monospace,
+            FontFamily::Name(SEMIBOLD.into()),
+        ]
+        .into_iter()
+        .map(|family| InsertFontFamily {
+            family,
+            priority: FontPriority::Lowest,
+        })
+        .collect(),
     ));
     // The desktop's sizes: 13 px body, 12 px controls and the log (`text-xs`).
     ctx.all_styles_mut(|style| {

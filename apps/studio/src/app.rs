@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Instant;
 
-use eframe::egui::{self, Align, Layout, Margin, RichText, ScrollArea, Stroke};
+use eframe::egui::{self, Align, Layout, Margin, RichText, ScrollArea, Stroke, vec2};
 use jd_core::{Request, Response, Status};
 use jd_ipc::Server;
 use serde_json::{Value, json};
@@ -61,6 +61,11 @@ enum Tag {
     Preview([f32; 2], u32, Instant),
     /// `terrain.scatter` for the viewport (points inline).
     Scatter,
+    /// `terrain.measure` for the Noise section's readout.
+    Measure,
+    /// An export or bake: busy while it runs and logged, as a button's op, but nothing on screen
+    /// changed, so no refresh (the desktop's `run`).
+    Export,
     /// Studio's own `project.set_look`: logged, then the project re-read (no terrain changed;
     /// the desktop's `writeLook` only logs).
     Look,
@@ -207,6 +212,15 @@ pub struct StudioApp {
     /// adopted by the evaluation that publishes it.
     color_layer: Option<String>,
     pending_color: Option<String>,
+    /// The Noise section: its settings (session-only, as the desktop's), a Strength or octave
+    /// bar being dragged (applied on release), the shown layer's `terrain.stats`, and the last
+    /// `terrain.measure`.
+    noise: NoisePanel,
+    noise_drag: NoiseDrag,
+    /// The Export section's fields (session-only, as the desktop's).
+    export: ExportPanel,
+    layer_stats: Option<Value>,
+    measure: Option<Value>,
     /// The material stack (the look's `materials`, the desktop's `materials`): mask, albedo,
     /// emissive, roughness, optional detail tile — as JSON, the shape the engine reads.
     materials: Vec<Value>,
@@ -217,6 +231,139 @@ pub struct StudioApp {
     xray: f64,
     caves: Vec<CaveRow>,
     cave_gen: u64,
+}
+
+/// The Noise panel's fields as typed (the desktop's `defaultNoise`: open_simplex2 fbm, seed 0,
+/// 1024 m, 6 octaves, lacunarity 2, gain 0.5, 0..500 m).
+#[derive(Debug, Clone, PartialEq)]
+struct NoisePanel {
+    kind: String,
+    fractal: String,
+    seed: String,
+    feature_size_m: String,
+    octaves: String,
+    lacunarity: String,
+    gain: String,
+    height_min: String,
+    height_max: String,
+}
+
+impl Default for NoisePanel {
+    fn default() -> Self {
+        Self {
+            kind: "open_simplex2".into(),
+            fractal: "fbm".into(),
+            seed: "0".into(),
+            feature_size_m: "1024".into(),
+            octaves: "6".into(),
+            lacunarity: "2".into(),
+            gain: "0.5".into(),
+            height_min: "0".into(),
+            height_max: "500".into(),
+        }
+    }
+}
+
+/// A noise preset: label, fractal, feature size, octaves, gain, height range.
+type NoisePreset = (&'static str, &'static str, f64, u32, f64, [f64; 2]);
+
+/// The desktop's `NOISE_PRESETS`.
+const NOISE_PRESETS: [NoisePreset; 4] = [
+    ("Mountains 0..500 m", "fbm", 1024.0, 6, 0.5, [0.0, 500.0]),
+    (
+        "Ridged alpine 0..1200 m",
+        "ridged",
+        1400.0,
+        7,
+        0.5,
+        [0.0, 1200.0],
+    ),
+    (
+        "Rolling hills 0..150 m",
+        "fbm",
+        800.0,
+        5,
+        0.45,
+        [0.0, 150.0],
+    ),
+    ("Desert plain 0..40 m", "fbm", 1200.0, 3, 0.5, [0.0, 40.0]),
+];
+
+impl NoisePanel {
+    fn apply(
+        &mut self,
+        (_, fractal, feature, octaves, gain, range): (&str, &str, f64, u32, f64, [f64; 2]),
+    ) {
+        self.fractal = fractal.into();
+        self.feature_size_m = number(&json!(feature));
+        self.octaves = octaves.to_string();
+        self.gain = number(&json!(gain));
+        self.height_min = number(&json!(range[0]));
+        self.height_max = number(&json!(range[1]));
+    }
+
+    /// The noise as the engine takes it (a field that does not parse is 0, as the desktop's
+    /// `Number`).
+    fn json(&self) -> Value {
+        let f = |s: &str| s.trim().parse::<f64>().unwrap_or(0.0);
+        json!({
+            "kind": self.kind,
+            "fractal": self.fractal,
+            "seed": self.seed.trim().parse::<i64>().unwrap_or(0),
+            "feature_size_m": f(&self.feature_size_m),
+            "octaves": self.octaves.trim().parse::<u32>().unwrap_or(0),
+            "lacunarity": f(&self.lacunarity),
+            "gain": f(&self.gain),
+            "height_range_m": [f(&self.height_min), f(&self.height_max)],
+        })
+    }
+}
+
+/// The Export section's fields: heightmap file, holes layer, engine and tiles, mesh file, HDRI
+/// file, timeline frames (the desktop's defaults: height.exr, none, Unity × 1, terrain.glb,
+/// sky.exr, 24).
+#[derive(Debug, Clone)]
+struct ExportPanel {
+    path: String,
+    holes: Option<String>,
+    unreal: bool,
+    tiles: String,
+    mesh: String,
+    sky: String,
+    frames: String,
+}
+
+impl Default for ExportPanel {
+    fn default() -> Self {
+        Self {
+            path: "height.exr".into(),
+            holes: None,
+            unreal: false,
+            tiles: "1".into(),
+            mesh: "terrain.glb".into(),
+            sky: "sky.exr".into(),
+            frames: "24".into(),
+        }
+    }
+}
+
+/// A Strength or octave bar value while it is dragged (the node keeps the applied one).
+#[derive(Debug, Default)]
+struct NoiseDrag {
+    strength: Option<f64>,
+    octaves: std::collections::HashMap<usize, f64>,
+}
+
+/// The desktop's `JSON.stringify(a) !== JSON.stringify(b)` for parameters: numbers by value
+/// (1024 and 1024.0 are the same), arrays element by element.
+fn same_value(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => x.as_f64() == y.as_f64(),
+        (Value::Array(x), Value::Array(y)) => {
+            x.len() == y.len() && x.iter().zip(y).all(|(a, b)| same_value(a, b))
+        }
+        _ => a == b,
+    }
 }
 
 /// The desktop's cave kinds (`CAVE_KINDS`): node kind and label.
@@ -351,6 +498,11 @@ impl StudioApp {
             color_layer: None,
             pending_color: None,
             materials: Vec::new(),
+            noise: NoisePanel::default(),
+            noise_drag: NoiseDrag::default(),
+            export: ExportPanel::default(),
+            layer_stats: None,
+            measure: None,
             cave_kind: 0,
             show_caves: true,
             xray: 0.0,
@@ -466,7 +618,7 @@ impl StudioApp {
     fn invoke(&mut self, tag: Tag, op: &str, params: Value) {
         let request = Self::request(op, params);
         let (server, tx, ctx) = (self.server.clone(), self.tx.clone(), self.ctx.clone());
-        let user = matches!(tag, Tag::User);
+        let user = matches!(tag, Tag::User | Tag::Export);
         let spawned = std::thread::Builder::new()
             .name("studio-op".into())
             .spawn(move || {
@@ -534,7 +686,7 @@ impl StudioApp {
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
                 Msg::Reply { tag, response } => {
-                    if matches!(tag, Tag::User) {
+                    if matches!(tag, Tag::User | Tag::Export) {
                         self.busy = self.busy.saturating_sub(1);
                     } else {
                         self.reads = self.reads.saturating_sub(1);
@@ -797,6 +949,8 @@ impl StudioApp {
                 }
             }
             Tag::Stats(layer) => {
+                self.layer_stats = r.result.clone();
+                self.measure = None;
                 let Some(size) = r.result.as_ref().map(|v| &v["size_px"]) else {
                     self.log_response(&r);
                     return self.refresh_done();
@@ -826,6 +980,11 @@ impl StudioApp {
             Tag::Look => {
                 self.log_response(&r);
                 self.invoke(Tag::InfoOnly, "project.info", json!({}));
+            }
+            Tag::Export => self.log_response(&r),
+            Tag::Measure => {
+                self.log_response(&r);
+                self.measure = r.result;
             }
             Tag::Scatter => {
                 self.log_response(&r);
@@ -1215,6 +1374,571 @@ impl StudioApp {
         }
     }
 
+    /// The graph's noise node, if any (the Noise section's Strength and octave bars edit it).
+    fn noise_node(&self) -> Option<Value> {
+        self.graph["nodes"]
+            .as_array()?
+            .iter()
+            .find(|n| {
+                n["kind"]
+                    .as_str()
+                    .is_some_and(|k| k.starts_with("jd.noise."))
+            })
+            .cloned()
+    }
+
+    /// The desktop's `generate`: the Noise panel into the graph's noise node (only the parameters
+    /// that differ, each journaled), then a full evaluation; without a noise node (a graph from an
+    /// imported heightmap) the standalone `terrain.generate` fills `height`.
+    fn generate(&mut self) {
+        let noise = self.noise.json();
+        let Some(node) = self.noise_node() else {
+            return self.invoke(
+                Tag::User,
+                "terrain.generate",
+                json!({ "noise": noise, "layer": "height" }),
+            );
+        };
+        let id = node["id"].as_str().unwrap_or_default().to_owned();
+        let mut steps: Vec<Step> = Vec::new();
+        for (key, value) in noise.as_object().into_iter().flatten() {
+            if !same_value(&node["params"][key], value) {
+                let request = Self::request(
+                    "graph.set_param",
+                    json!({ "id": id, "key": key, "value": value }),
+                );
+                steps.push(Box::new(move |_| Some(request)));
+            }
+        }
+        steps.push(Box::new(|_| {
+            Some(Self::request("graph.evaluate", json!({ "lod": 0 })))
+        }));
+        self.chain(steps);
+    }
+
+    /// `graph.set_param` on the noise node.
+    fn set_noise_param(&mut self, key: &str, value: Value) {
+        if let Some(id) = self
+            .noise_node()
+            .and_then(|n| n["id"].as_str().map(str::to_owned))
+        {
+            self.invoke(
+                Tag::User,
+                "graph.set_param",
+                json!({ "id": id, "key": key, "value": value }),
+            );
+        }
+    }
+
+    /// The right column's Terrain · Noise section (the desktop's, in its order).
+    fn noise_card(&mut self, ui: &mut egui::Ui) {
+        use crate::widgets::{Range, VBar};
+        look::section(ui, "Terrain · Noise");
+        let mut preset = None;
+        look::field(ui, "Preset", |ui| {
+            egui::ComboBox::from_id_salt("noise-preset")
+                .width(144.0)
+                .selected_text(RichText::new("choose…").size(12.0))
+                .show_ui(ui, |ui| {
+                    for (i, p) in NOISE_PRESETS.iter().enumerate() {
+                        if ui.selectable_label(false, p.0).clicked() {
+                            preset = Some(i);
+                        }
+                    }
+                })
+                .response
+                .on_hover_text("Fills the noise fields below; a desert plain is the start for dunes (jd.erosion.aeolian@1) and sinkholes (jd.erosion.karst@1)")
+                .widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::accesskit::Role::ComboBox, true, "Noise preset")
+                });
+        });
+        if let Some(i) = preset {
+            self.noise.apply(NOISE_PRESETS[i]);
+        }
+        let n = &mut self.noise;
+        for (label, value, options) in [
+            (
+                "Lattice",
+                &mut n.kind,
+                &[
+                    "open_simplex2",
+                    "open_simplex2s",
+                    "perlin",
+                    "value",
+                    "value_cubic",
+                    "cellular",
+                ][..],
+            ),
+            (
+                "Fractal",
+                &mut n.fractal,
+                &["none", "fbm", "ridged", "ping_pong"][..],
+            ),
+        ] {
+            look::field(ui, label, |ui| {
+                egui::ComboBox::from_id_salt(("noise", label))
+                    .width(112.0)
+                    .selected_text(RichText::new(value.as_str()).size(12.0))
+                    .show_ui(ui, |ui| {
+                        for o in options {
+                            ui.selectable_value(value, (*o).to_owned(), *o);
+                        }
+                    })
+                    .response
+                    .widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::accesskit::Role::ComboBox, true, label)
+                    });
+            });
+        }
+        for (label, value) in [
+            ("Seed", &mut n.seed),
+            ("Feature size (m)", &mut n.feature_size_m),
+            ("Octaves", &mut n.octaves),
+            ("Lacunarity", &mut n.lacunarity),
+            ("Gain", &mut n.gain),
+        ] {
+            look::field(ui, label, |ui| {
+                look::input(ui, value, 112.0, "", label);
+            });
+        }
+        if let Some(node) = self.noise_node() {
+            let strength = node["params"]["strength"].as_f64().unwrap_or(1.0);
+            let label = format!("Strength {strength:.2}");
+            let mut v = self.noise_drag.strength.unwrap_or(strength);
+            let mut apply = None;
+            look::field(ui, &label, |ui| {
+                let r = ui
+                    .add(Range::new(&mut v, 0.0..=2.0, "Strength").step(0.05).reset(1.0).fill_from(1.0))
+                    .on_hover_text("General strength: scales the relief around the middle of the height range (World Creator's General Strength)");
+                if r.changed() {
+                    self.noise_drag.strength = Some(v);
+                }
+                // Applied on release (the desktop's onPointerUp / onKeyUp), not on every step.
+                if r.drag_stopped()
+                    || (r.changed() && !r.dragged() && !r.is_pointer_button_down_on())
+                {
+                    apply = Some(v);
+                }
+            });
+            if let Some(v) = apply {
+                self.noise_drag.strength = None;
+                self.set_noise_param("strength", json!(v));
+            }
+            // The octave bars: strength per octave, coarsest first (fbm only); `reset` clears them.
+            let count = self
+                .noise
+                .octaves
+                .trim()
+                .parse::<usize>()
+                .unwrap_or(0)
+                .min(16);
+            let weights: Vec<f64> = node["params"]["octave_weights"]
+                .as_array()
+                .map(|a| a.iter().map(|w| w.as_f64().unwrap_or(1.0)).collect())
+                .unwrap_or_default();
+            let fbm = self.noise.fractal == "fbm";
+            let mut reset = false;
+            let mut set: Option<Vec<f64>> = None;
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Octaves").size(12.0).color(color::FG1));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    reset = ui
+                        .add(egui::Button::new(RichText::new("reset").size(10.0).color(color::FG2)).frame(false))
+                        .clicked();
+                });
+            })
+            .response
+            .on_hover_text("Strength per octave, coarsest first (fbm): drag a bar and release to apply; double-click to reset all to 1");
+            if count > 0 {
+                let gap = 4.0;
+                let w =
+                    ((ui.available_width() - gap * (count - 1) as f32) / count as f32).max(16.0);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = gap;
+                    for i in 0..count {
+                        ui.allocate_ui_with_layout(
+                            vec2(w, 80.0),
+                            Layout::top_down(Align::Center),
+                            |ui| {
+                                ui.spacing_mut().item_spacing.y = 2.0;
+                                let mut v = self
+                                    .noise_drag
+                                    .octaves
+                                    .get(&i)
+                                    .copied()
+                                    .unwrap_or_else(|| weights.get(i).copied().unwrap_or(1.0));
+                                let r = ui.add_enabled(
+                                    fbm,
+                                    VBar::new(
+                                        &mut v,
+                                        0.0..=2.0,
+                                        66.0,
+                                        &format!("octave {} strength", i + 1),
+                                    ),
+                                );
+                                if r.changed() {
+                                    self.noise_drag.octaves.insert(i, v);
+                                }
+                                if r.drag_stopped()
+                                    || (r.changed()
+                                        && !r.dragged()
+                                        && !r.is_pointer_button_down_on())
+                                {
+                                    let next = (0..count)
+                                        .map(|k| {
+                                            if k == i {
+                                                v
+                                            } else {
+                                                weights.get(k).copied().unwrap_or(1.0)
+                                            }
+                                        })
+                                        .collect();
+                                    set = Some(next);
+                                }
+                                ui.label(
+                                    RichText::new(format!("{}", i + 1))
+                                        .size(9.0)
+                                        .color(color::FG2),
+                                );
+                            },
+                        );
+                    }
+                });
+            }
+            if reset {
+                self.noise_drag.octaves.clear();
+                self.set_noise_param("octave_weights", Value::Null);
+            } else if let Some(next) = set {
+                self.noise_drag.octaves.clear();
+                self.set_noise_param("octave_weights", json!(next));
+            }
+        }
+        let n = &mut self.noise;
+        look::field(ui, "Height min / max (m)", |ui| {
+            look::input(ui, &mut n.height_max, 56.0, "", "Height max (m)");
+            look::input(ui, &mut n.height_min, 56.0, "", "Height min (m)");
+        });
+        ui.add_space(8.0);
+        let can = self.project.is_some() && self.busy == 0;
+        let generate = look::wide_primary(ui, "mountain", "Generate", can).clicked();
+        if generate {
+            self.generate();
+        }
+        // The shown layer's statistics, then Measure landform and its readout.
+        if let Some(st) = self.layer_stats.clone() {
+            ui.add_space(8.0);
+            let grid = |ui: &mut egui::Ui, id: &str, rows: Vec<(&str, String)>| {
+                egui::Grid::new(id)
+                    .num_columns(2)
+                    .spacing(vec2(8.0, 4.0))
+                    .show(ui, |ui| {
+                        for (k, v) in rows {
+                            ui.label(RichText::new(k).size(12.0).color(color::FG2));
+                            ui.label(RichText::new(v).size(12.0).color(color::FG2));
+                            ui.end_row();
+                        }
+                    });
+            };
+            let f = |k: &str| st["stats"][k].as_f64().unwrap_or(0.0);
+            let hash: String = st["content_hash"]
+                .as_str()
+                .unwrap_or_default()
+                .chars()
+                .take(16)
+                .collect();
+            grid(
+                ui,
+                "layer-stats",
+                vec![
+                    ("min / max", format!("{:.1} / {:.1} m", f("min"), f("max"))),
+                    ("mean", format!("{:.1} m", f("mean"))),
+                    (
+                        "time",
+                        format!("{} ms", st["duration_ms"].as_u64().unwrap_or(0)),
+                    ),
+                    ("hash", format!("{hash}…")),
+                ],
+            );
+            ui.add_space(8.0);
+            if look::button(ui, None, "Measure landform", false, self.busy == 0)
+                .on_hover_text("terrain.measure: relief, hypsometric integral, slope statistics and geomorphon shares — compare with a real DEM of the same landform (Reading a landscape)")
+                .clicked()
+            {
+                let layer = self.layer.as_deref().unwrap_or("height").split('#').next().unwrap_or("height").to_owned();
+                self.invoke(Tag::Measure, "terrain.measure", json!({ "layer": layer }));
+            }
+            if let Some(m) = self.measure.clone() {
+                ui.add_space(8.0);
+                let hi = m["hypsometric_integral"].as_f64().unwrap_or(0.0);
+                let age = if hi < 0.45 {
+                    "(dissected, old)"
+                } else if hi > 0.55 {
+                    "(plateau-like, young)"
+                } else {
+                    ""
+                };
+                let s = |k: &str| m["slope"][k].as_f64().unwrap_or(0.0);
+                let mut forms: Vec<(String, f64)> = m["geomorphons"]
+                    .as_object()
+                    .map(|o| {
+                        o.iter()
+                            .map(|(k, v)| (k.clone(), v.as_f64().unwrap_or(0.0)))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                forms.sort_by(|a, b| b.1.total_cmp(&a.1));
+                let forms = forms
+                    .iter()
+                    .take(5)
+                    .map(|(k, v)| format!("{k} {:.0} %", v * 100.0))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                grid(
+                    ui,
+                    "measure-readout",
+                    vec![
+                        (
+                            "relief",
+                            format!("{:.0} m", m["relief_m"].as_f64().unwrap_or(0.0)),
+                        ),
+                        (
+                            "hypsometric",
+                            format!("{hi:.2} {age}").trim_end().to_owned(),
+                        ),
+                        (
+                            "slope",
+                            format!(
+                                "mean {:.1}°, median {:.1}°, p90 {:.1}°",
+                                s("mean_deg"),
+                                s("p50_deg"),
+                                s("p90_deg")
+                            ),
+                        ),
+                        ("landforms", forms),
+                    ],
+                );
+            }
+        }
+    }
+
+    /// Choose where to save the heightmap, then export it there (the desktop's `pickExportPath`:
+    /// the panel's browse button and the toolbar's ⌘E).
+    fn pick_export_path(&mut self) {
+        if let Some(p) = rfd::FileDialog::new()
+            .set_title("Export heightmap")
+            .set_file_name(&self.export.path)
+            .add_filter("OpenEXR (32-bit float)", &["exr"])
+            .add_filter("PNG (16-bit)", &["png"])
+            .add_filter("RAW 16-bit", &["r16"])
+            .add_filter("RAW 32-bit float", &["r32"])
+            .add_filter("TIFF (32-bit float)", &["tif", "tiff"])
+            .save_file()
+        {
+            self.export.path = p.display().to_string();
+            self.export_heightmap(self.export.path.clone());
+        }
+    }
+
+    /// The right column's Export section (the desktop's, in its order): heightmap, holes, engine
+    /// profile, mesh, HDRI, water maps, timeline frames.
+    fn export_card(&mut self, ui: &mut egui::Ui) {
+        look::section(ui, "Export");
+        let idle = self.busy == 0;
+        let has_layer = self.layer.is_some();
+        let has_project = self.project.is_some();
+        let sea = self.graph["nodes"].as_array().and_then(|n| {
+            n.iter()
+                .find(|n| {
+                    n["kind"]
+                        .as_str()
+                        .is_some_and(|k| k.starts_with("jd.hydrology.sea_level@"))
+                })
+                .cloned()
+        });
+        let holes_options: Vec<String> = self
+            .layers
+            .iter()
+            .filter(|l| !l.contains('#'))
+            .cloned()
+            .collect();
+        let e = &mut self.export;
+        let mut act: Option<&str> = None;
+        look::field(ui, "File", |ui| {
+            if look::icon_button(
+                ui,
+                "folder-search",
+                "Choose where to save… (⌘E)",
+                has_layer && idle,
+            )
+            .clicked()
+            {
+                act = Some("browse");
+            }
+            look::input(ui, &mut e.path, 112.0, "", "Export file")
+                .on_hover_text("Relative paths go to the project's exports/ directory");
+        });
+        ui.add_space(4.0);
+        if look::wide_button(ui, "upload", "Export heightmap", false, has_layer && idle).clicked() {
+            act = Some("heightmap");
+        }
+        look::field(ui, "Holes", |ui| {
+            egui::ComboBox::from_id_salt("export-holes")
+                .width(112.0)
+                .selected_text(RichText::new(e.holes.as_deref().unwrap_or("none")).size(12.0))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut e.holes, None, "none");
+                    for l in &holes_options {
+                        ui.selectable_value(&mut e.holes, Some(l.clone()), l);
+                    }
+                })
+                .response
+                .on_hover_text("A 0..1 layer (a painted mask, a class mask) whose cells ≥ 0.5 are holes: left out of the mesh exports, written as holes.png for the engines (Unity SetHoles, Unreal Visibility)")
+                .widget_info(|| egui::WidgetInfo::labeled(egui::accesskit::Role::ComboBox, true, "Holes"));
+        });
+        look::field(ui, "Engine", |ui| {
+            if look::button(ui, Some("upload"), "Export", false, has_layer && idle)
+                .on_hover_text("Write exports/<engine>/: heightmap, one weightmap per material mask, RGBA splat maps, README with the import numbers, materials.json")
+                .clicked()
+            {
+                act = Some("profile");
+            }
+            look::input(ui, &mut e.tiles, 48.0, "", "Tiles per side").on_hover_text("Tiles per side: 1 writes one folder; 2–16 cut the world into tiles × tiles engine folders (tile_<x>_<y>/) sharing one height range, with tiles.json — the resolution must divide");
+            egui::ComboBox::from_id_salt("export-engine")
+                .width(80.0)
+                .selected_text(RichText::new(if e.unreal { "Unreal" } else { "Unity" }).size(12.0))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut e.unreal, false, "Unity");
+                    ui.selectable_value(&mut e.unreal, true, "Unreal");
+                })
+                .response
+                .on_hover_text("Unity Terrain (RAW 16-bit + weightmaps) or Unreal Landscape (PNG16 + weightmaps), with the material stack as materials.json")
+                .widget_info(|| egui::WidgetInfo::labeled(egui::accesskit::Role::ComboBox, true, "Engine"));
+        });
+        look::field(ui, "Mesh", |ui| {
+            if look::button(ui, Some("upload"), "Export", false, has_layer && idle).clicked() {
+                act = Some("mesh");
+            }
+            look::input(ui, &mut e.mesh, 96.0, "", "Mesh file").on_hover_text("exports/<file>: .glb (materials baked into its textures), .fbx, .obj, .stl, .ply, .usda, .usdz");
+        });
+        look::field(ui, "HDRI", |ui| {
+            if look::button(ui, Some("upload"), "Bake", false, has_project && idle).clicked() {
+                act = Some("sky");
+            }
+            look::input(ui, &mut e.sky, 96.0, "", "HDRI file").on_hover_text("exports/<file>.exr: the viewport's sun, turbidity and clouds as an equirectangular HDRI (a .png preview beside it)");
+        });
+        ui.add_space(4.0);
+        if look::wide_button(ui, "upload", "Export water maps", false, sea.is_some() && idle)
+            .on_hover_text("Write exports/water/: depth, colour, foam and a tileable wave normal map for the sea-level node's clarity and wind")
+            .clicked()
+        {
+            act = Some("water");
+        }
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            look::input(ui, &mut e.frames, 64.0, "", "Frames").on_hover_text("Frames across the timeline (t = 0 … 1)");
+            if look::wide_button(ui, "upload", "Export frames", false, has_project && idle)
+                .on_hover_text("Write exports/frames/: one 16-bit heightmap per frame from t = 0 to 1, keyframed parameters animating (timeline.export)")
+                .clicked()
+            {
+                act = Some("frames");
+            }
+        });
+        // The tiles field keeps the desktop's clamp: 1..16, 1 when it does not parse.
+        let tiles = self
+            .export
+            .tiles
+            .trim()
+            .parse::<u32>()
+            .unwrap_or(1)
+            .clamp(1, 16);
+        let holes = self.export.holes.clone();
+        let materials = Value::Array(self.materials.clone());
+        match act {
+            Some("browse") => self.pick_export_path(),
+            Some("heightmap") => self.export_heightmap(self.export.path.clone()),
+            Some("profile") => {
+                let profile = if self.export.unreal {
+                    "unreal"
+                } else {
+                    "unity"
+                };
+                // Each mask once, in stack order (the desktop's `new Set`).
+                let mut seen = std::collections::HashSet::new();
+                let masks: Vec<&str> = self
+                    .materials
+                    .iter()
+                    .filter_map(|m| m["mask"].as_str())
+                    .filter(|m| seen.insert(*m))
+                    .collect();
+                let mut params = json!({ "profile": profile, "dir": profile, "layer": "height", "masks": masks, "materials": materials });
+                if tiles > 1 {
+                    params["tiles"] = json!(tiles);
+                }
+                if let Some(h) = &holes {
+                    params["holes"] = json!(h);
+                }
+                // The project's caves go along: their meshes, their mouths merged into holes.png.
+                if !self.cave_nodes().is_empty() {
+                    params["caves"] = json!(true);
+                }
+                self.invoke(Tag::Export, "terrain.export_profile", params);
+            }
+            Some("mesh") => {
+                let mut params =
+                    json!({ "layer": "height", "path": self.export.mesh, "materials": materials });
+                // Without a holes layer chosen, the caves' mouths open the mesh (cave_holes).
+                let open = holes.or_else(|| {
+                    self.layers
+                        .iter()
+                        .any(|l| l == "cave_holes")
+                        .then(|| "cave_holes".to_owned())
+                });
+                if let Some(h) = open {
+                    params["holes"] = json!(h);
+                }
+                self.invoke(Tag::Export, "terrain.export_mesh", params);
+            }
+            Some("sky") => {
+                let [az, el, turbidity, clouds, fog] = self.sun.0;
+                self.invoke(
+                    Tag::Export,
+                    "sky.bake",
+                    json!({ "sun_azimuth_deg": az, "sun_elevation_deg": el, "turbidity": turbidity, "cloud_cover": clouds, "fog": fog, "path": self.export.sky }),
+                );
+            }
+            Some("water") => {
+                if let Some(sea) = sea {
+                    let p = &sea["params"];
+                    let wind = self
+                        .project
+                        .as_ref()
+                        .map(|p| p["world"]["wind"].clone())
+                        .unwrap_or_default();
+                    let mut params = json!({
+                        "level_m": p["level_m"].as_f64().unwrap_or(0.0),
+                        "visibility_m": p["visibility_m"].as_f64().unwrap_or(15.0),
+                        "wind_speed_mps": p["wind_speed_mps"].as_f64().or(wind["speed_mps"].as_f64()).unwrap_or(8.0),
+                        "fetch_km": p["fetch_km"].as_f64(),
+                        "wind_azimuth_deg": p["wind_azimuth_deg"].as_f64().or(wind["azimuth_deg"].as_f64()).unwrap_or(270.0),
+                    });
+                    if p["tint"].as_array().is_some_and(|t| t.len() == 3) {
+                        params["tint"] = p["tint"].clone();
+                    }
+                    self.invoke(Tag::Export, "ocean.bake", params);
+                }
+            }
+            Some("frames") => {
+                let frames = self.export.frames.trim().parse::<u32>().unwrap_or(0);
+                self.invoke(
+                    Tag::Export,
+                    "timeline.export",
+                    json!({ "frames": frames, "dir": "frames", "format": "png16" }),
+                );
+            }
+            _ => {}
+        }
+    }
+
     /// The cave nodes of the graph, in order.
     fn cave_nodes(&self) -> Vec<Value> {
         self.graph["nodes"]
@@ -1466,7 +2190,13 @@ impl StudioApp {
             ui.add_space(8.0);
         }
         if let Some((op, params)) = action {
-            self.invoke(Tag::User, op, params);
+            // An export writes a file; an entrance edit changes the graph (refresh).
+            let tag = if op == "caves.export" {
+                Tag::Export
+            } else {
+                Tag::User
+            };
+            self.invoke(tag, op, params);
         }
     }
 
@@ -2093,7 +2823,7 @@ impl StudioApp {
             if !model.is_empty() {
                 params["model"] = json!(model);
             }
-            self.invoke(Tag::User, "terrain.scatter", params);
+            self.invoke(Tag::Export, "terrain.scatter", params);
         }
     }
 
@@ -2531,17 +3261,8 @@ impl StudioApp {
             self.layer.is_some() && idle,
         )
         .clicked()
-            && let Some(p) = rfd::FileDialog::new()
-                .set_title("Export heightmap")
-                .set_file_name("height.exr")
-                .add_filter("OpenEXR (32-bit float)", &["exr"])
-                .add_filter("PNG (16-bit)", &["png"])
-                .add_filter("RAW 16-bit", &["r16"])
-                .add_filter("RAW 32-bit float", &["r32"])
-                .add_filter("TIFF (32-bit float)", &["tif", "tiff"])
-                .save_file()
         {
-            self.export_heightmap(p.display().to_string());
+            self.pick_export_path();
         }
         look::toolbar_separator(ui);
         if look::icon_button(
@@ -2565,11 +3286,9 @@ impl StudioApp {
             self.invoke(Tag::User, "graph.redo", json!({}));
         }
         look::toolbar_separator(ui);
-        // ponytail: the desktop's Generate first copies the Noise panel into the graph's noise
-        // node; Studio's Noise panel arrives with the panel port (P4), until then both evaluate.
         if look::icon_button(ui, "wand-2", "Generate terrain (⌘G)", has_project && idle).clicked()
         {
-            self.invoke(Tag::User, "graph.evaluate", json!({ "lod": 0 }));
+            self.generate();
         }
         if look::icon_button(ui, "play", "Evaluate the graph", has_project && idle).clicked() {
             self.invoke(Tag::User, "graph.evaluate", json!({ "lod": 0 }));
@@ -3082,6 +3801,10 @@ impl eframe::App for StudioApp {
                         self.actions_card(ui);
                         ui.add_space(12.0);
                         self.materials_card(ui);
+                        ui.add_space(12.0);
+                        self.noise_card(ui);
+                        ui.add_space(16.0);
+                        self.export_card(ui);
                     });
                 });
             egui::Panel::left("panel-left")

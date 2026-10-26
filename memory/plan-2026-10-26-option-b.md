@@ -191,5 +191,16 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   `+ layer`; Studio keeps the stack itself (restored from the look, written after the 400 ms
   debounce, maps re-baked on every edit). Core: MaterialSpec albedo / roughness / emissive are
   f64 now — f32 read back as 0.8999999761581421 in both UIs and in the published schema default.
-  Next: Noise, Export; then the left column (Real world, Reference image, Layers, Settings); the
-  viewport click tools (cave entrances, sculpt, grid, road); live evaluation.
+- P4 slice 8 (Terrain · Noise, Export) — the right column is complete:
+  Noise: Preset / Lattice / Fractal / Seed / Feature size / Octaves / Lacunarity / Gain (session-
+  only, the desktop's defaults), Strength and the octave bars (widgets::VBar, the native accent
+  slider) applied on release, Height min / max, Generate (toolbar ⌘G too: the panel into the noise
+  node's differing params, journaled, then a full evaluation; terrain.generate without a noise
+  node), the layer's stats grid, Measure landform + readout. Export: file + picker (shared with
+  the toolbar), Export heightmap, Holes, Engine Unity/Unreal × tiles (terrain.export_profile, caves
+  along), Mesh (cave_holes by default), HDRI bake, water maps (sea node), timeline frames.
+  Exports and bakes use Tag::Export (busy, logged, no refresh — the desktop's `run`); before, each
+  re-ran the whole refresh and re-baked the maps. look::wide_button centres full-width buttons.
+  The symbol font backs Monospace too (the log shows the engine's "2ⁿ+1").
+  Next: the left column (Real world, Reference image, Layers, Settings); the viewport click tools
+  (cave entrances, sculpt, grid, road); live evaluation; then P5.

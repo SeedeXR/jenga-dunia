@@ -263,3 +263,70 @@ pub fn checkbox(ui: &mut Ui, on: &mut bool, name: &str) -> Response {
     resp.widget_info(|| WidgetInfo::selected(Role::CheckBox, true, state, &name));
     resp
 }
+
+/// The desktop's `btn btn-primary w-full justify-center`: a full-width primary button with its
+/// icon and text centred (egui's button keeps its content at the left when stretched).
+pub fn wide_primary(ui: &mut Ui, icon_name: &str, text: &str, enabled: bool) -> Response {
+    wide_button(ui, icon_name, text, true, enabled)
+}
+
+/// A full-width button (`btn w-full justify-center`, or with `btn-primary`) with its icon and
+/// text centred.
+pub fn wide_button(
+    ui: &mut Ui,
+    icon_name: &str,
+    text: &str,
+    primary: bool,
+    enabled: bool,
+) -> Response {
+    let sense = if enabled {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 24.0), sense);
+    if ui.is_rect_visible(rect) {
+        let alpha = if enabled { 1.0 } else { 0.4 };
+        let hovered = resp.hovered() && enabled;
+        let (fill, stroke, fg) = if primary {
+            let fill = if hovered {
+                color::ACCENT
+            } else {
+                color::PRIMARY
+            };
+            (fill, Stroke::NONE, Color32::WHITE)
+        } else {
+            let w = &ui.visuals().widgets;
+            let v = if hovered { &w.hovered } else { &w.inactive };
+            (v.weak_bg_fill, v.bg_stroke, color::FG0)
+        };
+        ui.painter().rect(
+            rect,
+            4.0,
+            fill.gamma_multiply(alpha),
+            stroke,
+            StrokeKind::Inside,
+        );
+        let galley = ui.painter().layout_no_wrap(
+            text.to_owned(),
+            egui::FontId::proportional(12.0),
+            fg.gamma_multiply(alpha),
+        );
+        let w = 14.0 + 6.0 + galley.size().x;
+        let left = rect.center().x - w / 2.0;
+        egui::Image::new(icon(icon_name))
+            .tint(fg.gamma_multiply(alpha))
+            .paint_at(
+                ui,
+                egui::Rect::from_center_size(pos2(left + 7.0, rect.center().y), vec2(14.0, 14.0)),
+            );
+        ui.painter().galley(
+            pos2(left + 20.0, rect.center().y - galley.size().y / 2.0),
+            galley,
+            fg,
+        );
+    }
+    let name = text.to_owned();
+    resp.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, &name));
+    resp
+}

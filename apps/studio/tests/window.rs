@@ -766,6 +766,150 @@ fn the_materials_section_edits_the_stack_and_rebakes_the_maps() {
     }
 }
 
+#[test]
+fn the_noise_section_generates_tunes_octaves_and_measures() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = engine(dir.path());
+    let probe = server.clone();
+    let mut h = window(server);
+    settle(&mut h, |a| a.viewport.info().is_some());
+    let noise = || -> Value {
+        let g = probe
+            .invoke(Request::new("graph.list", json!({})))
+            .result
+            .unwrap();
+        g["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|n| n["kind"].as_str().unwrap().starts_with("jd.noise."))
+            .unwrap()["params"]
+            .clone()
+    };
+    let combo = eframe::egui::accesskit::Role::ComboBox;
+    // Preset Ridged alpine, then Generate: the panel goes into the noise node, the graph evaluates.
+    h.get_by_role_and_label(combo, "Noise preset")
+        .scroll_to_me();
+    h.run();
+    h.get_by_role_and_label(combo, "Noise preset").click();
+    h.run();
+    h.get_by_label("Ridged alpine 0..1200 m").click();
+    h.run();
+    h.get_by_label("Generate").scroll_to_me();
+    h.run();
+    h.get_by_label("Generate").click();
+    h.run_steps(1);
+    settle(&mut h, |a| {
+        a.log_lines().any(|l| l.text == "graph.evaluate: ok")
+    });
+    let p = noise();
+    assert_eq!(
+        (p["fractal"].as_str(), p["octaves"].as_u64()),
+        (Some("ridged"), Some(7)),
+        "{p}"
+    );
+    assert_eq!(p["height_range_m"], json!([0.0, 1200.0]));
+    // Strength: one keyboard step up, applied on release.
+    h.get_by_role_and_label(eframe::egui::accesskit::Role::Slider, "Strength")
+        .focus();
+    h.run();
+    h.key_press(eframe::egui::Key::ArrowRight);
+    h.run_steps(1);
+    settle(&mut h, |_| {
+        (noise()["strength"].as_f64().unwrap_or(1.0) - 1.05).abs() < 1e-9
+    });
+    // The octave bars are for fbm; back to Mountains (fbm, 6 octaves) and tune the first.
+    h.get_by_role_and_label(combo, "Noise preset")
+        .scroll_to_me();
+    h.run();
+    h.get_by_role_and_label(combo, "Noise preset").click();
+    h.run();
+    h.get_by_label("Mountains 0..500 m").click();
+    h.run();
+    h.get_by_role_and_label(eframe::egui::accesskit::Role::Slider, "octave 1 strength")
+        .focus();
+    h.run();
+    h.key_press(eframe::egui::Key::ArrowDown);
+    h.run_steps(1);
+    settle(&mut h, |_| {
+        noise()["octave_weights"]
+            .as_array()
+            .is_some_and(|w| w.len() == 6)
+    });
+    assert!((noise()["octave_weights"][0].as_f64().unwrap() - 0.95).abs() < 1e-9);
+    h.get_by_label("reset").click();
+    h.run_steps(1);
+    settle(&mut h, |_| noise()["octave_weights"].is_null());
+    // The layer's stats, then Measure landform.
+    h.get_by_label("min / max");
+    h.get_by_label("Measure landform").scroll_to_me();
+    h.run();
+    h.get_by_label("Measure landform").click();
+    h.run_steps(1);
+    settle(&mut h, |a| {
+        a.log_lines()
+            .any(|l| l.text.starts_with("terrain.measure: ok"))
+    });
+    h.get_by_label("hypsometric");
+}
+
+#[test]
+fn the_export_section_writes_every_kind_of_export() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window(engine(dir.path()));
+    settle(&mut h, |a| a.viewport.info().is_some());
+    let exports = dir.path().join("Kit.jdproj/exports");
+    for (button, expect) in [
+        ("Export heightmap", "height.exr"),
+        ("Export", "unity"),
+        ("Bake", "sky.exr"),
+        ("Export frames", "frames"),
+    ] {
+        // By role: the section's heading is labelled `Export` too.
+        let by = || {
+            egui_kittest::kittest::by()
+                .role(eframe::egui::accesskit::Role::Button)
+                .label(button)
+        };
+        h.get_all(by()).next().unwrap().scroll_to_me();
+        h.run();
+        h.get_all(by()).next().unwrap().click();
+        h.run_steps(1);
+        let until = Instant::now() + Duration::from_secs(30);
+        while !exports.join(expect).exists() || h.state().busy() {
+            assert!(
+                Instant::now() < until,
+                "{button}: no exports/{expect}; log: {:?}",
+                h.state()
+                    .log_lines()
+                    .map(|l| l.text.clone())
+                    .collect::<Vec<_>>()
+            );
+            h.step();
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+    // The mesh row's Export (the second `Export`): terrain.glb.
+    h.get_all(
+        egui_kittest::kittest::by()
+            .role(eframe::egui::accesskit::Role::Button)
+            .label("Export"),
+    )
+    .nth(1)
+    .unwrap()
+    .click();
+    h.run_steps(1);
+    settle(&mut h, |_| exports.join("terrain.glb").exists());
+    assert!(std::fs::read_dir(exports.join("frames")).unwrap().count() >= 24);
+    let errors: Vec<_> = h
+        .state()
+        .log_lines()
+        .filter(|l| l.text.contains(": E_"))
+        .map(|l| l.text.clone())
+        .collect();
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
 /// `JD_STUDIO_CAPTURE=<png> cargo test -p jd-studio --test window -- --ignored capture`: the
 /// window rendered offscreen (no screen capture involved) on the project the desktop's
 /// `e2e/parity-capture.spec.ts` builds — same world, seed and starter graph — at the same
@@ -841,6 +985,14 @@ fn capture_for_docs() {
             h.run();
         }
         let out = out.replace(".png", "-cave.png");
+        render(&mut h).save(&out).expect("save png");
+    }
+    // The Noise section (JD_STUDIO_NOISE=1), as the desktop's JD_PARITY_NOISE: `<capture>-noise.png`.
+    if std::env::var_os("JD_STUDIO_NOISE").is_some() {
+        h.get_by_role_and_label(eframe::egui::accesskit::Role::Slider, "octave 1 strength")
+            .scroll_to_me();
+        h.run();
+        let out = out.replace(".png", "-noise.png");
         render(&mut h).save(&out).expect("save png");
     }
     // The post effects (JD_STUDIO_POST=1), as the desktop's JD_PARITY_POST: `<capture>-post.png`.

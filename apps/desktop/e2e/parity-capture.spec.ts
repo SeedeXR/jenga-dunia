@@ -51,6 +51,12 @@ test("parity capture: desktop", async ({ page }) => {
       await page.waitForTimeout(1000);
       await page.screenshot({ path: path.join(out!, "desktop-cave.png") });
     }
+    // The Noise section (JD_PARITY_NOISE=1): scrolled to the octave bars.
+    if (process.env.JD_PARITY_NOISE) {
+      await page.getByTestId("octave-bars").scrollIntoViewIfNeeded();
+      await page.waitForTimeout(500);
+      await page.screenshot({ path: path.join(out!, "desktop-noise.png") });
+    }
     // The post effects (JD_PARITY_POST=1): exposure 1.5, bloom 0.6, vignette 0.5.
     if (process.env.JD_PARITY_POST) {
       await page.getByTestId("post-exposure").fill("1.5");

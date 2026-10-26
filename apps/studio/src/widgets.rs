@@ -165,3 +165,89 @@ impl Widget for Range<'_> {
         resp
     }
 }
+
+/// The desktop's octave bars: a native vertical `<input type="range">` with the accent colour
+/// (`accent-color: primary`, WebKit's look) — a 4 px light track, filled in the primary blue from
+/// the bottom to a blue round thumb. Drag or click sets the value (stepped), the arrow keys step.
+pub struct VBar<'a> {
+    value: &'a mut f64,
+    range: RangeInclusive<f64>,
+    step: f64,
+    height: f32,
+    label: String,
+}
+
+impl<'a> VBar<'a> {
+    /// A vertical bar of `value` over `range`, `height` points tall, named `label`.
+    pub fn new(value: &'a mut f64, range: RangeInclusive<f64>, height: f32, label: &str) -> Self {
+        Self {
+            value,
+            range,
+            step: 0.05,
+            height,
+            label: label.to_owned(),
+        }
+    }
+}
+
+impl Widget for VBar<'_> {
+    fn ui(self, ui: &mut Ui) -> Response {
+        const THUMB: f32 = 16.0;
+        let (rect, mut resp) =
+            ui.allocate_exact_size(vec2(THUMB, self.height), Sense::click_and_drag());
+        let (lo, hi) = (*self.range.start(), *self.range.end());
+        let span = (hi - lo).max(f64::EPSILON);
+        let (top, bottom) = (rect.top() + THUMB / 2.0, rect.bottom() - THUMB / 2.0);
+        let y_of = |v: f64| bottom - ((v - lo) / span) as f32 * (bottom - top);
+        let snap = |v: f64| (lo + ((v - lo) / self.step).round() * self.step).clamp(lo, hi);
+        let before = *self.value;
+        if let Some(p) = resp.interact_pointer_pos()
+            && (resp.dragged() || resp.clicked())
+        {
+            let t = f64::from(((bottom - p.y) / (bottom - top)).clamp(0.0, 1.0));
+            *self.value = snap(lo + t * span);
+        }
+        if resp.has_focus() {
+            let (down, up) = ui.input(|i| {
+                (
+                    i.key_pressed(Key::ArrowLeft) || i.key_pressed(Key::ArrowDown),
+                    i.key_pressed(Key::ArrowRight) || i.key_pressed(Key::ArrowUp),
+                )
+            });
+            if down {
+                *self.value = snap(*self.value - self.step);
+            }
+            if up {
+                *self.value = snap(*self.value + self.step);
+            }
+        }
+        if *self.value != before {
+            resp.mark_changed();
+        }
+        if ui.is_rect_visible(rect) {
+            let p = ui.painter();
+            let alpha = if ui.is_enabled() { 1.0 } else { 0.4 };
+            let c = |c: egui::Color32| c.gamma_multiply(alpha);
+            let x = rect.center().x;
+            let y = y_of(*self.value);
+            let track = |a: f32, b: f32| Rect::from_min_max(pos2(x - 2.0, a), pos2(x + 2.0, b));
+            p.rect_filled(
+                track(top - 2.0, bottom + 2.0),
+                2.0,
+                c(egui::Color32::from_gray(222)),
+            );
+            p.rect_filled(track(y, bottom + 2.0), 2.0, c(color::PRIMARY));
+            p.circle_filled(pos2(x, y), THUMB / 2.0 - 1.0, c(color::PRIMARY));
+            if resp.has_focus() {
+                p.circle_stroke(
+                    pos2(x, y),
+                    THUMB / 2.0 + 2.0,
+                    Stroke::new(2.0, color::ACCENT),
+                );
+            }
+        }
+        let (enabled, value, label) = (ui.is_enabled(), *self.value, self.label.clone());
+        resp.widget_info(|| WidgetInfo::slider(enabled, value, &label));
+        resp
+    }
+}
