@@ -1392,6 +1392,85 @@ fn sculpt_paints_strokes_and_transforms_and_the_road_lays_a_spline() {
     assert!(h.state().viewport.tool.is_none(), "one drag, one road");
 }
 
+#[test]
+fn the_grid_tool_selects_cells_and_levels_raises_and_transforms_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = engine(dir.path());
+    let probe = server.clone();
+    let mut h = window(server);
+    settle(&mut h, |a| a.viewport.info().is_some());
+    let node = |kind: &str| {
+        let g = probe
+            .invoke(Request::new("graph.list", json!({})))
+            .result
+            .unwrap();
+        g["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|n| n["kind"] == kind)
+            .cloned()
+    };
+    h.get_by_label(
+        "Grid tool: select cells of the world and set their height, World Creator style",
+    )
+    .click();
+    h.run();
+    h.get_by_role_and_label(eframe::egui::accesskit::Role::ComboBox, "Cells per side");
+    // A drag across the middle selects every cell it crosses.
+    let r = h.state().viewport.rect();
+    drag_on(
+        &mut h,
+        r.center() - eframe::egui::vec2(60.0, 0.0),
+        r.center() + eframe::egui::vec2(60.0, 0.0),
+    );
+    h.run();
+    let n = h.state().grid_selection().len();
+    assert!(n >= 2, "{n} cells");
+    h.get_by_label(&format!("{n} cells"));
+    // A click on a selected cell toggles it off.
+    let c = r.center() + eframe::egui::vec2(60.0, 0.0);
+    drag_on(&mut h, c, c);
+    h.run();
+    assert_eq!(h.state().grid_selection().len(), n - 1);
+    // Set height: one flatten stroke over the selected cells; Raise: one more.
+    let button = eframe::egui::accesskit::Role::Button;
+    tap(&mut h, Some(button), "Set height");
+    settle(&mut h, |_| {
+        node("jd.sculpt.strokes@1").is_some_and(|s| {
+            s["params"]["strokes"]
+                .as_array()
+                .is_some_and(|a| a.len() == 1)
+        })
+    });
+    let stroke = node("jd.sculpt.strokes@1").unwrap()["params"]["strokes"][0].clone();
+    assert_eq!(
+        (stroke["mode"].as_str(), stroke["shape"].as_str()),
+        (Some("flatten"), Some("square"))
+    );
+    assert_eq!(stroke["points"].as_array().unwrap().len(), n - 1);
+    tap(&mut h, Some(button), "Raise");
+    settle(&mut h, |_| {
+        node("jd.sculpt.strokes@1").is_some_and(|s| {
+            s["params"]["strokes"]
+                .as_array()
+                .is_some_and(|a| a.len() == 2)
+        })
+    });
+    // Duplicate: the block copied one selection-width east, as a transforms op.
+    tap(&mut h, Some(button), "Duplicate");
+    settle(&mut h, |_| {
+        node("jd.sculpt.transforms@1")
+            .is_some_and(|t| t["params"]["ops"].as_array().is_some_and(|o| o.len() == 1))
+    });
+    let op = node("jd.sculpt.transforms@1").unwrap()["params"]["ops"][0].clone();
+    assert_eq!(op["kind"], "duplicate");
+    assert!(op["vector_m"][0].as_f64().unwrap() > 0.0, "{op}");
+    tap(&mut h, Some(button), "Clear");
+    h.run();
+    assert!(h.state().grid_selection().is_empty());
+}
+
 /// `JD_STUDIO_CAPTURE=<png> cargo test -p jd-studio --test window -- --ignored capture`: the
 /// window rendered offscreen (no screen capture involved) on the project the desktop's
 /// `e2e/parity-capture.spec.ts` builds — same world, seed and starter graph — at the same

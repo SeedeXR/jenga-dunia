@@ -227,5 +227,12 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   strokes go to the strokes node chosen when sculpting started (the desktop selects the
   transforms node after a transform stroke and then stops painting — a desktop follow-up).
   Fixed: 11 icon files were never registered (the alphas drew circles) → every_icon_file_is_registered.
-  Next: the Grid tool (overlay, cell selection, the Grid section); selection sync with the Editor;
-  live evaluation in Studio; then P5 (default switch, packaging, docs).
+- P3 / P4 slice 11 — the Grid tool: the chip (puts the ground tools away), the overlay (cell lines
+  draped on the preview 0x8fb0ff 55 %, selected cells as fans 0x5b8cff 45 %, lifted 0.2 %; a new
+  unlit blended triangle pipeline `flat`), the selection (click toggles, drag adds, Alt + drag
+  removes, right drag orbits), the Grid section (cells 8–64 clear the selection, Selected,
+  Smoothness, Height + Set height, Clear, Step + Raise / Lower — square stamps in the strokes node,
+  one stroke — and Duplicate / Rotate / Scale / Tilt / Align of the selection's bounding block into
+  the transforms node, the shortcuts). P3 viewport and P4 panels are now complete.
+  Next: selection sync with the Editor (node ↔ viewport); live evaluation in Studio; then P5
+  (default switch, packaging, docs).

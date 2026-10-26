@@ -590,9 +590,35 @@ impl Brush {
 }
 
 /// The grid tool (the desktop's `grid`: 32 cells a side, smoothness 0.25, step 10 m, …).
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 struct GridPanel {
     on: bool,
+    cells: u32,
+    selected: Vec<[u32; 2]>,
+    smoothness: f64,
+    height_m: f64,
+    step_m: f64,
+    angle_deg: f64,
+    factor: f64,
+    tilt_deg: f64,
+    tilt_azimuth_deg: f64,
+}
+
+impl Default for GridPanel {
+    fn default() -> Self {
+        Self {
+            on: false,
+            cells: 32,
+            selected: Vec::new(),
+            smoothness: 0.25,
+            height_m: 0.0,
+            step_m: 10.0,
+            angle_deg: 90.0,
+            factor: 1.5,
+            tilt_deg: 10.0,
+            tilt_azimuth_deg: 0.0,
+        }
+    }
 }
 
 /// The DEM providers (`geo.fetch_dem`'s `provider`) and their labels.
@@ -3189,6 +3215,11 @@ impl StudioApp {
         }
     }
 
+    /// The grid tool's selected cells: for tests.
+    pub fn grid_selection(&self) -> &[[u32; 2]] {
+        &self.grid.selected
+    }
+
     /// Cave `i`'s entrances as the graph holds them (metres east, north): for tests.
     pub fn cave_entrances(&self, i: usize) -> Vec<[f64; 2]> {
         self.cave_nodes()
@@ -3584,6 +3615,266 @@ impl StudioApp {
                 }
             });
         ui.add_space(12.0);
+    }
+
+    /// The right column's Grid section, while the grid tool is on (the desktop's): cells a side,
+    /// the selection, smoothness, Set height / Clear, Raise / Lower by a step, the selection's
+    /// transforms and the shortcuts.
+    fn grid_card(&mut self, ui: &mut egui::Ui) {
+        use crate::widgets::Range;
+        look::section(ui, "Grid");
+        let idle = self.busy == 0;
+        let g = &mut self.grid;
+        let has = !g.selected.is_empty();
+        let mut act: Option<&str> = None;
+        look::field(ui, "Cells per side", |ui| {
+            let before = g.cells;
+            egui::ComboBox::from_id_salt("grid-cells")
+                .width(80.0)
+                .selected_text(RichText::new(g.cells.to_string()).size(12.0))
+                .show_ui(ui, |ui| {
+                    for n in [8, 16, 32, 64] {
+                        ui.selectable_value(&mut g.cells, n, n.to_string());
+                    }
+                })
+                .response
+                .widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::accesskit::Role::ComboBox,
+                        true,
+                        "Cells per side",
+                    )
+                });
+            if g.cells != before {
+                g.selected.clear();
+            }
+        });
+        let n = g.selected.len();
+        look::field(ui, "Selected", |ui| {
+            ui.label(
+                RichText::new(format!("{n} cell{}", if n == 1 { "" } else { "s" }))
+                    .size(12.0)
+                    .color(color::FG1),
+            );
+        });
+        let label = format!("Smoothness {:.2}", g.smoothness);
+        look::field(ui, &label, |ui| {
+            ui.add(
+                Range::new(&mut g.smoothness, 0.0..=1.0, &label)
+                    .step(0.05)
+                    .reset(0.25),
+            )
+            .on_hover_text(
+                "How far the selection's edge blends into its surroundings (0 = hard cell edges)",
+            );
+        });
+        let num = |ui: &mut egui::Ui, label: &str, v: &mut f64, width: f32| {
+            let mut text = number(&json!(*v));
+            if look::input(ui, &mut text, width, "", label).changed() {
+                *v = text.trim().parse().unwrap_or(0.0);
+            }
+        };
+        look::field(ui, "Height (m)", |ui| {
+            num(ui, "Height (m)", &mut g.height_m, 112.0)
+        });
+        ui.horizontal(|ui| {
+            if look::button(ui, None, "Set height", false, has && idle)
+                .on_hover_text("Level the selected cells to the height above (one undoable stroke)")
+                .clicked()
+            {
+                act = Some("set");
+            }
+            if look::button(ui, None, "Clear", false, has).clicked() {
+                act = Some("clear");
+            }
+        });
+        look::field(ui, "Step (m)", |ui| {
+            num(ui, "Step (m)", &mut g.step_m, 112.0)
+        });
+        ui.horizontal(|ui| {
+            if look::button(ui, None, "Raise", false, has && idle).clicked() {
+                act = Some("raise");
+            }
+            if look::button(ui, None, "Lower", false, has && idle).clicked() {
+                act = Some("lower");
+            }
+        });
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new("Transform selection")
+                .size(11.0)
+                .strong()
+                .color(color::FG1),
+        );
+        egui::Grid::new("grid-transform-fields")
+            .num_columns(4)
+            .spacing(vec2(4.0, 4.0))
+            .show(ui, |ui| {
+                for row in [["Angle", "Factor"], ["Tilt", "Toward"]] {
+                    for label in row {
+                        ui.label(RichText::new(label).size(11.0).color(color::FG2));
+                        let v = match label {
+                            "Angle" => &mut g.angle_deg,
+                            "Factor" => &mut g.factor,
+                            "Tilt" => &mut g.tilt_deg,
+                            _ => &mut g.tilt_azimuth_deg,
+                        };
+                        let r = {
+                            let mut text = number(&json!(*v));
+                            let r = look::input(ui, &mut text, 64.0, "", label);
+                            if r.changed() {
+                                *v = text.trim().parse().unwrap_or(0.0);
+                            }
+                            r
+                        };
+                        if label == "Toward" {
+                            r.on_hover_text(
+                                "Direction the tilt rises toward, degrees clockwise from north",
+                            );
+                        }
+                    }
+                    ui.end_row();
+                }
+            });
+        ui.horizontal_wrapped(|ui| {
+            for (k, label, title) in [
+                ("duplicate", "Duplicate", "Copy the selected block one selection-width east"),
+                ("rotate", "Rotate", "Turn the selected block by Angle (counter-clockwise)"),
+                ("scale", "Scale", "Scale the block's relief about its mean by Factor"),
+                ("tilt", "Tilt", "Tilt the block by Tilt degrees, rising toward Toward"),
+                ("align", "Align", "Level the block onto its own best-fit plane"),
+            ] {
+                if look::button(ui, None, label, false, has && idle)
+                    .on_hover_text(format!("{title} — appended to a jd.sculpt.transforms node; Raise / Lower above are World Creator's Push / Pull"))
+                    .clicked()
+                {
+                    act = Some(k);
+                }
+            }
+        });
+        egui::Grid::new("grid-shortcuts")
+            .num_columns(2)
+            .spacing(vec2(8.0, 0.0))
+            .show(ui, |ui| {
+                for (k, v) in [
+                    ("Click", "toggle a cell"),
+                    ("Left drag", "add cells"),
+                    ("Alt + drag", "remove cells"),
+                    ("Right drag", "orbit"),
+                ] {
+                    ui.label(RichText::new(k).size(11.0).color(color::FG2));
+                    ui.label(RichText::new(v).size(11.0).color(color::FG2));
+                    ui.end_row();
+                }
+            });
+        ui.add_space(12.0);
+        match act {
+            Some("clear") => self.grid.selected.clear(),
+            Some(k @ ("set" | "raise" | "lower")) => self.grid_apply(k),
+            Some(k) => self.grid_transform(k),
+            None => {}
+        }
+    }
+
+    /// The desktop's gridApply: one square stamp per selected cell in the strokes node — one
+    /// stroke, one undo step — levelling to Height or raising / lowering by Step.
+    fn grid_apply(&mut self, kind: &str) {
+        let Some(extent) = self.viewport.info().map(|i| i.extent_m) else {
+            return;
+        };
+        let g = &self.grid;
+        let (cw, ch) = (
+            f64::from(extent[0]) / f64::from(g.cells),
+            f64::from(extent[1]) / f64::from(g.cells),
+        );
+        let r1 = |v: f64| (v * 10.0).round() / 10.0;
+        let points: Vec<[f64; 2]> = g
+            .selected
+            .iter()
+            .map(|c| {
+                [
+                    r1((f64::from(c[0]) + 0.5) * cw),
+                    r1((f64::from(c[1]) + 0.5) * ch),
+                ]
+            })
+            .collect();
+        let mut value = json!({
+            "points": points,
+            "radius_m": r1(cw.max(ch) / 2.0),
+            "shape": "square",
+            "hardness": ((1.0 - g.smoothness) * 100.0).round() / 100.0,
+            "amount": 1,
+        });
+        if kind == "set" {
+            value["mode"] = json!("flatten");
+            value["target_m"] = json!(g.height_m);
+        } else {
+            value["mode"] = json!("raise");
+            value["strength_m"] = json!(if kind == "raise" { g.step_m } else { -g.step_m });
+        }
+        self.sculpt_append("strokes", "strokes", value);
+    }
+
+    /// The desktop's gridTransform: the selection's bounding square as one block, its op appended
+    /// to the transforms node.
+    fn grid_transform(&mut self, kind: &str) {
+        let Some(extent) = self.viewport.info().map(|i| i.extent_m) else {
+            return;
+        };
+        let g = &self.grid;
+        if g.selected.is_empty() {
+            return;
+        }
+        let (cw, ch) = (
+            f64::from(extent[0]) / f64::from(g.cells),
+            f64::from(extent[1]) / f64::from(g.cells),
+        );
+        let r1 = |v: f64| (v * 10.0).round() / 10.0;
+        let xs = g.selected.iter().map(|c| f64::from(c[0]));
+        let ys = g.selected.iter().map(|c| f64::from(c[1]));
+        let (x0, x1) = (
+            xs.clone().fold(f64::MAX, f64::min),
+            xs.fold(f64::MIN, f64::max) + 1.0,
+        );
+        let (y0, y1) = (
+            ys.clone().fold(f64::MAX, f64::min),
+            ys.fold(f64::MIN, f64::max) + 1.0,
+        );
+        let value = json!({
+            "kind": kind,
+            "center_m": [r1((x0 + x1) / 2.0 * cw), r1((y0 + y1) / 2.0 * ch)],
+            "radius_m": r1(((x1 - x0) * cw).max((y1 - y0) * ch) / 2.0),
+            "shape": "square",
+            "falloff": (g.smoothness * 100.0).round() / 100.0,
+            "angle_deg": if kind == "tilt" { g.tilt_deg } else { g.angle_deg },
+            "azimuth_deg": g.tilt_azimuth_deg,
+            "factor": g.factor,
+            // Duplicate: the copy lands one selection-width east.
+            "vector_m": if kind == "duplicate" { [r1((x1 - x0) * cw), 0.0] } else { [0.0, 0.0] },
+            "strength": 1,
+        });
+        self.sculpt_append("transforms", "ops", value);
+    }
+
+    /// Append `value` to the `kind` sculpt node's `key` (found or spliced by the core), then
+    /// evaluate.
+    fn sculpt_append(&mut self, kind: &str, key: &'static str, value: Value) {
+        let target = Self::request(
+            "graph.sculpt_target",
+            json!({ "layer": "height", "kind": kind }),
+        );
+        let lod = self.preview_lod();
+        self.chain(vec![
+            Box::new(move |_| Some(target)),
+            Box::new(move |done| {
+                let id = done[0].result.as_ref()?["id"].clone();
+                Some(Self::request(
+                    "graph.append_param",
+                    json!({ "id": id, "key": key, "value": value }),
+                ))
+            }),
+            Box::new(move |_| Some(Self::request("graph.evaluate", json!({ "lod": lod })))),
+        ]);
     }
 
     /// The cave nodes of the graph, in order.
@@ -5055,6 +5346,13 @@ impl StudioApp {
                     self.start_sculpting("height", None);
                 }
             }
+            Action::Grid => {
+                // The desktop's toggleGrid: on puts the ground tools away.
+                self.grid.on = !self.grid.on;
+                if self.grid.on {
+                    self.drawing = None;
+                }
+            }
             Action::Road => {
                 self.drawing = if self.drawing == Some(Drawing::Road) {
                     None
@@ -5532,6 +5830,9 @@ impl eframe::App for StudioApp {
                         if self.drawing.is_some() {
                             self.brush_card(ui);
                         }
+                        if self.grid.on {
+                            self.grid_card(ui);
+                        }
                         self.sun_card(ui, frame);
                         ui.add_space(12.0);
                         self.scatter_card(ui);
@@ -5572,8 +5873,13 @@ impl eframe::App for StudioApp {
             }
         };
         // The ground tool's ring, after the side columns: a Sculpt / Place / Road click there arms
-        // (or disarms) it for this very frame's viewport.
+        // (or disarms) it for this very frame's viewport; the grid overlay likewise.
         self.viewport.tool = self.tool_radius();
+        self.viewport
+            .set_grid(self.grid.on.then(|| crate::viewport::GridView {
+                cells: self.grid.cells,
+                selected: self.grid.selected.clone(),
+            }));
         egui::CentralPanel::default()
             .frame(bg.inner_margin(margin))
             .show(ui, |ui| {
@@ -5581,6 +5887,19 @@ impl eframe::App for StudioApp {
                 self.record_frame(frame);
                 if let Some(stroke) = self.viewport.take_stroke() {
                     self.on_stroke(&stroke);
+                }
+                // The desktop's gridSelect: add, remove, or toggle the one clicked cell.
+                if let Some((cells, op)) = self.viewport.take_grid_select() {
+                    for c in cells {
+                        let has = self.grid.selected.contains(&c);
+                        if op == "add" || (op == "toggle" && !has) {
+                            if !has {
+                                self.grid.selected.push(c);
+                            }
+                        } else {
+                            self.grid.selected.retain(|x| *x != c);
+                        }
+                    }
                 }
                 // The desktop's `adjustBrush`: the radius in whole metres (≥ 1), the strength to
                 // 0.1 m.
@@ -5606,6 +5925,7 @@ impl eframe::App for StudioApp {
                     // The desktop's `sculpting` is on for any ground tool (road, entrances too).
                     sculpting: self.drawing.is_some(),
                     road: self.drawing == Some(Drawing::Road),
+                    grid: self.grid.on,
                 };
                 if let Some(action) = crate::chrome::show(ui, self.viewport.rect(), &st) {
                     self.chrome_action(action, ui.ctx(), frame);

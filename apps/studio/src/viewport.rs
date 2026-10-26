@@ -882,6 +882,8 @@ pub struct TerrainInfo {
 
 struct Gpu {
     terrain: wgpu::RenderPipeline,
+    /// Unlit translucent triangles (the grid selection): the line stages on a triangle list.
+    flat: wgpu::RenderPipeline,
     /// X-ray: the terrain blended at 1 − x-ray, writing depth below 0.5 (three's depthWrite).
     terrain_see: [wgpu::RenderPipeline; 2],
     /// Caves depth-tested, and over the terrain while x-rayed (no depth test, no depth write).
@@ -990,6 +992,15 @@ fn sphere(r: f32) -> (Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u32>) {
         }
     }
     (pos, nrm, idx)
+}
+
+/// The grid tool as the viewport draws it: cells a side and the selected `[x, y]` cells.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GridView {
+    /// Cells a side.
+    pub cells: u32,
+    /// Selected cells, `[east, north]` from the south-west corner.
+    pub selected: Vec<[u32; 2]>,
 }
 
 /// Scatter instances for the viewport: points in layer metres (u east, v north from the south
@@ -1405,6 +1416,13 @@ pub struct Viewport {
     pub tool: Option<f32>,
     stroke: Option<Vec<[f32; 2]>>,
     finished_stroke: Option<Vec<[f32; 2]>>,
+    /// The grid tool: its cells a side and selected cells (the overlay; drags select cells).
+    grid: Option<GridView>,
+    pending_grid: Option<Option<(Vec<ColorVertex>, Vec<ColorVertex>)>>,
+    grid_bufs: [Option<(wgpu::Buffer, u32)>; 2],
+    /// A grid drag under way: remove (Alt), the cells crossed, whether it left its first cell.
+    grid_drag: Option<(bool, Vec<[u32; 2]>, bool)>,
+    finished_grid: Option<(Vec<[u32; 2]>, &'static str)>,
     /// Over the armed tool, Ctrl / ⌘ + wheel sizes the brush and Shift + wheel sets its strength
     /// (the desktop's `onAdjust`): (radius?, factor) since the last call.
     adjust: Option<(bool, f32)>,
@@ -1464,6 +1482,11 @@ impl Default for Viewport {
             stroke: None,
             finished_stroke: None,
             adjust: None,
+            grid: None,
+            pending_grid: None,
+            grid_bufs: [None, None],
+            grid_drag: None,
+            finished_grid: None,
             sun_deg: [140.0, 35.0],
             fog: 0.0,
             overlay: None,
@@ -1533,6 +1556,93 @@ impl Viewport {
         self.rebuild_sea();
         self.rebuild_lakes();
         self.rebuild_rain();
+        self.rebuild_grid();
+    }
+
+    /// The grid tool's overlay (`None`: off): cells a side and the selected cells.
+    pub fn set_grid(&mut self, grid: Option<GridView>) {
+        if grid != self.grid {
+            self.grid = grid;
+            self.rebuild_grid();
+        }
+    }
+
+    /// The desktop's grid overlay: cell lines draped on the preview (0x8fb0ff at 55 %) and the
+    /// selected cells as translucent fans around their centres (0x5b8cff at 45 %), lifted 0.2 %
+    /// of the world above the ground.
+    fn rebuild_grid(&mut self) {
+        let built = self
+            .grid
+            .as_ref()
+            .zip(self.shown.as_ref())
+            .map(|(g, (pv, e))| {
+                let lift = e[0].max(e[1]) * 0.002;
+                let at = |u: f32, v: f32, extra: f32| {
+                    [
+                        u - e[0] / 2.0,
+                        self.height_at([u, v]).unwrap_or(0.0) + lift + extra,
+                        e[1] / 2.0 - v,
+                    ]
+                };
+                let line = {
+                    let c = hex(0x8fb0ff);
+                    [c[0], c[1], c[2], 0.55]
+                };
+                let fill = {
+                    let c = hex(0x5b8cff);
+                    [c[0], c[1], c[2], 0.45]
+                };
+                let n = pv.width.min(pv.height).max(2);
+                let mut lines = Vec::new();
+                for i in 0..=g.cells {
+                    let (u, v) = (
+                        i as f32 / g.cells as f32 * e[0],
+                        i as f32 / g.cells as f32 * e[1],
+                    );
+                    for k in 0..n - 1 {
+                        let (a, b) = (k as f32 / (n - 1) as f32, (k + 1) as f32 / (n - 1) as f32);
+                        for pos in [
+                            at(u, a * e[1], 0.0),
+                            at(u, b * e[1], 0.0),
+                            at(a * e[0], v, 0.0),
+                            at(b * e[0], v, 0.0),
+                        ] {
+                            lines.push(ColorVertex { pos, color: line });
+                        }
+                    }
+                }
+                let (cw, ch) = (e[0] / g.cells as f32, e[1] / g.cells as f32);
+                let mut quads = Vec::new();
+                for &[ix, iy] in &g.selected {
+                    let (x, y) = (ix as f32, iy as f32);
+                    let c = at((x + 0.5) * cw, (y + 0.5) * ch, lift);
+                    let sw = at(x * cw, y * ch, lift);
+                    let se = at((x + 1.0) * cw, y * ch, lift);
+                    let ne = at((x + 1.0) * cw, (y + 1.0) * ch, lift);
+                    let nw = at(x * cw, (y + 1.0) * ch, lift);
+                    for pos in [c, sw, se, c, se, ne, c, ne, nw, c, nw, sw] {
+                        quads.push(ColorVertex { pos, color: fill });
+                    }
+                }
+                (lines, quads)
+            });
+        self.pending_grid = Some(built);
+        self.dirty = true;
+    }
+
+    /// Cells the last grid drag selected, and how (`add`, `remove` with Alt, `toggle` for a
+    /// click on one cell), once the button is released.
+    pub fn take_grid_select(&mut self) -> Option<(Vec<[u32; 2]>, &'static str)> {
+        self.finished_grid.take()
+    }
+
+    /// The cell under a ground point.
+    fn cell_of(&self, p: [f32; 2]) -> Option<[u32; 2]> {
+        let (g, (_, e)) = self.grid.as_ref().zip(self.shown.as_ref())?;
+        let clamp = |q: f32, size: f32| {
+            ((q / size * g.cells as f32).floor().max(0.0) as u32).min(g.cells - 1)
+        };
+        Some([clamp(p[0], e[0]), clamp(p[1], e[1])])
     }
 
     /// Colour the terrain by another layer's preview (`heat`: the lava ramp) instead of the height
@@ -2109,6 +2219,25 @@ impl Viewport {
                 })
             });
         }
+        if let Some(pending) = self.pending_grid.take() {
+            use wgpu::util::DeviceExt as _;
+            self.grid_bufs = match pending {
+                None => [None, None],
+                Some((lines, quads)) => [lines, quads].map(|v| {
+                    (!v.is_empty()).then(|| {
+                        (
+                            rs.device
+                                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                    label: Some("grid overlay"),
+                                    contents: bytemuck::cast_slice(&v),
+                                    usage: wgpu::BufferUsages::VERTEX,
+                                }),
+                            v.len() as u32,
+                        )
+                    })
+                }),
+            };
+        }
         if let Some(pending) = self.pending_instances.take() {
             use wgpu::util::DeviceExt as _;
             self.instances = pending.map(|(shape, at)| {
@@ -2291,6 +2420,42 @@ impl Viewport {
     /// The desktop's controls: either button drags orbit (0.005 rad per point), the wheel zooms
     /// (radius × (1 + Δ · 0.001) within 0.02–20 × the world's size).
     fn handle_input(&mut self, ui: &egui::Ui, resp: &egui::Response) {
+        // The grid tool: a click toggles a cell, a drag adds every cell it crosses (Alt: removes).
+        if self.grid.is_some() && self.tool.is_none() {
+            let (primary_down, alt, at) = ui.input(|i| {
+                (
+                    i.pointer.primary_down(),
+                    i.modifiers.alt,
+                    i.pointer.interact_pos(),
+                )
+            });
+            let cell = at.and_then(|a| self.pick(a)).and_then(|p| self.cell_of(p));
+            if resp.is_pointer_button_down_on() && primary_down && self.grid_drag.is_none() {
+                self.grid_drag = Some((alt, cell.into_iter().collect(), false));
+            }
+            if let Some((_, cells, moved)) = &mut self.grid_drag {
+                if let Some(c) = cell
+                    && !cells.contains(&c)
+                {
+                    cells.push(c);
+                    *moved = true;
+                }
+                if !primary_down {
+                    let (remove, cells, moved) = self.grid_drag.take().unwrap_or_default();
+                    if !cells.is_empty() {
+                        let op = if !moved && cells.len() == 1 {
+                            "toggle"
+                        } else if remove {
+                            "remove"
+                        } else {
+                            "add"
+                        };
+                        self.finished_grid = Some((cells, op));
+                    }
+                }
+                return;
+            }
+        }
         // A ground tool: the primary button's press, drag and release make a stroke of ground
         // points (the desktop's `stroke`), coalesced to every 0.5 % of the world's width.
         if self.tool.is_some() {
@@ -2515,6 +2680,17 @@ impl Viewport {
                 pass.set_vertex_buffer(0, v.slice(..));
                 pass.set_index_buffer(i.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..*n, 0, 0..1);
+            }
+            // The grid overlay (the desktop's renderOrder 5 and 6): lines, then the selection.
+            if let Some((buf, n)) = &self.grid_bufs[0] {
+                pass.set_pipeline(&gpu.lines);
+                pass.set_vertex_buffer(0, buf.slice(..));
+                pass.draw(0..*n, 0..1);
+            }
+            if let Some((buf, n)) = &self.grid_bufs[1] {
+                pass.set_pipeline(&gpu.flat);
+                pass.set_vertex_buffer(0, buf.slice(..));
+                pass.draw(0..*n, 0..1);
             }
             // The rain last (the desktop's streaks write no depth).
             if let Some((buf, n)) = &self.rain_buf {
@@ -2863,6 +3039,20 @@ fn create_gpu(rs: &RenderState) -> Gpu {
         step_mode: wgpu::VertexStepMode::Vertex,
         attributes: &cave_attributes,
     })];
+    let color_layout = [Some(wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<ColorVertex>() as u64,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4],
+    })];
+    let flat = mesh_pipeline(
+        "grid selection",
+        "line_vs",
+        "line_fs",
+        &color_layout,
+        wgpu::CompareFunction::Less,
+        false,
+        Some(wgpu::BlendState::ALPHA_BLENDING),
+    );
     let caves = [
         mesh_pipeline(
             "caves",
@@ -3014,6 +3204,7 @@ fn create_gpu(rs: &RenderState) -> Gpu {
     });
     let mut gpu = Gpu {
         terrain,
+        flat,
         terrain_see,
         caves,
         instances,

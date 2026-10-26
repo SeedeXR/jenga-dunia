@@ -32,6 +32,8 @@ pub enum Action {
     Sculpt,
     /// Draw a road (the next drag) / stop.
     Road,
+    /// The grid tool on / off.
+    Grid,
 }
 
 /// What a layer-strip button adds (the core's workflow ops, shared with the desktop).
@@ -139,6 +141,8 @@ pub struct State {
     pub sculpting: bool,
     /// The next drag lays a road (Road reads "Drawing road…").
     pub road: bool,
+    /// The grid tool is on.
+    pub grid: bool,
 }
 
 /// `fill-jd-bg-1/80` and friends: a token at an opacity.
@@ -223,7 +227,6 @@ pub fn show(ui: &mut Ui, rect: Rect, st: &State) -> Option<Action> {
         x += 32.0;
     }
     // Top right: Graph, Sculpt (right-28), Road (right-52), Horizon (right-72), Grid (right-[23.5rem]).
-    // ponytail: Grid is the next P3 slice; shown disabled until then.
     let (sculpt_label, sculpt_tip) = if st.sculpting {
         (
             "Sculpting…",
@@ -234,6 +237,11 @@ pub fn show(ui: &mut Ui, rect: Rect, st: &State) -> Option<Action> {
             "Sculpt",
             "Sculpt: adds a stroke node before the output and paints with the brush",
         )
+    };
+    let grid_tip = if st.grid {
+        "Grid: drag over cells to select them (Alt removes, click toggles); the Grid panel levels, raises or lowers them"
+    } else {
+        "Grid tool: select cells of the world and set their height, World Creator style"
     };
     let (road_label, road_tip) = if st.road {
         (
@@ -269,13 +277,7 @@ pub fn show(ui: &mut Ui, rect: Rect, st: &State) -> Option<Action> {
             "Horizon: continue the noise beyond the world's border as a coarse skirt (same seed, so it matches at the edge; erosion is not continued)",
             Some(Action::Horizon),
         ),
-        (
-            376.0,
-            "grid-3x-3",
-            "Grid",
-            "Grid tool: select cells of the world and set their height, World Creator style",
-            None,
-        ),
+        (376.0, "grid-3x-3", "Grid", grid_tip, Some(Action::Grid)),
     ] {
         let w =
             26.0 + ui.fonts_mut(|f| {
@@ -292,6 +294,7 @@ pub fn show(ui: &mut Ui, rect: Rect, st: &State) -> Option<Action> {
             Some(Action::Horizon) => st.horizon,
             Some(Action::Sculpt) => st.sculpting,
             Some(Action::Road) => st.road,
+            Some(Action::Grid) => st.grid,
             _ => false,
         };
         if chip(ui, r, icon, Some(label), tip, enabled, on).clicked() {
