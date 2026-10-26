@@ -376,6 +376,74 @@ fn the_post_sliders_darken_the_corners_bloom_and_expose() {
     h.get_by_role_and_label(eframe::egui::accesskit::Role::Slider, "Bloom 0.3");
 }
 
+#[test]
+fn the_camera_row_keys_records_and_plays_a_flythrough() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window(engine(dir.path()));
+    settle(&mut h, |a| a.viewport.info().is_some());
+    let home = h.state().viewport.camera;
+    // Two keys: the home view, then a turned and closer one.
+    h.get_by_label("+ key").click();
+    h.run();
+    let mut turned = home;
+    turned.theta += 1.0;
+    turned.radius *= 0.5;
+    h.state_mut().viewport.set_camera(turned);
+    h.run();
+    h.get_by_label("+ key").click();
+    h.run();
+    h.get_by_label("2 keys");
+    // The desktop's key line: heading (from south towards east) · elevation · distance.
+    h.get_by_label("326° · 33° up · 2.7 km");
+    // Go to the first key.
+    h.get_all_by_label("Go").next().unwrap().click();
+    h.run_steps(1);
+    assert_eq!(h.state().viewport.camera, home);
+    // Record the default 48 frames: every one written, the camera back where it was.
+    h.get_by_label("Record").click();
+    let until = Instant::now() + Duration::from_secs(120);
+    while !h
+        .state()
+        .log_lines()
+        .any(|l| l.text.starts_with("flythrough:"))
+    {
+        assert!(Instant::now() < until, "the flythrough did not finish");
+        h.step();
+    }
+    let line = h
+        .state()
+        .log_lines()
+        .find(|l| l.text.starts_with("flythrough:"))
+        .unwrap()
+        .text
+        .clone();
+    assert!(line.starts_with("flythrough: 48/48 frames"), "{line}");
+    let frames = std::fs::read_dir(dir.path().join("Kit.jdproj/exports/flythrough"))
+        .unwrap()
+        .count();
+    assert_eq!(frames, 48);
+    assert_eq!(h.state().viewport.camera, home);
+    // Play: 4 s along the path, ending on the last key.
+    h.get_by_label("Play").click();
+    let until = Instant::now() + Duration::from_secs(20);
+    // (the radius goes through log space, so equal up to rounding)
+    let at_end = |c: jd_studio::viewport::Camera| {
+        (c.theta - turned.theta).abs() < 1e-4 && (c.radius / turned.radius - 1.0).abs() < 1e-4
+    };
+    while !at_end(h.state().viewport.camera) {
+        assert!(Instant::now() < until, "Play did not reach the last key");
+        h.step();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // Remove one key, then drop the rest.
+    h.get_by_label("Remove key 2").click();
+    h.run();
+    h.get_by_label("1 keys");
+    h.get_by_label("Drop the flythrough keys").click();
+    h.run();
+    h.get_by_label("0 keys");
+}
+
 /// `JD_STUDIO_CAPTURE=<png> cargo test -p jd-studio --test window -- --ignored capture`: the
 /// window rendered offscreen (no screen capture involved) on the project the desktop's
 /// `e2e/parity-capture.spec.ts` builds — same world, seed and starter graph — at the same

@@ -655,6 +655,51 @@ impl Camera {
         let t = (FOV_DEG.to_radians() / 2.0).tan();
         (r.map(|c| c * t * aspect), u.map(|c| c * t), f)
     }
+
+    /// The camera at `t` in 0..1 along flythrough `keys` (the desktop's `orbitAt`,
+    /// `lib/camera.ts`): uniform Catmull-Rom through every key, ends clamped; theta unwrapped so a
+    /// path across north never spins the long way round, the radius in log space so a zoom feels
+    /// even; held to the orbit's own limits.
+    pub fn along(keys: &[Camera], t: f32) -> Option<Camera> {
+        let first = *keys.first()?;
+        let mut k: Vec<[f32; 3]> = Vec::with_capacity(keys.len());
+        for c in keys {
+            let mut theta = c.theta;
+            if let Some(prev) = k.last() {
+                while theta - prev[0] > std::f32::consts::PI {
+                    theta -= std::f32::consts::TAU;
+                }
+                while theta - prev[0] < -std::f32::consts::PI {
+                    theta += std::f32::consts::TAU;
+                }
+            }
+            k.push([theta, c.phi, c.radius.ln()]);
+        }
+        let n = k.len() - 1;
+        let [theta, phi, ln_r] = if n == 0 {
+            k[0]
+        } else {
+            let x = t.clamp(0.0, 1.0) * n as f32;
+            let seg = (x.floor() as usize).min(n - 1);
+            let u = x - seg as f32;
+            let at = |i: isize| k[i.clamp(0, n as isize) as usize];
+            let s = seg as isize;
+            let (a, b, c, d) = (at(s - 1), at(s), at(s + 1), at(s + 2));
+            std::array::from_fn(|i| {
+                let (p0, p1, p2, p3) = (a[i], b[i], c[i], d[i]);
+                0.5 * (2.0 * p1
+                    + (-p0 + p2) * u
+                    + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * u * u
+                    + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * u * u * u)
+            })
+        };
+        Some(Camera {
+            theta,
+            phi: phi.clamp(0.15, 1.5),
+            radius: ln_r.exp().clamp(first.size * 0.02, first.size * 20.0),
+            size: first.size,
+        })
+    }
 }
 
 // Column-major 4×4 maths for one camera: right-handed, depth 0..1 (wgpu).
@@ -1111,6 +1156,14 @@ impl Viewport {
         let (right, up, forward) = self.camera.basis(r.width() / r.height());
         let dir = normalize([0, 1, 2].map(|i| forward[i] + right[i] * ndc[0] + up[i] * ndc[1]));
         pick_heightfield(pv, *extent, self.camera.eye(), dir)
+    }
+
+    /// Move the camera (a flythrough frame, a key's Go); the next frame re-renders.
+    pub fn set_camera(&mut self, camera: Camera) {
+        if camera != self.camera {
+            self.camera = camera;
+            self.dirty = true;
+        }
     }
 
     /// Back to the home view (the viewport's Fit button).
@@ -2289,6 +2342,38 @@ mod tests {
     fn the_home_view_is_the_desktops_and_looks_at_the_origin() {
         let cam = Camera::fit([4096.0, 2048.0]);
         assert_eq!((cam.theta, cam.phi, cam.radius), (0.6, 1.0, 4096.0 * 1.3));
+        // Flythrough: the path passes through every key, eases between them, crosses north the
+        // short way and interpolates the radius in log space.
+        let key = |theta: f32, radius: f32| Camera {
+            theta,
+            radius,
+            ..cam
+        };
+        let keys = [key(0.2, 1000.0), key(1.0, 4000.0), key(2.0, 2000.0)];
+        for (t, k) in [(0.0, keys[0]), (0.5, keys[1]), (1.0, keys[2])] {
+            let c = Camera::along(&keys, t).unwrap();
+            assert!(
+                (c.theta - k.theta).abs() < 1e-5 && (c.radius - k.radius).abs() < 0.5,
+                "{t}: {c:?}"
+            );
+        }
+        let mid = Camera::along(&keys[..2], 0.5).unwrap();
+        assert!(
+            (mid.radius - 2000.0).abs() < 1.0,
+            "geometric mean, {}",
+            mid.radius
+        );
+        let wrap = [key(6.2, 1000.0), key(0.1, 1000.0)];
+        let c = Camera::along(&wrap, 0.5).unwrap();
+        assert!(
+            (c.theta.rem_euclid(std::f32::consts::TAU)
+                - 6.2915_f32.rem_euclid(std::f32::consts::TAU))
+            .abs()
+                < 1e-3,
+            "{}",
+            c.theta
+        );
+        assert_eq!(Camera::along(&[], 0.5), None);
         let p = apply(cam.view_proj(1.5), [0.0, 0.0, 0.0]);
         assert!(p[0].abs() < 1e-4 && p[1].abs() < 1e-4, "{p:?}");
         assert!(p[2] > 0.0 && p[2] < 1.0, "{p:?}");

@@ -137,3 +137,15 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   their viewport effects. Next: Sun card B (HDRI, exposure / bloom / vignette post pipeline,
   flythrough keys), then Scatter, Caves, Actions, Simulation layers, Materials, Noise, Export.
 
+- P4 slice 3 (Sun card B) + P3 post / flythrough: HDRI on the dome (load, Use sun, ×); the scene
+  renders into Rgba16Float (as three's WebGPU renderer always does) and `post.rs` finishes it —
+  three r186 BloomNode (high pass 0.85, five separable-blur mips, radius 0.4), the desktop's
+  vignette, ACES Filmic with the exposure while any effect is on; Exposure / Bloom / Vignette
+  sliders (session only, like the desktop) and the `post …` readout field. Camera row: + key /
+  N keys / × / frames, Record (frames along the keys → exports/flythrough/frame_NNNN.png by one
+  writer thread, the desktop's summary line), Play (4 s), Still, key list (heading · up ·
+  distance, Go, remove); `Camera::along` = lib/camera.ts orbitAt (Catmull-Rom, unwrapped theta,
+  log radius). CI: the e2e log cap (200 lines) made `logCount` plateau in long specs → log
+  entries carry `seq`, logCount reads the newest. Next: Scatter, Caves (+ x-ray), Actions,
+  Simulation layers, Materials, Noise, Export; then the left column (Real world, Reference image,
+  Layers, Settings).

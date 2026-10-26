@@ -18,6 +18,7 @@ use serde_json::{Value, json};
 use crate::editor::{self, Editor};
 use crate::look;
 use crate::theme::{self, color};
+use crate::viewport::Camera;
 use crate::viewport::Viewport;
 
 /// The viewport mesh keeps at most this many samples along a side: the desktop's default
@@ -177,6 +178,24 @@ pub struct StudioApp {
     /// The wind the last `ocean.waves` was fetched for, and its result.
     waves_for: Option<[Option<f64>; 3]>,
     waves: Option<Value>,
+    /// Flythrough keys (the desktop's `flyKeys`, session only), the frames to record, and a
+    /// Play or Record under way.
+    fly_keys: Vec<Camera>,
+    fly_frames: String,
+    fly: Option<Fly>,
+}
+
+/// A flythrough run along the keys.
+enum Fly {
+    /// 4 s along the path in the viewport, nothing written.
+    Play(Instant),
+    /// Frame `k` of `frames`; PNGs go to the writer thread, the camera back to `start` at the end.
+    Record {
+        k: usize,
+        frames: usize,
+        start: Camera,
+        tx: Sender<(usize, Vec<u8>)>,
+    },
 }
 
 impl StudioApp {
@@ -229,6 +248,9 @@ impl StudioApp {
             hdri: None,
             waves_for: None,
             waves: None,
+            fly_keys: Vec::new(),
+            fly_frames: "48".into(),
+            fly: None,
         };
         // The desktop bakes the sky on mount, project or not.
         app.fetch_sky(SunLook::of(&Value::Null));
@@ -983,9 +1005,8 @@ impl StudioApp {
         }
     }
 
-    /// The right column's Sun section (the desktop's, in its order; the flythrough keys are
-    /// next).
-    fn sun_card(&mut self, ui: &mut egui::Ui) {
+    /// The right column's Sun section (the desktop's, in its order).
+    fn sun_card(&mut self, ui: &mut egui::Ui, frame: &eframe::Frame) {
         use crate::widgets::Range;
         look::section(ui, "Sun");
         look::field(ui, "Textured (PBR)", |ui| {
@@ -1110,6 +1131,7 @@ impl StudioApp {
                 vignette: r2(vignette),
             });
         }
+        self.camera_row(ui, frame);
         slider(
             ui,
             format!("Clouds {} %", (clouds * 100.0).round()),
@@ -1164,6 +1186,123 @@ impl StudioApp {
             ]);
             self.rain = r2(rain);
             self.sun_edited();
+        }
+    }
+
+    /// The Sun section's Camera row: flythrough keys, frames, Record / Play / Still, and the key
+    /// list (heading · elevation · distance, Go, remove).
+    fn camera_row(&mut self, ui: &mut egui::Ui, frame: &eframe::Frame) {
+        enum Act {
+            Add,
+            Clear,
+            Record,
+            Play,
+            Still,
+            Go(usize),
+            Remove(usize),
+        }
+        let mut act = None;
+        let view = self.viewport.info().is_some();
+        let n = self.fly_keys.len();
+        let path = view && n >= 2;
+        let (idle, busy) = (self.fly.is_none(), self.busy > 0);
+        let can_still = view && self.project.is_some();
+        let frames = &mut self.fly_frames;
+        look::field(ui, "Camera", |ui| {
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    if look::button(ui, None, "+ key", false, view)
+                        .on_hover_text("Add the current view as a flythrough key")
+                        .clicked()
+                    {
+                        act = Some(Act::Add);
+                    }
+                    ui.label(RichText::new(format!("{n} keys")).size(12.0).color(color::FG2));
+                    let clear = look::button(ui, None, "×", false, n > 0)
+                        .on_hover_text("Drop the flythrough keys");
+                    clear.widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::accesskit::Role::Button,
+                            n > 0,
+                            "Drop the flythrough keys",
+                        )
+                    });
+                    if clear.clicked() {
+                        act = Some(Act::Clear);
+                    }
+                    look::input(ui, frames, 56.0, "", "Frames")
+                        .on_hover_text("Frames to render along the keys");
+                });
+                ui.horizontal(|ui| {
+                    if look::button(ui, None, "Record", false, path && idle && !busy)
+                        .on_hover_text("Render the frames along the keys into exports/flythrough/ (then: ffmpeg -framerate 24 -i frame_%04d.png flythrough.mp4)")
+                        .clicked()
+                    {
+                        act = Some(Act::Record);
+                    }
+                    if look::button(ui, None, "Play", false, path && idle)
+                        .on_hover_text("Play the path in the viewport (4 s, no frames written)")
+                        .clicked()
+                    {
+                        act = Some(Act::Play);
+                    }
+                    if look::button(ui, None, "Still", false, can_still)
+                        .on_hover_text("Save the current frame as exports/stills/view_<n>.png")
+                        .clicked()
+                    {
+                        act = Some(Act::Still);
+                    }
+                });
+            });
+        });
+        for (i, k) in self.fly_keys.iter().enumerate() {
+            ui.horizontal(|ui| {
+                ui.add_space(4.0);
+                ui.add_sized(
+                    [16.0, 16.0],
+                    egui::Label::new(
+                        RichText::new(format!("{}", i + 1))
+                            .size(11.0)
+                            .color(color::FG2),
+                    ),
+                );
+                ui.label(RichText::new(fly_key_text(k)).size(11.0).color(color::FG1));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let label = format!("Remove key {}", i + 1);
+                    let remove = ui
+                        .add(egui::Button::new(
+                            RichText::new("×").size(11.0).color(color::ERROR),
+                        ))
+                        .on_hover_text("Remove this key");
+                    remove.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::accesskit::Role::Button, true, &label)
+                    });
+                    if remove.clicked() {
+                        act = Some(Act::Remove(i));
+                    }
+                    if ui
+                        .add(egui::Button::new(
+                            RichText::new("Go").size(11.0).color(color::FG0),
+                        ))
+                        .on_hover_text("Move the camera to this key")
+                        .clicked()
+                    {
+                        act = Some(Act::Go(i));
+                    }
+                });
+            });
+        }
+        match act {
+            Some(Act::Add) => self.fly_keys.push(self.viewport.camera),
+            Some(Act::Clear) => self.fly_keys.clear(),
+            Some(Act::Record) => self.start_record(),
+            Some(Act::Play) => self.fly = Some(Fly::Play(Instant::now())),
+            Some(Act::Still) => self.save_still(frame),
+            Some(Act::Go(i)) => self.viewport.set_camera(self.fly_keys[i]),
+            Some(Act::Remove(i)) => {
+                self.fly_keys.remove(i);
+            }
+            None => {}
         }
     }
 
@@ -1237,22 +1376,10 @@ impl StudioApp {
 
     /// Toolbar Still: the viewport's last frame as PNG in exports/stills/.
     fn save_still(&mut self, frame: &eframe::Frame) {
-        let Some(rs) = frame.wgpu_render_state() else {
-            return;
+        let png = match self.png(frame) {
+            Ok(png) => png,
+            Err(e) => return self.log(format!("still: {e}"), Level::Error),
         };
-        let Some((w, h, rgba)) = self.viewport.capture(rs) else {
-            return self.log("still: the viewport gave no image".into(), Level::Error);
-        };
-        let mut png = Vec::new();
-        let encoded = image::RgbaImage::from_raw(w, h, rgba)
-            .ok_or_else(|| "bad frame size".to_owned())
-            .and_then(|img| {
-                img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
-                    .map_err(|e| e.to_string())
-            });
-        if let Err(e) = encoded {
-            return self.log(format!("still: {e}"), Level::Error);
-        }
         use base64::Engine as _;
         let n = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1276,6 +1403,104 @@ impl StudioApp {
             let _ = tx.send(Msg::Log(line.0, line.1));
             ctx.request_repaint();
         });
+    }
+
+    /// The viewport's last rendered frame as PNG bytes.
+    fn png(&self, frame: &eframe::Frame) -> Result<Vec<u8>, String> {
+        let rs = frame.wgpu_render_state().ok_or("no renderer")?;
+        let (w, h, rgba) = self
+            .viewport
+            .capture(rs)
+            .ok_or("the viewport gave no image")?;
+        let img = image::RgbaImage::from_raw(w, h, rgba).ok_or("bad frame size")?;
+        let mut png = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .map_err(|e| e.to_string())?;
+        Ok(png)
+    }
+
+    /// Record: the frames along the keys into exports/flythrough/frame_NNNN.png, written in order
+    /// by one worker that logs the desktop's summary line when the last frame is in.
+    fn start_record(&mut self) {
+        let frames = self.fly_frames.trim().parse().unwrap_or(2).max(2);
+        let (tx, rx) = mpsc::channel::<(usize, Vec<u8>)>();
+        let (server, out, ctx) = (self.server.clone(), self.tx.clone(), self.ctx.clone());
+        std::thread::spawn(move || {
+            use base64::Engine as _;
+            let mut written = 0;
+            for (k, png) in rx {
+                let r = server.invoke(Self::request(
+                    "project.write_export",
+                    json!({ "path": format!("flythrough/frame_{k:04}.png"), "bytes_base64": base64::engine::general_purpose::STANDARD.encode(&png) }),
+                ));
+                written += usize::from(r.result.is_some_and(|v| v["path"].is_string()));
+            }
+            let level = if written == frames {
+                Level::Info
+            } else {
+                Level::Warn
+            };
+            let _ = out.send(Msg::Log(
+                format!("flythrough: {written}/{frames} frames → exports/flythrough/ (ffmpeg -framerate 24 -i frame_%04d.png …)"),
+                level,
+            ));
+            ctx.request_repaint();
+        });
+        self.fly = Some(Fly::Record {
+            k: 0,
+            frames,
+            start: self.viewport.camera,
+            tx,
+        });
+    }
+
+    /// Before the viewport renders: the camera for this Play instant or Record frame.
+    fn fly_tick(&mut self, ctx: &egui::Context) {
+        let t = match &self.fly {
+            None => return,
+            Some(Fly::Play(started)) => started.elapsed().as_secs_f32() / 4.0,
+            Some(Fly::Record { k, frames, .. }) => *k as f32 / (*frames - 1) as f32,
+        };
+        if let Some(c) = Camera::along(&self.fly_keys, t) {
+            self.viewport.set_camera(c);
+        }
+        if matches!(self.fly, Some(Fly::Play(_))) && t >= 1.0 {
+            self.fly = None;
+        }
+        ctx.request_repaint();
+    }
+
+    /// After the viewport rendered a Record frame: hand it to the writer and step on; after the
+    /// last one the camera goes back and dropping the sender lets the writer finish.
+    fn record_frame(&mut self, frame: &eframe::Frame) {
+        if !matches!(self.fly, Some(Fly::Record { .. })) {
+            return;
+        }
+        let Some(Fly::Record {
+            k,
+            frames,
+            start,
+            tx,
+        }) = self.fly.take()
+        else {
+            return;
+        };
+        match self.png(frame) {
+            Ok(png) => {
+                let _ = tx.send((k, png));
+            }
+            Err(e) => self.log(format!("flythrough: frame {k}: {e}"), Level::Warn),
+        }
+        if k + 1 < frames {
+            self.fly = Some(Fly::Record {
+                k: k + 1,
+                frames,
+                start,
+                tx,
+            });
+        } else {
+            self.viewport.set_camera(start);
+        }
     }
 
     fn header(&mut self, ui: &mut egui::Ui, frame: &eframe::Frame) {
@@ -1847,6 +2072,18 @@ fn format_for(path: &str) -> &'static str {
 }
 
 /// A JSON number as JavaScript prints it (4096, not 4096.0).
+/// A flythrough key as the desktop lists it: `326° · 33° up · 2.7 km`.
+fn fly_key_text(k: &Camera) -> String {
+    let heading = (360.0 - k.theta.to_degrees()).rem_euclid(360.0).round();
+    let up = (90.0 - k.phi.to_degrees()).round();
+    let distance = if k.radius >= 1000.0 {
+        format!("{:.1} km", k.radius / 1000.0)
+    } else {
+        format!("{} m", k.radius.round())
+    };
+    format!("{heading}° · {up}° up · {distance}")
+}
+
 fn number(v: &Value) -> String {
     match v.as_f64() {
         Some(f) if f.fract() == 0.0 => format!("{f:.0}"),
@@ -1893,6 +2130,7 @@ impl eframe::App for StudioApp {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         self.drain();
         self.tick(ui.ctx());
+        self.fly_tick(ui.ctx());
         if self.fullscreen && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.set_fullscreen(ui.ctx(), false);
         }
@@ -1932,7 +2170,7 @@ impl eframe::App for StudioApp {
                         ScrollArea::vertical()
                             .id_salt("panel-right")
                             .auto_shrink(false)
-                            .show(ui, |ui| self.sun_card(ui));
+                            .show(ui, |ui| self.sun_card(ui, frame));
                     });
                 });
             egui::Panel::left("panel-left")
@@ -1968,6 +2206,7 @@ impl eframe::App for StudioApp {
             .frame(bg.inner_margin(margin))
             .show(ui, |ui| {
                 self.viewport.show(ui, frame.wgpu_render_state());
+                self.record_frame(frame);
                 let cam = self.viewport.camera;
                 let st = crate::chrome::State {
                     // The desktop's heading: the camera sits at θ from south towards east.
