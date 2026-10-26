@@ -357,8 +357,8 @@ export default function App() {
     };
   }, []);
 
-  // Connected to Studio (ADR-0017): a graph edit made there reloads the graph here, an evaluation
-  // run there shows here, and Studio's selection (a layer row, a viewport pick) selects the node here.
+  // Connected to Studio (ADR-0017): a project opened there opens here, a graph edit made there
+  // reloads the graph here, an evaluation run there shows here, and Studio's selection (a layer row, a viewport pick) selects the node here.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
@@ -367,6 +367,7 @@ export default function App() {
       const st = useStore.getState();
       const other = data.client !== "gui-editor";
       if (topic === "project_changed" && other && data.op?.startsWith("graph.") && data.op !== "graph.evaluate") void st.loadGraph(false);
+      if (topic === "project_changed" && other && (data.op === "project.open" || data.op === "project.create")) void st.followProject();
       if (topic === "evaluated" && other && data.report) void st.adoptEvaluation(data.report);
       if (topic === "selection" && data.source !== "gui-editor") st.setSelectedNode(data.nodes?.[0] ?? null);
     })

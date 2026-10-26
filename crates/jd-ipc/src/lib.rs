@@ -276,6 +276,32 @@ fn tokens_match(a: &str, b: &str) -> bool {
             == 0
 }
 
+/// The per-user directory where Studio and the Editor write their logs (`jd-studio.log`,
+/// `jd-app.log`): `~/Library/Logs/<identifier>` on macOS, `%LOCALAPPDATA%\<identifier>\logs` on
+/// Windows, `$XDG_DATA_HOME/<identifier>/logs` elsewhere.
+pub fn log_dir(identifier: &str) -> Option<std::path::PathBuf> {
+    if cfg!(target_os = "macos") {
+        Some(
+            std::path::PathBuf::from(std::env::var_os("HOME")?)
+                .join("Library/Logs")
+                .join(identifier),
+        )
+    } else if cfg!(target_os = "windows") {
+        Some(
+            std::path::PathBuf::from(std::env::var_os("LOCALAPPDATA")?)
+                .join(identifier)
+                .join("logs"),
+        )
+    } else {
+        let base = std::env::var_os("XDG_DATA_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share"))
+            })?;
+        Some(base.join(identifier).join("logs"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

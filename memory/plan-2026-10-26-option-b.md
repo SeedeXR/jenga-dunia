@@ -247,3 +247,16 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   preview LOD now takes the Live target's adaptive bias (the desktop's adaptLodBias, unit-tested),
   moved by any evaluation at the current preview LOD.
   Next: P5 (default switch, packaging, docs).
+- P5 slice 1 — packaging: cargo-packager 0.11.8 (`[package.metadata.packager]` in apps/studio,
+  `scripts/package.sh`), Studio the main executable, the Editor the embedded helper "Jenga Dunia
+  Editor.app" (own bundle id). Found by running the bundle: (1) with `jd-app` beside `jd-studio`
+  in Contents/MacOS, the Editor process also counts as the app — `quit` and a Finder open reached
+  the Editor instead of Studio — hence the helper; (2) winit 0.30.13 *does* own the application
+  delegate (its doc comment says otherwise; replacing it panics), so `crates/jd-macos` (unsafe
+  allowed, like jd-fbxsdk) installs an `aevt/odoc` handler through NSAppleEventManager from a
+  will-finish-launching observer; (3) Studio logged only to stderr — it now also writes
+  `jd-studio.log` beside `jd-app.log` (`jd_ipc::log_dir`, shared); (4) Studio's open / create did
+  not evaluate (the desktop's do) — now chained with a preview evaluation; (5) the Editor's
+  `project-opened` re-read of Studio's opens evaluated again — replaced by `followProject`.
+  Verified with the packaged app: open, second open, quit (see docs/user/desktop-app.md).
+  Open: retiring the WebView viewport waits for the owner (it removes the Editor's own view).

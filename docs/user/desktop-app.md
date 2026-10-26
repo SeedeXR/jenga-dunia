@@ -38,13 +38,15 @@ cd apps/desktop && pnpm install && pnpm tauri dev
 ## Build the app bundle
 
 ```sh
-cd apps/desktop && pnpm tauri build --no-sign
-# → target/release/bundle/macos/Jenga Dunia.app (18 MiB) and dmg/Jenga Dunia_0.0.1_aarch64.dmg (7 MiB)
+cargo install cargo-packager --version 0.11.8 --locked   # once
+scripts/package.sh                # → target/release/Jenga Dunia.app (+ a .dmg); `-f app` for the app only
 ```
 
-The bundle is **unsigned** (no Apple developer account yet): macOS Gatekeeper will ask you to confirm the first launch of a downloaded copy; a locally built bundle runs directly. `src-tauri/Info.plist` (merged by the bundler) declares `.jdproj` as a **package** document type (`LSTypeIsPackage`, UTI `com.seedexr.jengadunia.project`), so Finder treats the project folder as a single document owned by Jenga Dunia: double-click, **Open With**, or a plain `open My.jdproj` launches the app with that project — macOS hands the document over as an Apple Event, which the app handles alongside the `jd-app My.jdproj` launch argument used on Linux/Windows and from the CLI. Verified on macOS 27 (2026-10-20) after `lsregister -f "Jenga Dunia.app"`: `open H512.jdproj` started the app, opened the project and live-previewed it; the app menu reads **Jenga Dunia**.
+The bundle starts **Studio** (ADR-0017: the engine, the 3-D viewport and the panels), which opens the **Editor** (the node graph) beside it; on macOS the Editor is the helper app `Contents/MacOS/Jenga Dunia Editor.app` (bundle id `com.seedexr.jengadunia.editor`), so the system's events for Jenga Dunia (open a document, quit) reach Studio. Quitting Studio closes the Editor. `src-tauri/Info.plist` (merged into the bundle's) declares `.jdproj` as a **package** document type (`LSTypeIsPackage`, UTI `com.seedexr.jengadunia.project`), so Finder treats the project folder as a single document owned by Jenga Dunia: double-click, **Open With**, or `open My.jdproj` hands it to Studio as an Apple Event (`crates/jd-macos`), which opens and live-previews it — the Editor follows; on Linux and Windows the path is a launch argument (`jd-studio My.jdproj`). Verified on macOS 27 (2026-10-27) with the packaged app: `open -a "Jenga Dunia.app" Pkg.jdproj` launched Studio, which opened and evaluated the project and started the Editor from the helper; a second `open` while running switched projects (one evaluation each, by Studio); an AppleScript `quit` closed both. The bundle is **unsigned** (no Apple developer account yet): Gatekeeper asks to confirm the first launch of a downloaded copy; a locally built bundle runs directly. macOS is the one packaged platform so far.
 
-Logs: `~/Library/Logs/com.seedexr.jengadunia/jd-app.log` on macOS (`$XDG_DATA_HOME/com.seedexr.jengadunia/logs` on Linux, `%LOCALAPPDATA%\com.seedexr.jengadunia\logs` on Windows), plus stderr; `JD_LOG=debug` raises the level.
+The single-window app (the Editor with its own engine and viewport) still builds as before with `cd apps/desktop && pnpm tauri build --no-sign` (→ `target/release/bundle/macos/Jenga Dunia.app`; same bundle id, so build one or the other).
+
+Logs: `~/Library/Logs/com.seedexr.jengadunia/jd-studio.log` (Studio and the engine) and `jd-app.log` (the Editor) on macOS (`$XDG_DATA_HOME/com.seedexr.jengadunia/logs` on Linux, `%LOCALAPPDATA%\com.seedexr.jengadunia\logs` on Windows), plus stderr; `JD_LOG=debug` raises the level.
 
 ## Tutorial: first terrain in four steps
 

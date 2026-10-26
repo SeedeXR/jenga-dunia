@@ -1,0 +1,25 @@
+[package]
+name = "jd-macos"
+description = "Jenga Dunia's AppKit glue for Studio: receives the documents macOS opens with the app (a .jdproj double-clicked in Finder arrives as an Apple Event, not on the command line). A no-op elsewhere."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSAppleEventDescriptor", "NSAppleEventManager", "NSNotification", "NSString", "NSURL", "NSObject"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication"] }
+tracing.workspace = true
+
+# Objective-C messaging is `unsafe` in objc2; like jd-fbxsdk (ADR-0015) this crate is a contained
+# exception to the workspace's `forbid` (ADR-0017, packaging), so the lints are set here.
+[lints.rust]
+unsafe_code = "allow"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"

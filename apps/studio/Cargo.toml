@@ -14,6 +14,7 @@ jd-ipc.workspace = true
 jd-gpu.workspace = true
 jd-terrain.workspace = true
 jd-types.workspace = true
+jd-macos.workspace = true
 base64.workspace = true
 # wgpu backends come from jd-gpu's wgpu features (metal, vulkan, dx12): one wgpu 30 for both.
 eframe = { version = "0.37", default-features = false, features = ["wgpu_no_default_features", "accesskit", "default_fonts", "wayland", "x11", "clipboard", "persistence"] }
@@ -35,3 +36,30 @@ tempfile.workspace = true
 
 [lints]
 workspace = true
+
+# The app bundle (ADR-0017 P5: Studio is the entry point): `scripts/package.sh` builds both release
+# binaries and the Editor's helper app, then runs `cargo packager`. On macOS the Editor ships as
+# the embedded helper "Jenga Dunia Editor.app" (its own bundle id, so the system's Apple Events for
+# the app reach Studio; `editor::locate`). The bundle takes the Editor's Info.plist (the `.jdproj`
+# package document type, its UTI and `CFBundleIconName`) merged over the generated one, and the
+# Icon Composer icon (Assets.car, macOS 26+; icon.icns before). Paths are relative to this file.
+# ponytail: macOS is the one packaged platform; Windows / Linux packages add `jd-app` to
+# `binaries` (beside jd-studio, where `editor::locate` looks) with per-OS config when they ship.
+[package.metadata.packager]
+product-name = "Jenga Dunia"
+identifier = "com.seedexr.jengadunia"
+category = "GraphicsAndDesign"
+binaries = [{ path = "jd-studio", main = true }]
+icons = [
+  "../desktop/src-tauri/icons/icon.icns",
+  "../desktop/src-tauri/icons/32x32.png",
+  "../desktop/src-tauri/icons/128x128.png",
+  "../desktop/src-tauri/icons/128x128@2x.png",
+  "../desktop/src-tauri/icons/icon.ico",
+]
+resources = [{ src = "../desktop/src-tauri/icons/Assets.car", target = "Assets.car" }]
+file-associations = [{ extensions = ["jdproj"], name = "Jenga Dunia Project", description = "Jenga Dunia project directory", role = "editor" }]
+
+[package.metadata.packager.macos]
+info-plist-path = "../desktop/src-tauri/Info.plist"
+embedded-apps = ["../../target/release/Jenga Dunia Editor.app"]

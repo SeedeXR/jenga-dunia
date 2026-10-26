@@ -311,6 +311,9 @@ interface State {
   setEvalOutput: (layer: string | null) => void;
   /** Adopt a project the backend already has open (launch argument / file association). */
   probeProject: (isCancelled?: () => boolean) => Promise<void>;
+  /** Another window (Studio) opened or created a project: show it as `openProject` does, without
+   *  evaluating it (that window evaluates; its report arrives as `evaluated`). */
+  followProject: () => Promise<void>;
   newProject: (path: string, name: string, extent: number, resolution: number) => Promise<void>;
   openProject: (path: string) => Promise<void>;
   generate: () => Promise<void>;
@@ -1249,6 +1252,15 @@ export const useStore = create<State>((set, get) => {
       } catch {
         // not inside Tauri (browser/tests)
       }
+    },
+    followProject: async () => {
+      // Synchronously, before any await: the other window's evaluation report follows this event.
+      set({ project: null, layer: null, preview: null, lastEval: null });
+      const r = await op<ProjectSummary>("project.info");
+      if (r.status !== "ok" || !r.result) return log(r);
+      await loadGraph(false);
+      set({ project: r.result, ...lookState(r.result) });
+      void refreshMaps();
     },
     newProject: async (path, name, extent, resolution) => {
       const r = await run("project.create", {

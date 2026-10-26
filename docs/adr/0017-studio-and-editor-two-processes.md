@@ -30,7 +30,7 @@ Research (`docs/research/option-b-stack.md`, 2026-10-26): egui / eframe / egui-w
 - Two UI toolkits: shared colour tokens and Host Grotesk (TTF, OFL) in egui; two test setups (Playwright for the Editor, `egui_kittest` with its wgpu renderer for Studio — Linux CI needs lavapipe).
 - Anything crossing the boundary is a message: node ↔ viewport selection, keyboard shortcuts, focus, drag-and-drop.
 - Two windows: on macOS two Dock icons unless the Editor runs as an accessory (which hides its menu bar); on Wayland the compositor places them.
-- Packaging: the Tauri bundler provides icons, the `.jdproj` association and the macOS bundle today; with Studio as the entry point that moves to `cargo-packager` (decided in Phase 5).
+- Packaging (decided in Phase 5): `cargo-packager` 0.11 builds the bundle with Studio as the entry point (`[package.metadata.packager]` in `apps/studio/Cargo.toml`, `scripts/package.sh`); the same icons, `.jdproj` association and Info.plist the Tauri bundler used. On macOS the Editor is the embedded helper app `Jenga Dunia Editor.app` with its own bundle id — a second executable of the main bundle counts as the app too, and the system's quit and document opens reached it instead of Studio. macOS hands a double-clicked `.jdproj` to the main executable as an "open documents" Apple Event, which winit does not surface (and winit owns the application delegate): `crates/jd-macos` installs a handler with `NSAppleEventManager`. Objective-C messaging is `unsafe` in objc2, so that crate is the second contained exception to the workspace's `unsafe_code = "forbid"` (after `jd-fbxsdk`, ADR-0015), with its own lints.
 - egui lays out every frame (~1–2 ms) and has open IME issues: text-heavy editing stays in the Editor's WebView.
 
 ## Evidence

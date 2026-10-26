@@ -69,6 +69,8 @@ fn main() -> ExitCode {
         editor,
         project: args.project,
     };
+    // A .jdproj opened from Finder reaches the window (macOS sends it as an Apple Event).
+    jd_studio::documents::install();
     let result = eframe::run_native(
         "Jenga Dunia Studio",
         native_options(),
@@ -135,11 +137,32 @@ fn headless(server: &jd_ipc::Server) -> ExitCode {
 }
 
 /// `tracing` to stderr; `JD_LOG` sets the filter (default `info`).
+/// stderr, and a file beside the Editor's (`jd_ipc::log_dir`): a Studio started from Finder has
+/// no terminal.
 fn init_logging() {
+    use tracing_subscriber::fmt::writer::MakeWriterExt;
     let filter = tracing_subscriber::EnvFilter::try_from_env("JD_LOG")
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_writer(std::io::stderr)
-        .try_init();
+    let file = jd_ipc::log_dir("com.seedexr.jengadunia").and_then(|dir| {
+        std::fs::create_dir_all(&dir).ok()?;
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.join("jd-studio.log"))
+            .ok()
+    });
+    let result = match file {
+        Some(f) => tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_ansi(false)
+            .with_writer(std::io::stderr.and(std::sync::Mutex::new(f)))
+            .try_init(),
+        None => tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_writer(std::io::stderr)
+            .try_init(),
+    };
+    if let Err(e) = result {
+        eprintln!("logging already initialised: {e}");
+    }
 }

@@ -3,6 +3,7 @@
 
 pub mod app;
 pub mod chrome;
+pub mod documents;
 pub mod editor;
 pub mod i18n;
 pub mod look;

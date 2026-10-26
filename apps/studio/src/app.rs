@@ -846,14 +846,27 @@ impl StudioApp {
         if let Some(path) = &options.editor {
             app.start_editor(path.clone());
         }
+        crate::documents::wake(&cc.egui_ctx);
         match options.project {
-            Some(p) => {
-                app.path_input = p.display().to_string();
-                app.invoke(Tag::User, "project.open", json!({ "path": p }));
-            }
+            Some(p) => app.open_project(p.display().to_string()),
             None => app.refresh(),
         }
         app
+    }
+
+    /// The desktop's `openProject`: open, then a live evaluation at the opened world's preview LOD
+    /// (a project publishes no layer until it is evaluated).
+    fn open_project(&mut self, path: String) {
+        self.path_input.clone_from(&path);
+        let bias = self.lod_bias;
+        self.chain(vec![
+            Box::new(move |_| Some(Self::request("project.open", json!({ "path": path })))),
+            Box::new(move |done| {
+                let world = &done.first()?.result.as_ref()?["world"];
+                let lod = preview_lod_of(world) + bias;
+                Some(Self::request("graph.evaluate", json!({ "lod": lod })))
+            }),
+        ]);
     }
 
     /// The selected layer.
@@ -4389,6 +4402,10 @@ impl StudioApp {
             self.sky_due = None;
             self.fetch_sky(self.sun);
         }
+        // A .jdproj opened from Finder (several at once: the last one, one project at a time).
+        if let Some(p) = crate::documents::take().pop() {
+            self.open_project(p.display().to_string());
+        }
         if let Some(next) = [self.look_due, self.sky_due].into_iter().flatten().min() {
             ctx.request_repaint_after(next.saturating_duration_since(now));
         }
@@ -4852,11 +4869,20 @@ impl StudioApp {
             );
         };
         let name = self.name_input.trim().to_owned();
-        self.invoke(
-            Tag::User,
+        let create = Self::request(
             "project.create",
             json!({ "path": path, "name": name, "world": { "extent_m": [extent, extent], "resolution_px": [resolution, resolution], "tile_size": 512, "halo": 4, "origin": [0, 0], "seed": 42 } }),
         );
+        // Then a live evaluation, as the desktop's newProject (the starter graph's terrain).
+        let bias = self.lod_bias;
+        self.chain(vec![
+            Box::new(move |_| Some(create)),
+            Box::new(move |done| {
+                let world = &done.first()?.result.as_ref()?["world"];
+                let lod = preview_lod_of(world) + bias;
+                Some(Self::request("graph.evaluate", json!({ "lod": lod })))
+            }),
+        ]);
     }
 
     /// The desktop's `importAsset`: copy into assets/, then a `jd.input.heightmap@1` node right of
@@ -5246,8 +5272,7 @@ impl StudioApp {
                 .set_title("Open Jenga Dunia project")
                 .pick_folder()
         {
-            self.path_input = p.display().to_string();
-            self.invoke(Tag::User, "project.open", json!({ "path": p }));
+            self.open_project(p.display().to_string());
         }
         if look::icon_button(ui, "save", "Save (⌘S)", has_project && idle).clicked() {
             self.invoke(Tag::User, "project.save", json!({}));
@@ -5399,13 +5424,10 @@ impl StudioApp {
 
     /// The desktop's `previewLod`: live evaluations stay ≤ 512², plus the Live target's bias.
     fn preview_lod(&self) -> u32 {
-        let res = self.project.as_ref().map_or(512.0, |p| {
-            let r = &p["world"]["resolution_px"];
-            r[0].as_f64()
-                .unwrap_or(512.0)
-                .max(r[1].as_f64().unwrap_or(512.0))
-        });
-        (res / 512.0).log2().ceil().max(0.0) as u32 + self.lod_bias
+        self.project
+            .as_ref()
+            .map_or(0, |p| preview_lod_of(&p["world"]))
+            + self.lod_bias
     }
 
     /// A layer-strip button: the shared workflow op (as the desktop), then a live evaluation.
@@ -5481,8 +5503,7 @@ impl StudioApp {
                     .set_title("Open Jenga Dunia project")
                     .pick_folder()
             {
-                self.path_input = p.display().to_string();
-                self.invoke(Tag::User, "project.open", json!({ "path": p }));
+                self.open_project(p.display().to_string());
             }
             look::input(
                 ui,
@@ -5549,7 +5570,7 @@ impl StudioApp {
             )
             .clicked()
             {
-                self.invoke(Tag::User, "project.open", json!({ "path": path }));
+                self.open_project(path);
             }
             if look::button(
                 ui,
@@ -5972,6 +5993,16 @@ impl eframe::App for StudioApp {
             editor.stop(std::time::Duration::from_secs(3));
         }
     }
+}
+
+/// The LOD that keeps a world's live preview ≤ 512² (⌈log₂(res / 512)⌉).
+fn preview_lod_of(world: &Value) -> u32 {
+    let r = &world["resolution_px"];
+    let res = r[0]
+        .as_f64()
+        .unwrap_or(512.0)
+        .max(r[1].as_f64().unwrap_or(512.0));
+    (res / 512.0).log2().ceil().max(0.0) as u32
 }
 
 /// The desktop's `adaptLodBias` (lib/previewLod.ts): over the target → one LOD coarser, under a

@@ -284,6 +284,12 @@ describe("App", () => {
     emit("project_changed", { op: "graph.splice", client: "gui-editor" });
     await new Promise((r) => setTimeout(r, 20));
     expect(calls.some((c) => (c.args as { request?: { op: string } }).request?.op === "graph.list")).toBe(false);
+    // A project Studio opened opens here, without a second evaluation.
+    calls.length = 0;
+    emit("project_changed", { op: "project.open", client: "gui-studio" });
+    await waitFor(() => expect(calls.some((c) => (c.args as { request?: { op: string } }).request?.op === "project.info")).toBe(true));
+    await new Promise((r) => setTimeout(r, 250));
+    expect(calls.some((c) => (c.args as { request?: { op: string } }).request?.op === "graph.evaluate")).toBe(false);
     // An evaluation Studio ran shows here: its first layer's stats.
     emit("evaluated", { report: { lod: 1, duration_ms: 5, nodes: [], layers: { height: {} } }, client: "gui-studio" });
     await waitFor(() => expect(calls.some((c) => (c.args as { request?: { op: string; params: { layer?: string } } }).request?.op === "terrain.stats")).toBe(true));

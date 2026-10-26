@@ -138,14 +138,7 @@ fn connect_engine(
             app.exit(0);
             return;
         }
-        // Studio opened, created or closed a project: re-read it the way a Finder open does.
-        let op = data["op"].as_str().unwrap_or_default();
-        if topic == "project_changed"
-            && matches!(op, "project.open" | "project.create" | "project.close")
-            && let Err(e) = app.emit("project-opened", op)
-        {
-            tracing::warn!(error = %e, "project-opened not delivered");
-        }
+        // The frontend follows Studio from these (a project Studio opened: `followProject`).
         if let Err(e) = app.emit(
             "engine-event",
             serde_json::json!({ "topic": topic, "data": data }),
@@ -351,7 +344,7 @@ fn init_logging(identifier: &str) {
     use tracing_subscriber::fmt::writer::MakeWriterExt;
     let filter = tracing_subscriber::EnvFilter::try_from_env("JD_LOG")
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-    let file = log_dir(identifier).and_then(|dir| {
+    let file = jd_ipc::log_dir(identifier).and_then(|dir| {
         std::fs::create_dir_all(&dir).ok()?;
         std::fs::OpenOptions::new()
             .create(true)
@@ -372,29 +365,6 @@ fn init_logging(identifier: &str) {
     };
     if let Err(e) = result {
         eprintln!("logging already initialised: {e}");
-    }
-}
-
-fn log_dir(identifier: &str) -> Option<std::path::PathBuf> {
-    if cfg!(target_os = "macos") {
-        Some(
-            std::path::PathBuf::from(std::env::var_os("HOME")?)
-                .join("Library/Logs")
-                .join(identifier),
-        )
-    } else if cfg!(target_os = "windows") {
-        Some(
-            std::path::PathBuf::from(std::env::var_os("LOCALAPPDATA")?)
-                .join(identifier)
-                .join("logs"),
-        )
-    } else {
-        let base = std::env::var_os("XDG_DATA_HOME")
-            .map(std::path::PathBuf::from)
-            .or_else(|| {
-                std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share"))
-            })?;
-        Some(base.join(identifier).join("logs"))
     }
 }
 

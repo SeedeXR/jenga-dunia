@@ -26,7 +26,12 @@ pub enum Status {
     Failed(String),
 }
 
-/// Find the Editor binary: `explicit`, else `JD_EDITOR`, else `jd-app` next to this executable.
+/// The Editor's helper app inside the macOS bundle (`scripts/package.sh`): its own bundle id, so
+/// the system's Apple Events for the app (open a document, quit) reach Studio, not the Editor.
+pub const MAC_HELPER: &str = "Jenga Dunia Editor.app/Contents/MacOS/jd-app";
+
+/// Find the Editor binary: `explicit`, else `JD_EDITOR`, else the macOS helper app or `jd-app`
+/// next to this executable.
 pub fn locate(explicit: Option<PathBuf>) -> Result<PathBuf, String> {
     if let Some(p) = explicit.or_else(|| std::env::var_os("JD_EDITOR").map(PathBuf::from)) {
         return if p.is_file() {
@@ -36,8 +41,11 @@ pub fn locate(explicit: Option<PathBuf>) -> Result<PathBuf, String> {
         };
     }
     let exe = std::env::current_exe().map_err(|e| format!("cannot find jd-studio itself: {e}"))?;
+    let helper = exe.with_file_name(MAC_HELPER);
     let sibling = exe.with_file_name(format!("jd-app{}", std::env::consts::EXE_SUFFIX));
-    if sibling.is_file() {
+    if cfg!(target_os = "macos") && helper.is_file() {
+        Ok(helper)
+    } else if sibling.is_file() {
         Ok(sibling)
     } else {
         Err(format!(
