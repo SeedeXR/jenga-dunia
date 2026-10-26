@@ -20,7 +20,8 @@ eframe = { version = "0.37", default-features = false, features = ["wgpu_no_defa
 bytemuck = { version = "1", features = ["derive"] }
 egui_extras = { version = "0.37", default-features = false, features = ["svg"] }
 # Native dialogs (the same rfd the Editor's dialog plugin uses), PNG stills, local log times.
-rfd = "0.16"
+# gtk3, as Tauri's dialog plugin: rfd refuses gtk3 and xdg-portal together, and Cargo unifies them.
+rfd = { version = "0.16", default-features = false, features = ["gtk3"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 jiff = "0.2"
 clap.workspace = true
