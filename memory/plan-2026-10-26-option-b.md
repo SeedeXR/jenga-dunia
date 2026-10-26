@@ -121,4 +121,11 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   JD_PARITY_HORIZON / JD_STUDIO_HORIZON captures; the header readout now truncates beside the
   toolbar instead of running under it. Left in P3: Grid, Road, Sculpt tools (raycasting), sea,
   lakes, scatter instances, caves + x-ray, colour overlays, rain, post, stills of flythroughs.
+- P3 slice 4 (the sea): sea-level node → sea grid coloured by depth (the desktop's waterColour,
+  Beer–Lambert sand + tint, foam band / surf zone), transparent pass (roughness 0.2, metalness
+  0.05) with Gerstner waves from ocean.waves in the vertex shader (animated under the desktop's
+  ≤ 70 000-vertex rule), the white shoreline (marching squares), the ruler's sea mark, the readout in
+  the desktop's full order (… sea · waves · fog · sun · pbr · sky · box · shore · horizon · preview).
+  Side-by-side checked (JD_PARITY_SEA capture). Terrain picking (`Viewport::pick`, ray march +
+  bisection, unit-tested) is in for the tools; Sculpt / Grid wait for their P4 panels.
 

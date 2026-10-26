@@ -38,3 +38,36 @@ test("parity capture: desktop", async ({ page }) => {
     rmSync(ws, { recursive: true, force: true });
   }
 });
+
+// The sea (JD_PARITY_SEA=1): the same world with a sea-level node at 180 m on the noise, built in
+// the core before the page loads (the desktop adopts the open project on mount).
+test("parity capture: desktop sea", async ({ page }) => {
+  const out = process.env.JD_PARITY_DIR;
+  test.skip(!out || !process.env.JD_PARITY_SEA, "set JD_PARITY_DIR and JD_PARITY_SEA");
+  const ws = mkdtempSync(path.join(tmpdir(), "jd-parity-sea-"));
+  try {
+    const core = await connectCore(ws);
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const r = await core.callTool({ name, arguments: args });
+      const env = r.structuredContent as { status: string; result?: Record<string, unknown> };
+      if (env.status !== "ok") throw new Error(`${name}: ${JSON.stringify(env)}`);
+      return env.result!;
+    };
+    const world = { extent_m: [4096, 4096], resolution_px: [1024, 1024], tile_size: 512, halo: 4, origin: [0, 0], seed: 42 };
+    await call("project.create", { path: path.join(ws, "Sea.jdproj"), name: "Sea", world });
+    const g = (await call("graph.list", {})) as { nodes: { id: string; kind: string }[] };
+    const noise = g.nodes.find((n) => n.kind.startsWith("jd.noise."))!;
+    const sea = (await call("graph.add_node", { kind: "jd.hydrology.sea_level@1", params: { level_m: 180 } })) as { id: string };
+    await call("graph.connect", { from: noise.id, from_port: "out", to: sea.id, to_port: "in" });
+    await installBridge(page, core);
+    await page.goto("/");
+    await expect(page.locator("header")).toContainText("Sea —");
+    await evaluateAndWait(page, "graph-evaluate");
+    await expect(page.getByTestId("viewport-info")).toContainText("pbr", { timeout: 60_000 });
+    await expect(page.getByTestId("viewport-info")).toContainText("sea 180 m");
+    await page.waitForTimeout(1000);
+    await page.screenshot({ path: path.join(out!, "desktop-sea.png") });
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
+});

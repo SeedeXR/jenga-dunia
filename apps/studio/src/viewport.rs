@@ -28,6 +28,140 @@ struct Vertex {
     uv: [f32; 2],
 }
 
+/// A coloured point of a line or of the sea (linear RGB and alpha).
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct ColorVertex {
+    pos: [f32; 3],
+    color: [f32; 4],
+}
+
+/// One Gerstner component of the wind sea (`ocean.waves`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Wave {
+    /// Amplitude (m).
+    pub amplitude_m: f32,
+    /// Wavelength (m).
+    pub wavelength_m: f32,
+    /// Travel direction, degrees clockwise from north.
+    pub direction_deg: f32,
+    /// Phase speed (m/s).
+    pub speed_mps: f32,
+    /// Phase offset (rad).
+    pub phase: f32,
+}
+
+/// The sea as the desktop draws it (the graph's sea-level node and its wind sea).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Sea {
+    /// Water level (m).
+    pub level_m: f32,
+    /// Depth at which the bottom fades out (m).
+    pub visibility_m: f32,
+    /// Colour of the suspended matter (linear RGB).
+    pub tint: [f32; 3],
+    /// Depth above which the wind sea breaks: the surf zone's foam (m).
+    pub breaking_depth_m: f32,
+    /// The wind sea's components (empty: calm).
+    pub waves: Vec<Wave>,
+    /// Significant wave height and peak wavelength (m), for the readout.
+    pub waves_m: Option<[f32; 2]>,
+}
+
+/// The sea grid (vertices, indices) and its shoreline segments.
+type SeaGeometry = (Vec<ColorVertex>, Vec<u32>, Vec<ColorVertex>);
+
+/// Pure-water absorption per channel in m⁻¹ (Pope & Fry 1997, rounded): red dies first.
+const PURE_WATER_ABSORPTION: [f32; 3] = [0.4, 0.07, 0.005];
+
+/// The desktop's `waterColour`: the sandy bottom through Beer–Lambert transmittance (down and up),
+/// plus the tint scattered back; murkier or deeper water is more opaque.
+fn water_colour(depth_m: f32, sea: &Sea) -> ([f32; 3], f32) {
+    let k = 15.0 / sea.visibility_m.max(0.5);
+    let bottom = [0.62, 0.55, 0.38];
+    let mut rgb = [0.0; 3];
+    let mut seen = 0.0;
+    for c in 0..3 {
+        let t = (-PURE_WATER_ABSORPTION[c] * k * depth_m * 2.0).exp();
+        rgb[c] = bottom[c] * t + sea.tint[c] * (1.0 - t);
+        seen += t;
+    }
+    (rgb, 0.35 + 0.55 * (1.0 - seen / 3.0))
+}
+
+/// The desktop's `buildSeaGeometry`: a flat grid at the sea level over the world, coloured by the
+/// depth of the terrain under it, a foam band near the shore, transparent over land.
+fn sea_mesh(pv: &Preview, extent_m: [f32; 2], sea: &Sea) -> (Vec<ColorVertex>, Vec<u32>) {
+    let (ground, indices) = grid_mesh(pv, extent_m);
+    let foam_m = (0.5f32)
+        .max((pv.max - pv.min) * 0.01)
+        .max(sea.breaking_depth_m);
+    let foam = hex(0xdff3f5);
+    let vertices = ground
+        .iter()
+        .map(|g| {
+            let depth = sea.level_m - g.pos[1];
+            let (mut rgb, mut alpha) = water_colour(depth.max(0.0), sea);
+            if depth <= 0.0 {
+                alpha = 0.0;
+            } else if depth < foam_m {
+                let f = 1.0 - depth / foam_m;
+                rgb = [0, 1, 2].map(|i| rgb[i] + (foam[i] - rgb[i]) * f);
+                alpha = alpha.max(0.5 + 0.45 * f);
+            }
+            ColorVertex {
+                pos: [g.pos[0], sea.level_m, g.pos[2]],
+                color: [rgb[0], rgb[1], rgb[2], alpha],
+            }
+        })
+        .collect();
+    (vertices, indices)
+}
+
+/// The desktop's `buildShoreline`: where the terrain crosses the sea level, by marching squares,
+/// white (0.85) just above the water.
+fn shoreline(pv: &Preview, extent_m: [f32; 2], level_m: f32) -> Vec<ColorVertex> {
+    let (ground, _) = grid_mesh(pv, extent_m);
+    let (w, h) = (pv.width.max(2) as usize, pv.height.max(2) as usize);
+    let y = level_m + (0.2f32).max((pv.max - pv.min) * 0.002);
+    let white = [1.0, 1.0, 1.0, 0.85];
+    let cross = |a: usize, b: usize| -> Option<[f32; 3]> {
+        let (pa, pb) = (ground[a].pos, ground[b].pos);
+        let (da, db) = (pa[1] - level_m, pb[1] - level_m);
+        if (da < 0.0) == (db < 0.0) {
+            return None;
+        }
+        let t = da / (da - db);
+        Some([pa[0] + (pb[0] - pa[0]) * t, y, pa[2] + (pb[2] - pa[2]) * t])
+    };
+    let mut out = Vec::new();
+    for j in 0..h - 1 {
+        for i in 0..w - 1 {
+            let id = |i: usize, j: usize| j * w + i;
+            let hits: Vec<[f32; 3]> = [
+                cross(id(i, j), id(i + 1, j)),
+                cross(id(i + 1, j), id(i + 1, j + 1)),
+                cross(id(i, j + 1), id(i + 1, j + 1)),
+                cross(id(i, j), id(i, j + 1)),
+            ]
+            .into_iter()
+            .flatten()
+            .collect();
+            for pair in hits.chunks(2).filter(|p| p.len() == 2) {
+                out.push(ColorVertex {
+                    pos: pair[0],
+                    color: white,
+                });
+                out.push(ColorVertex {
+                    pos: pair[1],
+                    color: white,
+                });
+            }
+        }
+    }
+    out
+}
+
 /// Everything the shaders read, in WGSL's uniform layout (16-byte rows).
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -51,6 +185,10 @@ struct Uniforms {
     fog: [f32; 4],
     /// x: baked maps on, y: emissive map on, z: sky texture on, w: sky radius (metres).
     flags: [f32; 4],
+    /// x: seconds, y: wave components, z: waves animate (0 / 1), w unused.
+    time: [f32; 4],
+    /// Up to three Gerstner components: [amplitude, wavelength, direction°, speed], [phase, …].
+    waves: [[f32; 4]; 6],
 }
 
 const SHADER: &str = r"
@@ -59,6 +197,7 @@ struct U {
     eye: vec4<f32>, right: vec4<f32>, up: vec4<f32>, forward: vec4<f32>,
     sun_dir: vec4<f32>, sun_light: vec4<f32>, hemi_sky: vec4<f32>, hemi_ground: vec4<f32>,
     fog_color: vec4<f32>, fog: vec4<f32>, flags: vec4<f32>,
+    time: vec4<f32>, waves: array<vec4<f32>, 6>,
 };
 @group(0) @binding(0) var<uniform> u: U;
 @group(0) @binding(1) var samp: sampler;
@@ -92,14 +231,13 @@ fn vs_main(@location(0) pos: vec3<f32>, @location(1) normal: vec3<f32>, @locatio
 
 // three.js's physical BRDF (MeshStandardMaterial, metalness 0): Schlick Fresnel, height-correlated
 // Smith visibility, GGX distribution, Lambert diffuse.
-fn brdf_ggx(l: vec3<f32>, v: vec3<f32>, n: vec3<f32>, roughness: f32) -> vec3<f32> {
+fn brdf_ggx(l: vec3<f32>, v: vec3<f32>, n: vec3<f32>, roughness: f32, f0: vec3<f32>) -> vec3<f32> {
     let alpha = roughness * roughness;
     let h = normalize(l + v);
     let dnl = clamp(dot(n, l), 0.0, 1.0);
     let dnv = clamp(dot(n, v), 0.0, 1.0);
     let dnh = clamp(dot(n, h), 0.0, 1.0);
     let dvh = clamp(dot(v, h), 0.0, 1.0);
-    let f0 = vec3<f32>(0.04);
     let fresnel = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - dvh, 5.0);
     let a2 = alpha * alpha;
     let gv = dnl * sqrt(a2 + (1.0 - a2) * dnv * dnv);
@@ -108,6 +246,23 @@ fn brdf_ggx(l: vec3<f32>, v: vec3<f32>, n: vec3<f32>, roughness: f32) -> vec3<f3
     let denom = dnh * dnh * (a2 - 1.0) + 1.0;
     let d = RECIPROCAL_PI * a2 / (denom * denom);
     return fresnel * (vis * d);
+}
+
+// three's PhysicalLightingModel for one surface: the sun (direct diffuse + GGX) and the
+// hemisphere light (indirect diffuse), metalness mixing F0 towards the albedo.
+fn shade(albedo: vec3<f32>, n: vec3<f32>, world: vec3<f32>, roughness_in: f32, metalness: f32, geo_n: vec3<f32>) -> vec3<f32> {
+    // three: roughness ≥ 0.0525, plus the geometry's own roughness from the normal's derivatives.
+    let dxy = max(abs(dpdx(geo_n)), abs(dpdy(geo_n)));
+    let roughness = min(max(roughness_in, 0.0525) + max(max(dxy.x, dxy.y), dxy.z), 1.0);
+    let v = normalize(u.eye.xyz - world);
+    let l = normalize(u.sun_dir.xyz);
+    let irradiance = clamp(dot(n, l), 0.0, 1.0) * u.sun_light.rgb;
+    let diffuse_color = albedo * (1.0 - metalness);
+    let f0 = mix(vec3<f32>(0.04), albedo, metalness);
+    var c = irradiance * RECIPROCAL_PI * diffuse_color + irradiance * brdf_ggx(l, v, n, roughness, f0);
+    let hemi = mix(u.hemi_ground.rgb, u.hemi_sky.rgb, 0.5 * n.y + 0.5);
+    c += hemi * RECIPROCAL_PI * diffuse_color;
+    return c;
 }
 
 fn fogged(c: vec3<f32>, world: vec3<f32>) -> vec3<f32> {
@@ -136,17 +291,7 @@ fn fs_main(i: VsOut) -> @location(0) vec4<f32> {
             emissive = textureSample(emissive_map, samp, i.uv).rgb;
         }
     }
-    // three: roughness ≥ 0.0525, plus the geometry's own roughness from the normal's derivatives.
-    let dxy = max(abs(dpdx(flat_n)), abs(dpdy(flat_n)));
-    roughness = min(max(roughness, 0.0525) + max(max(dxy.x, dxy.y), dxy.z), 1.0);
-    let v = normalize(u.eye.xyz - i.world);
-    let l = normalize(u.sun_dir.xyz);
-    let irradiance = clamp(dot(n, l), 0.0, 1.0) * u.sun_light.rgb;
-    let diffuse_color = albedo;
-    var c = irradiance * RECIPROCAL_PI * diffuse_color + irradiance * brdf_ggx(l, v, n, roughness);
-    let hemi = mix(u.hemi_ground.rgb, u.hemi_sky.rgb, 0.5 * n.y + 0.5);
-    c += hemi * RECIPROCAL_PI * diffuse_color;
-    c += emissive;
+    let c = shade(albedo, n, i.world, roughness, 0.0, flat_n) + emissive;
     return vec4<f32>(fogged(c, i.world), 1.0);
 }
 
@@ -154,19 +299,68 @@ fn fs_main(i: VsOut) -> @location(0) vec4<f32> {
 struct LineOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) world: vec3<f32>,
+    @location(1) color: vec4<f32>,
 };
 
 @vertex
-fn line_vs(@location(0) pos: vec3<f32>) -> LineOut {
+fn line_vs(@location(0) pos: vec3<f32>, @location(1) color: vec4<f32>) -> LineOut {
     var o: LineOut;
     o.clip = u.view_proj * vec4<f32>(pos, 1.0);
     o.world = pos;
+    o.color = color;
     return o;
 }
 
 @fragment
 fn line_fs(i: LineOut) -> @location(0) vec4<f32> {
-    return vec4<f32>(fogged(vec3<f32>(0.0497, 0.6308, 0.5841), i.world), 1.0);
+    return vec4<f32>(fogged(i.color.rgb, i.world), i.color.a);
+}
+
+// The sea: the desktop's MeshStandardMaterial (roughness 0.2, metalness 0.05, vertex colour and
+// alpha from depth), moved along Gerstner orbits when its waves animate.
+struct SeaOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) world: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) color: vec4<f32>,
+};
+
+@vertex
+fn sea_vs(@location(0) pos: vec3<f32>, @location(1) color: vec4<f32>) -> SeaOut {
+    var p = pos;
+    var dx_ = vec3<f32>(1.0, 0.0, 0.0);
+    var dz_ = vec3<f32>(0.0, 0.0, 1.0);
+    let n = max(u.time.y, 1.0);
+    if (u.time.z > 0.5) {
+        for (var k = 0; k < i32(u.time.y); k++) {
+            let a = u.waves[2 * k];
+            let amp = a.x;
+            let wk = 2.0 * PI / a.y;
+            let rad = radians(a.z);
+            let dir = vec2<f32>(sin(rad), -cos(rad)); // north is −z
+            let phi = wk * (dir.x * pos.x + dir.y * pos.z) - wk * a.w * u.time.x + u.waves[2 * k + 1].x;
+            let q = min(1.0, 0.5 / (wk * amp * n)); // GPU Gems 1 ch. 1
+            let c = cos(phi);
+            let s = sin(phi);
+            p += vec3<f32>(q * amp * dir.x * c, amp * s, q * amp * dir.y * c);
+            // The surface's tangents along x and z, for the lit normal.
+            dx_ += vec3<f32>(-q * amp * dir.x * dir.x * wk * s, amp * wk * dir.x * c, -q * amp * dir.x * dir.y * wk * s);
+            dz_ += vec3<f32>(-q * amp * dir.x * dir.y * wk * s, amp * wk * dir.y * c, -q * amp * dir.y * dir.y * wk * s);
+        }
+    }
+    var o: SeaOut;
+    o.clip = u.view_proj * vec4<f32>(p, 1.0);
+    o.world = p;
+    o.normal = normalize(cross(dz_, dx_));
+    o.color = color;
+    return o;
+}
+
+@fragment
+fn sea_fs(i: SeaOut) -> @location(0) vec4<f32> {
+    let n = normalize(i.normal);
+    let c = shade(i.color.rgb, n, i.world, 0.2, 0.05, n);
+    return vec4<f32>(fogged(c, i.world), i.color.a);
 }
 
 // The sky: a full-screen triangle; each pixel's ray meets the dome (a sphere of radius flags.w
@@ -437,6 +631,7 @@ pub struct TerrainInfo {
 struct Gpu {
     terrain: wgpu::RenderPipeline,
     lines: wgpu::RenderPipeline,
+    sea: wgpu::RenderPipeline,
     sky: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
     uniforms: wgpu::Buffer,
@@ -459,7 +654,7 @@ struct Targets {
 }
 
 /// The framed block's wall triangles and rim line points.
-type Frame = (Vec<Vertex>, Vec<[f32; 3]>);
+type Frame = (Vec<Vertex>, Vec<ColorVertex>);
 
 struct Mesh {
     vertices: wgpu::Buffer,
@@ -509,6 +704,68 @@ fn grid_mesh(pv: &Preview, extent_m: [f32; 2]) -> (Vec<Vertex>, Vec<u32>) {
         }
     }
     (vertices, indices)
+}
+
+/// Where a ray from `eye` along `dir` first meets the preview's surface over `extent_m` (the
+/// mesh's bilinear heights): march in half-cell steps, then bisect the crossing.
+fn pick_heightfield(
+    pv: &Preview,
+    extent_m: [f32; 2],
+    eye: [f32; 3],
+    dir: [f32; 3],
+) -> Option<[f32; 2]> {
+    let (w, h) = (pv.width.max(2), pv.height.max(2));
+    let (dx, dz) = (extent_m[0] / (w - 1) as f32, extent_m[1] / (h - 1) as f32);
+    let height_at = |x: f32, z: f32| -> Option<f32> {
+        let (u, v) = ((x + extent_m[0] / 2.0) / dx, (extent_m[1] / 2.0 - z) / dz);
+        if !(0.0..=(w - 1) as f32).contains(&u) || !(0.0..=(h - 1) as f32).contains(&v) {
+            return None;
+        }
+        let (x0, y0) = ((u as u32).min(w - 2), (v as u32).min(h - 2));
+        let (fx, fy) = (u - x0 as f32, v - y0 as f32);
+        let q = |x: u32, y: u32| {
+            let i = (y.min(pv.height - 1) * pv.width + x.min(pv.width - 1)) as usize;
+            pv.min + f32::from(pv.data[i]) / 65535.0 * (pv.max - pv.min)
+        };
+        let top = q(x0, y0) * (1.0 - fx) + q(x0 + 1, y0) * fx;
+        let bottom = q(x0, y0 + 1) * (1.0 - fx) + q(x0 + 1, y0 + 1) * fx;
+        Some(top * (1.0 - fy) + bottom * fy)
+    };
+    let at = |t: f32| {
+        [
+            eye[0] + dir[0] * t,
+            eye[1] + dir[1] * t,
+            eye[2] + dir[2] * t,
+        ]
+    };
+    let above = |t: f32| {
+        let p = at(t);
+        height_at(p[0], p[2]).map(|g| p[1] - g)
+    };
+    let step = dx.min(dz) * 0.5;
+    let far = (dot(eye, eye).sqrt() + extent_m[0].max(extent_m[1])) * 2.0;
+    let (mut t, mut prev): (f32, Option<(f32, f32)>) = (0.0, None);
+    while t < far {
+        if let Some(d) = above(t) {
+            if d <= 0.0 {
+                // Crossed between the last sample above ground and this one: bisect.
+                let (mut lo, mut hi) = prev.map_or((t, t), |(pt, _)| (pt, t));
+                for _ in 0..24 {
+                    let mid = (lo + hi) / 2.0;
+                    if above(mid).is_some_and(|m| m > 0.0) {
+                        lo = mid;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                let p = at(hi);
+                return Some([p[0] + extent_m[0] / 2.0, extent_m[1] / 2.0 - p[2]]);
+            }
+            prev = Some((t, d));
+        }
+        t += step;
+    }
+    None
 }
 
 /// The desktop's horizon skirt: the noise continued over `scale` × the world, the ramp colours a
@@ -562,7 +819,9 @@ fn frame_geometry(vertices: &[Vertex], w: u32, h: u32, base: f32) -> Frame {
                 uv: [-1.0, -1.0],
             });
         }
-        rim.extend_from_slice(&[pa, pb, qa, qb]);
+        // The rim's teal (0x3fd0c9), as the desktop's LineBasicMaterial.
+        let teal = [0.0497, 0.6308, 0.5841, 1.0];
+        rim.extend([pa, pb, qa, qb].map(|pos| ColorVertex { pos, color: teal }));
     }
     (walls, rim)
 }
@@ -593,6 +852,13 @@ pub struct Viewport {
     dirty: bool,
     rect: Rect,
     renders: u64,
+    sea: Option<Sea>,
+    pending_sea: Option<Option<SeaGeometry>>,
+    sea_mesh: Option<(wgpu::Buffer, wgpu::Buffer, u32)>,
+    shore: Option<(wgpu::Buffer, u32)>,
+    shore_segments: usize,
+    sea_vertices: usize,
+    started: std::time::Instant,
 }
 
 impl Default for Viewport {
@@ -619,6 +885,13 @@ impl Default for Viewport {
             dirty: true,
             rect: Rect::NOTHING,
             renders: 0,
+            sea: None,
+            pending_sea: None,
+            sea_mesh: None,
+            shore: None,
+            shore_segments: 0,
+            sea_vertices: 0,
+            started: std::time::Instant::now(),
         }
     }
 }
@@ -647,6 +920,7 @@ impl Viewport {
         });
         self.pending = Some((vertices, indices, frame));
         self.dirty = true;
+        self.rebuild_sea();
     }
 
     /// Draw the world as a framed block or not (the viewport's Frame button).
@@ -655,6 +929,23 @@ impl Viewport {
         if let Some((pv, extent)) = self.shown.take() {
             self.set_terrain(&pv, extent);
         }
+    }
+
+    /// The ground under a point of the viewport (points, as egui reports the pointer), as the
+    /// desktop's raycast reports it: metres east of the west edge and north of the south edge.
+    pub fn pick(&self, at: egui::Pos2) -> Option<[f32; 2]> {
+        let (pv, extent) = self.shown.as_ref()?;
+        let r = self.rect;
+        if !r.contains(at) || r.width() < 1.0 || r.height() < 1.0 {
+            return None;
+        }
+        let ndc = [
+            (at.x - r.left()) / r.width() * 2.0 - 1.0,
+            1.0 - (at.y - r.top()) / r.height() * 2.0,
+        ];
+        let (right, up, forward) = self.camera.basis(r.width() / r.height());
+        let dir = normalize([0, 1, 2].map(|i| forward[i] + right[i] * ndc[0] + up[i] * ndc[1]));
+        pick_heightfield(pv, *extent, self.camera.eye(), dir)
     }
 
     /// Back to the home view (the viewport's Fit button).
@@ -711,6 +1002,54 @@ impl Viewport {
     pub fn set_sun(&mut self, azimuth_deg: f32, elevation_deg: f32) {
         self.sun_deg = [azimuth_deg, elevation_deg];
         self.dirty = true;
+    }
+
+    /// The sea (`None`: no sea-level node, or a non-height layer shown).
+    pub fn set_sea(&mut self, sea: Option<Sea>) {
+        if self.sea == sea {
+            return;
+        }
+        self.sea = sea;
+        self.rebuild_sea();
+    }
+
+    fn rebuild_sea(&mut self) {
+        let built = match (&self.sea, &self.shown) {
+            (Some(sea), Some((pv, extent))) => {
+                let (v, i) = sea_mesh(pv, *extent, sea);
+                // The desktop draws the shoreline only while the level is inside the terrain's range.
+                let shore = if sea.level_m > pv.min && sea.level_m < pv.max {
+                    shoreline(pv, *extent, sea.level_m)
+                } else {
+                    Vec::new()
+                };
+                Some((v, i, shore))
+            }
+            _ => None,
+        };
+        self.sea_vertices = built.as_ref().map_or(0, |b| b.0.len());
+        self.shore_segments = built.as_ref().map_or(0, |b| b.2.len() / 2);
+        self.pending_sea = Some(built);
+        self.dirty = true;
+    }
+
+    /// The sea shown: its level, and the wind sea's height and wavelength when it has one.
+    pub fn sea_info(&self) -> Option<(f32, Option<[f32; 2]>)> {
+        self.sea
+            .as_ref()
+            .filter(|_| self.shown.is_some())
+            .map(|s| (s.level_m, s.waves_m))
+    }
+
+    /// Shoreline segments drawn.
+    pub fn shore_segments(&self) -> usize {
+        self.shore_segments
+    }
+
+    /// The desktop animates the waves on the CPU and skips seas over 70 000 vertices; Studio moves
+    /// them in the vertex shader under the same rule, so the two look the same.
+    fn waves_animate(&self) -> bool {
+        self.sea.as_ref().is_some_and(|s| !s.waves.is_empty()) && self.sea_vertices <= 70_000
     }
 
     /// Fog amount 0..1 (the Sun panel's Fog).
@@ -860,6 +1199,49 @@ impl Viewport {
                 )
             });
         }
+        if let Some(sea) = self.pending_sea.take() {
+            use wgpu::util::DeviceExt as _;
+            let buf = |label, contents: &[u8], usage| {
+                rs.device
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some(label),
+                        contents,
+                        usage,
+                    })
+            };
+            self.sea_mesh = sea.as_ref().map(|(v, i, _)| {
+                (
+                    buf(
+                        "sea vertices",
+                        bytemuck::cast_slice(v),
+                        wgpu::BufferUsages::VERTEX,
+                    ),
+                    buf(
+                        "sea indices",
+                        bytemuck::cast_slice(i),
+                        wgpu::BufferUsages::INDEX,
+                    ),
+                    i.len() as u32,
+                )
+            });
+            self.shore =
+                sea.as_ref()
+                    .filter(|(_, _, shore)| !shore.is_empty())
+                    .map(|(_, _, shore)| {
+                        (
+                            buf(
+                                "shoreline",
+                                bytemuck::cast_slice(shore),
+                                wgpu::BufferUsages::VERTEX,
+                            ),
+                            shore.len() as u32,
+                        )
+                    });
+        }
+        if self.waves_animate() {
+            self.dirty = true;
+            ui.ctx().request_repaint();
+        }
         if let Some((v, i, frame)) = self.pending.take() {
             self.mesh = Some(upload(rs, &v, &i, frame.as_ref()));
         }
@@ -941,6 +1323,26 @@ impl Viewport {
                 f32::from(u8::from(self.sky_px.is_some())),
                 cam.size * 40.0,
             ],
+            time: [
+                self.started.elapsed().as_secs_f32(),
+                self.sea.as_ref().map_or(0, |s| s.waves.len().min(3)) as f32,
+                f32::from(u8::from(self.waves_animate())),
+                0.0,
+            ],
+            waves: {
+                let mut w = [[0.0; 4]; 6];
+                for (k, c) in self
+                    .sea
+                    .iter()
+                    .flat_map(|s| s.waves.iter())
+                    .take(3)
+                    .enumerate()
+                {
+                    w[2 * k] = [c.amplitude_m, c.wavelength_m, c.direction_deg, c.speed_mps];
+                    w[2 * k + 1] = [c.phase, 0.0, 0.0, 0.0];
+                }
+                w
+            },
         }
     }
 
@@ -1006,10 +1408,21 @@ impl Viewport {
                 pass.set_vertex_buffer(0, walls.slice(..));
                 pass.draw(0..*n, 0..1);
             }
+            pass.set_pipeline(&gpu.lines);
             if let Some((rim, n)) = &mesh.rim {
-                pass.set_pipeline(&gpu.lines);
                 pass.set_vertex_buffer(0, rim.slice(..));
                 pass.draw(0..*n, 0..1);
+            }
+            if let Some((shore, n)) = &self.shore {
+                pass.set_vertex_buffer(0, shore.slice(..));
+                pass.draw(0..*n, 0..1);
+            }
+            // Transparent last, as three sorts it: the sea.
+            if let Some((v, i, n)) = &self.sea_mesh {
+                pass.set_pipeline(&gpu.sea);
+                pass.set_vertex_buffer(0, v.slice(..));
+                pass.set_index_buffer(i.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..*n, 0, 0..1);
             }
         }
         rs.queue.submit([encoder.finish()]);
@@ -1245,7 +1658,45 @@ fn create_gpu(rs: &RenderState) -> Gpu {
         multiview_mask: None,
         cache: None,
     });
-    let line_attributes = wgpu::vertex_attr_array![0 => Float32x3];
+    let line_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4];
+    let blended = [Some(wgpu::ColorTargetState {
+        format: COLOR_SRGB,
+        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+        write_mask: wgpu::ColorWrites::ALL,
+    })];
+    let color_vertex = wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<ColorVertex>() as u64,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &line_attributes,
+    };
+    let sea = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("sea"),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("sea_vs"),
+            compilation_options: Default::default(),
+            buffers: &[Some(color_vertex.clone())],
+        },
+        primitive: wgpu::PrimitiveState::default(),
+        // The desktop's sea: transparent, depth-tested, no depth write.
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::Less),
+            stencil: Default::default(),
+            bias: Default::default(),
+        }),
+        multisample,
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("sea_fs"),
+            compilation_options: Default::default(),
+            targets: &blended,
+        }),
+        multiview_mask: None,
+        cache: None,
+    });
     let lines = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("rim"),
         layout: Some(&pipeline_layout),
@@ -1253,11 +1704,7 @@ fn create_gpu(rs: &RenderState) -> Gpu {
             module: &shader,
             entry_point: Some("line_vs"),
             compilation_options: Default::default(),
-            buffers: &[Some(wgpu::VertexBufferLayout {
-                array_stride: 12,
-                step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: &line_attributes,
-            })],
+            buffers: &[Some(color_vertex)],
         },
         primitive: wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::LineList,
@@ -1275,7 +1722,7 @@ fn create_gpu(rs: &RenderState) -> Gpu {
             module: &shader,
             entry_point: Some("line_fs"),
             compilation_options: Default::default(),
-            targets: &target,
+            targets: &blended,
         }),
         multiview_mask: None,
         cache: None,
@@ -1311,6 +1758,7 @@ fn create_gpu(rs: &RenderState) -> Gpu {
     let mut gpu = Gpu {
         terrain,
         lines,
+        sea,
         sky,
         layout,
         uniforms,
@@ -1501,6 +1949,87 @@ mod tests {
     }
 
     #[test]
+    fn a_pick_lands_where_the_ray_meets_the_ground() {
+        // A flat 10 m world over 200 × 100 m with a 30 m block in its north-east quarter.
+        let mut data = vec![0u16; 5 * 3];
+        data[2 * 5 + 4] = 65535; // row 2 (north), column 4 (east)
+        let pv = Preview {
+            width: 5,
+            height: 3,
+            min: 10.0,
+            max: 40.0,
+            data,
+        };
+        // Straight down onto the south-west quarter: lands right under the eye.
+        let hit = pick_heightfield(&pv, [200.0, 100.0], [-50.0, 500.0, 25.0], [0.0, -1.0, 0.0])
+            .expect("hit");
+        assert!(
+            (hit[0] - 50.0).abs() < 0.01 && (hit[1] - 25.0).abs() < 0.01,
+            "{hit:?}"
+        );
+        // A slanted ray from the south-west, aimed at the flat ground's (100, 50): the ground is
+        // 10 m up, so it lands a little short of the aim, on the line.
+        let eye = [-100.0, 110.0, 150.0];
+        let aim = [0.0, 0.0, 0.0];
+        let d = normalize(sub(aim, eye));
+        let hit = pick_heightfield(&pv, [200.0, 100.0], eye, d).expect("hit");
+        let t = (110.0 - 10.0) / 110.0; // where y falls to 10 m along eye → aim
+        let expect = [
+            eye[0] + (aim[0] - eye[0]) * t + 100.0,
+            50.0 - (eye[2] + (aim[2] - eye[2]) * t),
+        ];
+        assert!(
+            (hit[0] - expect[0]).abs() < 0.05 && (hit[1] - expect[1]).abs() < 0.05,
+            "{hit:?} vs {expect:?}"
+        );
+        // A ray into the sky misses.
+        assert!(pick_heightfield(&pv, [200.0, 100.0], [0.0, 50.0, 0.0], [0.0, 1.0, 0.0]).is_none());
+    }
+
+    #[test]
+    fn the_sea_shades_by_depth_and_draws_its_shoreline() {
+        let sea = Sea {
+            level_m: 15.0,
+            visibility_m: 15.0,
+            tint: [0.1, 0.35, 0.4],
+            breaking_depth_m: 0.0,
+            waves: vec![],
+            waves_m: None,
+        };
+        // Shallow water shows the sand; deep water the tint, and is more opaque.
+        let (shallow, a0) = water_colour(0.5, &sea);
+        let (deep, a1) = water_colour(60.0, &sea);
+        assert!(shallow[0] > deep[0] && a1 > a0, "{shallow:?} {deep:?}");
+        assert!((deep[1] - 0.35).abs() < 0.05, "{deep:?}");
+        // A ramp from 10 m (west) to 20 m (east): water over the west half, land over the east.
+        let data: Vec<u16> = (0..5 * 3)
+            .map(|i| ((i % 5) as f32 / 4.0 * 65535.0) as u16)
+            .collect();
+        let pv = Preview {
+            width: 5,
+            height: 3,
+            min: 10.0,
+            max: 20.0,
+            data,
+        };
+        let (v, i) = sea_mesh(&pv, [100.0, 50.0], &sea);
+        assert_eq!((v.len(), i.len()), (15, 4 * 2 * 6));
+        assert!(v.iter().all(|p| p.pos[1] == 15.0));
+        assert_eq!(v[4].color[3], 0.0, "transparent over land");
+        assert!(v[0].color[3] > 0.0, "visible over water");
+        // The 15 m contour runs north–south through the middle column: one segment per cell row.
+        let shore = shoreline(&pv, [100.0, 50.0], 15.0);
+        assert_eq!(shore.len(), 2 * 2);
+        assert!(
+            shore
+                .iter()
+                .all(|p| p.pos[0].abs() < 1e-3 && p.color[3] == 0.85),
+            "{:?}",
+            shore.iter().map(|p| p.pos).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn the_skirt_leaves_a_hole_where_the_world_is() {
         let pv = Preview {
             width: 9,
@@ -1590,7 +2119,8 @@ mod tests {
                 .iter()
                 .all(|w| w.uv == [-1.0, -1.0] && w.normal[1] == 0.0)
         );
-        assert_eq!(rim.iter().map(|p| p[1]).fold(f32::MAX, f32::min), 0.0);
+        assert_eq!(rim.iter().map(|p| p.pos[1]).fold(f32::MAX, f32::min), 0.0);
+        assert!(rim.iter().all(|p| p.color == [0.0497, 0.6308, 0.5841, 1.0]));
         // Walls face out: the north wall's normal points north (−z).
         let north = walls
             .iter()

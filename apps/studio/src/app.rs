@@ -75,6 +75,8 @@ enum Msg {
     Log(String, Level),
     /// Baked maps for a layer (`terrain.textures`, decoded on the worker) and the bake's time.
     Maps(String, Result<crate::viewport::Maps, String>, u64),
+    /// The wind sea for a wind (`ocean.waves`).
+    Waves([Option<f64>; 3], Box<Response>),
     /// The horizon skirt's preview (`terrain.horizon`).
     Horizon(Result<jd_terrain::preview::Preview, String>),
     /// The physical-sky preview (`sky.preview`, decoded) for this sun.
@@ -149,6 +151,9 @@ pub struct StudioApp {
     editor_error: Option<String>,
     sky_for: Option<SunLook>,
     show_horizon: bool,
+    /// The wind the last `ocean.waves` was fetched for, and its result.
+    waves_for: Option<[Option<f64>; 3]>,
+    waves: Option<Value>,
 }
 
 impl StudioApp {
@@ -191,6 +196,8 @@ impl StudioApp {
             editor_error: None,
             sky_for: None,
             show_horizon: false,
+            waves_for: None,
+            waves: None,
         };
         // The desktop bakes the sky on mount, project or not.
         app.fetch_sky(SunLook::of(&Value::Null));
@@ -422,6 +429,14 @@ impl StudioApp {
                         }
                     }
                 }
+                Msg::Waves(wind, r) => {
+                    self.reads = self.reads.saturating_sub(1);
+                    self.log_response(&r);
+                    if self.waves_for == Some(wind) {
+                        self.waves = r.result.clone();
+                        self.update_sea();
+                    }
+                }
                 Msg::Horizon(preview) => {
                     self.reads = self.reads.saturating_sub(1);
                     match preview {
@@ -483,6 +498,7 @@ impl StudioApp {
             Tag::Graph => {
                 if !failed {
                     self.graph = r.result.unwrap_or_default();
+                    self.update_sea();
                 }
             }
             Tag::Layers => {
@@ -587,6 +603,103 @@ impl StudioApp {
             let _ = tx.send(Msg::Sky(sun, sky));
             ctx.request_repaint();
         });
+    }
+
+    /// The graph's sea-level node, as the desktop finds it.
+    fn sea_node(&self) -> Option<Value> {
+        self.graph["nodes"]
+            .as_array()?
+            .iter()
+            .find(|n| {
+                n["kind"]
+                    .as_str()
+                    .is_some_and(|k| k.starts_with("jd.hydrology.sea_level@"))
+            })
+            .cloned()
+    }
+
+    /// The desktop's sea: the sea-level node's level and water look while a height layer is shown,
+    /// and its wind sea (`ocean.waves`, re-fetched when the node's wind — or the world's — changes).
+    fn update_sea(&mut self) {
+        let node = self.sea_node();
+        let heightish = self
+            .layer
+            .as_deref()
+            .is_none_or(|l| l.starts_with("height"));
+        // The wind sea follows the node's own wind, else the world's shared wind.
+        let wind = node.as_ref().map(|n| {
+            let w = self
+                .project
+                .as_ref()
+                .map(|p| p["world"]["wind"].clone())
+                .unwrap_or_default();
+            let p = &n["params"];
+            [
+                p["wind_speed_mps"]
+                    .as_f64()
+                    .or(w["speed_mps"].as_f64())
+                    .or(Some(8.0)),
+                p["fetch_km"].as_f64(),
+                p["wind_azimuth_deg"]
+                    .as_f64()
+                    .or(w["azimuth_deg"].as_f64())
+                    .or(Some(270.0)),
+            ]
+        });
+        if wind != self.waves_for {
+            self.waves_for = wind;
+            self.waves = None;
+            if let Some(w) = wind {
+                let request = Self::request(
+                    "ocean.waves",
+                    json!({ "wind_speed_mps": w[0], "fetch_km": w[1], "wind_azimuth_deg": w[2] }),
+                );
+                let (server, tx, ctx) = (self.server.clone(), self.tx.clone(), self.ctx.clone());
+                self.reads += 1;
+                std::thread::spawn(move || {
+                    let r = Box::new(server.invoke(request));
+                    let _ = tx.send(Msg::Waves(w, r));
+                    ctx.request_repaint();
+                });
+            }
+        }
+        let sea = node.filter(|_| heightish).map(|n| {
+            let p = &n["params"];
+            let f = |v: &Value, d: f64| v.as_f64().unwrap_or(d) as f32;
+            let tint = p["tint"]
+                .as_array()
+                .filter(|t| t.len() == 3)
+                .map_or([0.1, 0.35, 0.4], |t| {
+                    [f(&t[0], 0.1), f(&t[1], 0.35), f(&t[2], 0.4)]
+                });
+            let w = self.waves.as_ref();
+            crate::viewport::Sea {
+                level_m: f(&p["level_m"], 0.0),
+                visibility_m: f(&p["visibility_m"], 15.0),
+                tint,
+                breaking_depth_m: w.map_or(0.0, |w| f(&w["breaking_depth_m"], 0.0)),
+                waves: w
+                    .and_then(|w| w["components"].as_array())
+                    .map_or_else(Vec::new, |cs| {
+                        cs.iter()
+                            .map(|c| crate::viewport::Wave {
+                                amplitude_m: f(&c["amplitude_m"], 0.0),
+                                wavelength_m: f(&c["wavelength_m"], 1.0),
+                                direction_deg: f(&c["direction_deg"], 0.0),
+                                speed_mps: f(&c["speed_mps"], 0.0),
+                                phase: f(&c["phase"], 0.0),
+                            })
+                            .collect()
+                    }),
+                waves_m: w.map(|w| {
+                    [
+                        f(&w["significant_height_m"], 0.0),
+                        f(&w["wavelength_m"], 0.0),
+                    ]
+                }),
+            }
+        });
+        self.viewport.set_sea(sea);
     }
 
     /// The desktop's `refreshHorizon`: the noise continued over 3 × the world at 256².
@@ -858,9 +971,25 @@ impl StudioApp {
         });
     }
 
+    /// The desktop's viewport readout, in its order: tris · sea · waves · fog · sun · pbr · sky ·
+    /// box · shore · horizon · preview.
     fn viewport_info(&self) -> String {
         let tris = self.viewport.info().map_or(0, |i| i.triangles);
         let mut s = format!("viewport: wgpu · {} tris", thousands(tris));
+        if let Some((level, waves)) = self.viewport.sea_info() {
+            s += &format!(" · sea {} m", number(&json!(level)));
+            if let Some([h, len]) = waves {
+                s += &format!(" · waves {h:.1} m / {} m", len.round());
+            }
+        }
+        let fog = self
+            .project
+            .as_ref()
+            .and_then(|p| p["look"]["sun"]["fog"].as_f64())
+            .unwrap_or(0.0);
+        if fog > 0.0 {
+            s += &format!(" · fog {} %", (fog * 100.0).round());
+        }
         if let Some(p) = &self.project {
             let sun = &p["look"]["sun"];
             let az = sun["azimuth_deg"].as_f64().unwrap_or(140.0);
@@ -875,6 +1004,12 @@ impl StudioApp {
         }
         if self.viewport.frame && self.viewport.info().is_some() {
             s += " · box";
+        }
+        if self.viewport.shore_segments() > 0 {
+            s += &format!(
+                " · shore {}",
+                thousands(self.viewport.shore_segments() as u64)
+            );
         }
         if let Some(px) = self.viewport.horizon_px() {
             s += &format!(" · horizon {px}²");
@@ -1422,6 +1557,7 @@ impl eframe::App for StudioApp {
                     heading: (360.0 - cam.theta.to_degrees()).rem_euclid(360.0),
                     distance_m: cam.radius,
                     range_m: self.viewport.info().map(|i| i.range_m),
+                    sea_m: self.viewport.sea_info().map(|(level, _)| level),
                     frame: self.viewport.frame,
                     horizon: self.show_horizon,
                     enabled: self.project.is_some() && self.busy == 0,

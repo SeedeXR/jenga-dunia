@@ -277,3 +277,53 @@ fn capture_for_docs() {
         h.render().expect("render").save(&out).expect("save png");
     }
 }
+
+/// `JD_STUDIO_CAPTURE=<dir>/studio-sea.png cargo test -p jd-studio --test window -- --ignored
+/// capture_sea`: the desktop parity spec's sea project (a sea-level node at 180 m on the noise).
+#[test]
+#[ignore = "writes a parity image"]
+fn capture_sea() {
+    let out = std::env::var("JD_STUDIO_CAPTURE").expect("JD_STUDIO_CAPTURE=<path.png>");
+    let dir = tempfile::tempdir().unwrap();
+    let server = Server::bind(Registry::with_builtins(), Context::default()).expect("bind");
+    let ok = |op: &str, params: serde_json::Value| {
+        let r = server.invoke(Request::new(op, params));
+        assert!(r.error.is_none(), "{op}: {:?}", r.error);
+        r.result.unwrap()
+    };
+    let world = json!({ "resolution_px": [1024, 1024], "extent_m": [4096.0, 4096.0], "tile_size": 512, "halo": 4, "origin": [0, 0], "seed": 42 });
+    ok(
+        "project.create",
+        json!({ "path": dir.path().join("Sea.jdproj"), "name": "Sea", "world": world }),
+    );
+    let g = ok("graph.list", json!({}));
+    let noise = g["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["kind"].as_str().unwrap().starts_with("jd.noise."))
+        .unwrap()["id"]
+        .clone();
+    let sea = ok(
+        "graph.add_node",
+        json!({ "kind": "jd.hydrology.sea_level@1", "params": { "level_m": 180 } }),
+    )["id"]
+        .clone();
+    ok(
+        "graph.connect",
+        json!({ "from": noise, "from_port": "out", "to": sea, "to_port": "in" }),
+    );
+    ok("graph.evaluate", json!({ "lod": 0 }));
+    let server = Arc::new(server);
+    let mut h = Harness::builder()
+        .with_size([1440.0, 900.0])
+        .wgpu()
+        .with_context_setup(jd_studio::theme::install)
+        .build_eframe(move |cc| StudioApp::new(cc, server, Options::default()));
+    settle(&mut h, |a| {
+        a.viewport.maps_px().is_some()
+            && a.viewport.sky_px().is_some()
+            && a.viewport.sea_info().is_some()
+    });
+    h.render().expect("render").save(&out).expect("save png");
+}

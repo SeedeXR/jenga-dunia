@@ -119,6 +119,8 @@ pub struct State {
     pub distance_m: f32,
     /// The shown layer's height range, when there is one.
     pub range_m: Option<[f32; 2]>,
+    /// The sea level, marked on the ruler when it is inside the range.
+    pub sea_m: Option<f32>,
     /// Framed block on.
     pub frame: bool,
     /// Horizon skirt on.
@@ -169,7 +171,7 @@ pub fn show(ui: &mut Ui, rect: Rect, st: &State) -> Option<Action> {
     let mut action = None;
     compass(ui, rect, st);
     if let Some(range) = st.range_m {
-        ruler(ui, rect, range);
+        ruler(ui, rect, range, st.sea_m);
     }
     hints(ui, rect);
     // Top left (`top-2 left-2 gap-1`): fit, still, fullscreen, frame.
@@ -388,7 +390,7 @@ fn compass(ui: &Ui, rect: Rect, st: &State) {
 
 /// The height ruler (`top-14 bottom-16 left-1 w-16`): ticks over the layer's range, zero marked,
 /// negatives in the warning colour, `Max` above and `Min` below.
-fn ruler(ui: &Ui, rect: Rect, [lo, hi]: [f32; 2]) {
+fn ruler(ui: &Ui, rect: Rect, [lo, hi]: [f32; 2], sea_m: Option<f32>) {
     let p = ui.painter();
     let (top, bottom, left) = (rect.top() + 56.0, rect.bottom() - 64.0, rect.left() + 4.0);
     let line_x = left + 64.0 - 4.0;
@@ -426,6 +428,22 @@ fn ruler(ui: &Ui, rect: Rect, [lo, hi]: [f32; 2]) {
         );
         v += step;
         n += 1;
+    }
+    // The sea level (`text-sky-300`, a `bg-sky-400` bar reaching the ruler's edge).
+    if let Some(sea) = sea_m.filter(|s| (lo..=hi).contains(s)) {
+        let edge = left + 64.0;
+        p.hline(
+            edge - 16.0..=edge,
+            y(sea),
+            Stroke::new(2.0, Color32::from_rgb(0x38, 0xbd, 0xf8)),
+        );
+        p.text(
+            pos2(edge - 20.0, y(sea)),
+            Align2::RIGHT_CENTER,
+            "sea",
+            FontId::proportional(10.0),
+            Color32::from_rgb(0x7d, 0xd3, 0xfc),
+        );
     }
     p.text(
         pos2(left, top - 20.0),
