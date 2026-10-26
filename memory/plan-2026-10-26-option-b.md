@@ -202,5 +202,18 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   Exports and bakes use Tag::Export (busy, logged, no refresh — the desktop's `run`); before, each
   re-ran the whole refresh and re-baked the maps. look::wide_button centres full-width buttons.
   The symbol font backs Monospace too (the log shows the engine's "2ⁿ+1").
-  Next: the left column (Real world, Reference image, Layers, Settings); the viewport click tools
-  (cave entrances, sculpt, grid, road); live evaluation; then P5.
+- P4 slice 9 — the left column complete: Real world (geo.fetch_dem → the world in the DEM's CRS →
+  a heightmap node wired into the height output → evaluate, one chain; tested against a loopback
+  Terrarium server by re-running the test as a child with JD_GEO_TERRARIUM_URL, as the workspace
+  forbids `unsafe` set_var), Reference image (media.metadata, Use sun, Terrain here), Layers (the
+  desktop's LayerStack: chain + grouped side branches, search, bypass, up/down, bin, `+`), Settings
+  (language, the project's settings committed on leaving a field, Preview detail, Live target,
+  origin, CRS, wind), Tasks (jobs.list polled every 250 ms while busy, Cancel), Diagnostics.
+  Shared with the desktop: i18n.json (both UIs read it); core ops graph.unsplice and
+  graph.swap_in_chain (all or nothing via mutate_all — the old client-side swap could leave the
+  graph half-rewired when it met a generator). Studio remembers language / preview detail / live
+  target (eframe persistence; window size and egui memory not persisted, as the desktop). Fixed:
+  a widget asking for more than the available width grew the left panel every frame (guarded by
+  a layout-stability check in the first window test).
+  Next: the viewport click tools (cave entrances, sculpt + Brush, grid + Grid, road); selection
+  sync with the Editor; live evaluation in Studio; then P5 (default switch, packaging, docs).

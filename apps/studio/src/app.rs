@@ -23,6 +23,7 @@ use crate::viewport::Viewport;
 
 /// The viewport mesh keeps at most this many samples along a side: the desktop's default
 /// `previewMaxPx` (1024² ≈ 2 M triangles; its 2048² option arrives with Settings, P4).
+/// The viewport preview's longest side by default (Settings ▸ Preview detail: 1024² or 2048²).
 const PREVIEW_MAX_PX: u32 = 1024;
 /// Log lines kept (the desktop keeps 200).
 const LOG_LINES: usize = 200;
@@ -63,6 +64,14 @@ enum Tag {
     Scatter,
     /// `terrain.measure` for the Noise section's readout.
     Measure,
+    /// `media.metadata` for the Reference image section.
+    Reference,
+    /// A Diagnostics button's op (`diag.env`, `project.cache_gc`, `diag.bench`).
+    Diag,
+    /// `jobs.list` while Studio waits on the engine (the Tasks section).
+    Jobs,
+    /// `graph.kinds`, once (the Layers section's `+`).
+    Kinds,
     /// An export or bake: busy while it runs and logged, as a button's op, but nothing on screen
     /// changed, so no refresh (the desktop's `run`).
     Export,
@@ -219,6 +228,24 @@ pub struct StudioApp {
     noise_drag: NoiseDrag,
     /// The Export section's fields (session-only, as the desktop's).
     export: ExportPanel,
+    /// App settings (remembered between runs, as the desktop's browser store): the viewport
+    /// preview's longest side and the live preview's target per evaluation (ms, as typed).
+    preview_max_px: u32,
+    preview_target_ms: String,
+    /// The Tasks section's jobs (`jobs.list`) and when they were last polled; the Diagnostics
+    /// section's environment, cache GC and bench results.
+    jobs: Vec<Value>,
+    jobs_polled: Option<Instant>,
+    diag: [Option<Value>; 3],
+    /// The Layers section: the node kinds (`graph.kinds`), its add / search / collapsed state, and
+    /// the node selected by a row (sent to the Editor as `selection`).
+    kinds: Vec<Value>,
+    stack: StackPanel,
+    selected_node: Option<String>,
+    /// Real world's fields, and the Reference image section's path and `media.metadata`.
+    geo: GeoPanel,
+    reference_path: String,
+    reference: Option<Value>,
     layer_stats: Option<Value>,
     measure: Option<Value>,
     /// The material stack (the look's `materials`, the desktop's `materials`): mask, albedo,
@@ -343,6 +370,182 @@ impl Default for ExportPanel {
             mesh: "terrain.glb".into(),
             sky: "sky.exr".into(),
             frames: "24".into(),
+        }
+    }
+}
+
+/// The Layers section's own state: the kind `+` adds, the search text, collapsed groups.
+#[derive(Debug, Clone)]
+struct StackPanel {
+    kind: String,
+    query: String,
+    closed: std::collections::HashSet<String>,
+}
+
+impl Default for StackPanel {
+    fn default() -> Self {
+        Self {
+            kind: "jd.erosion.thermal@1".into(),
+            query: String::new(),
+            closed: std::collections::HashSet::new(),
+        }
+    }
+}
+
+/// The desktop's `categoryOf`: the layer stack's badge for a node kind.
+fn category_of(kind: &str) -> &'static str {
+    match kind.split('.').nth(1).unwrap_or_default() {
+        "noise" | "input" | "shape" => "shape",
+        "erosion" | "climate" | "volcanic" | "hydrology" | "ocean" => "simulation",
+        "analysis" | "mask" | "biome" => "mask",
+        "output" => "output",
+        _ => "filter",
+    }
+}
+
+/// The desktop's `stackOf`: the nodes feeding the height output through their `in` ports,
+/// nearest first (the chain), and every other node but the outputs.
+fn stack_of(nodes: &[Value], edges: &[Value]) -> (Vec<Value>, Vec<Value>) {
+    let output = nodes.iter().find(|n| {
+        n["kind"]
+            .as_str()
+            .is_some_and(|k| k.starts_with("jd.output.height@"))
+            && n["params"]["layer"].as_str().unwrap_or("height") == "height"
+    });
+    let mut chain = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut cur = output.cloned();
+    while let Some(c) = cur {
+        let id = c["id"].as_str().unwrap_or_default().to_owned();
+        seen.insert(id.clone());
+        let feed = edges
+            .iter()
+            .find(|e| e["to"]["node"] == id.as_str() && e["to"]["port"] == "in");
+        let prev = feed.and_then(|f| nodes.iter().find(|n| n["id"] == f["from"]["node"]));
+        cur = match prev {
+            Some(p) if !seen.contains(p["id"].as_str().unwrap_or_default()) => {
+                chain.push(p.clone());
+                Some(p.clone())
+            }
+            _ => None,
+        };
+    }
+    let others = nodes
+        .iter()
+        .filter(|n| {
+            !seen.contains(n["id"].as_str().unwrap_or_default())
+                && !n["kind"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .starts_with("jd.output.")
+        })
+        .cloned()
+        .collect();
+    (chain, others)
+}
+
+/// `jd.erosion.thermal@1` → `erosion.thermal`, as the desktop lists kinds.
+fn short_kind(kind: &str) -> String {
+    let rest = kind.split_once('.').map_or(kind, |(_, r)| r);
+    rest.split('@').next().unwrap_or(rest).to_owned()
+}
+
+/// A row's name: the node's label, else its short kind.
+fn label_of(n: &Value) -> String {
+    n["ui"]["label"].as_str().map_or_else(
+        || short_kind(n["kind"].as_str().unwrap_or_default()),
+        str::to_owned,
+    )
+}
+
+/// The desktop's blend readout: a blend node's op · opacity · the layer wired into `b`, a placed
+/// shape's op × opacity.
+fn readout_of(n: &Value, nodes: &[Value], edges: &[Value]) -> Option<String> {
+    let kind = n["kind"].as_str().unwrap_or_default();
+    let pct = |v: &Value| format!("{} %", (v.as_f64().unwrap_or(1.0) * 100.0).round());
+    let id = n["id"].as_str().unwrap_or_default();
+    for op in ["min", "max", "lerp"] {
+        if kind.starts_with(&format!("jd.math.{op}@")) {
+            let src = edges
+                .iter()
+                .find(|e| e["to"]["node"] == id && e["to"]["port"] == "b")
+                .and_then(|e| nodes.iter().find(|x| x["id"] == e["from"]["node"]));
+            let tail = src.map_or_else(
+                || " · b unwired".to_owned(),
+                |s| format!(" · {}", label_of(s)),
+            );
+            return Some(format!("{op} · {}{tail}", pct(&n["params"]["opacity"])));
+        }
+    }
+    if kind.starts_with("jd.shape.") {
+        let op = n["params"]["op"]
+            .as_str()
+            .unwrap_or(if kind.contains("polygon") {
+                "lerp"
+            } else {
+                "add"
+            });
+        return Some(format!("{op} · {}", pct(&n["params"]["opacity"])));
+    }
+    None
+}
+
+/// The stack's small icon buttons (`btn px-1 py-0` with a 12 px icon).
+fn small_icon_button(ui: &mut egui::Ui, icon: &str, enabled: bool) -> egui::Response {
+    ui.add_enabled(
+        enabled,
+        egui::Button::image(
+            egui::Image::new(look::icon(icon))
+                .fit_to_exact_size(vec2(12.0, 12.0))
+                .tint(color::FG1),
+        )
+        .min_size(vec2(18.0, 16.0)),
+    )
+}
+
+/// The category badge: Tailwind's 900 shade at 60 % behind its 200 shade, as the desktop's.
+fn badge(ui: &mut egui::Ui, cat: &str) {
+    let (bg, fg) = match cat {
+        "shape" => (0x064e3b, 0xa7f3d0),
+        "simulation" => (0x78350f, 0xfde68a),
+        "mask" => (0x701a75, 0xf5d0fe),
+        "output" => (0x27272a, 0xd4d4d8),
+        _ => (0x0c4a6e, 0xbae6fd),
+    };
+    let rgb = |c: u32| egui::Color32::from_rgb((c >> 16) as u8, (c >> 8) as u8, c as u8);
+    let alpha = if cat == "output" { 1.0 } else { 0.6 };
+    egui::Frame::new()
+        .fill(rgb(bg).gamma_multiply(alpha))
+        .corner_radius(3.0)
+        .inner_margin(Margin::symmetric(4, 0))
+        .show(ui, |ui| {
+            ui.label(RichText::new(cat).size(10.0).color(rgb(fg)));
+        });
+}
+
+/// The DEM providers (`geo.fetch_dem`'s `provider`) and their labels.
+const GEO_PROVIDERS: [(&str, &str); 3] = [
+    ("terrarium", "Terrarium"),
+    ("copernicus", "Copernicus"),
+    ("opentopography", "OpenTopography"),
+];
+
+/// Real world's fields as typed (the desktop's defaults: Nairobi, 2 km, Terrarium).
+#[derive(Debug, Clone)]
+struct GeoPanel {
+    lon: String,
+    lat: String,
+    radius: String,
+    provider: (&'static str, &'static str),
+}
+
+impl Default for GeoPanel {
+    fn default() -> Self {
+        Self {
+            lon: "36.82".into(),
+            lat: "-1.29".into(),
+            radius: "2000".into(),
+            provider: GEO_PROVIDERS[0],
         }
     }
 }
@@ -501,6 +704,17 @@ impl StudioApp {
             noise: NoisePanel::default(),
             noise_drag: NoiseDrag::default(),
             export: ExportPanel::default(),
+            geo: GeoPanel::default(),
+            kinds: Vec::new(),
+            stack: StackPanel::default(),
+            selected_node: None,
+            preview_max_px: PREVIEW_MAX_PX,
+            preview_target_ms: "0".into(),
+            jobs: Vec::new(),
+            jobs_polled: None,
+            diag: [None, None, None],
+            reference_path: String::new(),
+            reference: None,
             layer_stats: None,
             measure: None,
             cave_kind: 0,
@@ -509,6 +723,18 @@ impl StudioApp {
             caves: Vec::new(),
             cave_gen: 0,
         };
+        // App settings remembered between runs (the desktop keeps them in its browser store).
+        if let Some(st) = cc.storage {
+            if let Some(lang) = eframe::get_value::<String>(st, "jd.lang") {
+                crate::i18n::set(&cc.egui_ctx, &lang);
+            }
+            if let Some(px) = eframe::get_value::<u32>(st, "jd.previewMaxPx") {
+                app.preview_max_px = if px == 2048 { 2048 } else { PREVIEW_MAX_PX };
+            }
+            if let Some(ms) = eframe::get_value::<String>(st, "jd.previewTargetMs") {
+                app.preview_target_ms = ms;
+            }
+        }
         // The desktop bakes the sky on mount, project or not.
         app.fetch_sky(SunLook::of(&Value::Null));
         if let Some(path) = &options.editor {
@@ -903,6 +1129,9 @@ impl StudioApp {
                 }
                 self.project = Some(info);
                 self.invoke(Tag::Graph, "graph.list", json!({}));
+                if self.kinds.is_empty() {
+                    self.invoke(Tag::Kinds, "graph.kinds", json!({}));
+                }
                 self.invoke(Tag::Layers, "terrain.layers", json!({}));
             }
             Tag::InfoOnly => {
@@ -957,7 +1186,7 @@ impl StudioApp {
                 };
                 let longest = size[0].as_u64().max(size[1].as_u64()).unwrap_or(1) as u32;
                 let lod = longest
-                    .div_ceil(PREVIEW_MAX_PX)
+                    .div_ceil(self.preview_max_px)
                     .max(1)
                     .next_power_of_two()
                     .trailing_zeros();
@@ -982,6 +1211,32 @@ impl StudioApp {
                 self.invoke(Tag::InfoOnly, "project.info", json!({}));
             }
             Tag::Export => self.log_response(&r),
+            Tag::Diag => {
+                self.log_response(&r);
+                let k = match r.op.as_str() {
+                    "diag.env" => 0,
+                    "project.cache_gc" => 1,
+                    _ => 2,
+                };
+                if r.result.is_some() {
+                    self.diag[k] = r.result;
+                }
+            }
+            Tag::Kinds => {
+                if let Some(k) = r.result.as_ref().and_then(Value::as_array) {
+                    self.kinds = k.clone();
+                }
+            }
+            Tag::Jobs => {
+                self.jobs = r
+                    .result
+                    .and_then(|v| v.as_array().cloned())
+                    .unwrap_or_default();
+            }
+            Tag::Reference => {
+                self.log_response(&r);
+                self.reference = r.result;
+            }
             Tag::Measure => {
                 self.log_response(&r);
                 self.measure = r.result;
@@ -1939,6 +2194,908 @@ impl StudioApp {
         }
     }
 
+    /// The desktop's `fetchDem`: the DEM around `center` (lon, lat) from `provider`, the world
+    /// placed in its CRS, a heightmap node for it wired into the height output in place of what fed
+    /// it, then a full evaluation — one chain, stopping at the first failure.
+    fn fetch_dem(&mut self, center: [f64; 2], radius_m: f64, provider: &str) {
+        let nodes = self.graph["nodes"].as_array().cloned().unwrap_or_default();
+        let right = nodes
+            .iter()
+            .filter_map(|n| n["ui"]["position"][0].as_f64())
+            .fold(-320.0_f64, f64::max);
+        let out = nodes
+            .iter()
+            .find(|n| {
+                n["kind"]
+                    .as_str()
+                    .is_some_and(|k| k.starts_with("jd.output.height"))
+            })
+            .and_then(|n| n["id"].as_str().map(str::to_owned));
+        let feeds: Vec<Value> = match &out {
+            Some(id) => self.graph["edges"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|e| e["to"]["node"] == id.as_str() && e["to"]["port"] == "in")
+                .cloned()
+                .collect(),
+            None => Vec::new(),
+        };
+        let fetch = Self::request(
+            "geo.fetch_dem",
+            json!({ "center": center, "radius_m": radius_m, "provider": provider, "res_m": 30 }),
+        );
+        let mut steps: Vec<Step> = vec![
+            Box::new(move |_| Some(fetch)),
+            Box::new(|done| {
+                let dem = done[0].result.as_ref()?;
+                Some(Self::request(
+                    "project.set_settings",
+                    json!({ "crs": dem["crs"], "origin": dem["origin"] }),
+                ))
+            }),
+            Box::new(move |done| {
+                let dem = done[0].result.as_ref()?;
+                Some(Self::request(
+                    "graph.add_node",
+                    json!({ "kind": "jd.input.heightmap@1", "params": { "path": dem["asset"], "georeference": true }, "position": [right + 320.0, 0.0] }),
+                ))
+            }),
+        ];
+        if let Some(out) = out {
+            // The starter noise feeds the height output; the DEM takes its place.
+            for e in feeds {
+                steps.push(Box::new(move |_| {
+                    Some(Self::request(
+                        "graph.disconnect",
+                        json!({ "from": e["from"]["node"], "from_port": e["from"]["port"], "to": e["to"]["node"], "to_port": e["to"]["port"] }),
+                    ))
+                }));
+            }
+            steps.push(Box::new(move |done| {
+                let id = done[2].result.as_ref()?["id"].clone();
+                Some(Self::request(
+                    "graph.connect",
+                    json!({ "from": id, "from_port": "out", "to": out, "to_port": "in" }),
+                ))
+            }));
+        }
+        steps.push(Box::new(|_| {
+            Some(Self::request("graph.evaluate", json!({ "lod": 0 })))
+        }));
+        self.chain(steps);
+    }
+
+    /// Real world (the desktop's row under Import): longitude, latitude, radius, provider, fetch.
+    fn real_world_row(&mut self, ui: &mut egui::Ui) {
+        let idle = self.busy == 0;
+        let mut fetch = false;
+        let g = &mut self.geo;
+        look::field(ui, "Real world", |ui| {
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    look::input(ui, &mut g.lon, 64.0, "", "Longitude");
+                    look::input(ui, &mut g.lat, 64.0, "", "Latitude");
+                });
+                ui.horizontal(|ui| {
+                    look::input(ui, &mut g.radius, 64.0, "", "Radius (m)");
+                    egui::ComboBox::from_id_salt("geo-provider")
+                        .width(96.0)
+                        .selected_text(RichText::new(g.provider.1).size(12.0))
+                        .show_ui(ui, |ui| {
+                            for p in GEO_PROVIDERS {
+                                ui.selectable_value(&mut g.provider, p, p.1);
+                            }
+                        })
+                        .response
+                        .widget_info(|| {
+                            egui::WidgetInfo::labeled(egui::accesskit::Role::ComboBox, true, "Provider")
+                        });
+                });
+                let globe = look::button(ui, Some("globe"), "", false, idle)
+                    .on_hover_text("Fetch the DEM and place the world on it");
+                globe.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::accesskit::Role::Button, idle, "Fetch the DEM")
+                });
+                fetch = globe.clicked();
+            })
+            .response
+            .on_hover_text("Fetch a DEM around a point (ADR-0014: Terrarium tiles without a key, Copernicus GLO-30, or OpenTopography with JD_OPENTOPOGRAPHY_KEY), place the world in its CRS and feed it to the height output; the provider's notice goes into every export");
+        });
+        if fetch {
+            let f = |s: &str| s.trim().parse::<f64>().unwrap_or(0.0);
+            let (lon, lat, radius) = (f(&self.geo.lon), f(&self.geo.lat), f(&self.geo.radius));
+            let provider = self.geo.provider.0;
+            self.fetch_dem([lon, lat], radius, provider);
+        }
+    }
+
+    /// The left column's Reference image section: a photo, 360° sphere or video read by
+    /// `media.metadata` — where, when, heading, field of view and the sun — with Use sun and
+    /// Terrain here (5 km of Terrarium around its position).
+    fn reference_card(&mut self, ui: &mut egui::Ui) {
+        look::section(ui, "Reference image");
+        let idle = self.busy == 0;
+        let mut read: Option<String> = None;
+        let path = &mut self.reference_path;
+        look::field(ui, "File", |ui| {
+            if look::button(ui, None, "Read", false, !path.trim().is_empty() && idle).clicked() {
+                read = Some(path.trim().to_owned());
+            }
+            if look::icon_button(
+                ui,
+                "folder-search",
+                "Choose a reference image or video…",
+                idle,
+            )
+            .clicked()
+                && let Some(p) = rfd::FileDialog::new()
+                    .set_title("Reference image or video")
+                    .add_filter(
+                        "Images and videos",
+                        &[
+                            "jpg", "jpeg", "png", "tif", "tiff", "heic", "webp", "mp4", "mov",
+                        ],
+                    )
+                    .pick_file()
+            {
+                *path = p.display().to_string();
+                read = Some(path.clone());
+            }
+            look::input(ui, path, 96.0, "photo, 360°, video", "Reference file").on_hover_text("A photo (JPEG, PNG, TIFF, HEIF, WebP), a 360° photo sphere or a video (MP4, MOV): media.metadata reads where, when and how it was taken, and the sun");
+        });
+        if let Some(p) = read {
+            self.invoke(Tag::Reference, "media.metadata", json!({ "path": p }));
+        }
+        let Some(r) = self.reference.clone() else {
+            return;
+        };
+        let f = |v: &Value| v.as_f64().unwrap_or(0.0);
+        let kind = match (r["kind"].as_str(), r["px"].as_array()) {
+            (Some(k), Some(px)) => format!("{k} {}×{}", px[0], px[1]),
+            (Some(k), None) => k.to_owned(),
+            _ => String::new(),
+        };
+        let when = match r["captured_at_utc"].as_str() {
+            Some(t) => match r["captured_at_source"].as_str() {
+                Some(src) => format!("{t} ({src})"),
+                None => t.to_owned(),
+            },
+            None => "unknown".into(),
+        };
+        let place = if r["gps"].is_object() {
+            format!("{:.4}, {:.4}", f(&r["gps"]["lat"]), f(&r["gps"]["lon"]))
+        } else {
+            "no GPS".into()
+        };
+        let heading = if r["heading_deg"].is_number() {
+            format!(
+                "{:.0}° {}",
+                f(&r["heading_deg"]),
+                r["heading_ref"].as_str().unwrap_or_default()
+            )
+        } else {
+            "unknown".into()
+        };
+        let fov = if r["fov_x_deg"].is_number() {
+            format!("{:.1}°", f(&r["fov_x_deg"]))
+        } else {
+            r["projection"]["type"]
+                .as_str()
+                .unwrap_or("unknown")
+                .to_owned()
+        };
+        let sun = &r["sun"];
+        let up = sun.is_object() && !sun["below_horizon"].as_bool().unwrap_or(false);
+        let sun_text = if !sun.is_object() {
+            "needs place and time".to_owned()
+        } else if !up {
+            "below the horizon".to_owned()
+        } else {
+            format!(
+                "{:.0}° from north, {:.0}° up",
+                f(&sun["azimuth_deg"]),
+                f(&sun["elevation_deg"])
+            )
+        };
+        egui::Grid::new("ref-info")
+            .num_columns(2)
+            .spacing(vec2(8.0, 2.0))
+            .show(ui, |ui| {
+                for (k, v) in [
+                    ("kind", kind),
+                    ("when", when),
+                    ("where", place),
+                    ("heading", heading.trim_end().to_owned()),
+                    ("field of view", fov),
+                    ("sun", sun_text),
+                ] {
+                    ui.label(RichText::new(k).size(12.0).color(color::FG2));
+                    ui.label(RichText::new(v).size(12.0).color(color::FG2));
+                    ui.end_row();
+                }
+            });
+        ui.add_space(4.0);
+        let (mut use_sun, mut here) = (false, false);
+        ui.horizontal(|ui| {
+            use_sun = look::button(ui, None, "Use sun", false, up)
+                .on_hover_text("Set the viewport sun to the reference's")
+                .clicked();
+            here = look::button(ui, None, "Terrain here", false, r["gps"].is_object() && idle)
+                .on_hover_text("Fetch the real terrain 5 km around the reference's position (Terrarium) and place the world on it")
+                .clicked();
+        });
+        for n in r["notes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+        {
+            ui.label(RichText::new(format!("• {n}")).size(12.0).color(color::FG2));
+        }
+        if use_sun {
+            // The desktop's useReferenceSun: whole degrees, elevation held to 3..90.
+            self.sun.0[0] = f(&sun["azimuth_deg"]).round().rem_euclid(360.0);
+            self.sun.0[1] = f(&sun["elevation_deg"]).round().clamp(3.0, 90.0);
+            self.sun_edited();
+        }
+        if here {
+            self.fetch_dem(
+                [f(&r["gps"]["lon"]), f(&r["gps"]["lat"])],
+                5000.0,
+                "terrarium",
+            );
+        }
+    }
+
+    /// The left column's Settings section (the desktop's): language, the project's settings
+    /// committed on leaving a field (`project.set_settings`), preview detail and the live target
+    /// (app settings, remembered), the world's origin, CRS and shared wind.
+    fn settings_card(&mut self, ui: &mut egui::Ui) {
+        let Some(p) = self.project.clone() else {
+            return;
+        };
+        look::section(ui, "Settings");
+        let ctx = ui.ctx().clone();
+        let mut lang = crate::i18n::lang(&ctx);
+        let label = crate::i18n::tr(&ctx, "Language");
+        look::field(ui, &label, |ui| {
+            egui::ComboBox::from_id_salt("setting-lang")
+                .width(112.0)
+                .selected_text(
+                    RichText::new(
+                        crate::i18n::LANGS
+                            .iter()
+                            .find(|l| l.0 == lang)
+                            .map_or("English", |l| l.1),
+                    )
+                    .size(12.0),
+                )
+                .show_ui(ui, |ui| {
+                    for (code, name) in crate::i18n::LANGS {
+                        ui.selectable_value(&mut lang, code.to_owned(), name);
+                    }
+                })
+                .response
+                .on_hover_text("Interface language (Kiswahili and French are first drafts)")
+                .widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::accesskit::Role::ComboBox, true, "Language")
+                });
+        });
+        if lang != crate::i18n::lang(&ctx) {
+            crate::i18n::set(&ctx, &lang);
+        }
+        let s = &p["settings"];
+        let w = &p["world"];
+        let mut patch: Option<Value> = None;
+        let num = |v: &Value| number(v);
+        let rows: [(&str, String, &str); 4] = [
+            (
+                "Autosave (s)",
+                num(&s["autosave_interval_s"]),
+                "Seconds after the last edit before the project autosaves; 0 disables",
+            ),
+            (
+                "Cache limit (MB)",
+                number(&json!(
+                    (s["cache_limit_bytes"].as_f64().unwrap_or(0.0) / 1_048_576.0).round()
+                )),
+                "Layer cache cap on disk; oldest layers are evicted beyond it",
+            ),
+            (
+                "Preview LOD",
+                num(&s["preview_lod"]),
+                "Preview level of detail hint (resolution ÷ 2^lod)",
+            ),
+            (
+                "Memory budget (GB)",
+                number(&json!(
+                    s["memory_budget_bytes"].as_f64().unwrap_or(4_294_967_296.0) / 1_073_741_824.0
+                )),
+                "Evaluations whose memory estimate exceeds this are refused (E_RESOURCE_MEMORY)",
+            ),
+        ];
+        for (label, current, tip) in rows {
+            look::field(ui, label, |ui| {
+                if let Some(v) = look::commit_input(ui, &current, 112.0, "", label, tip)
+                    .map(|t| t.parse::<f64>().unwrap_or(0.0))
+                {
+                    patch = Some(match label {
+                        "Autosave (s)" => json!({ "autosave_interval_s": v as u64 }),
+                        "Cache limit (MB)" => {
+                            json!({ "cache_limit_bytes": (v.round() as u64) * 1_048_576 })
+                        }
+                        "Preview LOD" => json!({ "preview_lod": v as u64 }),
+                        _ => json!({ "memory_budget_bytes": (v * 1_073_741_824.0).round() as u64 }),
+                    });
+                }
+            });
+        }
+        let mut px = self.preview_max_px;
+        look::field(ui, "Preview detail", |ui| {
+            egui::ComboBox::from_id_salt("setting-preview-px")
+                .width(112.0)
+                .selected_text(RichText::new(if px == 2048 { "2048² (high)" } else { "1024²" }).size(12.0))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut px, 1024, "1024²");
+                    ui.selectable_value(&mut px, 2048, "2048² (high)");
+                })
+                .response
+                .on_hover_text("Viewport preview detail: the longest side of the mesh the viewport shows. 1024² ≈ 1 M samples (2 MB a transfer, 2 M triangles); 2048² is 4× that — 8 MB and 8 M triangles, for worlds above 1024² when the fine ridges matter more than the frame rate")
+                .widget_info(|| egui::WidgetInfo::labeled(egui::accesskit::Role::ComboBox, true, "Preview detail"));
+        });
+        if px != self.preview_max_px {
+            self.preview_max_px = px;
+            self.refresh();
+        }
+        look::field(ui, "Live target (ms)", |ui| {
+            look::input(ui, &mut self.preview_target_ms, 112.0, "", "Live target (ms)").on_hover_text("Live preview target per evaluation, ms (0 = off): the preview LOD steps coarser while evaluations run over it and finer again when they are well under; this app setting is not part of the project");
+        });
+        let origin = [
+            w["origin"][0].as_f64().unwrap_or(0.0),
+            w["origin"][1].as_f64().unwrap_or(0.0),
+        ];
+        let crs = w["crs"].as_str().unwrap_or_default().to_owned();
+        let wind = [
+            w["wind"]["azimuth_deg"].as_f64().unwrap_or(270.0),
+            w["wind"]["speed_mps"].as_f64().unwrap_or(8.0),
+        ];
+        let f = |t: &str| t.parse::<f64>().ok().filter(|v| v.is_finite());
+        look::field(ui, "Origin x (m)", |ui| {
+            if let Some(v) = look::commit_input(ui, &number(&json!(origin[0])), 112.0, "", "Origin x (m)", "World origin, metres: where pixel (0, 0) sits in the CRS. Georeferenced exports carry it; generators sample world space, so moving it moves the window over the noise field (adjacent worlds stay seamless)").and_then(|t| f(&t)) {
+                patch = Some(json!({ "origin": [v, origin[1]] }));
+            }
+        });
+        look::field(ui, "Origin y (m)", |ui| {
+            if let Some(v) = look::commit_input(
+                ui,
+                &number(&json!(origin[1])),
+                112.0,
+                "",
+                "Origin y (m)",
+                "World origin y (north), metres",
+            )
+            .and_then(|t| f(&t))
+            {
+                patch = Some(json!({ "origin": [origin[0], v] }));
+            }
+        });
+        look::field(ui, "CRS", |ui| {
+            if let Some(v) = look::commit_input(
+                ui,
+                &crs,
+                112.0,
+                "EPSG:32637",
+                "CRS",
+                "Coordinate reference system of the origin, e.g. EPSG:32637 (UTM 37N); empty = none. GeoTIFF exports carry it",
+            ) {
+                patch = Some(json!({ "crs": v }));
+            }
+        });
+        look::field(ui, "Wind from (°)", |ui| {
+            if let Some(v) = look::commit_input(ui, &number(&json!(wind[0])), 112.0, "", "Wind from (°)", "Shared wind: dunes, yardangs, snow scour and the wind sea follow it unless a node sets its own wind").and_then(|t| f(&t)) {
+                patch = Some(json!({ "wind": { "azimuth_deg": v, "speed_mps": wind[1] } }));
+            }
+        });
+        look::field(ui, "Wind (m/s)", |ui| {
+            if let Some(v) = look::commit_input(
+                ui,
+                &number(&json!(wind[1])),
+                112.0,
+                "",
+                "Wind (m/s)",
+                "Shared wind speed 10 m above the ground, m/s: 3 a breeze, 8 moderate, 20 a gale",
+            )
+            .and_then(|t| f(&t))
+            {
+                patch = Some(json!({ "wind": { "azimuth_deg": wind[0], "speed_mps": v } }));
+            }
+        });
+        if let Some(patch) = patch {
+            self.invoke(Tag::User, "project.set_settings", patch);
+        }
+    }
+
+    /// The left column's Tasks section: the engine's running jobs (`jobs.list`, polled while
+    /// Studio waits on it), each with Cancel.
+    fn tasks_card(&mut self, ui: &mut egui::Ui) {
+        look::section(ui, "Tasks");
+        let jobs = self.jobs.clone();
+        if jobs.is_empty() {
+            ui.label(
+                RichText::new("no running jobs")
+                    .size(12.0)
+                    .color(color::FG2),
+            );
+        }
+        for j in jobs {
+            ui.horizontal(|ui| {
+                let total = j["total"].as_u64().unwrap_or(0);
+                let mut t = format!("#{} {}", j["id"], j["op"].as_str().unwrap_or_default());
+                if j["state"] == "queued" {
+                    t += " · queued";
+                } else if total > 0 {
+                    t += &format!(
+                        " · {}/{total}",
+                        (j["done"].as_u64().unwrap_or(0) + 1).min(total)
+                    );
+                }
+                if let Some(p) = j["priority"].as_str().filter(|p| *p != "normal") {
+                    t += &format!(" · {p}");
+                }
+                t += &format!(
+                    " · {:.1} s",
+                    j["elapsed_ms"].as_f64().unwrap_or(0.0) / 1000.0
+                );
+                ui.label(RichText::new(t).size(12.0).color(color::FG1));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let cancelling = j["cancelling"].as_bool().unwrap_or(false);
+                    if look::button(
+                        ui,
+                        None,
+                        if cancelling { "…" } else { "Cancel" },
+                        false,
+                        !cancelling,
+                    )
+                    .clicked()
+                    {
+                        self.invoke(Tag::Export, "jobs.cancel", json!({ "id": j["id"] }));
+                    }
+                });
+            });
+        }
+    }
+
+    /// The left column's Diagnostics section: Environment, Cache GC, Bench 256², and their lines.
+    fn diagnostics_card(&mut self, ui: &mut egui::Ui) {
+        look::section(ui, "Diagnostics");
+        let idle = self.busy == 0;
+        let mut run = None;
+        ui.horizontal_wrapped(|ui| {
+            if look::button(ui, None, "Environment", false, idle).clicked() {
+                run = Some(("diag.env", json!({})));
+            }
+            if look::button(ui, None, "Cache GC", false, self.project.is_some() && idle).clicked() {
+                run = Some(("project.cache_gc", json!({})));
+            }
+            if look::button(ui, None, "Bench 256²", false, idle)
+                .on_hover_text("S1 scene at 256² with the real kernels; use `jd diag bench s1` for the full benchmark")
+                .clicked()
+            {
+                run = Some(("diag.bench", json!({ "scene": "s1", "size_px": 256 })));
+            }
+        });
+        if let Some((op, params)) = run {
+            self.invoke(Tag::Diag, op, params);
+        }
+        let mut rows: Vec<(&str, String)> = Vec::new();
+        let mb = |v: &Value| v.as_f64().unwrap_or(0.0) / 1_048_576.0;
+        if let Some(e) = &self.diag[0] {
+            rows.push((
+                "host",
+                format!(
+                    "{} · {} · {} cpus · {:.0} GB",
+                    e["os"].as_str().unwrap_or_default(),
+                    e["arch"].as_str().unwrap_or_default(),
+                    e["cpus"],
+                    e["memory_total_bytes"].as_f64().unwrap_or(0.0) / 1_073_741_824.0
+                ),
+            ));
+        }
+        if let Some(g) = &self.diag[1] {
+            let mut t = format!(
+                "{} blobs · {:.1} MB · evicted {}",
+                g["blobs"],
+                mb(&g["bytes"]),
+                g["evicted_blobs"]
+            );
+            if g["limit_bytes"].is_number() {
+                t += &format!(" · limit {:.0} MB", mb(&g["limit_bytes"]));
+            }
+            rows.push(("cache", t));
+        }
+        if let Some(b) = &self.diag[2] {
+            let mut t = format!(
+                "S1 {}² {}: total {:.0} ms",
+                b["size_px"],
+                b["profile"].as_str().unwrap_or_default(),
+                b["total_ms"].as_f64().unwrap_or(0.0)
+            );
+            if b["peak_rss_bytes"].is_number() {
+                t += &format!(" · {:.0} MB", mb(&b["peak_rss_bytes"]));
+            }
+            let stages: Vec<String> = b["stages"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|s| {
+                    let name = s["name"].as_str().unwrap_or_default();
+                    format!(
+                        "{} {:.0}",
+                        name.rsplit('.').next().unwrap_or(name),
+                        s["ms"].as_f64().unwrap_or(0.0)
+                    )
+                })
+                .collect();
+            t += &format!(" · {}", stages.join(", "));
+            rows.push(("bench", t));
+        }
+        if !rows.is_empty() {
+            egui::Grid::new("diag-results")
+                .num_columns(2)
+                .spacing(vec2(8.0, 2.0))
+                .show(ui, |ui| {
+                    for (k, v) in rows {
+                        ui.label(RichText::new(k).size(12.0).color(color::FG2));
+                        ui.add(
+                            egui::Label::new(RichText::new(v).size(12.0).color(color::FG1)).wrap(),
+                        );
+                        ui.end_row();
+                    }
+                });
+        }
+    }
+
+    /// The left column's Layers section, the desktop's `LayerStack`: the chain feeding the height
+    /// output (top = last applied) with bypass, up / down and remove, the side branches grouped by
+    /// category, a search box, and `+` to splice a kind in front of the output.
+    fn layers_card(&mut self, ui: &mut egui::Ui) {
+        look::section(ui, "Layers");
+        let nodes = self.graph["nodes"].as_array().cloned().unwrap_or_default();
+        let edges = self.graph["edges"].as_array().cloned().unwrap_or_default();
+        let (chain, others) = stack_of(&nodes, &edges);
+        let idle = self.busy == 0;
+        let has_project = self.project.is_some();
+        // `+`: kinds with an `in` input and an `out` output.
+        let kinds: Vec<String> = self
+            .kinds
+            .iter()
+            .filter(|k| {
+                let has = |side: &str, name: &str| {
+                    k[side]
+                        .as_array()
+                        .is_some_and(|p| p.iter().any(|p| p["name"] == name))
+                };
+                has("inputs", "in") && has("outputs", "out")
+            })
+            .filter_map(|k| k["kind"].as_str().map(str::to_owned))
+            .collect();
+        let mut act: Option<(&str, Value)> = None;
+        // Right to left: `+` first, then the kind picker takes exactly what is left (a width asked
+        // beyond it would widen the panel a little more every frame).
+        let row = vec2(ui.available_width(), 24.0);
+        ui.allocate_ui_with_layout(row, Layout::right_to_left(Align::Center), |ui| {
+            let add = look::icon_button(
+                ui,
+                "plus",
+                "Splice the chosen node in front of the height output",
+                has_project && idle,
+            );
+            if add.clicked() {
+                act = Some((
+                    "graph.splice",
+                    json!({ "layer": "height", "kind": self.stack.kind }),
+                ));
+            }
+            let k = &mut self.stack.kind;
+            egui::ComboBox::from_id_salt("layer-add-kind")
+                .width(ui.available_width())
+                .selected_text(RichText::new(short_kind(k)).size(12.0))
+                .show_ui(ui, |ui| {
+                    for kind in &kinds {
+                        ui.selectable_value(k, kind.clone(), short_kind(kind));
+                    }
+                })
+                .response
+                .on_hover_text(
+                    "Node kind to add on top of the stack (in front of the height output)",
+                )
+                .widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::accesskit::Role::ComboBox, true, "Layer kind")
+                });
+        });
+        // The search box (`Search layers`), with its magnifier.
+        egui::Frame::new()
+            .fill(color::BG2)
+            .stroke(Stroke::new(1.0, egui::Color32::from_white_alpha(13)))
+            .corner_radius(6.0)
+            .inner_margin(Margin::symmetric(6, 2))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::Image::new(look::icon("search"))
+                            .fit_to_exact_size(vec2(12.0, 12.0))
+                            .tint(color::FG2),
+                    );
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.stack.query)
+                            .frame(egui::Frame::NONE)
+                            .margin(Margin::ZERO)
+                            .desired_width(ui.available_width())
+                            .font(egui::FontId::proportional(12.0))
+                            .hint_text("Search layers"),
+                    )
+                    .widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::accesskit::Role::TextInput,
+                            true,
+                            "Search layers",
+                        )
+                    });
+                });
+            });
+        let q = self.stack.query.trim().to_lowercase();
+        let matches = |n: &Value| {
+            q.is_empty()
+                || n["kind"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_lowercase()
+                    .contains(&q)
+                || n["ui"]["label"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_lowercase()
+                    .contains(&q)
+        };
+        let selected = self.selected_node.clone();
+        let mut select: Option<String> = None;
+        let mut row = |ui: &mut egui::Ui,
+                       n: &Value,
+                       i: usize,
+                       in_chain: bool,
+                       len: usize,
+                       act: &mut Option<(&str, Value)>| {
+            let id = n["id"].as_str().unwrap_or_default().to_owned();
+            let kind = n["kind"].as_str().unwrap_or_default();
+            let bypass = n["bypass"].as_bool().unwrap_or(false);
+            let cat = category_of(kind);
+            let fill = if selected.as_deref() == Some(id.as_str()) {
+                color::BG2
+            } else {
+                egui::Color32::TRANSPARENT
+            };
+            egui::Frame::new()
+                .fill(fill)
+                .corner_radius(4.0)
+                .inner_margin(Margin::symmetric(4, 1))
+                .show(ui, |ui| {
+                    if bypass {
+                        ui.set_opacity(0.5);
+                    }
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        let eye =
+                            small_icon_button(ui, if bypass { "eye-off" } else { "eye" }, true)
+                                .on_hover_text(if bypass {
+                                    "Bypassed: click to apply this layer again"
+                                } else {
+                                    "Bypass: pass the input through unchanged (graph.set_bypass)"
+                                });
+                        let name = format!(
+                            "{} {}",
+                            if bypass { "Apply" } else { "Bypass" },
+                            label_of(n)
+                        );
+                        eye.widget_info(|| {
+                            egui::WidgetInfo::selected(
+                                egui::accesskit::Role::Button,
+                                true,
+                                !bypass,
+                                &name,
+                            )
+                        });
+                        if eye.clicked() {
+                            *act =
+                                Some(("graph.set_bypass", json!({ "id": id, "bypass": !bypass })));
+                        }
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            ui.spacing_mut().item_spacing.x = 4.0;
+                            if in_chain {
+                                let fixed =
+                                    kind.starts_with("jd.noise.") || kind.starts_with("jd.input.");
+                                let rm = small_icon_button(ui, "trash-2", idle && !fixed)
+                                    .on_hover_text("Remove this layer and close the gap");
+                                rm.widget_info(|| {
+                                    egui::WidgetInfo::labeled(
+                                        egui::accesskit::Role::Button,
+                                        idle && !fixed,
+                                        format!("Remove {}", label_of(n)),
+                                    )
+                                });
+                                if rm.clicked() {
+                                    *act = Some(("graph.unsplice", json!({ "id": id })));
+                                }
+                                let down = small_icon_button(ui, "arrow-down", idle && i + 1 < len)
+                                    .on_hover_text("Apply earlier (move down the stack)");
+                                down.widget_info(|| {
+                                    egui::WidgetInfo::labeled(
+                                        egui::accesskit::Role::Button,
+                                        idle && i + 1 < len,
+                                        format!("Move {} down", label_of(n)),
+                                    )
+                                });
+                                if down.clicked() {
+                                    *act = Some((
+                                        "graph.swap_in_chain",
+                                        json!({ "id": id, "dir": "down" }),
+                                    ));
+                                }
+                                let up = small_icon_button(ui, "arrow-up", idle && i > 0)
+                                    .on_hover_text("Apply later (move up the stack)");
+                                up.widget_info(|| {
+                                    egui::WidgetInfo::labeled(
+                                        egui::accesskit::Role::Button,
+                                        idle && i > 0,
+                                        format!("Move {} up", label_of(n)),
+                                    )
+                                });
+                                if up.clicked() {
+                                    *act = Some((
+                                        "graph.swap_in_chain",
+                                        json!({ "id": id, "dir": "up" }),
+                                    ));
+                                }
+                            }
+                            badge(ui, cat);
+                            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                                let mut text = egui::text::LayoutJob::default();
+                                text.append(
+                                    &label_of(n),
+                                    0.0,
+                                    egui::TextFormat {
+                                        font_id: egui::FontId::proportional(12.0),
+                                        color: color::FG0,
+                                        ..Default::default()
+                                    },
+                                );
+                                if let Some(r) = readout_of(n, &nodes, &edges) {
+                                    text.append(
+                                        &r,
+                                        4.0,
+                                        egui::TextFormat {
+                                            font_id: egui::FontId::proportional(10.0),
+                                            color: color::FG2,
+                                            ..Default::default()
+                                        },
+                                    );
+                                }
+                                let r = ui
+                                    .add(
+                                        egui::Label::new(text)
+                                            .truncate()
+                                            .sense(egui::Sense::click()),
+                                    )
+                                    .on_hover_text(kind);
+                                if r.clicked() {
+                                    select = Some(id.clone());
+                                }
+                            });
+                        });
+                    });
+                });
+        };
+        let head = |ui: &mut egui::Ui,
+                    closed: &mut std::collections::HashSet<String>,
+                    key: &str,
+                    label: &str,
+                    count: usize| {
+            let shut = closed.contains(key);
+            let r = ui
+                .horizontal(|ui| {
+                    ui.add(
+                        egui::Image::new(look::icon(if shut {
+                            "chevron-right"
+                        } else {
+                            "chevron-down"
+                        }))
+                        .fit_to_exact_size(vec2(12.0, 12.0))
+                        .tint(color::FG1),
+                    );
+                    ui.label(RichText::new(label).size(11.0).strong().color(color::FG1));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        egui::Frame::new()
+                            .fill(color::BG3)
+                            .corner_radius(3.0)
+                            .inner_margin(Margin::symmetric(4, 0))
+                            .show(ui, |ui| {
+                                ui.label(
+                                    RichText::new(count.to_string())
+                                        .size(10.0)
+                                        .color(color::FG2),
+                                );
+                            });
+                    });
+                })
+                .response
+                .interact(egui::Sense::click());
+            r.widget_info(|| {
+                egui::WidgetInfo::selected(egui::accesskit::Role::Button, true, !shut, label)
+            });
+            if r.clicked() {
+                if shut {
+                    closed.remove(key);
+                } else {
+                    closed.insert(key.to_owned());
+                }
+            }
+        };
+        let mut closed = std::mem::take(&mut self.stack.closed);
+        head(ui, &mut closed, "stack", "Height stack", chain.len());
+        if !closed.contains("stack") {
+            for (i, n) in chain.iter().enumerate() {
+                if matches(n) {
+                    row(ui, n, i, true, chain.len(), &mut act);
+                }
+            }
+        }
+        for (cat, label) in [
+            ("shape", "Shape layers"),
+            ("filter", "Filters"),
+            ("simulation", "Simulation layers"),
+            ("mask", "Mask layers"),
+        ] {
+            let rows: Vec<&Value> = others
+                .iter()
+                .filter(|n| category_of(n["kind"].as_str().unwrap_or_default()) == cat)
+                .collect();
+            if rows.is_empty() {
+                continue;
+            }
+            head(ui, &mut closed, cat, label, rows.len());
+            if !closed.contains(cat) {
+                ui.indent(cat, |ui| {
+                    for (i, n) in rows.iter().enumerate() {
+                        if matches(n) {
+                            row(ui, n, i, false, rows.len(), &mut act);
+                        }
+                    }
+                });
+            }
+        }
+        self.stack.closed = closed;
+        if let Some(id) = select {
+            // The Editor's inspector follows over the protocol's `selection` event.
+            self.server
+                .emit("selection", json!({ "nodes": [id], "source": "studio" }));
+            self.selected_node = Some(id);
+        }
+        if let Some((op, params)) = act {
+            let removed = (op == "graph.unsplice")
+                .then(|| params["id"].as_str().map(str::to_owned))
+                .flatten();
+            let lod = self.preview_lod();
+            let request = Self::request(op, params);
+            self.chain(vec![
+                Box::new(move |_| Some(request)),
+                Box::new(move |_| Some(Self::request("graph.evaluate", json!({ "lod": lod })))),
+            ]);
+            if removed.is_some() && removed == self.selected_node {
+                self.selected_node = None;
+            }
+        }
+    }
+
     /// The cave nodes of the graph, in order.
     fn cave_nodes(&self) -> Vec<Value> {
         self.graph["nodes"]
@@ -2308,7 +3465,7 @@ impl StudioApp {
         let materials = Value::Array(self.materials.clone());
         let request = Self::request(
             "terrain.textures",
-            json!({ "materials": materials, "layer": layer, "max_px": PREVIEW_MAX_PX }),
+            json!({ "materials": materials, "layer": layer, "max_px": self.preview_max_px }),
         );
         let (server, tx, ctx) = (self.server.clone(), self.tx.clone(), self.ctx.clone());
         self.reads += 1;
@@ -2376,6 +3533,20 @@ impl StudioApp {
     /// Fire the debounced look write and sky bake when due.
     fn tick(&mut self, ctx: &egui::Context) {
         let now = Instant::now();
+        // Tasks: poll the engine's jobs every 250 ms while a button's op runs (the desktop's
+        // pollers around `run`); clear them when nothing does.
+        if self.busy > 0 {
+            if self
+                .jobs_polled
+                .is_none_or(|t| now.duration_since(t).as_millis() >= 250)
+            {
+                self.jobs_polled = Some(now);
+                self.invoke(Tag::Jobs, "jobs.list", json!({}));
+            }
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        } else if self.jobs_polled.take().is_some() {
+            self.jobs.clear();
+        }
         if self.look_due.is_some_and(|t| now >= t) {
             self.look_due = None;
             self.write_look();
@@ -3545,6 +4716,7 @@ impl StudioApp {
                 "Import",
             );
         });
+        self.real_world_row(ui);
         ui.add_space(12.0);
         egui::Grid::new("project-meta")
             .num_columns(2)
@@ -3568,6 +4740,16 @@ impl StudioApp {
                 dt(ui, &p["pending_journal"].to_string());
                 ui.end_row();
             });
+        ui.add_space(12.0);
+        self.reference_card(ui);
+        ui.add_space(12.0);
+        self.layers_card(ui);
+        ui.add_space(12.0);
+        self.settings_card(ui);
+        ui.add_space(12.0);
+        self.tasks_card(ui);
+        ui.add_space(12.0);
+        self.diagnostics_card(ui);
     }
 
     fn log_card(&mut self, ui: &mut egui::Ui) {
@@ -3753,6 +4935,18 @@ fn decode_preview(v: &Value) -> Result<(jd_terrain::preview::Preview, usize), St
 }
 
 impl eframe::App for StudioApp {
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, "jd.lang", &crate::i18n::lang(&self.ctx));
+        eframe::set_value(storage, "jd.previewMaxPx", &self.preview_max_px);
+        eframe::set_value(storage, "jd.previewTargetMs", &self.preview_target_ms);
+    }
+
+    /// Only the app settings above persist: panel sizes and scroll positions start fresh, as the
+    /// desktop's do.
+    fn persist_egui_memory(&self) -> bool {
+        false
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         self.drain();
         self.tick(ui.ctx());

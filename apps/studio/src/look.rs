@@ -56,6 +56,8 @@ pub fn scroll_card(ui: &mut Ui, id: &str, add: impl FnOnce(&mut Ui)) {
 
 /// `.jd-section`: a chevron (`▾`, `text-[10px] text-jd-fg-2`) and a semibold 12.5 px title.
 pub fn section(ui: &mut Ui, title: &str) {
+    let title = crate::i18n::tr(ui.ctx(), title);
+    let title = title.as_str();
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
         let (r, _) = ui.allocate_exact_size(vec2(8.0, 12.0), Sense::hover());
@@ -113,6 +115,15 @@ pub fn icon(name: &str) -> ImageSource<'static> {
         };
     }
     icons!(
+        "arrow-down",
+        "arrow-up",
+        "chevron-down",
+        "chevron-right",
+        "eye",
+        "eye-off",
+        "plus",
+        "search",
+        "trash-2",
         "file-plus",
         "folder-open",
         "save",
@@ -329,4 +340,33 @@ pub fn wide_button(
     let name = text.to_owned();
     resp.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, &name));
     resp
+}
+
+/// A field committed when it loses focus (the desktop's `defaultValue` + `onBlur`): it shows
+/// `current` until edited, keeps the typed text while focused, and returns it on leaving if it
+/// differs from `current`.
+pub fn commit_input(
+    ui: &mut Ui,
+    current: &str,
+    width: f32,
+    hint: &str,
+    name: &str,
+    tip: &str,
+) -> Option<String> {
+    let id = ui.make_persistent_id(("commit-input", name));
+    let mut text = ui
+        .data(|d| d.get_temp::<String>(id))
+        .unwrap_or_else(|| current.to_owned());
+    let mut r = input(ui, &mut text, width, hint, name);
+    if !tip.is_empty() {
+        r = r.on_hover_text(tip);
+    }
+    if r.lost_focus() {
+        ui.data_mut(|d| d.remove::<String>(id));
+        return (text.trim() != current).then(|| text.trim().to_owned());
+    }
+    if r.has_focus() {
+        ui.data_mut(|d| d.insert_temp(id, text));
+    }
+    None
 }

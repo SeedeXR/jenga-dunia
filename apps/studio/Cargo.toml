@@ -16,7 +16,7 @@ jd-terrain.workspace = true
 jd-types.workspace = true
 base64.workspace = true
 # wgpu backends come from jd-gpu's wgpu features (metal, vulkan, dx12): one wgpu 30 for both.
-eframe = { version = "0.37", default-features = false, features = ["wgpu_no_default_features", "accesskit", "default_fonts", "wayland", "x11", "clipboard"] }
+eframe = { version = "0.37", default-features = false, features = ["wgpu_no_default_features", "accesskit", "default_fonts", "wayland", "x11", "clipboard", "persistence"] }
 bytemuck = { version = "1", features = ["derive"] }
 egui_extras = { version = "0.37", default-features = false, features = ["svg"] }
 # Native dialogs (the same rfd the Editor's dialog plugin uses), PNG stills, local log times.

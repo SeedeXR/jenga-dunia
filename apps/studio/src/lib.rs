@@ -4,6 +4,7 @@
 pub mod app;
 pub mod chrome;
 pub mod editor;
+pub mod i18n;
 pub mod look;
 pub mod post;
 pub mod theme;

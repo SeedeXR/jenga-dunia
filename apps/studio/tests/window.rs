@@ -70,6 +70,25 @@ fn render(h: &mut Harness<'static, StudioApp>) -> image::RgbaImage {
     panic!("render: {last}")
 }
 
+/// Scroll a control into view (the side columns scroll), click it, and step once.
+fn tap(
+    h: &mut Harness<'static, StudioApp>,
+    role: Option<eframe::egui::accesskit::Role>,
+    label: &str,
+) {
+    let by = || {
+        let b = egui_kittest::kittest::by().label(label);
+        match role {
+            Some(r) => b.role(r),
+            None => b,
+        }
+    };
+    h.get(by()).scroll_to_me();
+    h.run();
+    h.get(by()).click();
+    h.run_steps(1);
+}
+
 /// Share of viewport pixels that are not the background colour.
 fn covered(h: &mut Harness<'static, StudioApp>) -> (f32, Vec<[u8; 4]>) {
     let img = render(h);
@@ -102,6 +121,15 @@ fn the_window_shows_the_project_renders_its_terrain_and_orbits() {
     h.get_by_label("Open the node editor");
     let info = h.state().viewport.info().unwrap().clone();
     assert_eq!((info.size, info.extent_m), ([256, 256], [2048.0, 2048.0]));
+    // The layout is stable: no column grows frame after frame (a widget asking for more than the
+    // available width once made the left panel creep to its maximum, squeezing the viewport).
+    let rect = h.state().viewport.rect();
+    h.run_steps(30);
+    assert_eq!(
+        h.state().viewport.rect(),
+        rect,
+        "the viewport moved: a side column is growing"
+    );
 
     let (share, before) = covered(&mut h);
     assert!(
@@ -338,7 +366,10 @@ fn the_sun_card_writes_the_look_and_toggles_the_maps() {
 fn the_post_sliders_darken_the_corners_bloom_and_expose() {
     let dir = tempfile::tempdir().unwrap();
     let mut h = window(engine(dir.path()));
-    settle(&mut h, |a| a.viewport.info().is_some());
+    // The maps too: a bake landing between two measurements would change the shading under them.
+    settle(&mut h, |a| {
+        a.viewport.info().is_some() && a.viewport.maps_px().is_some()
+    });
     // Mean brightness of the viewport's corner and centre boxes (a tenth of its width).
     let mean = |h: &mut Harness<'static, StudioApp>| {
         let img = render(h);
@@ -908,6 +939,286 @@ fn the_export_section_writes_every_kind_of_export() {
         .map(|l| l.text.clone())
         .collect();
     assert!(errors.is_empty(), "{errors:?}");
+}
+
+/// A loopback Terrarium server (`/t/{z}/{x}/{y}.png`, height 1000 m + 0.01 m per row), as the
+/// core's and the desktop's e2e tests use; returns its base URL.
+fn tile_server() -> String {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for mut stream in listener.incoming().flatten() {
+            let mut buf = [0u8; 4096];
+            let n = stream.read(&mut buf).unwrap_or(0);
+            let req = String::from_utf8_lossy(&buf[..n]);
+            let target = req
+                .lines()
+                .next()
+                .and_then(|l| l.split_whitespace().nth(1))
+                .unwrap_or("/")
+                .to_owned();
+            let ty: u32 = target
+                .trim_end_matches(".png")
+                .rsplit('/')
+                .next()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0);
+            let mut img = image::RgbImage::new(256, 256);
+            for (_, py, p) in img.enumerate_pixels_mut() {
+                let v = 1000.0 + (ty * 256 + py) as f32 * 0.01 + 32768.0;
+                let r = (v / 256.0).floor();
+                *p = image::Rgb([r as u8, (v - r * 256.0).floor() as u8, 0]);
+            }
+            let mut body = Vec::new();
+            img.write_to(
+                &mut std::io::Cursor::new(&mut body),
+                image::ImageFormat::Png,
+            )
+            .unwrap();
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = stream.write_all(head.as_bytes());
+            let _ = stream.write_all(&body);
+        }
+    });
+    format!("http://127.0.0.1:{port}/t")
+}
+
+#[test]
+fn real_world_fetches_a_dem_and_wires_it_into_the_height() {
+    // The core reads the provider override from the environment, which a test may not set in
+    // its own process (no unsafe): run this test again as a child with it set.
+    const NAME: &str = "real_world_fetches_a_dem_and_wires_it_into_the_height";
+    if std::env::var_os("JD_GEO_TERRARIUM_URL").is_none() {
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", NAME, "--test-threads=1"])
+            .env("JD_GEO_TERRARIUM_URL", tile_server())
+            .status()
+            .unwrap();
+        assert!(status.success(), "the child run failed");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let server = engine(dir.path());
+    let probe = server.clone();
+    let mut h = window(server);
+    settle(&mut h, |a| a.viewport.info().is_some());
+    h.get_by_label("Fetch the DEM").click();
+    h.run_steps(1);
+    settle(&mut h, |a| {
+        a.log_lines().any(|l| l.text == "graph.evaluate: ok")
+    });
+    let errors: Vec<_> = h
+        .state()
+        .log_lines()
+        .filter(|l| l.text.contains(": E_"))
+        .map(|l| l.text.clone())
+        .collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    // A heightmap node now feeds the height output, and the world sits in the DEM's CRS.
+    let g = probe
+        .invoke(Request::new("graph.list", json!({})))
+        .result
+        .unwrap();
+    let dem = g["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["kind"] == "jd.input.heightmap@1")
+        .expect("a heightmap node");
+    let out = g["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["kind"] == "jd.output.height@1")
+        .unwrap();
+    let feeds: Vec<_> = g["edges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["to"]["node"] == out["id"])
+        .collect();
+    assert_eq!(feeds.len(), 1);
+    assert_eq!(feeds[0]["from"]["node"], dem["id"]);
+    let info = probe
+        .invoke(Request::new("project.info", json!({})))
+        .result
+        .unwrap();
+    assert!(
+        info["world"]["crs"]
+            .as_str()
+            .is_some_and(|c| c.starts_with("EPSG:")),
+        "{}",
+        info["world"]
+    );
+}
+
+#[test]
+fn the_reference_section_reads_an_image() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window(engine(dir.path()));
+    settle(&mut h, |a| a.viewport.info().is_some());
+    // A plain PNG: no GPS, no time — the sun needs both.
+    let png = dir.path().join("ref.png");
+    image::RgbImage::new(64, 48).save(&png).unwrap();
+    h.get_by_label("Reference file").focus();
+    h.run();
+    h.get_by_label("Reference file")
+        .type_text(&png.display().to_string());
+    h.run();
+    h.get_by_label("Read").click();
+    h.run_steps(1);
+    settle(&mut h, |a| {
+        a.log_lines()
+            .any(|l| l.text.starts_with("media.metadata: ok"))
+    });
+    h.get_by_label("no GPS");
+    h.get_by_label("needs place and time");
+}
+
+#[test]
+fn settings_commit_on_leaving_language_tasks_and_diagnostics() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = engine(dir.path());
+    let probe = server.clone();
+    let mut h = window(server);
+    settle(&mut h, |a| a.viewport.info().is_some());
+    let settings = || {
+        probe
+            .invoke(Request::new("project.info", json!({})))
+            .result
+            .unwrap()["settings"]
+            .clone()
+    };
+    let before = settings()["autosave_interval_s"].as_u64().unwrap();
+    // Autosave: typed, then committed when the field is left (the desktop's onBlur).
+    h.get_by_role_and_label(eframe::egui::accesskit::Role::TextInput, "Autosave (s)")
+        .scroll_to_me();
+    h.run();
+    h.get_by_role_and_label(eframe::egui::accesskit::Role::TextInput, "Autosave (s)")
+        .focus();
+    h.run();
+    h.get_by_role_and_label(eframe::egui::accesskit::Role::TextInput, "Autosave (s)")
+        .type_text("0");
+    h.run();
+    assert_eq!(
+        settings()["autosave_interval_s"].as_u64().unwrap(),
+        before,
+        "not before leaving"
+    );
+    h.key_press(eframe::egui::Key::Tab);
+    h.run_steps(1);
+    settle(&mut h, |_| {
+        settings()["autosave_interval_s"].as_u64() == Some(before * 10)
+    });
+    // Kiswahili: the section titles follow.
+    h.get_by_role_and_label(eframe::egui::accesskit::Role::ComboBox, "Language")
+        .click();
+    h.run();
+    h.get_by_label("Kiswahili").click();
+    h.run();
+    h.get_by_label("Mipangilio");
+    h.get_by_label("Jua");
+    // Tasks idle; Diagnostics' environment line.
+    h.get_by_label("no running jobs");
+    h.get_by_label("Environment").scroll_to_me();
+    h.run();
+    h.get_by_label("Environment").click();
+    h.run_steps(1);
+    settle(&mut h, |a| {
+        a.log_lines().any(|l| l.text.starts_with("diag.env: ok"))
+    });
+    h.get_by_label("host");
+}
+
+#[test]
+fn the_layer_stack_adds_bypasses_reorders_and_removes() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = engine(dir.path());
+    let probe = server.clone();
+    let mut h = window(server);
+    settle(&mut h, |a| a.viewport.info().is_some());
+    let graph = || {
+        probe
+            .invoke(Request::new("graph.list", json!({})))
+            .result
+            .unwrap()
+    };
+    let node = |kind: &str| {
+        graph()["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|n| n["kind"] == kind)
+            .cloned()
+    };
+    let feed = |to: &Value| {
+        graph()["edges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["to"]["node"] == *to && e["to"]["port"] == "in")
+            .map(|e| e["from"]["node"].clone())
+    };
+    let button = eframe::egui::accesskit::Role::Button;
+    let out = node("jd.output.height@1").unwrap();
+    // `+` splices the default kind (erosion.thermal), then a terrace on top of it.
+    tap(
+        &mut h,
+        None,
+        "Splice the chosen node in front of the height output",
+    );
+    settle(&mut h, |_| node("jd.erosion.thermal@1").is_some());
+    tap(
+        &mut h,
+        Some(eframe::egui::accesskit::Role::ComboBox),
+        "Layer kind",
+    );
+    h.run();
+    // The kind list scrolls inside its popup.
+    h.get_by_label("filter.terrace").scroll_to_me();
+    h.run();
+    h.get_by_label("filter.terrace").click();
+    h.run();
+    tap(
+        &mut h,
+        None,
+        "Splice the chosen node in front of the height output",
+    );
+    settle(&mut h, |_| node("jd.filter.terrace@1").is_some());
+    let (thermal, terrace) = (
+        node("jd.erosion.thermal@1").unwrap()["id"].clone(),
+        node("jd.filter.terrace@1").unwrap()["id"].clone(),
+    );
+    assert_eq!(
+        (feed(&out["id"]), feed(&terrace)),
+        (Some(terrace.clone()), Some(thermal.clone()))
+    );
+    // The eye bypasses the terrace.
+    tap(&mut h, Some(button), "Bypass filter.terrace");
+    settle(&mut h, |_| {
+        node("jd.filter.terrace@1").unwrap()["bypass"] == true
+    });
+    // Down: applied before the thermal; up: back on top.
+    tap(&mut h, Some(button), "Move filter.terrace down");
+    settle(&mut h, |_| feed(&out["id"]) == Some(thermal.clone()));
+    assert_eq!(feed(&thermal), Some(terrace.clone()));
+    tap(&mut h, Some(button), "Move filter.terrace up");
+    settle(&mut h, |_| feed(&out["id"]) == Some(terrace.clone()));
+    // The thermal sits right on the noise: down would feed a generator — refused, nothing moves.
+    tap(&mut h, Some(button), "Move erosion.thermal down");
+    settle(&mut h, |a| {
+        a.log_lines()
+            .any(|l| l.text.starts_with("graph.swap_in_chain: E_"))
+    });
+    assert_eq!(feed(&out["id"]), Some(terrace.clone()));
+    // The bin closes the gap.
+    tap(&mut h, Some(button), "Remove filter.terrace");
+    settle(&mut h, |_| node("jd.filter.terrace@1").is_none());
+    assert_eq!(feed(&out["id"]), Some(thermal));
 }
 
 /// `JD_STUDIO_CAPTURE=<png> cargo test -p jd-studio --test window -- --ignored capture`: the

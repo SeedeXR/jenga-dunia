@@ -108,6 +108,8 @@ fn native_options() -> eframe::NativeOptions {
             .with_app_id("jenga-dunia-studio")
             .with_inner_size([1440.0, 900.0])
             .with_min_inner_size([800.0, 520.0]),
+        // The window opens at its default size each time, as the desktop's does.
+        persist_window: false,
         ..Default::default()
     };
     options.wgpu_options.wgpu_setup = egui_wgpu::WgpuSetup::CreateNew(setup);
