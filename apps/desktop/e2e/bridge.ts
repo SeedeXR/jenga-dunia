@@ -107,7 +107,9 @@ export async function wire(page: Page, from: Locator, to: Locator, fromHandle = 
     await src.click({ force: true });
     await dst.click({ force: true });
     try {
-      await expect.poll(() => logCount(page, "graph.connect: ok"), { timeout: 2500 }).toBeGreaterThan(before);
+      // 10 s: on the CI runner one log query alone takes ~1.5 s while the page renders (software
+      // WebGPU) and the connect lands 2–4 s after the clicks; a 2.5 s window saw the line too late.
+      await expect.poll(() => logCount(page, "graph.connect: ok"), { timeout: 10_000 }).toBeGreaterThan(before);
       return;
     } catch (e) {
       if (i >= 3) throw e;
