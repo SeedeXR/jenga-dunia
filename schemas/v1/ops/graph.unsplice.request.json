@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Unsplice",
+  "description": "`graph.unsplice` params.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "The node to take out of its chain.",
+      "$ref": "#/$defs/NodeId"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id"
+  ],
+  "$defs": {
+    "NodeId": {
+      "description": "Identifies a graph node.",
+      "type": "string"
+    }
+  }
+}

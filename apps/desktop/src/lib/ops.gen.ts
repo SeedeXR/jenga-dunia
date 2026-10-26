@@ -821,9 +821,49 @@ export type GraphSpliceResult = {
   "materials"?: MaterialSpec[] | null;
 };
 
+export type ChainDir = "up" | "down";
+
+export type GraphSwapInChainRequest = {
+  /** The node to move. */
+  "id": NodeId;
+  /** Up (later) or down (earlier). */
+  "dir": ChainDir;
+};
+
+export type GraphSwapInChainResult = {
+  /** Nodes. */
+  "nodes": NodeView[];
+  /** Edges. */
+  "edges": Edge[];
+  /** Number of edits `graph.undo` can take back. */
+  "undo_depth": number;
+  /** Number of undone edits `graph.redo` can re-apply. */
+  "redo_depth": number;
+  /** Timeline position 0..1 at which keyed parameters resolve (`graph.set_time`). */
+  "time"?: number;
+};
+
 export type GraphUndoRequest = Record<string, unknown>;
 
 export type GraphUndoResult = {
+  /** Nodes. */
+  "nodes": NodeView[];
+  /** Edges. */
+  "edges": Edge[];
+  /** Number of edits `graph.undo` can take back. */
+  "undo_depth": number;
+  /** Number of undone edits `graph.redo` can re-apply. */
+  "redo_depth": number;
+  /** Timeline position 0..1 at which keyed parameters resolve (`graph.set_time`). */
+  "time"?: number;
+};
+
+export type GraphUnspliceRequest = {
+  /** The node to take out of its chain. */
+  "id": NodeId;
+};
+
+export type GraphUnspliceResult = {
   /** Nodes. */
   "nodes": NodeView[];
   /** Edges. */
@@ -3203,8 +3243,12 @@ export interface JdOps {
   "graph.set_time": { request: GraphSetTimeRequest; result: GraphSetTimeResult };
   /** Insert a node in front of a published layer's output, between it and whatever fed it, stacked under the output on the canvas (journaled; the viewport's layer strip) */
   "graph.splice": { request: GraphSpliceRequest; result: GraphSpliceResult };
+  /** Swap a node with its neighbour in its chain — up: applied later, down: earlier (journaled; the layer stack's arrows) */
+  "graph.swap_in_chain": { request: GraphSwapInChainRequest; result: GraphSwapInChainResult };
   /** Take back the last graph edit (journaled as graph.restore) */
   "graph.undo": { request: GraphUndoRequest; result: GraphUndoResult };
+  /** Take a node out of its chain: whatever it fed is fed by what fed it, and the node is removed (journaled; the layer stack's bin) */
+  "graph.unsplice": { request: GraphUnspliceRequest; result: GraphUnspliceResult };
   /** Request cancellation of a running job; it stops at the next node or kernel iteration with E_CANCELLED */
   "jobs.cancel": { request: JobsCancelRequest; result: JobsCancelResult };
   /** Running jobs with progress (steps done/total, current node) — poll while an evaluation runs */

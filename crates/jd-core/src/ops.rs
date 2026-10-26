@@ -1435,6 +1435,34 @@ pub mod graph {
         pub params: Map<String, Value>,
     }
 
+    /// `graph.unsplice` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct Unsplice {
+        /// The node to take out of its chain.
+        pub id: NodeId,
+    }
+
+    /// Which way `graph.swap_in_chain` moves a node.
+    #[derive(Debug, Clone, Copy, Deserialize, schemars::JsonSchema)]
+    #[serde(rename_all = "snake_case")]
+    pub enum ChainDir {
+        /// Applied later: swapped with the node it feeds (towards the output).
+        Up,
+        /// Applied earlier: swapped with the node that feeds it.
+        Down,
+    }
+
+    /// `graph.swap_in_chain` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct SwapInChain {
+        /// The node to move.
+        pub id: NodeId,
+        /// Up (later) or down (earlier).
+        pub dir: ChainDir,
+    }
+
     /// A node added by a workflow op.
     #[derive(Debug, Serialize, schemars::JsonSchema)]
     pub struct Added {
@@ -1643,8 +1671,131 @@ pub mod graph {
         }
     }
 
+    /// The `in` edge into `node`, and the edges out of its `out` port.
+    fn chain_links(p: &Project, node: &NodeId) -> (Option<Edge>, Vec<Edge>) {
+        let feed = p
+            .graph
+            .edges
+            .iter()
+            .find(|e| e.to.node == *node && e.to.port == "in")
+            .cloned();
+        let outs = p
+            .graph
+            .edges
+            .iter()
+            .filter(|e| e.from.node == *node && e.from.port == "out")
+            .cloned()
+            .collect();
+        (feed, outs)
+    }
+
+    /// Apply `steps` (graph mutations) all or nothing: the whole sequence is tried on a copy of
+    /// the graph first, and only if it leaves no new structural problem is each step applied (and
+    /// journaled, one undo step each). A refused sequence leaves the project as it was.
+    fn mutate_all(p: &mut Project, steps: &[(&str, Value)]) -> JdResult<()> {
+        let mut trial = p.graph.clone();
+        for (op, params) in steps {
+            apply(&mut trial, op, params)?;
+        }
+        let ev = Evaluator::new(registry(), cache());
+        let key = |e: &JdError| format!("{:?}|{}|{:?}", e.code, e.message, e.details);
+        let before: Vec<String> = ev.structure_errors(&p.graph).iter().map(key).collect();
+        if let Some(e) = ev
+            .structure_errors(&trial)
+            .into_iter()
+            .find(|e| !before.contains(&key(e)))
+        {
+            return Err(e);
+        }
+        for (op, params) in steps {
+            builtin::mutate(p, op, params.clone())?;
+        }
+        Ok(())
+    }
+
+    fn connect_step(
+        from: &NodeId,
+        from_port: &str,
+        to: &NodeId,
+        to_port: &str,
+    ) -> (&'static str, Value) {
+        (
+            "graph.connect",
+            serde_json::json!({ "from": from, "from_port": from_port, "to": to, "to_port": to_port }),
+        )
+    }
+
+    /// The layer stack's bin: every consumer of `id` re-pointed at what fed it, then `id` removed.
+    fn unsplice(p: &mut Project, id: &NodeId) -> JdResult<()> {
+        let (feed, outs) = chain_links(p, id);
+        let mut steps = Vec::new();
+        if let Some(f) = feed {
+            // graph.connect replaces the edge an input holds: each consumer just moves over.
+            for o in outs {
+                steps.push(connect_step(
+                    &f.from.node,
+                    &f.from.port,
+                    &o.to.node,
+                    &o.to.port,
+                ));
+            }
+        }
+        steps.push(("graph.remove_node", serde_json::json!({ "id": id })));
+        mutate_all(p, &steps)
+    }
+
+    /// The layer stack's arrows: P → A → B → N becomes P → B → A → N, where A is `id` moving up
+    /// or the node feeding `id` when it moves down. Nothing changes at either end of the chain;
+    /// a swap that would put a generator (no `in`) above another node is refused whole.
+    fn swap_in_chain(p: &mut Project, id: &NodeId, dir: ChainDir) -> JdResult<()> {
+        let next_of = |p: &Project, n: &NodeId| chain_links(p, n).1.into_iter().next();
+        let (a, b) = match dir {
+            ChainDir::Up => (Some(id.clone()), next_of(p, id).map(|e| e.to.node)),
+            ChainDir::Down => (chain_links(p, id).0.map(|e| e.from.node), Some(id.clone())),
+        };
+        let (Some(a), Some(b)) = (a, b) else {
+            return Ok(());
+        };
+        let prev = chain_links(p, &a).0;
+        let Some(next) = next_of(p, &b) else {
+            return Ok(());
+        };
+        let mut steps = vec![match prev {
+            Some(pe) => connect_step(&pe.from.node, &pe.from.port, &b, "in"),
+            None => (
+                "graph.disconnect",
+                serde_json::json!({ "from": a, "from_port": "out", "to": b, "to_port": "in" }),
+            ),
+        }];
+        steps.push(connect_step(&b, "out", &a, "in"));
+        steps.push(connect_step(&a, "out", &next.to.node, &next.to.port));
+        mutate_all(p, &steps)
+    }
+
     /// The viewport's workflow ops (ADR-0017: one implementation for the desktop and Studio).
     fn register_workflows(r: &mut Registry) {
+        r.register::<Unsplice, GraphView, _>(
+            "graph.unsplice",
+            "Take a node out of its chain: whatever it fed is fed by what fed it, and the node is removed (journaled; the layer stack's bin)",
+            Scope::ProjectWrite,
+            |ctx, a| {
+                ctx.with_project(|p| {
+                    unsplice(p, &a.id)?;
+                    Ok((view(p), Vec::new()))
+                })
+            },
+        );
+        r.register::<SwapInChain, GraphView, _>(
+            "graph.swap_in_chain",
+            "Swap a node with its neighbour in its chain — up: applied later, down: earlier (journaled; the layer stack's arrows)",
+            Scope::ProjectWrite,
+            |ctx, a| {
+                ctx.with_project(|p| {
+                    swap_in_chain(p, &a.id, a.dir)?;
+                    Ok((view(p), Vec::new()))
+                })
+            },
+        );
         r.register::<Splice, Added, _>(
             "graph.splice",
             "Insert a node in front of a published layer's output, between it and whatever fed it, stacked under the output on the canvas (journaled; the viewport's layer strip)",
@@ -6603,6 +6754,60 @@ mod tests {
         assert!(edge(&g, &t["id"], "out", &output["id"], "in"));
         let tn = node_of(&g, "jd.filter.terrace@1");
         assert_eq!(tn["ui"]["position"][0], output["ui"]["position"][0]);
+
+        // The layer stack: a blur on top (… → terrace → blur → output); its down arrow swaps it
+        // under the terrace (… → blur → terrace → output); its bin closes the gap again.
+        let b = ok(
+            "graph.splice",
+            serde_json::json!({ "kind": "jd.filter.blur@1" }),
+        );
+        ok(
+            "graph.swap_in_chain",
+            serde_json::json!({ "id": b["id"], "dir": "down" }),
+        );
+        let g = graph();
+        assert!(edge(
+            &g,
+            &feed["from"]["node"],
+            feed["from"]["port"].as_str().expect("p"),
+            &b["id"],
+            "in"
+        ));
+        assert!(edge(&g, &b["id"], "out", &t["id"], "in"));
+        assert!(edge(&g, &t["id"], "out", &output["id"], "in"));
+        ok(
+            "graph.swap_in_chain",
+            serde_json::json!({ "id": b["id"], "dir": "up" }),
+        );
+        assert!(
+            edge(&graph(), &b["id"], "out", &output["id"], "in"),
+            "up undoes down"
+        );
+        // The terrace sits right above the noise: swapping it down would feed a generator (no
+        // `in`), so the whole swap is refused and nothing changes.
+        let before = graph();
+        let r = invoke(
+            &reg,
+            &ctx,
+            "graph.swap_in_chain",
+            serde_json::json!({ "id": t["id"], "dir": "down" }),
+        );
+        assert!(r.error.is_some(), "a generator cannot be fed");
+        assert_eq!(
+            graph()["edges"],
+            before["edges"],
+            "refused whole, not half-applied"
+        );
+        ok("graph.unsplice", serde_json::json!({ "id": b["id"] }));
+        let g = graph();
+        assert!(edge(&g, &t["id"], "out", &output["id"], "in"));
+        assert!(
+            g["nodes"]
+                .as_array()
+                .expect("nodes")
+                .iter()
+                .all(|n| n["id"] != b["id"])
+        );
 
         // Snow: beside the height, fed like the output, publishing `snow`, a snow material once.
         let snow = ok(

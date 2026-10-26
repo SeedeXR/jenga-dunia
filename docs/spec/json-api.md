@@ -48,6 +48,8 @@ Normative companion to `docs/architecture/07-agent-interfaces.md`. JSON Schemas 
 | `graph.splice` | project:rw | no | `layer?` (height), `kind`, `params?` | `id` — the node between the layer's output and its feed (the viewport's layer strip, ADR-0017: both UIs call it) |
 | `graph.add_simulation` | project:rw | no | `which` (snow / sand / debris / lava), `max_height_m?` | `id`, `published[]`, `materials?` (re-published layers merge with max) |
 | `graph.add_cave` | project:rw | no | `kind` | `id`, `published` (`cave_holes`, `cave_plan`) |
+| `graph.unsplice` | project:rw | no | `id` | the graph — whatever the node fed is fed by what fed it, then the node is removed (the layer stack's bin; all or nothing) |
+| `graph.swap_in_chain` | project:rw | no | `id`, `dir` (`up` / `down`) | the graph — the node swapped with its neighbour in its chain (the layer stack's arrows); a swap that would feed a generator is refused whole |
 | `graph.set_param` | project:rw | no | `node_id`, `key`, `value` | `dirty_count` |
 | `graph.evaluate` | project:rw | yes | `targets[]?`, `lod`, `region?` | `outputs[]` (hashes, stats) |
 | `terrain.stats` | project:ro | no | `node_id` | min/max/mean height, slope histogram |

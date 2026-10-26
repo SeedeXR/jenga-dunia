@@ -140,8 +140,18 @@
     "scope": "project-write"
   },
   {
+    "id": "graph.swap_in_chain",
+    "description": "Swap a node with its neighbour in its chain — up: applied later, down: earlier (journaled; the layer stack's arrows)",
+    "scope": "project-write"
+  },
+  {
     "id": "graph.undo",
     "description": "Take back the last graph edit (journaled as graph.restore)",
+    "scope": "project-write"
+  },
+  {
+    "id": "graph.unsplice",
+    "description": "Take a node out of its chain: whatever it fed is fed by what fed it, and the node is removed (journaled; the layer stack's bin)",
     "scope": "project-write"
   },
   {

@@ -66,7 +66,7 @@ test.describe("layer stack against the real core", () => {
     // Remove thermal: the gap closes (noise → terrace → height) and the graph still evaluates.
     const evaluated = await logCount(page, "graph.evaluate: ok");
     await page.getByTestId(`layer-remove-${thermal.id}`).click();
-    await expect(page.getByTestId("log")).toContainText("graph.remove_node: ok");
+    await expect(page.getByTestId("log")).toContainText("graph.unsplice: ok"); // one core op (shared with Studio)
     await expect(chain).toHaveCount(2);
     const v2 = await view();
     expect(v2.result.edges.find((e) => e.to.node === terrace.id && e.to.port === "in")?.from.node).toBe(v2.result.nodes.find((n) => n.kind === "jd.noise.fbm@1")!.id);

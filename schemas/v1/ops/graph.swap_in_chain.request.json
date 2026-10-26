@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SwapInChain",
+  "description": "`graph.swap_in_chain` params.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "The node to move.",
+      "$ref": "#/$defs/NodeId"
+    },
+    "dir": {
+      "description": "Up (later) or down (earlier).",
+      "$ref": "#/$defs/ChainDir"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "dir"
+  ],
+  "$defs": {
+    "NodeId": {
+      "description": "Identifies a graph node.",
+      "type": "string"
+    },
+    "ChainDir": {
+      "description": "Which way `graph.swap_in_chain` moves a node.",
+      "oneOf": [
+        {
+          "description": "Applied later: swapped with the node it feeds (towards the output).",
+          "type": "string",
+          "const": "up"
+        },
+        {
+          "description": "Applied earlier: swapped with the node that feeds it.",
+          "type": "string",
+          "const": "down"
+        }
+      ]
+    }
+  }
+}

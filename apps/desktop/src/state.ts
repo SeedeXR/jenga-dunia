@@ -1223,29 +1223,13 @@ export const useStore = create<State>((set, get) => {
       if (id) set({ selectedNode: id });
     },
     unsplice: async (id) => {
-      const g = get().graph;
-      const feed = g.edges.find((e) => e.to.node === id && e.to.port === "in");
-      const outs = g.edges.filter((e) => e.from.node === id && e.from.port === "out");
-      // graph.connect replaces the edge an input holds, so each consumer is simply re-pointed at the feeder.
-      if (feed) for (const o of outs) await get().connectNodes(feed.from.node, feed.from.port, o.to.node, o.to.port);
-      await mutate("graph.remove_node", { id });
+      // The core re-points whatever the node fed at what fed it, then removes it (shared with Studio).
+      await mutate("graph.unsplice", { id });
       if (get().selectedNode === id) set({ selectedNode: null });
     },
     swapInChain: async (id, dir) => {
-      const g = get().graph;
-      const feedOf = (n: string) => g.edges.find((e) => e.to.node === n && e.to.port === "in");
-      const nextOf = (n: string) => g.edges.find((e) => e.from.node === n && e.from.port === "out");
-      // P → A → B → N; moving A up makes it P → B → A → N (and moving B down is the same swap).
-      const a = dir === "up" ? id : feedOf(id)?.from.node;
-      const b = dir === "up" ? nextOf(id)?.to.node : id;
-      if (!a || !b) return;
-      const p = feedOf(a);
-      const n = nextOf(b);
-      if (!n) return;
-      if (p) await get().connectNodes(p.from.node, p.from.port, b, "in");
-      else await get().disconnectNodes(a, "out", b, "in");
-      await get().connectNodes(b, "out", a, "in");
-      await get().connectNodes(a, "out", n.to.node, n.to.port);
+      // P → A → B → N becomes P → B → A → N (the core's graph.swap_in_chain, shared with Studio).
+      await mutate("graph.swap_in_chain", { id, dir });
     },
     setTime: (time) => {
       set((s) => ({ graph: { ...s.graph, time } })); // the slider follows the pointer; the journal gets the settled value
