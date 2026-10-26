@@ -54,9 +54,25 @@ fn settle(h: &mut Harness<'static, StudioApp>, done: impl Fn(&StudioApp) -> bool
     h.run_steps(2);
 }
 
+/// The window as an image. kittest waits 10 s for the GPU, for everything queued; on a software
+/// rasteriser (WARP on the Windows runner) a test that re-rendered the viewport for dozens of
+/// steps can queue more than that (CI: "PollError … Wait timed out"). The work keeps running, so
+/// wait again rather than fail.
+fn render(h: &mut Harness<'static, StudioApp>) -> image::RgbaImage {
+    let mut last = String::new();
+    for _ in 0..4 {
+        match h.render() {
+            Ok(img) => return img,
+            Err(e) if e.contains("PollError") => last = e,
+            Err(e) => panic!("render: {e}"),
+        }
+    }
+    panic!("render: {last}")
+}
+
 /// Share of viewport pixels that are not the background colour.
 fn covered(h: &mut Harness<'static, StudioApp>) -> (f32, Vec<[u8; 4]>) {
-    let img = h.render().expect("render");
+    let img = render(h);
     let r = h.state().viewport.rect();
     let bg = jd_studio::theme::color::BG0;
     let mut px = Vec::new();
@@ -325,7 +341,7 @@ fn the_post_sliders_darken_the_corners_bloom_and_expose() {
     settle(&mut h, |a| a.viewport.info().is_some());
     // Mean brightness of the viewport's corner and centre boxes (a tenth of its width).
     let mean = |h: &mut Harness<'static, StudioApp>| {
-        let img = h.render().expect("render");
+        let img = render(h);
         let r = h.state().viewport.rect().shrink(2.0);
         let d = r.width() / 10.0;
         let boxed = |x0: f32, y0: f32| {
@@ -784,14 +800,14 @@ fn capture_for_docs() {
             && a.viewport.maps_px().is_some()
             && a.viewport.sky_px().is_some()
     });
-    h.render().expect("render").save(&out).expect("save png");
+    render(&mut h).save(&out).expect("save png");
     // The horizon skirt (JD_STUDIO_HORIZON=1): `<capture>-horizon.png` beside it.
     if std::env::var_os("JD_STUDIO_HORIZON").is_some() {
         h.get_by_label("Horizon: continue the noise beyond the world's border as a coarse skirt (same seed, so it matches at the edge; erosion is not continued)").click();
         h.run_steps(1);
         settle(&mut h, |a| a.viewport.horizon_px().is_some());
         let out = out.replace(".png", "-horizon.png");
-        h.render().expect("render").save(&out).expect("save png");
+        render(&mut h).save(&out).expect("save png");
     }
     // Scatter (JD_STUDIO_SCATTER=1), as the desktop's JD_PARITY_SCATTER: `<capture>-scatter.png`.
     if std::env::var_os("JD_STUDIO_SCATTER").is_some() {
@@ -808,7 +824,7 @@ fn capture_for_docs() {
         h.run_steps(1);
         settle(&mut h, |a| a.viewport.instance_count() > 0);
         let out = out.replace(".png", "-scatter.png");
-        h.render().expect("render").save(&out).expect("save png");
+        render(&mut h).save(&out).expect("save png");
     }
     // A cave (JD_STUDIO_CAVE=1), as the desktop's JD_PARITY_CAVE: `<capture>-cave.png`.
     if std::env::var_os("JD_STUDIO_CAVE").is_some() {
@@ -825,7 +841,7 @@ fn capture_for_docs() {
             h.run();
         }
         let out = out.replace(".png", "-cave.png");
-        h.render().expect("render").save(&out).expect("save png");
+        render(&mut h).save(&out).expect("save png");
     }
     // The post effects (JD_STUDIO_POST=1), as the desktop's JD_PARITY_POST: `<capture>-post.png`.
     if std::env::var_os("JD_STUDIO_POST").is_some() {
@@ -836,7 +852,7 @@ fn capture_for_docs() {
         });
         h.run_steps(2);
         let out = out.replace(".png", "-post.png");
-        h.render().expect("render").save(&out).expect("save png");
+        render(&mut h).save(&out).expect("save png");
     }
 }
 
@@ -888,5 +904,5 @@ fn capture_sea() {
             && a.viewport.sky_px().is_some()
             && a.viewport.sea_info().is_some()
     });
-    h.render().expect("render").save(&out).expect("save png");
+    render(&mut h).save(&out).expect("save png");
 }
