@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SculptTarget",
+  "description": "`graph.sculpt_target` params.",
+  "type": "object",
+  "properties": {
+    "layer": {
+      "description": "The published layer whose output the node feeds.",
+      "type": "string",
+      "default": "height"
+    },
+    "kind": {
+      "description": "Strokes or transforms.",
+      "$ref": "#/$defs/SculptKind"
+    },
+    "clamp": {
+      "description": "For a new strokes node: clamp its result to this range (a painted 0..1 mask).",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "number",
+        "format": "double"
+      },
+      "minItems": 2,
+      "maxItems": 2,
+      "default": null
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "kind"
+  ],
+  "$defs": {
+    "SculptKind": {
+      "description": "Which sculpt node `graph.sculpt_target` finds or adds.",
+      "oneOf": [
+        {
+          "description": "`jd.sculpt.strokes@1`, right in front of the output (brush strokes, painted masks).",
+          "type": "string",
+          "const": "strokes"
+        },
+        {
+          "description": "`jd.sculpt.transforms@1`, anywhere up the output's chain (rotate, scale, tilt, push,\nalign, duplicate).",
+          "type": "string",
+          "const": "transforms"
+        }
+      ]
+    }
+  }
+}

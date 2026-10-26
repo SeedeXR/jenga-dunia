@@ -1435,6 +1435,31 @@ pub mod graph {
         pub params: Map<String, Value>,
     }
 
+    /// Which sculpt node `graph.sculpt_target` finds or adds.
+    #[derive(Debug, Clone, Copy, Deserialize, schemars::JsonSchema)]
+    #[serde(rename_all = "snake_case")]
+    pub enum SculptKind {
+        /// `jd.sculpt.strokes@1`, right in front of the output (brush strokes, painted masks).
+        Strokes,
+        /// `jd.sculpt.transforms@1`, anywhere up the output's chain (rotate, scale, tilt, push,
+        /// align, duplicate).
+        Transforms,
+    }
+
+    /// `graph.sculpt_target` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct SculptTarget {
+        /// The published layer whose output the node feeds.
+        #[serde(default = "height_layer")]
+        pub layer: String,
+        /// Strokes or transforms.
+        pub kind: SculptKind,
+        /// For a new strokes node: clamp its result to this range (a painted 0..1 mask).
+        #[serde(default)]
+        pub clamp: Option<[f64; 2]>,
+    }
+
     /// `graph.unsplice` params.
     #[derive(Debug, Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
@@ -1772,8 +1797,56 @@ pub mod graph {
         mutate_all(p, &steps)
     }
 
+    /// The sculpt node a stroke or a transform goes into: the strokes node right in front of
+    /// `layer`'s output, or the transforms node anywhere up its chain; spliced in when there is
+    /// none (the desktop's `strokesNodeFor` / `transformsNodeFor`).
+    fn sculpt_target(p: &mut Project, a: &SculptTarget) -> JdResult<NodeId> {
+        let out = output_for(p, &a.layer)?;
+        let is = |p: &Project, n: &NodeId, kind: &str| {
+            p.graph
+                .nodes
+                .get(n)
+                .is_some_and(|x| x.kind.0.starts_with(kind))
+        };
+        match a.kind {
+            SculptKind::Strokes => {
+                if let Some(f) = feed_of(p, &out).filter(|f| is(p, &f.node, "jd.sculpt.strokes@")) {
+                    return Ok(f.node);
+                }
+                let params = a.clamp.map_or_else(
+                    || serde_json::json!({}),
+                    |c| serde_json::json!({ "clamp": c }),
+                );
+                splice(p, &a.layer, "jd.sculpt.strokes@1", params)
+            }
+            SculptKind::Transforms => {
+                let mut seen = std::collections::HashSet::new();
+                let mut cur = out;
+                while seen.insert(cur.clone()) {
+                    let Some(f) = feed_of(p, &cur) else { break };
+                    if is(p, &f.node, "jd.sculpt.transforms@") {
+                        return Ok(f.node);
+                    }
+                    cur = f.node;
+                }
+                splice(p, &a.layer, "jd.sculpt.transforms@1", serde_json::json!({}))
+            }
+        }
+    }
+
     /// The viewport's workflow ops (ADR-0017: one implementation for the desktop and Studio).
     fn register_workflows(r: &mut Registry) {
+        r.register::<SculptTarget, Added, _>(
+            "graph.sculpt_target",
+            "The sculpt node for a layer — the strokes node right in front of its output, or the transforms node up its chain — spliced in when there is none (journaled then; the brush, the grid tool and painted density)",
+            Scope::ProjectWrite,
+            |ctx, a| {
+                ctx.with_project(|p| {
+                    let id = sculpt_target(p, &a)?;
+                    Ok((Added { id, published: Vec::new(), materials: None }, Vec::new()))
+                })
+            },
+        );
         r.register::<Unsplice, GraphView, _>(
             "graph.unsplice",
             "Take a node out of its chain: whatever it fed is fed by what fed it, and the node is removed (journaled; the layer stack's bin)",
@@ -6799,6 +6872,29 @@ mod tests {
             "refused whole, not half-applied"
         );
         ok("graph.unsplice", serde_json::json!({ "id": b["id"] }));
+        // The brush's target: a strokes node spliced in front of the output once, then found.
+        let s1 = ok(
+            "graph.sculpt_target",
+            serde_json::json!({ "kind": "strokes" }),
+        );
+        let s2 = ok(
+            "graph.sculpt_target",
+            serde_json::json!({ "kind": "strokes" }),
+        );
+        assert_eq!(s1["id"], s2["id"], "found, not spliced twice");
+        assert!(edge(&graph(), &s1["id"], "out", &output["id"], "in"));
+        // The transforms node may sit further up the chain; it is still found.
+        let x1 = ok(
+            "graph.sculpt_target",
+            serde_json::json!({ "kind": "transforms" }),
+        );
+        let x2 = ok(
+            "graph.sculpt_target",
+            serde_json::json!({ "kind": "transforms" }),
+        );
+        assert_eq!(x1["id"], x2["id"]);
+        ok("graph.unsplice", serde_json::json!({ "id": x1["id"] }));
+        ok("graph.unsplice", serde_json::json!({ "id": s1["id"] }));
         let g = graph();
         assert!(edge(&g, &t["id"], "out", &output["id"], "in"));
         assert!(

@@ -54,6 +54,7 @@ vi.mock("@tauri-apps/api/core", () => ({
         return { ...base, status: "ok", result: [] };
       case "graph.add_node":
       case "graph.splice": // the core wires the spliced node itself (ADR-0017 workflow ops)
+      case "graph.sculpt_target": // …and finds or splices the brush's strokes node
         sculptAdded = true;
         return { ...base, status: "ok", result: { id: "01SCULPT00000000000000000A", published: [] } };
       case "graph.connect":
@@ -239,9 +240,9 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByTestId("graph-panel")).toHaveTextContent("jd.noise.fbm@1"));
     fireEvent.click(screen.getByTestId("sculpt-toggle"));
     await waitFor(() => expect(screen.getByTestId("sculpt-toggle")).toHaveTextContent("Sculpting"));
-    // One core call puts the strokes node between the noise and the height output.
-    const splice = calls.find((c) => (c.args as { request?: { op: string } }).request?.op === "graph.splice");
-    expect(splice).toMatchObject({ args: { request: { params: { layer: "height", kind: "jd.sculpt.strokes@1" } } } });
+    // One core call finds or puts the strokes node between the noise and the height output.
+    const target = calls.find((c) => (c.args as { request?: { op: string } }).request?.op === "graph.sculpt_target");
+    expect(target).toMatchObject({ args: { request: { params: { layer: "height", kind: "strokes" } } } });
     expect(screen.getByTestId("brush-strength")).toBeInTheDocument();
     // Mode select swaps strength for amount, and strokes carry mode + amount to the core.
     fireEvent.change(screen.getByTestId("brush-mode"), { target: { value: "flatten" } });

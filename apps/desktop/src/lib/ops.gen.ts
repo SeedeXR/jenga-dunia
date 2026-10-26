@@ -742,6 +742,26 @@ export type GraphRemoveNodeResult = {
   "time"?: number;
 };
 
+export type SculptKind = "strokes" | "transforms";
+
+export type GraphSculptTargetRequest = {
+  /** The published layer whose output the node feeds. */
+  "layer"?: string;
+  /** Strokes or transforms. */
+  "kind": SculptKind;
+  /** For a new strokes node: clamp its result to this range (a painted 0..1 mask). */
+  "clamp"?: [number, number] | null;
+};
+
+export type GraphSculptTargetResult = {
+  /** The new node. */
+  "id": NodeId;
+  /** Layers the op published (new `jd.output.height` nodes). */
+  "published"?: string[];
+  /** The look's material layers afterwards (`project.set_look`), when the op added any. */
+  "materials"?: MaterialSpec[] | null;
+};
+
 export type GraphSetBypassRequest = {
   /** Node id. */
   "id": NodeId;
@@ -3235,6 +3255,8 @@ export interface JdOps {
   "graph.redo": { request: GraphRedoRequest; result: GraphRedoResult };
   /** Remove a node and its edges (journaled) */
   "graph.remove_node": { request: GraphRemoveNodeRequest; result: GraphRemoveNodeResult };
+  /** The sculpt node for a layer — the strokes node right in front of its output, or the transforms node up its chain — spliced in when there is none (journaled then; the brush, the grid tool and painted density) */
+  "graph.sculpt_target": { request: GraphSculptTargetRequest; result: GraphSculptTargetResult };
   /** Bypass or un-bypass a node (journaled) */
   "graph.set_bypass": { request: GraphSetBypassRequest; result: GraphSetBypassResult };
   /** Set (or null to reset) a node parameter (journaled; validated against the kind's schema) */

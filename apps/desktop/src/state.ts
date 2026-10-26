@@ -608,33 +608,17 @@ export const useStore = create<State>((set, get) => {
     await loadGraph();
     return r.result.id;
   };
-  const strokesNodeFor = async (layer: string, clamp: [number, number] | null): Promise<string | null> => {
-    const g = get().graph;
-    const output = g.nodes.find((n) => n.kind.startsWith("jd.output.height@") && String(n.params?.layer ?? "height") === layer);
-    if (!output) return null;
-    const feed = g.edges.find((e) => e.to.node === output.id && e.to.port === "in");
-    const existing = feed ? g.nodes.find((n) => n.id === feed.from.node && n.kind.startsWith("jd.sculpt.strokes@")) : undefined;
-    if (existing) return existing.id;
-    return spliceBefore(layer, "jd.sculpt.strokes@1", clamp ? { clamp } : null);
+  // The sculpt node for a layer — strokes right in front of its output, transforms up its chain —
+  // found or spliced in by the core (graph.sculpt_target, shared with Studio).
+  const sculptTarget = async (layer: string, kind: "strokes" | "transforms", clamp: [number, number] | null): Promise<string | null> => {
+    graphGen++;
+    const r = await run("graph.sculpt_target", { layer, kind, ...(clamp ? { clamp } : {}) });
+    if (r.status !== "ok" || !r.result) return null;
+    await loadGraph();
+    return r.result.id;
   };
-  // The transforms node feeding the height output (spliced in when there is none).
-  const transformsNodeFor = async (layer: string): Promise<string | null> => {
-    const g = get().graph;
-    const output = g.nodes.find((n) => n.kind.startsWith("jd.output.height@") && String(n.params?.layer ?? "height") === layer);
-    if (!output) return null;
-    // Anywhere up the chain that feeds the output (a strokes node spliced later sits in front of it).
-    const seen = new Set<string>();
-    let cur: string | undefined = output.id;
-    while (cur && !seen.has(cur)) {
-      seen.add(cur);
-      const feed = g.edges.find((e) => e.to.node === cur && e.to.port === "in");
-      const up = feed ? g.nodes.find((n) => n.id === feed.from.node) : undefined;
-      if (!up) break;
-      if (up.kind.startsWith("jd.sculpt.transforms@")) return up.id;
-      cur = up.id;
-    }
-    return spliceBefore(layer, "jd.sculpt.transforms@1", null);
-  };
+  const strokesNodeFor = (layer: string, clamp: [number, number] | null) => sculptTarget(layer, "strokes", clamp);
+  const transformsNodeFor = (layer: string) => sculptTarget(layer, "transforms", null);
   const r1 = (v: number) => Math.round(v * 10) / 10;
   type GraphView = GraphListResult;
   // The look (materials, scatter, sun) lives in scene.json: restored from the project summary on

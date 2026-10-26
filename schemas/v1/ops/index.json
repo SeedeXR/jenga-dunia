@@ -120,6 +120,11 @@
     "scope": "project-write"
   },
   {
+    "id": "graph.sculpt_target",
+    "description": "The sculpt node for a layer — the strokes node right in front of its output, or the transforms node up its chain — spliced in when there is none (journaled then; the brush, the grid tool and painted density)",
+    "scope": "project-write"
+  },
+  {
     "id": "graph.set_bypass",
     "description": "Bypass or un-bypass a node (journaled)",
     "scope": "project-write"
