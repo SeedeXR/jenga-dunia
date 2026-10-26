@@ -222,10 +222,17 @@ fn profile_sdf(profile: Profile, x: f32, y: f32, w: f32, h: f32) -> f32 {
             .mul_add(w.min(h), -w.min(h)),
         Profile::Rect => bx(0.0, 0.0, w, h),
         Profile::Arch => {
-            // Walls from the floor (−h) up to the springing line, a half-circle roof above it.
-            let yc = h - w.min(h);
-            let walls = bx(0.0, (yc - h) / 2.0, w, (yc + h) / 2.0);
-            walls.min(circle(yc, w).max(yc - y))
+            // Walls from the floor (−h) up to the springing line, a round roof above it. The roof
+            // is a whole circle (or, for a drift wider than tall, an ellipse) whose lower half
+            // lies inside the walls: cutting it at the springing line instead left the distance
+            // exactly 0 along that line inside the air, and a voxel row on it grew a false sheet.
+            if h >= w {
+                let yc = h - w;
+                bx(0.0, (yc - h) / 2.0, w, (yc + h) / 2.0).min(circle(yc, w))
+            } else {
+                let roof = ((x / w).powi(2) + (y / h).powi(2)).sqrt().mul_add(h, -h);
+                bx(0.0, -h / 2.0, w, h / 2.0).min(roof)
+            }
         }
         Profile::Keyhole => {
             let r = w.min(h);
@@ -724,6 +731,45 @@ pub fn cave_mesh(
                 pos[i][q] = prev[i][q] + factor * (m[q] / list.len() as f32 - prev[i][q]);
             }
         }
+    }
+    // Onto the surface: two Newton steps along the field's gradient put every vertex on the
+    // zero level set, so an edge running diagonal to the grid (a drift's floor corner, an arch's
+    // springing) comes out straight instead of as a staircase; the normal is the exact gradient.
+    let h = 0.25 * s;
+    let projected: Vec<([f32; 3], [f32; 3])> = pos
+        .par_iter()
+        .zip(nrm.par_iter())
+        .map(|(p0, n0)| {
+            let mut p = *p0;
+            let mut g = [0.0f32; 3];
+            for _ in 0..2 {
+                let f = field.sdf(p);
+                if f == f32::MAX {
+                    return (*p0, *n0);
+                }
+                for k in 0..3 {
+                    let (mut a, mut b) = (p, p);
+                    a[k] += h;
+                    b[k] -= h;
+                    g[k] = (field.sdf(a) - field.sdf(b)) / (2.0 * h);
+                }
+                let g2 = dot(g, g);
+                if g2.is_nan() || g2 <= 1e-6 {
+                    return (*p0, *n0);
+                }
+                let step = f / g2;
+                // Never further than half a voxel: the surface nets vertex is already that close.
+                let k = (step * g2.sqrt()).clamp(-0.5 * s, 0.5 * s) / g2.sqrt().max(1e-6);
+                for q in 0..3 {
+                    p[q] -= k * g[q];
+                }
+            }
+            (p, norm([-g[0], -g[1], -g[2]]))
+        })
+        .collect();
+    for (i, (p, n)) in projected.into_iter().enumerate() {
+        pos[i] = p;
+        nrm[i] = n;
     }
     // Drop what lies above the ground; keep the walls up to one voxel over it (the terrain hides them).
     let above = |p: [f32; 3]| p[2] > ground(hf, extent_m, p[0], p[1]) + s;
@@ -1239,6 +1285,52 @@ mod tests {
             agree as f32 > 0.95 * (m.indices.len() / 3) as f32,
             "{agree}"
         );
+    }
+
+    #[test]
+    fn mesh_vertices_sit_on_the_surface_so_man_made_edges_run_straight() {
+        // A drift diagonal to the voxel grid: its floor edge would staircase without projection.
+        let hf = flat(100.0, 64);
+        let sys = CaveSystem {
+            passages: vec![tube(
+                vec![[8.0, 9.0, 50.0], [55.0, 41.0, 50.0]],
+                1.0,
+                0.9,
+                Profile::Arch,
+            )],
+            ..Default::default()
+        };
+        let field = CaveField::new(&sys).expect("field");
+        let m = cave_mesh(&sys, &hf, [64.0, 64.0], 0.4).expect("mesh");
+        let p = m.positions.as_chunks::<3>().0;
+        let off: Vec<f32> = p
+            .iter()
+            .map(|v| field.sdf([v[0] + 32.0, 32.0 - v[2], v[1]]).abs())
+            .collect();
+        let mean = off.iter().sum::<f32>() / off.len() as f32;
+        assert!(mean < 0.01, "mean distance to the surface {mean}");
+        // The floor is flat along the drift (away from its two end caps): every up-facing vertex at 49.1 m.
+        let (a, b) = ([8.0f32, 9.0], [55.0f32, 41.0]);
+        let len = (b[0] - a[0]).hypot(b[1] - a[1]);
+        let along =
+            |u: f32, v: f32| ((u - a[0]) * (b[0] - a[0]) + (v - a[1]) * (b[1] - a[1])) / len;
+        let floor: Vec<f32> = p
+            .iter()
+            .zip(m.normals.as_chunks::<3>().0)
+            .filter(|(v, n)| {
+                n[1] > 0.9 && (2.0..len - 2.0).contains(&along(v[0] + 32.0, 32.0 - v[2]))
+            })
+            .map(|(v, _)| v[1])
+            .collect();
+        assert!(floor.len() > 50, "{}", floor.len());
+        assert!(
+            floor.iter().all(|y| (y - 49.1).abs() < 0.02),
+            "floor heights {:?}",
+            floor
+                .iter()
+                .fold((f32::MAX, f32::MIN), |a, y| (a.0.min(*y), a.1.max(*y)))
+        );
+        assert_eq!(m.topology().non_manifold_edges, 0);
     }
 
     #[test]

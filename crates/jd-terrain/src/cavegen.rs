@@ -408,14 +408,31 @@ pub fn mask_points(
     spread(&pts, max, spacing_m)
 }
 
-/// Generate a cave from a node's inputs: the terrain, an optional water depth and, for karst
-/// without placed sinkholes, an optional inlet mask.
+/// Keep each speleothem with probability = the soil / vegetation cover (0..1) over it: drip water
+/// is only supersaturated enough to grow stalagmites when it took up CO₂ from soil and plants
+/// (Kaufmann 2003), so caves under bare rock or desert stay nearly bare. A stalactite and the
+/// stalagmite under it share one draw (same site), so pairs stay pairs.
+pub fn thin_by_cover(sys: &mut CaveSystem, cover: &Heightfield, extent_m: [f64; 2], seed: u64) {
+    sys.speleothems.retain(|s| {
+        let c = ground(cover, extent_m, s.at[0], s.at[1]).clamp(0.0, 1.0);
+        let h = unit(mix(seed
+            ^ 0xC0FE
+            ^ mix(u64::from(s.at[0].to_bits()))
+            ^ mix(u64::from(s.at[1].to_bits()) << 17)));
+        h < c
+    });
+}
+
+/// Generate a cave from a node's inputs: the terrain, an optional water depth, for karst without
+/// placed sinkholes an optional inlet mask, and an optional soil / vegetation cover that sets
+/// how many speleothems grow.
 pub fn cave_in_terrain(
     p: &CaveParams,
     hf: &Heightfield,
     extent_m: [f64; 2],
     water: Option<&Heightfield>,
     inlets: Option<&Heightfield>,
+    cover: Option<&Heightfield>,
 ) -> JdResult<Generated> {
     let mut q = p.clone();
     if q.entrances.is_empty()
@@ -429,14 +446,18 @@ pub fn cave_in_terrain(
             (0.15 * q.reach_m).max(20.0),
         );
     }
-    generate_cave(
+    let mut made = generate_cave(
         &q,
         &Ground {
             hf,
             extent_m,
             water,
         },
-    )
+    )?;
+    if let Some(c) = cover {
+        thin_by_cover(&mut made.system, c, extent_m, p.seed);
+    }
+    Ok(made)
 }
 
 /// A standard normal sample (Box–Muller).
@@ -911,6 +932,69 @@ fn karst(p: &CaveParams, g: &Ground, notes: &mut Vec<String>) -> JdResult<CaveSy
             profile,
         };
         sys.passages.push(ps);
+    }
+    // Side passages: real caves branch every hundred metres or so into leads that end blind
+    // (abandoned tributaries, fissures followed a little way). Without them the network is a few
+    // long branches; with them its branch lengths fall inside surveyed caves' (Paris 2021, Table 2).
+    let trunks = sys.passages.clone();
+    for (pi, tr) in trunks.iter().enumerate() {
+        if tr.points.len() < 3 {
+            continue;
+        }
+        let mut r = Rng::new(p.seed ^ 0x51DE, pi as u64);
+        let mut next = r.range(80.0, 160.0);
+        let mut run = 0.0f32;
+        for i in 1..tr.points.len() - 1 {
+            let (a, b) = (tr.points[i - 1], tr.points[i]);
+            let horiz = (b[0] - a[0]).hypot(b[1] - a[1]);
+            run += horiz;
+            // Branch only off a level stretch (not a shaft or a steep ramp).
+            if run < next || (b[2] - a[2]).abs() > 0.5 * horiz {
+                continue;
+            }
+            next = run + r.range(80.0, 160.0);
+            let t = [tr.points[i + 1][0] - a[0], tr.points[i + 1][1] - a[1]];
+            let tl = t[0].hypot(t[1]).max(1e-3);
+            let side = if r.f() < 0.5 { 1.0 } else { -1.0 };
+            let ang = side * r.range(0.7, 1.55);
+            let (c, sn) = (ang.cos(), ang.sin());
+            let d = [(t[0] * c - t[1] * sn) / tl, (t[0] * sn + t[1] * c) / tl];
+            let len = r.range(30.0, 90.0) * p.size;
+            let mut pts = vec![b];
+            let mut k = 1;
+            while (k as f32) * 6.0 <= len {
+                let q = [
+                    b[0] + d[0] * k as f32 * 6.0,
+                    b[1] + d[1] * k as f32 * 6.0,
+                    b[2] + 0.02 * k as f32 * 6.0,
+                ];
+                if !g.inside(q[0], q[1]) || g.z(q[0], q[1]) - q[2] < cover {
+                    break;
+                }
+                pts.push(q);
+                k += 1;
+            }
+            if pts.len() < 3 {
+                continue;
+            }
+            let pts = meander(&pts, 6.0, 4.0, p.seed ^ (pi as u64) << 8 ^ i as u64);
+            let n = pts.len();
+            let (w0, h0) = (tr.half_width_m[i] * 0.75, tr.half_height_m[i] * 0.75);
+            sys.passages.push(Passage {
+                half_width_m: (0..n)
+                    .map(|j| (w0 * (1.0 - 0.5 * j as f32 / n as f32)).max(0.4))
+                    .collect(),
+                half_height_m: (0..n)
+                    .map(|j| (h0 * (1.0 - 0.5 * j as f32 / n as f32)).max(0.4))
+                    .collect(),
+                points: pts,
+                profile: if tr.profile == Profile::Keyhole {
+                    Profile::Keyhole
+                } else {
+                    Profile::Tube
+                },
+            });
+        }
     }
     // Chambers at some junctions (breakdown rooms).
     let mut junctions: Vec<(usize, u32)> = deg.iter().map(|(n, d)| (*n, *d)).collect();
@@ -1795,6 +1879,170 @@ mod tests {
             &hf,
         );
         assert_eq!(again.system, g.system);
+    }
+
+    /// karstnet-style statistics of a cave skeleton, every polyline point a survey station:
+    /// (average vertex degree, average branch length between nodes of degree ≠ 2 in metres,
+    /// length-weighted orientation entropy of the legs over 18 bins of 10°, normalised to 0..1).
+    fn network_stats(sys: &CaveSystem) -> (f32, f32, f32) {
+        let key = |p: [f32; 3]| {
+            (
+                (p[0] * 10.0).round() as i64,
+                (p[1] * 10.0).round() as i64,
+                (p[2] * 10.0).round() as i64,
+            )
+        };
+        type Station = (i64, i64, i64);
+        let mut adj: HashMap<Station, Vec<Station>> = HashMap::new();
+        let mut pos: HashMap<Station, [f32; 3]> = HashMap::new();
+        let mut bins = [0.0f32; 18];
+        for q in &sys.passages {
+            for w in q.points.windows(2) {
+                let (a, b) = (key(w[0]), key(w[1]));
+                if a == b {
+                    continue;
+                }
+                adj.entry(a).or_default().push(b);
+                adj.entry(b).or_default().push(a);
+                pos.insert(a, w[0]);
+                pos.insert(b, w[1]);
+                let (dx, dy) = (w[1][0] - w[0][0], w[1][1] - w[0][1]);
+                let horiz = dx.hypot(dy);
+                if horiz > 0.1 {
+                    let az = dy.atan2(dx).rem_euclid(std::f32::consts::PI);
+                    bins[((az / std::f32::consts::PI * 18.0) as usize).min(17)] += horiz;
+                }
+            }
+        }
+        let edges: usize = adj.values().map(Vec::len).sum::<usize>() / 2;
+        let k = 2.0 * edges as f32 / adj.len() as f32;
+        // Branches: walk from every node of degree ≠ 2 along degree-2 chains.
+        let mut seen = std::collections::HashSet::new();
+        let mut branches = Vec::new();
+        for (&n, nb) in &adj {
+            if nb.len() == 2 {
+                continue;
+            }
+            for &first in nb {
+                if seen.contains(&(n, first)) {
+                    continue;
+                }
+                let (mut prev, mut cur, mut len) = (n, first, 0.0f32);
+                seen.insert((n, first));
+                loop {
+                    let (a, b) = (pos[&prev], pos[&cur]);
+                    len += ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2))
+                        .sqrt();
+                    if adj[&cur].len() != 2 {
+                        seen.insert((cur, prev));
+                        break;
+                    }
+                    let next = adj[&cur]
+                        .iter()
+                        .copied()
+                        .find(|&x| x != prev)
+                        .unwrap_or(prev);
+                    prev = cur;
+                    cur = next;
+                }
+                branches.push(len);
+            }
+        }
+        let l = branches.iter().sum::<f32>() / branches.len().max(1) as f32;
+        let total: f32 = bins.iter().sum();
+        let h = -bins
+            .iter()
+            .filter(|b| **b > 0.0)
+            .map(|b| (b / total) * (b / total).ln())
+            .sum::<f32>()
+            / 18f32.ln();
+        (k, l, h)
+    }
+
+    #[test]
+    fn karst_networks_fall_inside_the_statistics_of_real_caves() {
+        // Paris et al. 2021, Table 2 (34 surveyed caves): average degree 1.8–2.6, average branch
+        // length 8–331 m, orientation entropy 0.8–1.0.
+        // Karst country: a limestone plateau (340 m) ending in an escarpment above a valley (60 m).
+        let mut hf = Heightfield::new(128, 128, 64, 2).expect("hf");
+        hf.fill_with(|x, y| {
+            60.0 + 280.0 / (1.0 + ((x as f32 - 90.0) / 5.0).exp())
+                + 4.0 * (y as f32 / 6.0).sin()
+                + 3.0 * (x as f32 / 7.0).cos()
+        });
+        for seed in 1..=5u64 {
+            let g = make(
+                CaveParams {
+                    seed,
+                    reach_m: 700.0,
+                    ..Default::default()
+                },
+                &hf,
+            );
+            let (k, l, h) = network_stats(&g.system);
+            assert!((1.8..=2.6).contains(&k), "seed {seed}: degree {k}");
+            assert!((8.0..=331.0).contains(&l), "seed {seed}: branch length {l}");
+            assert!(
+                (0.8..=1.0).contains(&h),
+                "seed {seed}: orientation entropy {h}"
+            );
+        }
+    }
+
+    #[test]
+    fn speleothems_grow_where_soil_and_plants_cover_the_rock() {
+        let mut hf = Heightfield::new(128, 128, 64, 2).expect("hf");
+        hf.fill_with(|x, y| {
+            60.0 + 280.0 / (1.0 + ((x as f32 - 90.0) / 5.0).exp()) + 4.0 * (y as f32 / 6.0).sin()
+        });
+        let p = CaveParams {
+            seed: 3,
+            reach_m: 700.0,
+            speleothems: 8.0,
+            ..Default::default()
+        };
+        let all = cave_in_terrain(&p, &hf, EXT, None, None, None)
+            .expect("bare")
+            .system
+            .speleothems;
+        assert!(all.len() > 20, "{}", all.len());
+        let field = |f: &(dyn Fn(u32, u32) -> f32 + Sync)| {
+            let mut c = Heightfield::new(128, 128, 64, 2).expect("c");
+            c.fill_with(f);
+            c
+        };
+        let none = cave_in_terrain(&p, &hf, EXT, None, None, Some(&field(&|_, _| 0.0)))
+            .expect("rock")
+            .system
+            .speleothems;
+        assert!(none.is_empty(), "bare rock grows none: {}", none.len());
+        let full = cave_in_terrain(&p, &hf, EXT, None, None, Some(&field(&|_, _| 1.0)))
+            .expect("soil")
+            .system
+            .speleothems;
+        assert_eq!(full, all, "full cover keeps them all");
+        // Soil over the northern half only: every speleothem left is under it, and pairs survive together.
+        let half = cave_in_terrain(
+            &p,
+            &hf,
+            EXT,
+            None,
+            None,
+            Some(&field(&|_, y| if y >= 64 { 1.0 } else { 0.0 })),
+        )
+        .expect("half")
+        .system
+        .speleothems;
+        assert!(!half.is_empty() && half.len() < all.len());
+        assert!(half.iter().all(|s| s.at[1] > 500.0), "all under the soil");
+        for s in half.iter().filter(|s| s.kind == SpeleothemKind::Stalagmite) {
+            assert!(
+                half.iter().any(|t| t.kind == SpeleothemKind::Stalactite
+                    && t.at[0] == s.at[0]
+                    && t.at[1] == s.at[1]),
+                "pair kept together"
+            );
+        }
     }
 
     #[test]

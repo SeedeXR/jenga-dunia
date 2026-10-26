@@ -8,6 +8,10 @@ export default defineConfig({
   // flow takes ~90 s there (≈3 s locally). Generous there, tight locally.
   timeout: process.env.CI ? 300_000 : 90_000,
   retries: 0,
+  // UI text follows core work (evaluations, bakes, previews): on a loaded machine (load average
+  // 20–35 measured 2026-10-25) Playwright's 5 s default lost races that pass at idle, in specs
+  // unrelated to the change under test. Assertions still return as soon as they pass.
+  expect: { timeout: 15_000 },
   reporter: [["list"]],
   use: {
     // Locally, reuse the system Chrome (no 150 MB download); CI installs Playwright's Chromium.

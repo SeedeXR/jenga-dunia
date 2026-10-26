@@ -449,7 +449,7 @@
   },
   {
     "kind": "jd.cave.system@1",
-    "description": "A cave system under the terrain — `kind`: karst (sinkholes → spring through phreatic tubes and vadose canyons, chambers, stalactites and stalagmites), lava_tube (under a flow path, skylights), sea_cave (at sea level into cliffs, arches), mountain (wandering caves under hills), mine (adit rising 1 in 200, crosscuts, levels, shaft), tunnel (two portals), catacombs (a shallow maze). `entrances` are the points you place; an optional `water` depth layer (lakes, rivers, the sea) floods what lies under it and puts springs under water; an optional `inlets` mask (the karst node's `sinkholes`) gives a karst cave its sinkholes. Outputs the terrain unchanged, the `holes` mask over the entrances (wire it to the exports) and the `plan` footprint; `caves.mesh` / `caves.export` build the 3-D walls",
+    "description": "A cave system under the terrain — `kind`: karst (sinkholes → spring through phreatic tubes and vadose canyons, chambers, stalactites and stalagmites), lava_tube (under a flow path, skylights), sea_cave (at sea level into cliffs, arches), mountain (wandering caves under hills), mine (adit rising 1 in 200, crosscuts, levels, shaft), tunnel (two portals), catacombs (a shallow maze). `entrances` are the points you place; an optional `water` depth layer (lakes, rivers, the sea) floods what lies under it and puts springs under water; an optional `inlets` mask (the karst node's `sinkholes`) gives a karst cave its sinkholes; an optional `cover` (0..1 soil / vegetation, e.g. a forest or grassland mask) sets how many speleothems grow — bare rock and desert grow almost none. Outputs the terrain unchanged, the `holes` mask over the entrances (wire it to the exports) and the `plan` footprint; `caves.mesh` / `caves.export` build the 3-D walls",
     "inputs": [
       {
         "name": "in",
@@ -463,6 +463,11 @@
       },
       {
         "name": "inlets",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "cover",
         "ty": "heightfield",
         "required": false
       }

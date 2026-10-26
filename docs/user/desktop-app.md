@@ -337,3 +337,5 @@ Every button calls the same operation the CLI and MCP server expose (`jd schema 
 | Native window | screenshots of the real Tauri app on macOS; interaction recording requires Accessibility permission for the automating process | this page |
 
 The viewport draws scatter instances as cones, or as low-poly boulders when the mask's name says debris, rock, boulder, scree or talus; a lava flow's `heat` layer is coloured with a glow ramp (black through red to yellow) when it is the colour layer. Known limits of this build: the viewport's boulders are a stand-in for the core's generated rocks (the GLB export writes the real ones). The tutorial images are the real app annotated by `scripts/annotate.mjs`; the Figma file linked in the brief is the design reference and receives the same screenshots once the connector is authorised.
+
+Assertions wait up to 15 s (`expect.timeout` in `playwright.config.ts`): the UI's text follows core work, and on a loaded machine (load average 20–35) Playwright's 5 s default lost races in specs unrelated to the change under test. They return as soon as they pass; two full runs at load average 23–25 passed 38 / 38.

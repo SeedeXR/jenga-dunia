@@ -1373,13 +1373,14 @@ pub mod graph {
             JdError::invalid("id", "the cave node has no terrain wired to `in`")
                 .next("Connect a terrain output to the cave node's `in` port.")
         })?;
-        let (water, inlets) = (input("water"), input("inlets"));
+        let (water, inlets, cover) = (input("water"), input("inlets"), input("cover"));
         let made = jd_terrain::cave_in_terrain(
             &cp,
             &hf,
             world.extent_m,
             water.as_deref(),
             inlets.as_deref(),
+            cover.as_deref(),
         )?;
         Ok((made, hf, world.extent_m))
     }

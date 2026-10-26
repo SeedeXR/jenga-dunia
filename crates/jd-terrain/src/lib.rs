@@ -53,6 +53,7 @@ pub use aeolian::{AeolianParams, aeolian_transport, aeolian_transport_with};
 pub use bathymetry::{BathymetryParams, bathymetry, bathymetry_with};
 pub use cavegen::{
     CaveKind, CaveParams, Generated, Ground, cave_in_terrain, generate_cave, mask_points,
+    thin_by_cover,
 };
 pub use caves::{
     CaveField, CaveSystem, Chamber, Entrance, EntranceKind, Passage, Profile, Speleothem,

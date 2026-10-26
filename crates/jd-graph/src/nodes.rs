@@ -1700,11 +1700,12 @@ pub fn register_all(r: &mut Registry) {
     ).with_memory(16.0));
     r.register(NodeDef::new::<jd_terrain::CaveParams, _>(
         "jd.cave.system@1",
-        "A cave system under the terrain — `kind`: karst (sinkholes → spring through phreatic tubes and vadose canyons, chambers, stalactites and stalagmites), lava_tube (under a flow path, skylights), sea_cave (at sea level into cliffs, arches), mountain (wandering caves under hills), mine (adit rising 1 in 200, crosscuts, levels, shaft), tunnel (two portals), catacombs (a shallow maze). `entrances` are the points you place; an optional `water` depth layer (lakes, rivers, the sea) floods what lies under it and puts springs under water; an optional `inlets` mask (the karst node's `sinkholes`) gives a karst cave its sinkholes. Outputs the terrain unchanged, the `holes` mask over the entrances (wire it to the exports) and the `plan` footprint; `caves.mesh` / `caves.export` build the 3-D walls",
+        "A cave system under the terrain — `kind`: karst (sinkholes → spring through phreatic tubes and vadose canyons, chambers, stalactites and stalagmites), lava_tube (under a flow path, skylights), sea_cave (at sea level into cliffs, arches), mountain (wandering caves under hills), mine (adit rising 1 in 200, crosscuts, levels, shaft), tunnel (two portals), catacombs (a shallow maze). `entrances` are the points you place; an optional `water` depth layer (lakes, rivers, the sea) floods what lies under it and puts springs under water; an optional `inlets` mask (the karst node's `sinkholes`) gives a karst cave its sinkholes; an optional `cover` (0..1 soil / vegetation, e.g. a forest or grassland mask) sets how many speleothems grow — bare rock and desert grow almost none. Outputs the terrain unchanged, the `holes` mask over the entrances (wire it to the exports) and the `plan` footprint; `caves.mesh` / `caves.export` build the 3-D walls",
         vec![
             port("in", PortType::Heightfield, true),
             port("water", PortType::Heightfield, false),
             port("inlets", PortType::Heightfield, false),
+            port("cover", PortType::Heightfield, false),
         ],
         vec![port("out", PortType::Heightfield, false), port("holes", PortType::Heightfield, false), port("plan", PortType::Heightfield, false)],
         |ctx, p, i| {
@@ -1713,7 +1714,8 @@ pub fn register_all(r: &mut Registry) {
             let extent = ctx.lod_world.extent_m;
             let water = i.get("water").map(|v| v.as_field());
             let inlets = i.get("inlets").map(|v| v.as_field());
-            let made = jd_terrain::cave_in_terrain(&cp, hf, extent, water.map(|w| &**w), inlets.map(|m| &**m))?;
+            let cover = i.get("cover").map(|v| v.as_field());
+            let made = jd_terrain::cave_in_terrain(&cp, hf, extent, water.map(|w| &**w), inlets.map(|m| &**m), cover.map(|c| &**c))?;
             let holes = jd_terrain::entrance_holes(&made.system, hf, extent)?;
             let plan = jd_terrain::cave_plan(&made.system, hf, extent)?;
             Ok(BTreeMap::from([
