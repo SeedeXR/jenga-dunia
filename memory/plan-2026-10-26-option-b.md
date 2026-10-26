@@ -128,4 +128,12 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   the desktop's full order (… sea · waves · fog · sun · pbr · sky · box · shore · horizon · preview).
   Side-by-side checked (JD_PARITY_SEA capture). Terrain picking (`Viewport::pick`, ray march +
   bisection, unit-tested) is in for the tools; Sculpt / Grid wait for their P4 panels.
+- P4 slice 2 (Sun card A) + P3 lakes / rain: the right column with the Sun section — Textured
+  (PBR) (desktop-style checkbox), azimuth, elevation, turbidity, clouds, fog, rain — with the
+  desktop's 400 ms look write / 150 ms sky re-bake; Studio's own look writes re-read project.info
+  only (no terrain refresh). Lakes (fill depth, sea look, sea_fs) and rain streaks (seeded as the
+  desktop, 1.2 % fall per 60 Hz frame) in the viewport; readout lakes / rain fields. Order found:
+  scatter / caves / overlays / post depend on right-column panels → port them panel by panel with
+  their viewport effects. Next: Sun card B (HDRI, exposure / bloom / vignette post pipeline,
+  flythrough keys), then Scatter, Caves, Actions, Simulation layers, Materials, Noise, Export.
 

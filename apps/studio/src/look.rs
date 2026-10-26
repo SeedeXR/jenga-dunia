@@ -206,3 +206,35 @@ pub fn ring(ui: &Ui, rect: egui::Rect) {
     ui.painter()
         .rect_stroke(rect, 12.0, Stroke::new(1.0, HAIRLINE), StrokeKind::Inside);
 }
+
+/// The desktop's checkbox (`accent-color: primary` on the native control): a 13 px rounded box,
+/// filled blue with a white tick when on, a hairline square when off. `name` is its accessible
+/// label (the row's text).
+pub fn checkbox(ui: &mut Ui, on: &mut bool, name: &str) -> Response {
+    let (rect, mut resp) = ui.allocate_exact_size(vec2(13.0, 13.0), Sense::click());
+    if resp.clicked() {
+        *on = !*on;
+        resp.mark_changed();
+    }
+    if ui.is_rect_visible(rect) {
+        let p = ui.painter();
+        if *on {
+            p.rect_filled(rect, 3.0, color::PRIMARY);
+            let c = rect.center();
+            p.add(egui::Shape::line(
+                vec![
+                    c + vec2(-3.5, 0.0),
+                    c + vec2(-1.0, 2.5),
+                    c + vec2(3.5, -2.5),
+                ],
+                Stroke::new(1.8, Color32::WHITE),
+            ));
+        } else {
+            p.rect_filled(rect, 3.0, color::BG2);
+            p.rect_stroke(rect, 3.0, Stroke::new(1.0, color::FG2), StrokeKind::Inside);
+        }
+    }
+    let (state, name) = (*on, name.to_owned());
+    resp.widget_info(|| WidgetInfo::selected(Role::CheckBox, true, state, &name));
+    resp
+}

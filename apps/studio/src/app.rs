@@ -54,6 +54,8 @@ enum Tag {
     Info,
     Graph,
     Layers,
+    /// `project.info` after Studio's own look write: the project's look, nothing else.
+    InfoOnly,
     Stats(String),
     Preview([f32; 2], u32, Instant),
 }
@@ -153,6 +155,13 @@ pub struct StudioApp {
     editor_error: Option<String>,
     sky_for: Option<SunLook>,
     show_horizon: bool,
+    /// The Sun panel's values (the desktop's `sun` state; written to the look 400 ms after an
+    /// edit settles, the sky re-baked 150 ms after).
+    sun: SunLook,
+    rain: f64,
+    pbr: bool,
+    look_due: Option<Instant>,
+    sky_due: Option<Instant>,
     /// The wind the last `ocean.waves` was fetched for, and its result.
     waves_for: Option<[Option<f64>; 3]>,
     waves: Option<Value>,
@@ -198,6 +207,11 @@ impl StudioApp {
             editor_error: None,
             sky_for: None,
             show_horizon: false,
+            sun: SunLook::of(&Value::Null),
+            rain: 0.0,
+            pbr: true,
+            look_due: None,
+            sky_due: None,
             waves_for: None,
             waves: None,
         };
@@ -385,7 +399,12 @@ impl StudioApp {
                 Msg::Event { topic, data } => {
                     if topic == "project_changed" {
                         tracing::debug!(op = %data["op"], "project changed");
-                        self.refresh();
+                        // A look write changes no terrain: re-read the project, not the preview.
+                        if data["op"] == "project.set_look" {
+                            self.invoke(Tag::InfoOnly, "project.info", json!({}));
+                        } else {
+                            self.refresh();
+                        }
                     }
                 }
                 Msg::EditorExited(status) => {
@@ -494,11 +513,12 @@ impl StudioApp {
                     return self.refresh_done();
                 }
                 let info = r.result.unwrap_or_default();
-                let sun = SunLook::of(&info["look"]["sun"]);
-                self.viewport.set_sun(sun.0[0] as f32, sun.0[1] as f32);
-                self.viewport.set_fog(sun.0[4] as f32);
-                if self.sky_for != Some(sun) {
-                    self.fetch_sky(sun);
+                if self.look_due.is_none() {
+                    self.sun = SunLook::of(&info["look"]["sun"]);
+                }
+                self.apply_sun();
+                if self.sky_for != Some(self.sun) && self.sky_due.is_none() {
+                    self.fetch_sky(self.sun);
                 }
                 if self.path_input.is_empty() {
                     self.path_input = info["path"].as_str().unwrap_or_default().to_owned();
@@ -506,6 +526,11 @@ impl StudioApp {
                 self.project = Some(info);
                 self.invoke(Tag::Graph, "graph.list", json!({}));
                 self.invoke(Tag::Layers, "terrain.layers", json!({}));
+            }
+            Tag::InfoOnly => {
+                if !failed {
+                    self.project = r.result;
+                }
             }
             Tag::Graph => {
                 if !failed {
@@ -773,6 +798,9 @@ impl StudioApp {
         let Some(layer) = self.layer.clone() else {
             return;
         };
+        if !self.pbr {
+            return self.viewport.set_maps(None);
+        }
         if !layer
             .split('#')
             .next()
@@ -819,6 +847,158 @@ impl StudioApp {
             let _ = tx.send(Msg::Maps(layer, maps, ms));
             ctx.request_repaint();
         });
+    }
+
+    /// The Sun panel's values on the viewport.
+    fn apply_sun(&mut self) {
+        let [az, el, _, _, fog] = self.sun.0;
+        self.viewport.set_sun(az as f32, el as f32);
+        self.viewport.set_fog(fog as f32);
+        self.viewport.set_rain(self.rain as f32);
+    }
+
+    /// The desktop's `setSun`: the viewport follows at once; the look is written 400 ms and the
+    /// sky re-baked 150 ms after the edit settles.
+    fn sun_edited(&mut self) {
+        self.apply_sun();
+        let now = Instant::now();
+        if self.project.is_some() {
+            self.look_due = Some(now + std::time::Duration::from_millis(400));
+        }
+        self.sky_due = Some(now + std::time::Duration::from_millis(150));
+    }
+
+    /// The desktop's `writeLook`: materials, scatter and sun in one `project.set_look`.
+    fn write_look(&mut self) {
+        let Some(p) = &self.project else { return };
+        let look = &p["look"];
+        let scatter = if look["scatter"].is_null() {
+            json!({ "mask": null, "spacing_m": 40, "seed": 1, "grow": false })
+        } else {
+            look["scatter"].clone()
+        };
+        let [az, el, turbidity, clouds, fog] = self.sun.0;
+        let params = json!({
+            "materials": look["materials"].as_array().cloned().unwrap_or_default(),
+            "scatter": scatter,
+            "sun": { "azimuth_deg": az, "elevation_deg": el, "turbidity": turbidity, "clouds": clouds, "fog": fog },
+        });
+        self.invoke(Tag::User, "project.set_look", params);
+    }
+
+    /// Fire the debounced look write and sky bake when due.
+    fn tick(&mut self, ctx: &egui::Context) {
+        let now = Instant::now();
+        if self.look_due.is_some_and(|t| now >= t) {
+            self.look_due = None;
+            self.write_look();
+        }
+        if self.sky_due.is_some_and(|t| now >= t) {
+            self.sky_due = None;
+            self.fetch_sky(self.sun);
+        }
+        if let Some(next) = [self.look_due, self.sky_due].into_iter().flatten().min() {
+            ctx.request_repaint_after(next.saturating_duration_since(now));
+        }
+    }
+
+    /// The right column's Sun section (the desktop's, in its order; HDRI, post and the
+    /// flythrough keys arrive with the post pipeline).
+    fn sun_card(&mut self, ui: &mut egui::Ui) {
+        use crate::widgets::Range;
+        look::section(ui, "Sun");
+        look::field(ui, "Textured (PBR)", |ui| {
+            let mut on = self.pbr;
+            look::checkbox(ui, &mut on, "Textured (PBR)").on_hover_text("Shade the terrain with baked albedo, normal and roughness maps (full-field relief at any preview LOD); off = height-ramp vertex colours");
+            if on != self.pbr {
+                self.pbr = on;
+                self.fetch_maps();
+            }
+        });
+        let mut edited = false;
+        let [mut az, mut el, mut turbidity, mut clouds, mut fog] = self.sun.0;
+        let mut rain = self.rain;
+        let mut slider = |ui: &mut egui::Ui,
+                          label: String,
+                          v: &mut f64,
+                          range: std::ops::RangeInclusive<f64>,
+                          step: f64,
+                          reset: f64,
+                          tip: &str| {
+            look::field(ui, &label, |ui| {
+                let r = ui
+                    .add(Range::new(v, range, &label).step(step).reset(reset))
+                    .on_hover_text(tip);
+                edited |= r.changed();
+            });
+        };
+        slider(
+            ui,
+            format!("Azimuth {}°", number(&json!(az))),
+            &mut az,
+            0.0..=359.0,
+            1.0,
+            140.0,
+            "Direction the light comes from, clockwise from north",
+        );
+        slider(
+            ui,
+            format!("Elevation {}°", number(&json!(el))),
+            &mut el,
+            3.0..=90.0,
+            1.0,
+            35.0,
+            "Height of the sun above the horizon; low sun is warm and long-shadowed",
+        );
+        slider(
+            ui,
+            format!("Turbidity {}", number(&json!(turbidity))),
+            &mut turbidity,
+            2.0..=10.0,
+            0.5,
+            3.0,
+            "Atmospheric haze for the sky dome: 2 clear mountain air, 3 clear, 6 hazy, 10 thick haze (Preetham daylight model)",
+        );
+        slider(
+            ui,
+            format!("Clouds {} %", (clouds * 100.0).round()),
+            &mut clouds,
+            0.0..=1.0,
+            0.05,
+            0.0,
+            "Cloud cover on the sky dome and in the HDRI bake: a seeded cumulus-like noise layer, brighter on the sun side",
+        );
+        slider(
+            ui,
+            format!("Fog {} %", (fog * 100.0).round()),
+            &mut fog,
+            0.0..=1.0,
+            0.05,
+            0.0,
+            "Viewport fog: 0 keeps the faint aerial perspective, 1 closes the view within the world's width (a look setting — bakes and exports are untouched)",
+        );
+        slider(
+            ui,
+            format!("Rain {} %", (rain * 100.0).round()),
+            &mut rain,
+            0.0..=1.0,
+            0.05,
+            0.0,
+            "Rain falling in the viewport (look only); the rain itself is the jd.climate.rain node's field — wet surfaces come from a material on that layer",
+        );
+        if edited {
+            // Snap to the slider's 0.05 steps the way the desktop's inputs report them.
+            let r2 = |v: f64| (v * 100.0).round() / 100.0;
+            self.sun = SunLook([
+                az.round(),
+                el.round(),
+                (turbidity * 2.0).round() / 2.0,
+                r2(clouds),
+                r2(fog),
+            ]);
+            self.rain = r2(rain);
+            self.sun_edited();
+        }
     }
 
     fn world_inputs(&self) -> Option<(f64, u32)> {
@@ -1027,20 +1207,11 @@ impl StudioApp {
                 s += &format!(" · waves {h:.1} m / {} m", len.round());
             }
         }
-        let fog = self
-            .project
-            .as_ref()
-            .and_then(|p| p["look"]["sun"]["fog"].as_f64())
-            .unwrap_or(0.0);
+        let [az, el, _, _, fog] = self.sun.0;
         if fog > 0.0 {
             s += &format!(" · fog {} %", (fog * 100.0).round());
         }
-        if let Some(p) = &self.project {
-            let sun = &p["look"]["sun"];
-            let az = sun["azimuth_deg"].as_f64().unwrap_or(140.0);
-            let el = sun["elevation_deg"].as_f64().unwrap_or(35.0);
-            s += &format!(" · sun {el}°/{az}°");
-        }
+        s += &format!(" · sun {}°/{}°", number(&json!(el)), number(&json!(az)));
         if self.viewport.lake_cells() > 0 {
             s += &format!(
                 " · lakes {} cells",
@@ -1055,6 +1226,9 @@ impl StudioApp {
         }
         if self.viewport.frame && self.viewport.info().is_some() {
             s += " · box";
+        }
+        if let Some(rain) = self.viewport.rain() {
+            s += &format!(" · rain {} %", (rain * 100.0).round());
         }
         if self.viewport.shore_segments() > 0 {
             s += &format!(
@@ -1546,6 +1720,7 @@ fn decode_preview(v: &Value) -> Result<(jd_terrain::preview::Preview, usize), St
 impl eframe::App for StudioApp {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         self.drain();
+        self.tick(ui.ctx());
         if self.fullscreen && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.set_fullscreen(ui.ctx(), false);
         }
@@ -1569,6 +1744,25 @@ impl eframe::App for StudioApp {
                     bottom: 8,
                 }))
                 .show(ui, |ui| self.log_card(ui));
+            egui::Panel::right("panel-right")
+                .resizable(true)
+                .default_size(292.0)
+                .size_range(232.0..=572.0)
+                .frame(bg.inner_margin(Margin {
+                    left: 4,
+                    right: 8,
+                    top: 8,
+                    bottom: 8,
+                }))
+                .show(ui, |ui| {
+                    look::card().show(ui, |ui| {
+                        ui.set_min_size(ui.available_size());
+                        ScrollArea::vertical()
+                            .id_salt("panel-right")
+                            .auto_shrink(false)
+                            .show(ui, |ui| self.sun_card(ui));
+                    });
+                });
             egui::Panel::left("panel-left")
                 .resizable(true)
                 .default_size(272.0)

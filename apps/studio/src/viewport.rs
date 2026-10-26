@@ -144,6 +144,54 @@ fn lakes_mesh(
     Some((v, indices, wet))
 }
 
+/// The desktop's rain: `400 + 3600 × amount` streaks through a box from the lowest point to above
+/// the peaks (seeded like the desktop, so the same streaks), 4 % of the box tall, pale blue at
+/// `0.25 + 0.4 × amount` opacity. Returns the segments, the box's top and bottom.
+fn rain_streaks(pv: &Preview, extent_m: [f32; 2], amount: f32) -> (Vec<ColorVertex>, f32, f32) {
+    let n = (400.0 + 3600.0 * amount).round() as usize;
+    let top = pv.max + (pv.max - pv.min) * 0.6 + 50.0;
+    let bottom = pv.min;
+    let len = (top - bottom) * 0.04;
+    let mut seed: f64 = 7.0;
+    let mut rnd = || {
+        seed = (seed * 16807.0) % 2147483647.0;
+        (seed / 2147483647.0) as f32
+    };
+    let c = hex(0xc8d6e8);
+    let color = [c[0], c[1], c[2], 0.25 + 0.4 * amount];
+    let mut out = Vec::with_capacity(n * 2);
+    for _ in 0..n {
+        let x = (rnd() - 0.5) * extent_m[0];
+        let z = (rnd() - 0.5) * extent_m[1];
+        let y = bottom + rnd() * (top - bottom);
+        out.push(ColorVertex {
+            pos: [x, y, z],
+            color,
+        });
+        out.push(ColorVertex {
+            pos: [x + len * 0.08, y - len, z],
+            color,
+        });
+    }
+    (out, top, bottom)
+}
+
+/// One animation frame of the rain (the desktop's `animateRain`): every streak falls 1.2 % of the
+/// box; one that leaves the bottom starts again at the top.
+fn rain_fall(streaks: &mut [ColorVertex], top: f32, bottom: f32) {
+    let fall = (top - bottom) * 0.012;
+    for pair in streaks.as_chunks_mut::<2>().0 {
+        let (mut y0, mut y1) = (pair[0].pos[1] - fall, pair[1].pos[1] - fall);
+        if y1 < bottom {
+            let len = y0 - y1;
+            y0 = top;
+            y1 = top - len;
+        }
+        pair[0].pos[1] = y0;
+        pair[1].pos[1] = y1;
+    }
+}
+
 /// The sea grid (vertices, indices) and its shoreline segments.
 type SeaGeometry = (Vec<ColorVertex>, Vec<u32>, Vec<ColorVertex>);
 
@@ -941,6 +989,11 @@ pub struct Viewport {
     rect: Rect,
     renders: u64,
     sea: Option<Sea>,
+    rain: f32,
+    rain_streaks: Vec<ColorVertex>,
+    rain_box: [f32; 2],
+    rain_buf: Option<(wgpu::Buffer, usize)>,
+    rain_frames: f32,
     lakes: Option<Preview>,
     pending_lakes: Option<Option<LakesGeometry>>,
     lakes_mesh: Option<(wgpu::Buffer, wgpu::Buffer, u32)>,
@@ -978,6 +1031,11 @@ impl Default for Viewport {
             rect: Rect::NOTHING,
             renders: 0,
             sea: None,
+            rain: 0.0,
+            rain_streaks: Vec::new(),
+            rain_box: [0.0, 0.0],
+            rain_buf: None,
+            rain_frames: 0.0,
             lakes: None,
             pending_lakes: None,
             lakes_mesh: None,
@@ -1018,6 +1076,7 @@ impl Viewport {
         self.dirty = true;
         self.rebuild_sea();
         self.rebuild_lakes();
+        self.rebuild_rain();
     }
 
     /// Draw the world as a framed block or not (the viewport's Frame button).
@@ -1156,6 +1215,32 @@ impl Viewport {
         self.lake_cells = built.as_ref().map_or(0, |b| b.2);
         self.pending_lakes = Some(built);
         self.dirty = true;
+    }
+
+    /// Rain falling in the viewport, 0..1 (the Sun panel's Rain; look only).
+    pub fn set_rain(&mut self, amount: f32) {
+        if self.rain == amount {
+            return;
+        }
+        self.rain = amount;
+        self.rebuild_rain();
+    }
+
+    fn rebuild_rain(&mut self) {
+        match (&self.shown, self.rain > 0.0) {
+            (Some((pv, extent)), true) => {
+                let (v, top, bottom) = rain_streaks(pv, *extent, self.rain);
+                self.rain_streaks = v;
+                self.rain_box = [top, bottom];
+            }
+            _ => self.rain_streaks.clear(),
+        }
+        self.dirty = true;
+    }
+
+    /// The rain amount while it falls.
+    pub fn rain(&self) -> Option<f32> {
+        (!self.rain_streaks.is_empty()).then_some(self.rain)
     }
 
     /// Wet cells of the lakes drawn.
@@ -1394,6 +1479,35 @@ impl Viewport {
                 )
             });
         }
+        if !self.rain_streaks.is_empty() {
+            // The desktop moves the rain once per animation frame (60 per second).
+            let frames = (self.started.elapsed().as_secs_f32() * 60.0).floor();
+            for _ in 0..((frames - self.rain_frames) as usize).min(4) {
+                rain_fall(&mut self.rain_streaks, self.rain_box[0], self.rain_box[1]);
+            }
+            self.rain_frames = frames;
+            let bytes: &[u8] = bytemuck::cast_slice(&self.rain_streaks);
+            match &self.rain_buf {
+                Some((buf, n)) if *n == self.rain_streaks.len() => {
+                    rs.queue.write_buffer(buf, 0, bytes)
+                }
+                _ => {
+                    use wgpu::util::DeviceExt as _;
+                    let buf = rs
+                        .device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("rain"),
+                            contents: bytes,
+                            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                        });
+                    self.rain_buf = Some((buf, self.rain_streaks.len()));
+                }
+            }
+            self.dirty = true;
+            ui.ctx().request_repaint();
+        } else {
+            self.rain_buf = None;
+        }
         if self.waves_animate() {
             self.dirty = true;
             ui.ctx().request_repaint();
@@ -1585,6 +1699,12 @@ impl Viewport {
                 pass.set_vertex_buffer(0, v.slice(..));
                 pass.set_index_buffer(i.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..*n, 0, 0..1);
+            }
+            // The rain last (the desktop's streaks write no depth).
+            if let Some((buf, n)) = &self.rain_buf {
+                pass.set_pipeline(&gpu.lines);
+                pass.set_vertex_buffer(0, buf.slice(..));
+                pass.draw(0..*n as u32, 0..1);
             }
         }
         rs.queue.submit([encoder.finish()]);
@@ -2269,6 +2389,35 @@ mod tests {
             data: vec![1; 4],
         };
         assert!(lakes_mesh(&terrain, &other, [20.0, 20.0], &look).is_none());
+    }
+
+    #[test]
+    fn rain_falls_and_wraps_like_the_desktops() {
+        let pv = Preview {
+            width: 2,
+            height: 2,
+            min: 0.0,
+            max: 100.0,
+            data: vec![0; 4],
+        };
+        let (mut v, top, bottom) = rain_streaks(&pv, [1000.0, 1000.0], 0.5);
+        assert_eq!(v.len(), 2 * 2200);
+        assert_eq!((top, bottom), (210.0, 0.0));
+        assert!(
+            v.iter()
+                .all(|p| p.pos[0].abs() <= 500.0 + 1.0 && (p.color[3] - 0.45).abs() < 1e-6)
+        );
+        let before = v[0].pos[1];
+        rain_fall(&mut v, top, bottom);
+        assert!((before - v[0].pos[1] - 2.52).abs() < 1e-3 || v[0].pos[1] == top);
+        // Enough frames bring every streak back inside the box.
+        for _ in 0..200 {
+            rain_fall(&mut v, top, bottom);
+        }
+        assert!(
+            v.chunks(2)
+                .all(|p| p[1].pos[1] >= bottom - 1e-3 && p[0].pos[1] <= top + 1e-3)
+        );
     }
 
     #[test]

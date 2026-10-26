@@ -234,6 +234,58 @@ fn the_viewport_chrome_inserts_layers_frames_and_fits() {
     );
 }
 
+#[test]
+fn the_sun_card_writes_the_look_and_toggles_the_maps() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = engine(dir.path());
+    let probe = server.clone();
+    let mut h = window(server);
+    settle(&mut h, |a| {
+        a.viewport.info().is_some() && a.viewport.maps_px().is_some()
+    });
+    // Fog to 30 %: a keyboard edit on the slider (each arrow is one 0.05 step).
+    h.get_by_role_and_label(eframe::egui::accesskit::Role::Slider, "Fog 0 %")
+        .focus();
+    h.run();
+    for _ in 0..6 {
+        h.key_press(eframe::egui::Key::ArrowRight);
+        h.run();
+    }
+    // The desktop's 400 ms debounce, then the look on disk carries it.
+    let until = Instant::now() + Duration::from_secs(20);
+    loop {
+        h.step();
+        let info = probe
+            .invoke(Request::new("project.info", json!({})))
+            .result
+            .unwrap();
+        if info["look"]["sun"]["fog"]
+            .as_f64()
+            .is_some_and(|f| (f - 0.3).abs() < 1e-6)
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < until,
+            "the look was not written: {}",
+            info["look"]
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    settle(&mut h, |a| {
+        a.log_lines().any(|l| l.text == "project.set_look: ok")
+    });
+    // PBR off: the ramp colours (no maps); on again: the maps come back.
+    h.get_by_role_and_label(eframe::egui::accesskit::Role::CheckBox, "Textured (PBR)")
+        .click();
+    h.run_steps(2);
+    assert!(h.state().viewport.maps_px().is_none());
+    h.get_by_role_and_label(eframe::egui::accesskit::Role::CheckBox, "Textured (PBR)")
+        .click();
+    h.run_steps(1);
+    settle(&mut h, |a| a.viewport.maps_px().is_some());
+}
+
 /// `JD_STUDIO_CAPTURE=<png> cargo test -p jd-studio --test window -- --ignored capture`: the
 /// window rendered offscreen (no screen capture involved) on the project the desktop's
 /// `e2e/parity-capture.spec.ts` builds — same world, seed and starter graph — at the same
