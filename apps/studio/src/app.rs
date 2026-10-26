@@ -983,8 +983,8 @@ impl StudioApp {
         }
     }
 
-    /// The right column's Sun section (the desktop's, in its order; HDRI, post and the
-    /// flythrough keys arrive with the post pipeline).
+    /// The right column's Sun section (the desktop's, in its order; the flythrough keys are
+    /// next).
     fn sun_card(&mut self, ui: &mut egui::Ui) {
         use crate::widgets::Range;
         look::section(ui, "Sun");
@@ -1065,6 +1065,51 @@ impl StudioApp {
             }
             look::input(ui, &mut self.hdri_path, 96.0, "", "HDRI");
         });
+        // Post: viewport-only, never saved (the desktop keeps it in the session too).
+        let post = self.viewport.post();
+        let [mut exposure, mut bloom, mut vignette] =
+            [post.exposure, post.bloom, post.vignette].map(f64::from);
+        let mut post_edited = false;
+        for (label, v, range, reset, tip) in [
+            (
+                "Exposure",
+                &mut exposure,
+                0.25..=4.0,
+                1.0,
+                "Tone-mapping exposure (ACES while any effect is on); 1 = the plain render",
+            ),
+            (
+                "Bloom",
+                &mut bloom,
+                0.0..=1.0,
+                0.0,
+                "Bloom strength on the bright parts (sun glints, lava glow); 0 = off",
+            ),
+            (
+                "Vignette",
+                &mut vignette,
+                0.0..=1.0,
+                0.0,
+                "Darken the frame's corners; 0 = off",
+            ),
+        ] {
+            let label = format!("{label} {}", number(&json!((*v * 100.0).round() / 100.0)));
+            look::field(ui, &label, |ui| {
+                let mut r = Range::new(v, range, &label).step(0.05).reset(reset);
+                if reset == 1.0 {
+                    r = r.fill_from(1.0);
+                }
+                post_edited |= ui.add(r).on_hover_text(tip).changed();
+            });
+        }
+        if post_edited {
+            let r2 = |v: f64| ((v * 100.0).round() / 100.0) as f32;
+            self.viewport.set_post(crate::post::Post {
+                exposure: r2(exposure),
+                bloom: r2(bloom),
+                vignette: r2(vignette),
+            });
+        }
         slider(
             ui,
             format!("Clouds {} %", (clouds * 100.0).round()),
@@ -1359,6 +1404,9 @@ impl StudioApp {
                 " · shore {}",
                 thousands(self.viewport.shore_segments() as u64)
             );
+        }
+        if let Some(post) = self.viewport.post().info() {
+            s += &format!(" · post {post}");
         }
         if let Some(px) = self.viewport.horizon_px() {
             s += &format!(" · horizon {px}²");

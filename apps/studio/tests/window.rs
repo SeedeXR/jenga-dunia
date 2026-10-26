@@ -315,6 +315,67 @@ fn the_sun_card_writes_the_look_and_toggles_the_maps() {
     settle(&mut h, |a| a.viewport.maps_px().is_some());
 }
 
+#[test]
+fn the_post_sliders_darken_the_corners_bloom_and_expose() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window(engine(dir.path()));
+    settle(&mut h, |a| a.viewport.info().is_some());
+    // Mean brightness of the viewport's corner and centre boxes (a tenth of its width).
+    let mean = |h: &mut Harness<'static, StudioApp>| {
+        let img = h.render().expect("render");
+        let r = h.state().viewport.rect().shrink(2.0);
+        let d = r.width() / 10.0;
+        let boxed = |x0: f32, y0: f32| {
+            let mut sum = 0.0;
+            let mut n = 0.0;
+            for y in (y0 as u32..(y0 + d) as u32).step_by(2) {
+                for x in (x0 as u32..(x0 + d) as u32).step_by(2) {
+                    let p = img.get_pixel(x, y).0;
+                    sum += f32::from(p[0]) + f32::from(p[1]) + f32::from(p[2]);
+                    n += 3.0;
+                }
+            }
+            sum / n
+        };
+        let c = r.center();
+        (
+            boxed(r.left(), r.bottom() - d),
+            boxed(c.x - d / 2.0, c.y - d / 2.0),
+        )
+    };
+    let nudge = |h: &mut Harness<'static, StudioApp>, label: &str, steps: usize| {
+        h.get_by_role_and_label(eframe::egui::accesskit::Role::Slider, label)
+            .focus();
+        h.run();
+        for _ in 0..steps {
+            h.key_press(eframe::egui::Key::ArrowRight);
+            h.run();
+        }
+    };
+    let (_, centre) = mean(&mut h);
+    assert!(!h.state().viewport_readout().contains(" · post"));
+    // Exposure 1.5 (ACES from here on, as with any effect): the centre brightens.
+    nudge(&mut h, "Exposure 1", 10);
+    let (corner, centre2) = mean(&mut h);
+    assert!(centre2 > centre * 1.05, "centre {centre} -> {centre2}");
+    // Vignette 0.5: the corner darkens; the centre, inside its 0.35 radius, keeps its light.
+    nudge(&mut h, "Vignette 0", 10);
+    let (corner2, centre3) = mean(&mut h);
+    // At the box (uv distance ≈ 0.64) the factor is ≈ 0.74 linear, ≈ 0.87 once sRGB-encoded.
+    assert!(corner2 < corner * 0.9, "corner {corner} -> {corner2}");
+    assert!(
+        (centre3 - centre2).abs() < 1.0,
+        "centre {centre2} -> {centre3}"
+    );
+    nudge(&mut h, "Bloom 0", 6);
+    let readout = h.state().viewport_readout();
+    assert!(
+        readout.contains(" · post bloom 0.3 · vignette 0.5 · exposure 1.5"),
+        "{readout}"
+    );
+    h.get_by_role_and_label(eframe::egui::accesskit::Role::Slider, "Bloom 0.3");
+}
+
 /// `JD_STUDIO_CAPTURE=<png> cargo test -p jd-studio --test window -- --ignored capture`: the
 /// window rendered offscreen (no screen capture involved) on the project the desktop's
 /// `e2e/parity-capture.spec.ts` builds — same world, seed and starter graph — at the same
@@ -355,6 +416,17 @@ fn capture_for_docs() {
         h.run_steps(1);
         settle(&mut h, |a| a.viewport.horizon_px().is_some());
         let out = out.replace(".png", "-horizon.png");
+        h.render().expect("render").save(&out).expect("save png");
+    }
+    // The post effects (JD_STUDIO_POST=1), as the desktop's JD_PARITY_POST: `<capture>-post.png`.
+    if std::env::var_os("JD_STUDIO_POST").is_some() {
+        h.state_mut().viewport.set_post(jd_studio::post::Post {
+            exposure: 1.5,
+            bloom: 0.6,
+            vignette: 0.5,
+        });
+        h.run_steps(2);
+        let out = out.replace(".png", "-post.png");
         h.render().expect("render").save(&out).expect("save png");
     }
 }

@@ -2,18 +2,21 @@
 //! TerrainView.tsx`): the layer's preview as a mesh with the height ramp and slope rock (or the
 //! baked PBR maps), lit like three's `MeshStandardMaterial` by the sun and the hemisphere light,
 //! with distance fog and the sky dome (the physical-sky preview, or the gradient), rendered by
-//! wgpu into Studio's own colour and depth targets (4× MSAA when supported) and shown in an egui
-//! panel as a native texture. Either button drags orbit, the wheel zooms.
+//! wgpu into a half-float scene target (4× MSAA when supported), finished by the post pass
+//! ([`crate::post`]) into Studio's own colour target, as three's WebGPU renderer does, and shown in
+//! an egui panel as a native texture. Either button drags orbit, the wheel zooms.
 
 use eframe::egui::{self, Align2, FontId, PointerButton, Rect, Sense, TextureId};
 use eframe::egui_wgpu::{RenderState, wgpu};
 use jd_terrain::preview::Preview;
 
+use crate::post::{self, Post, PostGpu, PostTargets};
 use crate::theme::color;
 
 /// What egui samples (it expects gamma-encoded `Rgba8Unorm`).
 const COLOR: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
-/// What we render through: an sRGB view of the same texture, so the hardware gamma-encodes.
+/// What the post pass writes through: an sRGB view of the same texture, so the hardware
+/// gamma-encodes.
 const COLOR_SRGB: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
@@ -776,15 +779,19 @@ struct Gpu {
     /// Textures bound in slots 2–6 (a 1 × 1 stand-in where nothing is loaded).
     textures: [wgpu::TextureView; 5],
     bind_group: wgpu::BindGroup,
+    post: PostGpu,
 }
 
 struct Targets {
     size: [u32; 2],
     /// The colour texture (what egui shows; Still reads it back).
     color: wgpu::Texture,
-    /// The sRGB view we render (or resolve) into.
+    /// The sRGB view the post pass writes.
     target: wgpu::TextureView,
+    /// The HDR scene the passes render (or resolve) into.
+    hdr: wgpu::TextureView,
     msaa: Option<wgpu::TextureView>,
+    post: PostTargets,
     depth: wgpu::TextureView,
     tex_id: TextureId,
 }
@@ -982,6 +989,7 @@ pub struct Viewport {
     pub frame: bool,
     sun_deg: [f32; 2],
     fog: f32,
+    post: Post,
     maps_px: Option<[u32; 2]>,
     emissive: bool,
     sky_px: Option<[u32; 2]>,
@@ -1024,6 +1032,7 @@ impl Default for Viewport {
             frame: true,
             sun_deg: [140.0, 35.0],
             fog: 0.0,
+            post: Post::default(),
             maps_px: None,
             emissive: false,
             sky_px: None,
@@ -1273,6 +1282,19 @@ impl Viewport {
         self.dirty = true;
     }
 
+    /// The post effects (exposure, bloom, vignette).
+    pub fn set_post(&mut self, post: Post) {
+        if post != self.post {
+            self.post = post;
+            self.dirty = true;
+        }
+    }
+
+    /// The post effects shown.
+    pub fn post(&self) -> Post {
+        self.post
+    }
+
     /// The terrain shown, if any.
     pub fn info(&self) -> Option<&TerrainInfo> {
         self.info.as_ref()
@@ -1520,10 +1542,11 @@ impl Viewport {
             ((rect.width() * ppp).round() as u32).max(1),
             ((rect.height() * ppp).round() as u32).max(1),
         ];
-        if self.targets.as_ref().is_none_or(|t| t.size != size) {
-            let samples = self.gpu.as_ref().map_or(1, |g| g.samples);
+        if let Some(gpu) = &self.gpu
+            && self.targets.as_ref().is_none_or(|t| t.size != size)
+        {
             let old = self.targets.take().map(|t| t.tex_id);
-            self.targets = Some(create_targets(rs, size, samples, old));
+            self.targets = Some(create_targets(rs, gpu, size, old));
             self.dirty = true;
         }
         if self.mesh.is_none() {
@@ -1637,8 +1660,8 @@ impl Viewport {
                 a: 1.0,
             };
             let (view, resolve) = match &t.msaa {
-                Some(msaa) => (msaa, Some(&t.target)),
-                None => (&t.target, None),
+                Some(msaa) => (msaa, Some(&t.hdr)),
+                None => (&t.hdr, None),
             };
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("terrain"),
@@ -1707,6 +1730,8 @@ impl Viewport {
                 pass.draw(0..*n as u32, 0..1);
             }
         }
+        gpu.post
+            .encode(rs, &mut encoder, &t.post, self.post, &t.target);
         rs.queue.submit([encoder.finish()]);
         self.renders += 1;
     }
@@ -1837,7 +1862,7 @@ fn create_gpu(rs: &RenderState) -> Gpu {
             .flags
             .sample_count_supported(4)
     };
-    let samples = if supports_4x(COLOR_SRGB) && supports_4x(DEPTH) {
+    let samples = if supports_4x(post::HDR) && supports_4x(DEPTH) {
         4
     } else {
         1
@@ -1908,7 +1933,7 @@ fn create_gpu(rs: &RenderState) -> Gpu {
         count: samples,
         ..Default::default()
     };
-    let target = [Some(COLOR_SRGB.into())];
+    let target = [Some(post::HDR.into())];
     let terrain = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("terrain"),
         layout: Some(&pipeline_layout),
@@ -1942,7 +1967,7 @@ fn create_gpu(rs: &RenderState) -> Gpu {
     });
     let line_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4];
     let blended = [Some(wgpu::ColorTargetState {
-        format: COLOR_SRGB,
+        format: post::HDR,
         blend: Some(wgpu::BlendState::ALPHA_BLENDING),
         write_mask: wgpu::ColorWrites::ALL,
     })];
@@ -2097,6 +2122,7 @@ fn create_gpu(rs: &RenderState) -> Gpu {
                 }),
             entries: &[],
         }),
+        post: PostGpu::new(rs, COLOR_SRGB),
     };
     gpu.bind_group = bind_group(rs, &gpu);
     gpu
@@ -2104,10 +2130,11 @@ fn create_gpu(rs: &RenderState) -> Gpu {
 
 fn create_targets(
     rs: &RenderState,
+    gpu: &Gpu,
     size: [u32; 2],
-    samples: u32,
     reuse: Option<TextureId>,
 ) -> Targets {
+    let samples = gpu.samples;
     let device = &rs.device;
     let extent = wgpu::Extent3d {
         width: size[0],
@@ -2142,10 +2169,18 @@ fn create_targets(
         })
     };
     let (unorm, target) = (view_as(COLOR), view_as(COLOR_SRGB));
+    let hdr = texture(
+        "viewport hdr",
+        post::HDR,
+        1,
+        wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        &[],
+    )
+    .create_view(&Default::default());
     let msaa = (samples > 1).then(|| {
         texture(
             "viewport msaa",
-            COLOR_SRGB,
+            post::HDR,
             samples,
             wgpu::TextureUsages::RENDER_ATTACHMENT,
             &[],
@@ -2177,6 +2212,8 @@ fn create_targets(
         size,
         color,
         target,
+        post: gpu.post.targets(rs, size, &hdr),
+        hdr,
         msaa,
         depth,
         tex_id,

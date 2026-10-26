@@ -5,6 +5,7 @@ pub mod app;
 pub mod chrome;
 pub mod editor;
 pub mod look;
+pub mod post;
 pub mod theme;
 pub mod viewport;
 pub mod widgets;

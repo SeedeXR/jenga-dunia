@@ -34,6 +34,15 @@ test("parity capture: desktop", async ({ page }) => {
       await page.waitForTimeout(1000);
       await page.screenshot({ path: path.join(out!, "desktop-horizon.png") });
     }
+    // The post effects (JD_PARITY_POST=1): exposure 1.5, bloom 0.6, vignette 0.5.
+    if (process.env.JD_PARITY_POST) {
+      await page.getByTestId("post-exposure").fill("1.5");
+      await page.getByTestId("post-bloom").fill("0.6");
+      await page.getByTestId("post-vignette").fill("0.5");
+      await expect(page.getByTestId("viewport-info")).toContainText("post bloom 0.6 · vignette 0.5 · exposure 1.5");
+      await page.waitForTimeout(1000);
+      await page.screenshot({ path: path.join(out!, "desktop-post.png") });
+    }
   } finally {
     rmSync(ws, { recursive: true, force: true });
   }
