@@ -10,7 +10,7 @@ test.describe("jobs against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-jobs-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("a long evaluation shows progress in the header and can be cancelled", async ({ page }) => {

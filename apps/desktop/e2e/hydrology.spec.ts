@@ -14,7 +14,7 @@ test.describe("hydrology nodes against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-hydro-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("rivers node: method select (d8 → dinf) in the inspector, wired and evaluated; sea-level node added", async ({ page }, testInfo) => {

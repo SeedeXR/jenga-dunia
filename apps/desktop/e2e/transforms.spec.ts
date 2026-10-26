@@ -12,7 +12,7 @@ test.describe("grid and brush transforms against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-transforms-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("grid Scale 0 levels the block, Rotate / Duplicate / Align append, a push drag grabs", async ({ page }) => {

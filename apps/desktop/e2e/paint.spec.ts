@@ -13,7 +13,7 @@ test.describe("painted density against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-paint-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("Paint density splices a clamped stroke node in front of the mask output; a stroke changes the instance count", async ({ page }, testInfo) => {

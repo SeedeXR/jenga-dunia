@@ -10,7 +10,7 @@ test.describe("sculpting against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-sculpt-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("Sculpt inserts a stroke node, a viewport drag records a stroke, the terrain rises, undo removes it", async ({ page }, testInfo) => {

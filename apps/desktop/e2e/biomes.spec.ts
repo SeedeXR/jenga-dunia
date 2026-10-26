@@ -13,7 +13,7 @@ test.describe("biome rules editor against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-biomes-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("rules are edited as a table: add a row, type a range, the core journals the array; a bad range is refused", async ({ page }, testInfo) => {

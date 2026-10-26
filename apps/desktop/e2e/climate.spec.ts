@@ -13,7 +13,7 @@ test.describe("climate nodes against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-climate-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("orographic rain: node added, wired from the noise, its `rain` output published and shown as the colour layer", async ({ page }, testInfo) => {

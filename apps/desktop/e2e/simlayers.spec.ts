@@ -12,7 +12,7 @@ test.describe("simulation layers against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-sim-layers-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("Snow, Lava, Debris and Sand each wire themselves in one click", async ({ page }, testInfo) => {

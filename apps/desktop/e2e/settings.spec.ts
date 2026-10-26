@@ -12,7 +12,7 @@ test.describe("project settings against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-settings-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("settings panel edits project.json through project.set_settings; a 1 s autosave interval saves after an edit", async ({ page }, testInfo) => {

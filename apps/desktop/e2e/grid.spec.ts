@@ -12,7 +12,7 @@ test.describe("grid tool against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-grid-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("cells selected by click and drag are levelled to a height by one undoable stroke", async ({ page }, testInfo) => {

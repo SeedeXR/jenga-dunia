@@ -14,7 +14,7 @@ test.describe("lakes against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-lakes-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("a published `lakes` layer from the fill node is drawn as standing water", async ({ page }) => {

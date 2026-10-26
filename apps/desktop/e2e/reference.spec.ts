@@ -20,7 +20,7 @@ test.describe("reference image against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-ref-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("reading a reference shows where, when and the sun; Use sun sets the viewport sky", async ({ page }) => {

@@ -12,7 +12,7 @@ test.describe("node graph editor against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-graph-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("starter graph → edit param → add node → drag → evaluate → delete; every edit is journaled", async ({ page }, testInfo) => {

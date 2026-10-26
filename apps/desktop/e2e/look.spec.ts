@@ -13,7 +13,7 @@ test.describe("look and exports against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-look-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("materials, scatter and sun survive save and reopen; engine, mesh and HDRI exports carry them", async ({ page }) => {

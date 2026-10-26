@@ -12,7 +12,7 @@ test.describe("caves against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-caves-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("add a mine, click its portal, see it under the x-rayed terrain, export it", async ({ page }, testInfo) => {

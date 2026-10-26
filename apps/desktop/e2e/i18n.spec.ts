@@ -12,7 +12,7 @@ test.describe("languages and crash reports against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-i18n-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("Kiswahili persists; an uncaught error leaves a crash report", async ({ page }) => {

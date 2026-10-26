@@ -12,7 +12,7 @@ test.describe("brush alphas against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-alphas-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("a crater stroke records its alpha", async ({ page }) => {

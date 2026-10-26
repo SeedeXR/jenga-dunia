@@ -12,7 +12,7 @@ test.describe("octave bars against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-octaves-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("a muted octave changes the field; strength 0 levels it", async ({ page }) => {

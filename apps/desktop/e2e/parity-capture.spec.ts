@@ -44,7 +44,7 @@ test("parity capture: desktop", async ({ page }) => {
       await page.screenshot({ path: path.join(out!, "desktop-post.png") });
     }
   } finally {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   }
 });
 
@@ -77,6 +77,6 @@ test("parity capture: desktop sea", async ({ page }) => {
     await page.waitForTimeout(1000);
     await page.screenshot({ path: path.join(out!, "desktop-sea.png") });
   } finally {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   }
 });

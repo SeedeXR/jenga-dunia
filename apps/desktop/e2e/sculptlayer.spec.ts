@@ -12,7 +12,7 @@ test.describe("sculpt-layer settings against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-sculptlayer-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("height scale 0 hides the strokes; the node carries the settings", async ({ page }) => {

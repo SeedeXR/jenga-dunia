@@ -13,7 +13,7 @@ test.describe("hydrology-first node against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-network-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("network node: no inputs, `rivers` published as a layer and shown as the colour; a fill node on `out` reports no lakes", async ({ page }, testInfo) => {

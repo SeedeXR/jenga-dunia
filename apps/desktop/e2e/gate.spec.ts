@@ -12,7 +12,7 @@ test.describe("gate pattern against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-gate-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("a published layer is read back by jd.input.layer; `only <output>` evaluates just that chain", async ({ page }, testInfo) => {

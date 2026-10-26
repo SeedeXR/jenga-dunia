@@ -12,7 +12,7 @@ test.describe("terrain actions against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-actions-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("flip keeps the range, flatten levels it, each action is a stack row", async ({ page }) => {

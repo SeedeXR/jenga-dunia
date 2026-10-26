@@ -12,7 +12,7 @@ test.describe("post effects, stills and flythrough against the real core", () =>
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-render-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("bloom and vignette read in the header; Still and Record write PNGs under exports/", async ({ page }) => {

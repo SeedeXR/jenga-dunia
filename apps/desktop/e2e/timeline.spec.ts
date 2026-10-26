@@ -14,7 +14,7 @@ test.describe("timeline against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-time-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("thermal steps keyed 1 → 300: scrubbing the slider re-evaluates the terrain", async ({ page }, testInfo) => {

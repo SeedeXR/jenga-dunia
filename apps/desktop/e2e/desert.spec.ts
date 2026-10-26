@@ -14,7 +14,7 @@ test.describe("desert landscapes against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-desert-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("low plain → aeolian dunes → karst sinkholes, coloured by the sinkhole floors", async ({ page }, testInfo) => {

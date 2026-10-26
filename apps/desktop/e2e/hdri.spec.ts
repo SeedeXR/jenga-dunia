@@ -12,7 +12,7 @@ test.describe("HDRI on the dome against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-hdri-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("a baked sky loads as an HDRI and 'Use sun' recovers its sun", async ({ page }) => {

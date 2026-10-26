@@ -15,7 +15,7 @@ test.describe("real-world DEM through the desktop", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-geo-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("fetch places the DEM, wires it to the height output and records the attribution", async ({ page }, testInfo) => {

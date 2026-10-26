@@ -13,7 +13,7 @@ test.describe("material detail tiles", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-detail-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("a detail layer re-bakes the maps with a tile and the viewport stays error-free", async ({ page }, testInfo) => {

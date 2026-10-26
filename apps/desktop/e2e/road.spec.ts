@@ -11,7 +11,7 @@ test.describe("roads against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-road-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("Road arms the next drag; the drag splices a spline node before the output and the terrain changes", async ({ page }, testInfo) => {

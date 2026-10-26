@@ -13,7 +13,7 @@ test.describe("preview IPC measurement", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-ipc-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   for (const res of [512, 1024, 2048]) {

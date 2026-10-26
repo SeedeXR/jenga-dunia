@@ -14,7 +14,7 @@ test.describe("debris and lava simulations against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-sim-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("mountains → debris → lava from the summit, coloured by the lava's glow", async ({ page }, testInfo) => {

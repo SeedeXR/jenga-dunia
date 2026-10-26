@@ -12,7 +12,7 @@ test.describe("layer tree and icon strip against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-tree-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("strip adds, tree groups, search filters", async ({ page }, testInfo) => {

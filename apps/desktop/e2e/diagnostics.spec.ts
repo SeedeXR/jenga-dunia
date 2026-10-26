@@ -10,7 +10,7 @@ test.describe("tasks and diagnostics panel against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-diag-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("environment, cache GC and a small bench run from the panel and show their numbers", async ({ page }, testInfo) => {

@@ -10,7 +10,7 @@ test.describe("desktop UI against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("create project → generate → viewport shows terrain → export PNG16", async ({ page }, testInfo) => {

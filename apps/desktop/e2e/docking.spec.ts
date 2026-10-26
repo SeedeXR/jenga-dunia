@@ -13,7 +13,7 @@ test.describe("docking and preview detail", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-dock-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("panels collapse, the graph docks right, the layout persists, and 2048² preview detail shows lod 0", async ({ page }, testInfo) => {

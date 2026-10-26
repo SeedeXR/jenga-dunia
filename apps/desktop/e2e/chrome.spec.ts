@@ -13,7 +13,7 @@ test.describe("viewport chrome against the real core", () => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-chrome-"));
   });
   test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true });
+    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
   });
 
   test("compass, ruler, hints and fit", async ({ page }, testInfo) => {
