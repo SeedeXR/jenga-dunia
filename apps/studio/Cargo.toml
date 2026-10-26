@@ -1,6 +1,6 @@
 [package]
 name = "jd-studio"
-description = "Jenga Dunia Studio (ADR-0017): owns the engine and serves it to the Editor over jd-ipc; the egui window arrives in Phase 2."
+description = "Jenga Dunia Studio (ADR-0017): owns the engine and serves it to the Editor over jd-ipc; its window shows the 3-D viewport and launches the Editor."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,13 +11,20 @@ publish.workspace = true
 [dependencies]
 jd-core.workspace = true
 jd-ipc.workspace = true
+jd-gpu.workspace = true
+jd-terrain.workspace = true
+jd-types.workspace = true
+base64.workspace = true
+# wgpu backends come from jd-gpu's wgpu features (metal, vulkan, dx12): one wgpu 30 for both.
+eframe = { version = "0.37", default-features = false, features = ["wgpu_no_default_features", "accesskit", "default_fonts", "wayland", "x11", "clipboard"] }
+bytemuck = { version = "1", features = ["derive"] }
 clap.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
-jd-types.workspace = true
+egui_kittest = { version = "0.37", features = ["wgpu", "eframe", "snapshot"] }
 tempfile.workspace = true
 
 [lints]

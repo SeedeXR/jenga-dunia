@@ -275,6 +275,11 @@
     "scope": "project-read"
   },
   {
+    "id": "terrain.layers",
+    "description": "Names of the open project's layers (in memory and in its cache), sorted — what `terrain.preview`, `terrain.stats` and the exports accept",
+    "scope": "project-read"
+  },
+  {
     "id": "terrain.measure",
     "description": "A layer's landform fingerprint — relief, hypsometric integral, slope mean / median / 90th percentile and 5° histogram, and the share of each geomorphon (flat, peak, ridge, shoulder, spur, slope, hollow, footslope, valley, pit) — to compare a generated world with a real DEM of the same landform",
     "scope": "project-read"

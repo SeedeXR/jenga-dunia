@@ -35,11 +35,25 @@ struct Params {
     dist: [f32; 8],
 }
 
+static GPU: std::sync::OnceLock<Option<Gpu>> = std::sync::OnceLock::new();
+
 impl Gpu {
     /// The process-wide device, opened on first use; `None` when the machine has no adapter.
     pub fn shared() -> Option<&'static Gpu> {
-        static GPU: std::sync::OnceLock<Option<Gpu>> = std::sync::OnceLock::new();
         GPU.get_or_init(Gpu::new).as_ref()
+    }
+
+    /// Make an existing device the process-wide one (Studio hands over its window's device, so
+    /// kernel output and the viewport share one GPU). Returns `false` when [`Gpu::shared`] has
+    /// already opened or been given a device; that one stays. The device must have been created
+    /// with the adapter's limits (big storage bindings, see [`Gpu::new`]).
+    pub fn install(device: wgpu::Device, queue: wgpu::Queue, adapter: String) -> bool {
+        GPU.set(Some(Gpu {
+            device,
+            queue,
+            adapter,
+        }))
+        .is_ok()
     }
 
     /// Open the first available adapter headlessly.

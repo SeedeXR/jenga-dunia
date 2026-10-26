@@ -8,6 +8,12 @@ yanked = "deny"
 ignore = [
   { id = "RUSTSEC-2024-0436", reason = "paste (unmaintained proc-macro) is pulled transitively at build time only; see cargo tree -i paste" },
   { id = "RUSTSEC-2024-0370", reason = "proc-macro-error (unmaintained proc-macro) via glib/gtk in Tauri's Linux stack; build-time only, tracked upstream" },
+  # zbus_names / zvariant / zvariant_derive were merged into zbus 6 ("no safe upgrade"): pulled by
+  # accesskit_unix (Studio's Linux screen-reader adapter, via eframe's `accesskit`); drop when
+  # accesskit moves to zbus 6.
+  { id = "RUSTSEC-2026-0370", reason = "zvariant unmaintained (merged into zbus 6) via accesskit_unix; no upgrade yet" },
+  { id = "RUSTSEC-2026-0371", reason = "zbus_names unmaintained (merged into zbus 6) via accesskit_unix; no upgrade yet" },
+  { id = "RUSTSEC-2026-0372", reason = "zvariant_derive unmaintained (merged into zbus 6) via accesskit_unix; no upgrade yet" },
 ]
 
 [licenses]
@@ -29,6 +35,12 @@ allow = [
   "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.8
+
+# egui's bundled fallback fonts (Studio, ADR-0017): font licences that allow embedding and
+# redistribution with the app, scoped to that one crate.
+[[licenses.exceptions]]
+crate = "epaint_default_fonts"
+allow = ["OFL-1.1", "Ubuntu-font-1.0"]
 
 [bans]
 multiple-versions = "allow"

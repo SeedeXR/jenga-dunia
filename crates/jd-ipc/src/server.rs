@@ -19,7 +19,7 @@ use crate::{
 pub struct Server {
     shared: Arc<Shared>,
     endpoint: Endpoint,
-    accept: Option<JoinHandle<()>>,
+    accept: Mutex<Option<JoinHandle<()>>>,
 }
 
 struct Shared {
@@ -28,9 +28,13 @@ struct Shared {
     token: String,
     session: String,
     peers: Mutex<Vec<Arc<Peer>>>,
+    /// Studio's own listener for the events it sends its clients.
+    local: Mutex<Option<LocalHook>>,
     next_peer: AtomicU64,
     stopping: AtomicBool,
 }
+
+type LocalHook = Arc<dyn Fn(&str, &Value) + Send + Sync>;
 
 struct Peer {
     id: u64,
@@ -69,6 +73,7 @@ impl Server {
             token,
             session: endpoint.session.clone(),
             peers: Mutex::new(Vec::new()),
+            local: Mutex::new(None),
             next_peer: AtomicU64::new(1),
             stopping: AtomicBool::new(false),
         });
@@ -101,7 +106,7 @@ impl Server {
         Ok(Self {
             shared,
             endpoint,
-            accept: Some(accept),
+            accept: Mutex::new(Some(accept)),
         })
     }
 
@@ -131,14 +136,26 @@ impl Server {
         self.shared.emit(topic, data);
     }
 
-    /// Tell every client (`shutdown` event, then `bye`) and stop accepting. Clients close their
-    /// side on `bye`; operations still running finish.
-    pub fn shutdown(mut self, reason: &str) {
-        self.stop(reason);
+    /// Also deliver every event to `hook` in this process (Studio's window), on the thread that
+    /// emitted it. Replaces an earlier hook.
+    pub fn on_event(&self, hook: impl Fn(&str, &Value) + Send + Sync + 'static) {
+        *self
+            .shared
+            .local
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(hook));
     }
 
-    fn stop(&mut self, reason: &str) {
-        let Some(accept) = self.accept.take() else {
+    /// Tell every client (`shutdown` event, then `bye`) and stop accepting. Clients close their
+    /// side on `bye`; operations still running finish.
+    /// Idempotent; dropping the server does the same.
+    pub fn shutdown(&self, reason: &str) {
+        let Some(accept) = self
+            .accept
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+        else {
             return;
         };
         self.shared.stopping.store(true, Ordering::SeqCst);
@@ -161,7 +178,7 @@ impl Server {
 
 impl Drop for Server {
     fn drop(&mut self) {
-        self.stop("the engine server was dropped");
+        self.shutdown("the engine server was dropped");
     }
 }
 
@@ -179,12 +196,12 @@ impl Shared {
         let response = self.registry.invoke(&self.ctx, request);
         // ponytail: detached jobs (`accepted`) change the project later; their `job` events land
         // with the Studio window (P2).
-        if response.status == Status::Ok
-            && matches!(
-                scope,
-                Some(Scope::ProjectWrite | Scope::FsWrite | Scope::Destructive)
-            )
-        {
+        // `project.open` / `project.close` only read, but they change which project is open.
+        let changes = matches!(
+            scope,
+            Some(Scope::ProjectWrite | Scope::FsWrite | Scope::Destructive)
+        ) || matches!(op.as_str(), "project.open" | "project.close");
+        if response.status == Status::Ok && changes {
             self.emit(
                 "project_changed",
                 json!({ "op": op, "request_id": response.request_id, "scope": scope }),
@@ -194,6 +211,14 @@ impl Shared {
     }
 
     fn emit(&self, topic: &str, data: Value) {
+        let local = self
+            .local
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        if let Some(hook) = local {
+            hook(topic, &data);
+        }
         let frame = Frame::Event {
             topic: topic.to_owned(),
             data,

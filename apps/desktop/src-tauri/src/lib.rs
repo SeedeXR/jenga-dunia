@@ -129,7 +129,17 @@ fn connect_engine(
             ev_quitting.store(true, Ordering::SeqCst);
             tracing::info!(reason = %data["reason"], "Studio is shutting down; closing the editor");
             app.exit(0);
-        } else if let Err(e) = app.emit(
+            return;
+        }
+        // Studio opened, created or closed a project: re-read it the way a Finder open does.
+        let op = data["op"].as_str().unwrap_or_default();
+        if topic == "project_changed"
+            && matches!(op, "project.open" | "project.create" | "project.close")
+            && let Err(e) = app.emit("project-opened", op)
+        {
+            tracing::warn!(error = %e, "project-opened not delivered");
+        }
+        if let Err(e) = app.emit(
             "engine-event",
             serde_json::json!({ "topic": topic, "data": data }),
         ) {

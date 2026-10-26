@@ -199,6 +199,9 @@ fn a_call_that_outlives_its_timeout_fails_and_the_connection_survives() {
 #[test]
 fn project_writes_and_emitted_events_reach_every_client() {
     let s = server();
+    let local: Events = Arc::default();
+    let l = local.clone();
+    s.on_event(move |t, d| l.lock().unwrap().push((t.to_owned(), d.clone())));
     let (a, ev_a, _) = client(&s, |_| {});
     let (_b, ev_b, _) = client(&s, |_| {});
     a.call(Request::new("test.echo", json!(1)))
@@ -220,6 +223,24 @@ fn project_writes_and_emitted_events_reach_every_client() {
             .count(),
         1
     );
+    // Studio's own window hears it too, and Studio's own writes are announced.
+    assert_eq!(wait_for(&local, "project_changed")["op"], "test.write");
+    s.invoke(Request::new("test.write", json!(2)));
+    let until = Instant::now() + Duration::from_secs(5);
+    while ev_b
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(t, _)| t == "project_changed")
+        .count()
+        < 2
+    {
+        assert!(
+            Instant::now() < until,
+            "Studio's own write was not announced"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
     s.emit(
         "selection",
         json!({ "nodes": ["n1"], "source": "viewport" }),

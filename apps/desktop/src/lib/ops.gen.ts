@@ -1864,6 +1864,13 @@ standard base64 with padding. One decoder serves both transports. */
   "bytes_base64": string;
 };
 
+export type TerrainLayersRequest = Record<string, unknown>;
+
+export type TerrainLayersResult = {
+  /** Layer names, sorted (`<name>#lod<N>` for a reduced-resolution evaluation). */
+  "layers": string[];
+};
+
 export type TerrainMeasureRequest = {
   /** Layer to measure. */
   "layer"?: string;
@@ -3197,6 +3204,8 @@ export interface JdOps {
   "terrain.generate": { request: TerrainGenerateRequest; result: TerrainGenerateResult };
   /** The world's noise continued beyond its border: the graph's noise node evaluated over `scale` × the extent (same seed and origin, so it matches at the edge) at a coarse `px`, as a u16 preview — a horizon skirt for viewers; erosion and the rest of the graph are not continued */
   "terrain.horizon": { request: TerrainHorizonRequest; result: TerrainHorizonResult };
+  /** Names of the open project's layers (in memory and in its cache), sorted — what `terrain.preview`, `terrain.stats` and the exports accept */
+  "terrain.layers": { request: TerrainLayersRequest; result: TerrainLayersResult };
   /** A layer's landform fingerprint — relief, hypsometric integral, slope mean / median / 90th percentile and 5° histogram, and the share of each geomorphon (flat, peak, ridge, shoulder, spur, slope, hollow, footslope, valley, pit) — to compare a generated world with a real DEM of the same landform */
   "terrain.measure": { request: TerrainMeasureRequest; result: TerrainMeasureResult };
   /** Downsampled u16 preview of a layer (base64) for agents and viewers */

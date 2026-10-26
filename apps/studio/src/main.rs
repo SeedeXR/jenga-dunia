@@ -1,38 +1,45 @@
-//! Jenga Dunia Studio (ADR-0017): the process that owns the engine — the `jd-core` registry and
-//! context — and serves it to the Editor over `jd-ipc`.
+//! `jd-studio`: Jenga Dunia Studio (ADR-0017).
 //!
-//! Phase 1 is `--headless`: bind a private socket, print one ready line on stdout
-//! (`{"socket", "token", "session"}`, what a parent needs to connect or launch the Editor with
-//! `JD_ENGINE_SOCKET` / `JD_ENGINE_TOKEN`), then serve until stdin closes. The egui window that
-//! renders the viewport and launches the Editor itself arrives in Phase 2.
+//! By default it opens the Studio window (3-D viewport and panels) and launches the Editor (the
+//! node graph, `jd-app`) against its engine. `--headless` serves the engine without a window:
+//! it prints one ready line on stdout (`{"socket", "token", "session"}`, what a parent needs to
+//! connect, or to launch the Editor with `JD_ENGINE_SOCKET` / `JD_ENGINE_TOKEN`) and serves
+//! until stdin closes.
 
 use std::io::Write;
+use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use clap::Parser;
+use eframe::egui_wgpu;
 use jd_core::{Context, Registry};
 
 #[derive(Parser)]
 #[command(
     name = "jd-studio",
     version,
-    about = "Jenga Dunia Studio: the engine process"
+    about = "Jenga Dunia Studio: the engine, the 3-D viewport and the Editor's host"
 )]
 struct Args {
     /// Serve the engine without a window until stdin closes.
     #[arg(long)]
     headless: bool,
+    /// The Editor binary (default: `JD_EDITOR`, else `jd-app` next to `jd-studio`).
+    #[arg(long, conflicts_with = "no_editor")]
+    editor: Option<PathBuf>,
+    /// Do not launch the Editor.
+    #[arg(long)]
+    no_editor: bool,
+    /// A project (`.jdproj`) to open.
+    project: Option<PathBuf>,
 }
 
 fn main() -> ExitCode {
     let args = Args::parse();
     init_logging();
-    if !args.headless {
-        eprintln!("jd-studio: the Studio window arrives in Phase 2; run with --headless");
-        return ExitCode::from(2);
-    }
     let server = match jd_ipc::Server::bind(Registry::with_builtins(), Context::default()) {
-        Ok(s) => s,
+        Ok(s) => Arc::new(s),
         Err(e) => {
             tracing::error!(
                 code = e.code.as_str(),
@@ -43,6 +50,71 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    if args.headless {
+        return headless(&server);
+    }
+    let editor = if args.no_editor {
+        None
+    } else {
+        match jd_studio::editor::locate(args.editor) {
+            Ok(p) => Some(p),
+            Err(msg) => {
+                // Studio still works without the Editor; the panel offers to open it later.
+                tracing::warn!("{msg}");
+                None
+            }
+        }
+    };
+    let options = jd_studio::Options {
+        editor,
+        project: args.project,
+    };
+    let result = eframe::run_native(
+        "Jenga Dunia Studio",
+        native_options(),
+        Box::new(move |cc| {
+            // One GPU for the window and the terrain kernels (erosion output can feed the view).
+            if let Some(rs) = &cc.wgpu_render_state {
+                let info = rs.adapter.get_info();
+                let name = format!("{} ({:?})", info.name, info.backend);
+                if jd_gpu::Gpu::install(rs.device.clone(), rs.queue.clone(), name.clone()) {
+                    tracing::info!(adapter = %name, "terrain kernels share the window's GPU");
+                }
+            }
+            Ok(Box::new(jd_studio::StudioApp::new(cc, server, options)))
+        }),
+    );
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            tracing::error!(error = %e, "the Studio window failed");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn native_options() -> eframe::NativeOptions {
+    let mut setup = egui_wgpu::WgpuSetupCreateNew::without_display_handle();
+    setup.power_preference = egui_wgpu::wgpu::PowerPreference::HighPerformance;
+    // The adapter's own limits: the erosion kernels bind storage buffers over the 128 MiB default.
+    setup.device_descriptor = Arc::new(|adapter| egui_wgpu::wgpu::DeviceDescriptor {
+        label: Some("jd-studio"),
+        required_limits: adapter.limits(),
+        ..Default::default()
+    });
+    let mut options = eframe::NativeOptions {
+        viewport: eframe::egui::ViewportBuilder::default()
+            .with_title("Jenga Dunia Studio")
+            .with_app_id("jenga-dunia-studio")
+            .with_inner_size([1440.0, 900.0])
+            .with_min_inner_size([800.0, 520.0]),
+        ..Default::default()
+    };
+    options.wgpu_options.wgpu_setup = egui_wgpu::WgpuSetup::CreateNew(setup);
+    options
+}
+
+fn headless(server: &jd_ipc::Server) -> ExitCode {
     let ready = serde_json::json!({
         "socket": server.socket(),
         "token": server.token(),

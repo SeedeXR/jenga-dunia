@@ -301,6 +301,11 @@ impl LayerCache {
         self.dir.join("index.json")
     }
 
+    /// Every name in the index (layers and evaluator node ports), sorted.
+    pub fn names(&self) -> JdResult<Vec<String>> {
+        Ok(self.read_index()?.into_keys().collect())
+    }
+
     fn read_index(&self) -> JdResult<BTreeMap<String, String>> {
         match fs::read(self.index_path()) {
             // A garbled index is a cache miss, not an error: the cache is disposable and the next

@@ -195,6 +195,17 @@ impl Context {
             .map(|p| p.root().to_path_buf())
     }
 
+    /// Names of the layers held in memory.
+    pub fn layer_names(&self) -> JdResult<Vec<String>> {
+        Ok(self
+            .layers
+            .lock()
+            .map_err(|_| JdError::new(ErrorCode::E_INTERNAL, "layer lock poisoned"))?
+            .keys()
+            .cloned()
+            .collect())
+    }
+
     /// Replace the open project (saving is the caller's responsibility). In-memory layers belong
     /// to the previous project and are dropped; the new project's come back from its cache.
     pub fn set_project(&self, p: Option<Project>) -> JdResult<()> {
@@ -5210,6 +5221,13 @@ pub mod terrain {
         pub detail_weights_png_base64: String,
     }
 
+    /// `terrain.layers` result.
+    #[derive(Debug, Serialize, schemars::JsonSchema)]
+    pub struct LayerNames {
+        /// Layer names, sorted (`<name>#lod<N>` for a reduced-resolution evaluation).
+        pub layers: Vec<String>,
+    }
+
     /// `terrain.preview` params.
     #[derive(Debug, Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
@@ -5572,6 +5590,25 @@ pub mod terrain {
                 Ok((out, Vec::new()))
             },
         );
+        r.register::<super::builtin::NoParams, LayerNames, _>(
+            "terrain.layers",
+            "Names of the open project's layers (in memory and in its cache), sorted — what `terrain.preview`, `terrain.stats` and the exports accept",
+            Scope::ProjectRead,
+            |ctx, _| {
+                let root = ctx.with_project(|p| Ok(p.root().to_path_buf()))?;
+                let mut layers = ctx.layer_names()?;
+                // Evaluator node ports (`node:<hash>:<port>`) are cache internals, not layers.
+                layers.extend(
+                    jd_cache::LayerCache::open(&root)
+                        .names()?
+                        .into_iter()
+                        .filter(|n| !n.starts_with("node:")),
+                );
+                layers.sort();
+                layers.dedup();
+                Ok((LayerNames { layers }, Vec::new()))
+            },
+        );
         r.register::<TerrainLayer, LayerInfo, _>(
             "terrain.stats",
             "Statistics and content hash of a layer",
@@ -5914,6 +5951,50 @@ pub mod terrain {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn layers_lists_published_layers_but_not_evaluator_ports() {
+            let reg = Registry::with_builtins();
+            let dir = tempfile::tempdir().expect("tmp");
+            let ctx = Context::default();
+            let world = WorldSettings {
+                resolution_px: [64, 64],
+                extent_m: [64.0, 64.0],
+                tile_size: 64,
+                halo: 0,
+                ..Default::default()
+            };
+            let path = dir.path().join("p.jdproj");
+            reg.invoke(
+                &ctx,
+                Request::new(
+                    "project.create",
+                    serde_json::json!({ "path": path, "name": "P", "world": world }),
+                ),
+            );
+            reg.invoke(
+                &ctx,
+                Request::new("terrain.generate", serde_json::json!({ "layer": "base" })),
+            );
+            reg.invoke(
+                &ctx,
+                Request::new("graph.evaluate", serde_json::json!({ "lod": 1 })),
+            );
+            let names = |ctx: &Context| {
+                reg.invoke(ctx, Request::new("terrain.layers", serde_json::json!({})))
+                    .result
+                    .expect("layers")["layers"]
+                    .clone()
+            };
+            assert_eq!(names(&ctx), serde_json::json!(["base", "height#lod1"]));
+            // Reopened: the same names come back from the cache alone.
+            let fresh = Context::default();
+            reg.invoke(
+                &fresh,
+                Request::new("project.open", serde_json::json!({ "path": path })),
+            );
+            assert_eq!(names(&fresh), serde_json::json!(["base", "height#lod1"]));
+        }
 
         #[test]
         fn preview_op_returns_the_wire_format() {

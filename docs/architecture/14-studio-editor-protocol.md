@@ -27,7 +27,7 @@ Every frame is an object with a `t` (type) field.
 
 Calls are independent: the server runs each on its own worker, so a long evaluation never blocks a ping or a second call, and replies may arrive out of order — the client matches them by `id`.
 
-**Events** (server → every client): `project_changed` `{ op, request_id, scope }` after any successful `ProjectWrite` / `FsWrite` / `Destructive` operation (the Editor reloads its graph); `selection` `{ nodes: [id…], source }` (node ↔ viewport highlighting); `job` `{ id, done, total, state }` (progress); `shutdown` `{ reason }` before Studio exits.
+**Events** (server → every client): `project_changed` `{ op, request_id, scope }` after any successful `ProjectWrite` / `FsWrite` / `Destructive` operation, and after `project.open` / `project.close` (the Editor reloads its graph; Studio refreshes its viewport — Studio's own operations announce themselves the same way); `selection` `{ nodes: [id…], source }` (node ↔ viewport highlighting); `job` `{ id, done, total, state }` (progress); `shutdown` `{ reason }` before Studio exits.
 
 ```mermaid
 sequenceDiagram
@@ -80,8 +80,8 @@ The server answers pings from the connection's reader thread (never queued behin
 
 ## Processes (Phase 1)
 
-- `jd-studio --headless` binds a fresh endpoint, prints one ready line on stdout — `{"socket", "token", "session"}` — and serves until its stdin closes, then sends `shutdown` and `bye` to every client and removes the socket directory. The Studio window (Phase 2) runs the same server and launches the Editor itself.
-- The Editor (`jd-app`) connects when `JD_ENGINE_SOCKET` is set (token from `JD_ENGINE_TOKEN`); otherwise it runs today's in-process engine. Connected, its `op`, `ops_list` and `layer_preview` commands forward (`layer_preview` through `terrain.preview`), server events reach the frontend as `engine-event` `{topic, data}`, a `shutdown` event closes the window quietly, and any other loss shows a native "engine lost" dialog with the error's next step and exits with status 1. If it cannot connect at launch it logs the error envelope and exits with status 1.
+- `jd-studio --headless` binds a fresh endpoint, prints one ready line on stdout — `{"socket", "token", "session"}` — and serves until its stdin closes, then sends `shutdown` and `bye` to every client and removes the socket directory. The Studio window (`jd-studio [project.jdproj]`, Phase 2) runs the same server in-process: its own operations go through `Server::invoke` as client `gui-studio` and announce `project_changed` exactly like the Editor's, and it hears every event through `Server::on_event`. It launches the Editor (`--editor <path>`, else `JD_EDITOR`, else `jd-app` next to `jd-studio`; `--no-editor` skips it) and supervises it: a clean exit means the user closed it (the Editor panel offers to reopen it); a crash is restarted, at most 3 times within 60 s. Closing Studio shuts the server down (the Editor exits on `shutdown`) and kills an Editor that has not exited within 3 s.
+- The Editor (`jd-app`) connects when `JD_ENGINE_SOCKET` is set (token from `JD_ENGINE_TOKEN`); otherwise it runs today's in-process engine. Connected, its `op`, `ops_list` and `layer_preview` commands forward (`layer_preview` through `terrain.preview`), server events reach the frontend as `engine-event` `{topic, data}`, a `project_changed` from `project.open` / `project.create` / `project.close` triggers the frontend's existing `project-opened` re-read, a `shutdown` event closes the window quietly, and any other loss shows a native "engine lost" dialog with the error's next step and exits with status 1. If it cannot connect at launch it logs the error envelope and exits with status 1.
 
 ## Logging
 
