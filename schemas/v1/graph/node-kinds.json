@@ -559,6 +559,15 @@
           "format": "float",
           "default": 0.0
         },
+        "old_sea_levels_m": {
+          "description": "Sea caves: old (raised) sea levels, metres — a line of caves is cut into the cliffs at each.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "default": []
+        },
         "speleothems": {
           "description": "Speleothem drip sites per 100 m² of dry floor (negative = the kind's default).",
           "type": "number",
@@ -611,6 +620,16 @@
               "description": "Catacombs: a shallow maze of galleries and rooms.",
               "type": "string",
               "const": "catacombs"
+            },
+            {
+              "description": "A maze cave: a multi-storey grid of fissure passages on two fracture sets (gypsum, flood mazes).",
+              "type": "string",
+              "const": "maze"
+            },
+            {
+              "description": "Flank-margin caves: wide, low, interconnected chambers just inland of a coast at an old highstand.",
+              "type": "string",
+              "const": "flank_margin"
             }
           ]
         }

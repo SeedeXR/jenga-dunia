@@ -166,6 +166,11 @@ expression: list
               "description": "A vertical shaft from the surface.",
               "type": "string",
               "const": "shaft"
+            },
+            {
+              "description": "A collapse into a flooded passage: open water at the bottom of a shaft tens of metres wide.",
+              "type": "string",
+              "const": "cenote"
             }
           ]
         }
@@ -383,6 +388,11 @@ expression: list
               "description": "A vertical shaft from the surface.",
               "type": "string",
               "const": "shaft"
+            },
+            {
+              "description": "A collapse into a flooded passage: open water at the bottom of a shaft tens of metres wide.",
+              "type": "string",
+              "const": "cenote"
             }
           ]
         }

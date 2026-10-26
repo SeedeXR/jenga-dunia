@@ -15,7 +15,7 @@ speleothems, water level); relative paths land in the project's `exports/`. */
   "speleothems"?: boolean;
 };
 
-export type EntranceKind = "sinkhole" | "portal" | "skylight" | "resurgence" | "sea_cave" | "shaft";
+export type EntranceKind = "sinkhole" | "portal" | "skylight" | "resurgence" | "sea_cave" | "shaft" | "cenote";
 
 export type Entrance = {
   /** Position `[u, v, z]` on the surface, metres. */
@@ -2282,7 +2282,7 @@ export type NodeParams_jd_biome_seabed_1 = {
   "river_reach_m"?: number;
 };
 
-export type CaveKind = "karst" | "lava_tube" | "sea_cave" | "mountain" | "mine" | "tunnel" | "catacombs";
+export type CaveKind = "karst" | "lava_tube" | "sea_cave" | "mountain" | "mine" | "tunnel" | "catacombs" | "maze" | "flank_margin";
 
 export type NodeParams_jd_cave_system_1 = {
   /** Kind of cave. */
@@ -2305,6 +2305,8 @@ catacombs' stair. Empty: chosen from the terrain. */
   "levels"?: number;
   /** Sea level, metres (sea caves and flooding when no water layer is wired). */
   "sea_level_m"?: number;
+  /** Sea caves: old (raised) sea levels, metres — a line of caves is cut into the cliffs at each. */
+  "old_sea_levels_m"?: number[];
   /** Speleothem drip sites per 100 m² of dry floor (negative = the kind's default). */
   "speleothems"?: number;
   /** Wall roughness 0..=2 (1 = the kind's natural roughness). */

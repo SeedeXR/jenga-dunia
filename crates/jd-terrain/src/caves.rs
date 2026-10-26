@@ -78,6 +78,8 @@ pub enum EntranceKind {
     SeaCave,
     /// A vertical shaft from the surface.
     Shaft,
+    /// A collapse into a flooded passage: open water at the bottom of a shaft tens of metres wide.
+    Cenote,
 }
 
 /// Where a cave opens.

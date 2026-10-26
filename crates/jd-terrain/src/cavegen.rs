@@ -55,6 +55,10 @@ pub enum CaveKind {
     Tunnel,
     /// Catacombs: a shallow maze of galleries and rooms.
     Catacombs,
+    /// A maze cave: a multi-storey grid of fissure passages on two fracture sets (gypsum, flood mazes).
+    Maze,
+    /// Flank-margin caves: wide, low, interconnected chambers just inland of a coast at an old highstand.
+    FlankMargin,
 }
 
 /// Cave settings (the editable cave: a `jd.cave.system@1` node's params).
@@ -90,6 +94,9 @@ pub struct CaveParams {
     /// Sea level, metres (sea caves and flooding when no water layer is wired).
     #[serde(default)]
     pub sea_level_m: f32,
+    /// Sea caves: old (raised) sea levels, metres — a line of caves is cut into the cliffs at each.
+    #[serde(default)]
+    pub old_sea_levels_m: Vec<f32>,
     /// Speleothem drip sites per 100 m² of dry floor (negative = the kind's default).
     #[serde(default = "minus_one")]
     pub speleothems: f32,
@@ -126,6 +133,7 @@ impl Default for CaveParams {
             complexity: d_complexity(),
             levels: d_levels(),
             sea_level_m: 0.0,
+            old_sea_levels_m: Vec::new(),
             speleothems: -1.0,
             roughness: 1.0,
         }
@@ -156,6 +164,9 @@ impl CaveParams {
                 "speleothems",
                 "speleothems ≤ 50 per 100 m², roughness within 0..=2, sea_level_m finite",
             );
+        }
+        if self.old_sea_levels_m.iter().any(|z| !z.is_finite()) || self.old_sea_levels_m.len() > 8 {
+            return bad("old_sea_levels_m", "at most 8 finite levels");
         }
         if self.entrances.iter().flatten().any(|c| !c.is_finite()) {
             return bad("entrances", "must be finite");
@@ -276,6 +287,8 @@ pub fn generate_cave(p: &CaveParams, g: &Ground) -> JdResult<Generated> {
         CaveKind::Mine => mine(p, g, &mut notes)?,
         CaveKind::Tunnel => tunnel(p, g, &mut notes)?,
         CaveKind::Catacombs => catacombs(p, g, &mut notes)?,
+        CaveKind::Maze => maze(p, g, &mut notes)?,
+        CaveKind::FlankMargin => flank_margin(p, g, &mut notes)?,
     };
     sys.seed = p.seed;
     // A mouth narrower than a terrain cell cannot open the terrain: widen it to about one cell.
@@ -329,6 +342,24 @@ pub fn generate_cave(p: &CaveParams, g: &Ground) -> JdResult<Generated> {
             SpeleothemParams {
                 per_100m2: 0.0,
                 ..Default::default()
+            },
+        ),
+        // Gypsum mazes hold few speleothems (gypsum crusts, not dripstone).
+        CaveKind::Maze => (
+            0.3,
+            SpeleothemParams {
+                per_100m2: 0.5,
+                max_length_m: 0.6,
+                stalagmite_share: 0.5,
+            },
+        ),
+        // Coastal eogenetic limestone: young, porous, some dripstone in the drier chambers.
+        CaveKind::FlankMargin => (
+            0.35,
+            SpeleothemParams {
+                per_100m2: 1.5,
+                max_length_m: 1.2,
+                stalagmite_share: 0.6,
             },
         ),
         _ => (
@@ -1013,6 +1044,46 @@ fn karst(p: &CaveParams, g: &Ground, notes: &mut Vec<String>) -> JdResult<CaveSy
             .total_cmp(&b.center[0])
             .then(a.center[1].total_cmp(&b.center[1]))
     });
+    // Cenotes: where the water table lies close under the surface (a low karst plain, a coast), the
+    // roofs over flooded passages fall in and leave round shafts of open water tens of metres
+    // across (Yucatán: "some tens of meters in diameter", average cave depth −15 m).
+    let mut cenotes: Vec<[f32; 2]> = Vec::new();
+    let mut cr = Rng::new(p.seed, 0xCE);
+    for ps in sys.passages.clone() {
+        for (i, q) in ps.points.iter().enumerate() {
+            if cenotes.len() >= p.complexity.max(1) as usize {
+                break;
+            }
+            let zg = g.z(q[0], q[1]);
+            let roof = zg - (q[2] + ps.half_height_m[i]);
+            let flooded = q[2] + ps.half_height_m[i] < water_level;
+            if flooded
+                && zg - water_level < 25.0
+                && roof > 0.0
+                && roof < 30.0
+                && cenotes
+                    .iter()
+                    .all(|c| (c[0] - q[0]).hypot(c[1] - q[1]) > 150.0)
+                && cr.f() < 0.1
+            {
+                let r = cr.range(8.0, 25.0) * p.size;
+                // From the flooded passage's floor up through the surface: a chamber's flat floor sits
+                // 0.6 of its height below its centre, so size it from the two ends.
+                let (floor, top) = (q[2] - 0.5 * ps.half_height_m[i], zg + 3.0);
+                let rz = (top - floor) / 1.6;
+                sys.chambers.push(Chamber {
+                    center: [q[0], q[1], top - rz],
+                    radii_m: [r, r * cr.range(0.8, 1.0), rz],
+                });
+                sys.entrances.push(Entrance {
+                    at: [q[0], q[1], zg],
+                    kind: EntranceKind::Cenote,
+                    underwater: false,
+                });
+                cenotes.push([q[0], q[1]]);
+            }
+        }
+    }
     // Shafts up to the sinkholes, and the spring mouth.
     for &q in &inlets {
         let z = g.z(q[0], q[1]);
@@ -1134,6 +1205,63 @@ fn lava_tube(p: &CaveParams, g: &Ground, notes: &mut Vec<String>) -> JdResult<Ca
         points: pts.clone(),
         profile: Profile::Tube,
     });
+    // Braids and an upper level (Kazumura: side tubes stay within ~140 m of the main one; "a
+    // third level is 7.5 m above the floor"): along the tube, now and then a side tube splits off
+    // and rejoins, or a stretch of tube runs above the main one, joined at both ends.
+    let mut br = Rng::new(p.seed, 9);
+    let mut i = (br.range(30.0, 80.0) / step) as usize;
+    while i + 16 < n {
+        let j = (i + (br.range(60.0, 150.0) / step) as usize).min(n - 1);
+        if br.f() < 0.5 {
+            let off = br.range(12.0, 40.0) * if br.f() < 0.5 { 1.0 } else { -1.0 };
+            let mut side: Vec<[f32; 3]> = Vec::new();
+            for k in i..=j {
+                let t = (k - i) as f32 / (j - i) as f32;
+                let (a, b) = (pts[k.saturating_sub(1)], pts[(k + 1).min(n - 1)]);
+                let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+                let l = dx.hypot(dy).max(1e-3);
+                let o = off * (std::f32::consts::PI * t).sin();
+                let q = [pts[k][0] - dy / l * o, pts[k][1] + dx / l * o];
+                if !g.inside(q[0], q[1]) {
+                    side.clear();
+                    break;
+                }
+                side.push([q[0], q[1], pts[k][2].min(g.z(q[0], q[1]) - depth)]);
+            }
+            if side.len() >= 3 {
+                let m = side.len();
+                sys.passages.push(Passage {
+                    half_width_m: vec![w * 0.6; m],
+                    half_height_m: vec![h * 0.7; m],
+                    points: side,
+                    profile: Profile::Tube,
+                });
+            }
+        } else {
+            let lift = 7.5 * p.size;
+            let mut upper: Vec<[f32; 3]> = vec![pts[i]];
+            let mut ok = true;
+            for q in &pts[i + 2..j.saturating_sub(1)] {
+                let z = q[2] + lift;
+                if g.z(q[0], q[1]) - (z + 0.6 * h) < 1.5 {
+                    ok = false;
+                    break;
+                }
+                upper.push([q[0], q[1], z]);
+            }
+            upper.push(pts[j]);
+            if ok && upper.len() >= 4 {
+                let m = upper.len();
+                sys.passages.push(Passage {
+                    half_width_m: vec![w * 0.55; m],
+                    half_height_m: vec![h * 0.6; m],
+                    points: upper,
+                    profile: Profile::Tube,
+                });
+            }
+        }
+        i = j + (br.range(80.0, 200.0) / step) as usize;
+    }
     // Skylights every 120–250 m.
     let mut next_sky = rng.range(40.0, 120.0);
     let mut s = 0.0f32;
@@ -1161,8 +1289,44 @@ fn lava_tube(p: &CaveParams, g: &Ground, notes: &mut Vec<String>) -> JdResult<Ca
 }
 
 fn sea_cave(p: &CaveParams, g: &Ground, notes: &mut Vec<String>) -> JdResult<CaveSystem> {
+    let mut sys = sea_cave_at(p, g, notes, None)?;
+    // Raised sea caves: the cliffs that met the sea at an old, higher level carry their own line
+    // of caves, dry now.
+    for (k, &level) in p.old_sea_levels_m.iter().enumerate() {
+        let q = CaveParams {
+            entrances: Vec::new(),
+            seed: p.seed ^ (0x01D0 + k as u64),
+            ..p.clone()
+        };
+        match sea_cave_at(&q, g, notes, Some(level)) {
+            Ok(raised) => {
+                notes.push(format!(
+                    "{} raised sea cave(s) at the old sea level {level:.0} m",
+                    raised
+                        .passages
+                        .iter()
+                        .filter(|x| x.profile == Profile::Arch)
+                        .count()
+                ));
+                sys.passages.extend(raised.passages);
+                sys.entrances.extend(raised.entrances);
+            }
+            Err(_) => notes.push(format!("no cliffs at the old sea level {level:.0} m")),
+        }
+    }
+    Ok(sys)
+}
+
+fn sea_cave_at(
+    p: &CaveParams,
+    g: &Ground,
+    notes: &mut Vec<String>,
+    fixed_level: Option<f32>,
+) -> JdResult<CaveSystem> {
     let sea = |u: f32, v: f32| {
-        if g.water.is_some() && g.water(u, v) > 0.0 {
+        if let Some(l) = fixed_level {
+            l
+        } else if g.water.is_some() && g.water(u, v) > 0.0 {
             g.z(u, v) + g.water(u, v)
         } else {
             p.sea_level_m
@@ -1273,6 +1437,30 @@ fn sea_cave(p: &CaveParams, g: &Ground, notes: &mut Vec<String>) -> JdResult<Cav
                 "the cave at ({:.0}, {:.0}) breaks through: a sea arch",
                 m[0], m[1]
             ));
+        }
+        // A blowhole: where the rock over the back of the cave is thin, waves drive a shaft up to the
+        // surface (Wikipedia, REPORTED in docs/research/caves.md).
+        if !through {
+            let (back, hb) = (pts[pts.len() - 1], half_h[half_h.len() - 1]);
+            let zg = g.z(back[0], back[1]);
+            let roof = zg - (back[2] + hb);
+            if roof > 0.0 && roof < 30.0 && unit(mix(p.seed ^ 0xB10 ^ mi as u64)) < 0.5 {
+                sys.passages.push(passage(
+                    vec![[back[0], back[1], back[2]], [back[0], back[1], zg + 2.0]],
+                    1.2 * p.size,
+                    1.2 * p.size,
+                    Profile::Tube,
+                ));
+                sys.entrances.push(Entrance {
+                    at: [back[0], back[1], zg],
+                    kind: EntranceKind::Shaft,
+                    underwater: false,
+                });
+                notes.push(format!(
+                    "a blowhole over the cave at ({:.0}, {:.0})",
+                    m[0], m[1]
+                ));
+            }
         }
         sys.passages.push(Passage {
             points: pts,
@@ -1760,6 +1948,251 @@ fn catacombs(p: &CaveParams, g: &Ground, _notes: &mut Vec<String>) -> JdResult<C
         kind: EntranceKind::Shaft,
         underwater: false,
     });
+    Ok(sys)
+}
+
+fn maze(p: &CaveParams, g: &Ground, _notes: &mut Vec<String>) -> JdResult<CaveSystem> {
+    // Klimchouk 1996 (gypsum mazes of the western Ukraine): two- to four-storey grids of fissure
+    // passages, 118–321 km of passage per km² (198 on average), 1.6–8.0 m³ of void per metre (3.84).
+    // A square grid of spacing s holds 2 / s of passage per unit area: 10 m → 200 km/km², and with
+    // 15 % of the links never opened, about 170.
+    let mut rng = Rng::new(p.seed, 8);
+    let centre = match p.entrances.first() {
+        Some(q) => *q,
+        None => {
+            let s = g.size();
+            [s[0] / 2.0, s[1] / 2.0]
+        }
+    };
+    let spacing = 10.0 * p.size;
+    let side = p.reach_m.min(400.0);
+    let n = ((side / spacing) as usize).clamp(4, 60);
+    let phi = rng.range(0.0, std::f32::consts::FRAC_PI_2); // the fracture strike
+    let (ca, sa) = (phi.cos(), phi.sin());
+    let half = (n as f32 - 1.0) / 2.0;
+    let at = |i: usize, j: usize, jit: [f32; 2]| {
+        let (x, y) = (
+            (i as f32 - half) * spacing + jit[0],
+            (j as f32 - half) * spacing + jit[1],
+        );
+        [centre[0] + x * ca - y * sa, centre[1] + x * sa + y * ca]
+    };
+    let ground_min = (0..n)
+        .flat_map(|i| (0..n).map(move |j| (i, j)))
+        .map(|(i, j)| at(i, j, [0.0, 0.0]))
+        .filter(|q| g.inside(q[0], q[1]))
+        .map(|q| g.z(q[0], q[1]))
+        .fold(f32::MAX, f32::min);
+    if ground_min == f32::MAX {
+        return Err(JdError::invalid("entrances", "the maze lies off the map"));
+    }
+    let cover = if p.cover_m > 0.0 { p.cover_m } else { 12.0 };
+    let (w, h) = (0.6 * p.size, 1.6 * p.size); // 1.2 m × 3.2 m fissures: ≈ 3.8 m³ per metre
+    let storeys = p.levels.clamp(2, 4) as usize;
+    let gap = 2.0 * h + 2.0;
+    let mut sys = CaveSystem::default();
+    let mut top = Vec::new();
+    for k in 0..storeys {
+        let z = ground_min - cover - h - k as f32 * gap;
+        let nodes: Vec<Option<[f32; 3]>> = (0..n * n)
+            .map(|idx| {
+                let q = at(
+                    idx % n,
+                    idx / n,
+                    [
+                        rng.range(-0.25, 0.25) * spacing,
+                        rng.range(-0.25, 0.25) * spacing,
+                    ],
+                );
+                g.inside(q[0], q[1])
+                    .then_some([q[0], q[1], z + rng.range(-0.3, 0.3)])
+            })
+            .collect();
+        for j in 0..n {
+            for i in 0..n {
+                let a = nodes[j * n + i];
+                for (ii, jj) in [(i + 1, j), (i, j + 1)] {
+                    if ii >= n || jj >= n || rng.f() >= 0.85 {
+                        continue;
+                    }
+                    if let (Some(a), Some(b)) = (a, nodes[jj * n + ii]) {
+                        sys.passages.push(passage(vec![a, b], w, h, Profile::Arch));
+                    }
+                }
+            }
+        }
+        // Shafts down to the storey below at about one node in twenty.
+        if k > 0 {
+            for (idx, q) in nodes.iter().enumerate() {
+                if let (Some(q), Some(up)) = (q, top.get(idx).copied().flatten())
+                    && rng.f() < 0.05
+                {
+                    let up: [f32; 3] = up;
+                    sys.passages.push(passage(
+                        vec![[q[0], q[1], up[2]], [q[0], q[1], q[2]]],
+                        0.8 * p.size,
+                        0.8 * p.size,
+                        Profile::Tube,
+                    ));
+                }
+            }
+        }
+        top = nodes; // the next storey's shafts rise to this one
+    }
+    // The way in: a shaft from the surface at the node nearest the centre.
+    let c = at(n / 2, n / 2, [0.0, 0.0]);
+    let zg = g.z(c[0], c[1]);
+    sys.passages.push(passage(
+        vec![[c[0], c[1], zg + 2.0], [c[0], c[1], ground_min - cover - h]],
+        1.2 * p.size,
+        1.2 * p.size,
+        Profile::Tube,
+    ));
+    sys.entrances.push(Entrance {
+        at: [c[0], c[1], zg],
+        kind: EntranceKind::Shaft,
+        underwater: false,
+    });
+    Ok(sys)
+}
+
+fn flank_margin(p: &CaveParams, g: &Ground, notes: &mut Vec<String>) -> JdResult<CaveSystem> {
+    // Mylroie & Carew 1990: where fresh groundwater meets tide-pulsed sea water under the flank of a
+    // coastal ridge, dissolution leaves "phreatic chambers with complex interconnections and blind
+    // tubes"; in the Bahamas 2–7 m above today's sea, the last-interglacial highstand. Roth 2004:
+    // small oval chambers (~100 m²) coalesce into "laterally extensive, vertically restricted" ones.
+    let sea = |u: f32, v: f32| {
+        if g.water.is_some() && g.water(u, v) > 0.0 {
+            g.z(u, v) + g.water(u, v)
+        } else {
+            p.sea_level_m
+        }
+    };
+    let c = g.cell();
+    let ring = |q: [f32; 2], r: f32| {
+        (0..8).any(|k| {
+            let a = k as f32 * std::f32::consts::FRAC_PI_4;
+            let (u, v) = (q[0] + a.cos() * r, q[1] + a.sin() * r);
+            g.inside(u, v) && g.z(u, v) < sea(u, v)
+        })
+    };
+    let sites: Vec<[f32; 2]> = if p.entrances.is_empty() {
+        let mut rng = Rng::new(p.seed, 10);
+        let mut cands: Vec<([f32; 2], f32)> = g
+            .samples(1)
+            .into_iter()
+            .filter(|q| {
+                let s = sea(q[0], q[1]);
+                g.z(q[0], q[1]) > s + 10.0
+                    && ring(*q, (60.0f32).max(3.0 * c))
+                    && !ring(*q, (15.0f32).max(c))
+            })
+            .map(|q| (q, rng.f()))
+            .collect();
+        cands.sort_by(|a, b| a.1.total_cmp(&b.1));
+        let pts: Vec<[f32; 2]> = cands.into_iter().map(|x| x.0).collect();
+        spread(&pts, p.complexity.max(1) as usize, 150.0)
+    } else {
+        p.entrances.clone()
+    };
+    if sites.is_empty() {
+        return Err(JdError::invalid(
+            "entrances",
+            "no coastal ridge: flank-margin caves form under land rising behind a shore",
+        )
+        .next("Set sea_level_m to your coast, wire a water layer, or place the sites yourself."));
+    }
+    let mut sys = CaveSystem::default();
+    let mut level = f32::MIN;
+    for (si, q0) in sites.iter().enumerate() {
+        let s = sea(q0[0], q0[1]);
+        level = level.max(s);
+        let mut r = Rng::new(p.seed ^ 0xF1A ^ si as u64, 11);
+        let z0 = s + r.range(2.0, 7.0);
+        let count = r.range(5.0, 12.0) as usize;
+        let mut prev: Option<[f32; 3]> = None;
+        let mut pos = *q0;
+        for k in 0..count {
+            let (rx, ry, rz) = (
+                r.range(3.0, 9.0) * p.size,
+                r.range(3.0, 9.0) * p.size,
+                r.range(1.2, 2.5) * p.size,
+            );
+            let cz = z0 + 0.4 * rz;
+            if g.z(pos[0], pos[1]) - (cz + rz) < 2.0 || !g.inside(pos[0], pos[1]) {
+                break; // out from under the ridge
+            }
+            sys.chambers.push(Chamber {
+                center: [pos[0], pos[1], cz],
+                radii_m: [rx, ry, rz],
+            });
+            let here = [pos[0], pos[1], z0 + 0.6];
+            if let Some(pv) = prev {
+                sys.passages.push(passage(
+                    vec![pv, here],
+                    1.0 * p.size,
+                    0.8 * p.size,
+                    Profile::Tube,
+                ));
+            }
+            // A blind pocket off this chamber now and then.
+            if r.f() < 0.4 {
+                let a = r.range(0.0, std::f32::consts::TAU);
+                let d = rx.max(ry) + r.range(2.0, 5.0);
+                let pk = [pos[0] + a.cos() * d, pos[1] + a.sin() * d];
+                let pr = r.range(1.5, 3.0) * p.size;
+                if g.z(pk[0], pk[1]) - (cz + pr) > 2.0 {
+                    sys.chambers.push(Chamber {
+                        center: [pk[0], pk[1], cz],
+                        radii_m: [pr, pr, pr * 0.6],
+                    });
+                    sys.passages.push(passage(
+                        vec![here, [pk[0], pk[1], z0 + 0.6]],
+                        0.6 * p.size,
+                        0.6 * p.size,
+                        Profile::Tube,
+                    ));
+                }
+            }
+            prev = Some(here);
+            if k + 1 < count {
+                let a = r.range(0.0, std::f32::consts::TAU);
+                let d = rx.max(ry) + r.range(3.0, 8.0);
+                pos = [pos[0] + a.cos() * d, pos[1] + a.sin() * d];
+            }
+        }
+        // The way in: a short passage from the first chamber down the slope until it breaks out.
+        let gr = g.grad(q0[0], q0[1]);
+        let l = gr[0].hypot(gr[1]).max(1e-6);
+        let down = [-gr[0] / l, -gr[1] / l];
+        let mut way = vec![[q0[0], q0[1], z0 + 0.6]];
+        for k in 1..60 {
+            let q = [
+                q0[0] + down[0] * k as f32 * 3.0,
+                q0[1] + down[1] * k as f32 * 3.0,
+            ];
+            if !g.inside(q[0], q[1]) {
+                break;
+            }
+            way.push([q[0], q[1], z0 + 0.6]);
+            if g.z(q[0], q[1]) < z0 + 2.5 {
+                sys.entrances.push(Entrance {
+                    at: [q[0], q[1], g.z(q[0], q[1])],
+                    kind: EntranceKind::Portal,
+                    underwater: false,
+                });
+                break;
+            }
+        }
+        if way.len() >= 2 {
+            sys.passages
+                .push(passage(way, 1.0 * p.size, 0.9 * p.size, Profile::Tube));
+        }
+    }
+    if sys.chambers.is_empty() {
+        notes.push("the ridges are too low for chambers at the old sea level".to_owned());
+    }
+    sys.water_level_m = Some(level);
     Ok(sys)
 }
 
@@ -2281,6 +2714,323 @@ mod tests {
         assert!(
             (wl - (spring.at[2] + 6.0)).abs() < 0.6,
             "water table at the lake surface: {wl}"
+        );
+    }
+
+    #[test]
+    fn a_maze_is_a_dense_connected_multi_storey_grid() {
+        let hf = hill();
+        let g = make(
+            CaveParams {
+                kind: CaveKind::Maze,
+                seed: 4,
+                reach_m: 150.0,
+                entrances: vec![[512.0, 512.0]],
+                ..Default::default()
+            },
+            &hf,
+        );
+        let s = &g.system;
+        let mut zs: Vec<i32> = s
+            .passages
+            .iter()
+            .filter(|q| q.profile == Profile::Arch)
+            .map(|q| q.points[0][2].round() as i32)
+            .collect();
+        zs.sort_unstable();
+        zs.dedup_by(|a, b| (*a - *b).abs() <= 1);
+        assert_eq!(zs.len(), 2, "two storeys by default: {zs:?}");
+        // Passage density per storey inside Klimchouk's 118–321 km/km².
+        let top = zs[zs.len() - 1] as f32;
+        let len: f32 = s
+            .passages
+            .iter()
+            .filter(|q| q.profile == Profile::Arch && (q.points[0][2] - top).abs() < 2.0)
+            .map(|q| {
+                let (a, b) = (q.points[0], q.points[1]);
+                (a[0] - b[0]).hypot(a[1] - b[1])
+            })
+            .sum();
+        let area_km2 = (150.0f32 - 10.0).powi(2) / 1e6;
+        let density = len / 1000.0 / area_km2;
+        assert!((118.0..=321.0).contains(&density), "{density} km/km²");
+        // Connected: most junctions of the top storey in one component.
+        let key = |p: [f32; 3]| ((p[0] * 4.0).round() as i64, (p[1] * 4.0).round() as i64);
+        let mut parent: HashMap<(i64, i64), (i64, i64)> = HashMap::new();
+        fn find(p: &mut HashMap<(i64, i64), (i64, i64)>, x: (i64, i64)) -> (i64, i64) {
+            let mut r = x;
+            while let Some(&q) = p.get(&r) {
+                if q == r {
+                    break;
+                }
+                r = q;
+            }
+            p.insert(x, r);
+            r
+        }
+        for q in s
+            .passages
+            .iter()
+            .filter(|q| q.profile == Profile::Arch && (q.points[0][2] - top).abs() < 2.0)
+        {
+            let (a, b) = (key(q.points[0]), key(q.points[1]));
+            parent.entry(a).or_insert(a);
+            parent.entry(b).or_insert(b);
+            let (ra, rb) = (find(&mut parent, a), find(&mut parent, b));
+            parent.insert(ra, rb);
+        }
+        let nodes: Vec<(i64, i64)> = parent.keys().copied().collect();
+        let mut sizes: HashMap<(i64, i64), usize> = HashMap::new();
+        for n in &nodes {
+            *sizes.entry(find(&mut parent, *n)).or_default() += 1;
+        }
+        let biggest = sizes.values().copied().max().unwrap_or(0);
+        assert!(
+            biggest as f32 >= 0.9 * nodes.len() as f32,
+            "{biggest} of {}",
+            nodes.len()
+        );
+        assert!(s.entrances.iter().any(|e| e.kind == EntranceKind::Shaft));
+    }
+
+    #[test]
+    fn cenotes_open_where_the_water_table_lies_close_under_a_karst_plain() {
+        // A low limestone plain (25–35 m) draining to a coastal valley at 5 m: the water table sits
+        // a few tens of metres down, under the whole plain.
+        let mut hf = Heightfield::new(128, 128, 64, 2).expect("hf");
+        hf.fill_with(|x, y| {
+            if x < 100 {
+                28.0 + 4.0 * ((x as f32 / 9.0).sin() + (y as f32 / 11.0).cos())
+            } else {
+                28.0 - (x as f32 - 100.0) * 0.9
+            }
+        });
+        let mut found = 0;
+        for seed in 1..=6u64 {
+            let g = make(
+                CaveParams {
+                    seed,
+                    reach_m: 900.0,
+                    complexity: 4,
+                    entrances: vec![[300.0, 500.0], [350.0, 300.0], [200.0, 700.0]],
+                    ..Default::default()
+                },
+                &hf,
+            );
+            let s = &g.system;
+            let wl = s.water_level_m.expect("wl");
+            for e in s
+                .entrances
+                .iter()
+                .filter(|e| e.kind == EntranceKind::Cenote)
+            {
+                found += 1;
+                let c = s
+                    .chambers
+                    .iter()
+                    .find(|c| {
+                        (c.center[0] - e.at[0]).abs() < 1e-3 && (c.center[1] - e.at[1]).abs() < 1e-3
+                    })
+                    .expect("collapse");
+                assert!(c.radii_m[0] >= 8.0, "tens of metres across: {c:?}");
+                assert!(c.center[2] + c.radii_m[2] > e.at[2], "reaches the surface");
+                assert!(
+                    c.center[2] - 0.6 * c.radii_m[2] < wl,
+                    "its floor is under the water"
+                );
+            }
+        }
+        assert!(found >= 2, "{found} cenotes over six seeds");
+    }
+
+    #[test]
+    fn flank_margin_caves_are_wide_low_chambers_above_the_sea_behind_the_shore() {
+        let mut hf = hill();
+        hf.fill_with(|x, y| {
+            let (dx, dy) = (x as f32 - 63.5, y as f32 - 63.5);
+            let r = (dx * dx + dy * dy).sqrt();
+            if r < 40.0 {
+                130.0 + (40.0 - r) * 1.5
+            } else {
+                100.0
+            }
+        });
+        let g = make(
+            CaveParams {
+                kind: CaveKind::FlankMargin,
+                seed: 6,
+                sea_level_m: 120.0,
+                complexity: 3,
+                ..Default::default()
+            },
+            &hf,
+        );
+        let s = &g.system;
+        assert!(s.chambers.len() >= 5, "{}", s.chambers.len());
+        let big: Vec<&Chamber> = s
+            .chambers
+            .iter()
+            // (The mouth widening generate_cave adds at each entrance is not a flank-margin chamber.)
+            .filter(|c| {
+                c.radii_m[0].min(c.radii_m[1]) >= 3.0
+                    && s.entrances
+                        .iter()
+                        .all(|e| (e.at[0] - c.center[0]).hypot(e.at[1] - c.center[1]) > 1.0)
+            })
+            .collect();
+        assert!(!big.is_empty());
+        for c in &big {
+            assert!(
+                c.radii_m[0].min(c.radii_m[1]) > 1.2 * c.radii_m[2],
+                "vertically restricted: {c:?}"
+            );
+            assert!(
+                (121.0..=130.0).contains(&c.center[2]),
+                "2–7 m above the sea: {c:?}"
+            );
+        }
+        assert!(
+            s.entrances.iter().any(|e| e.kind == EntranceKind::Portal),
+            "a way in from the slope"
+        );
+    }
+
+    #[test]
+    fn lava_tubes_braid_and_stack_and_rejoin_the_main_tube() {
+        let hf = hill();
+        let mut braids = 0;
+        let mut uppers = 0;
+        for seed in 1..=4u64 {
+            let g = make(
+                CaveParams {
+                    kind: CaveKind::LavaTube,
+                    seed,
+                    reach_m: 600.0,
+                    entrances: vec![[512.0, 600.0]],
+                    ..Default::default()
+                },
+                &hf,
+            );
+            let s = &g.system;
+            let main = &s.passages[0];
+            let near_main = |q: [f32; 3]| {
+                main.points
+                    .iter()
+                    .map(|m| (m[0] - q[0]).hypot(m[1] - q[1]))
+                    .fold(f32::MAX, f32::min)
+            };
+            for side in &s.passages[1..] {
+                let (a, b) = (side.points[0], side.points[side.points.len() - 1]);
+                assert!(
+                    near_main(a) < 1.0 && near_main(b) < 1.0,
+                    "joins the main tube at both ends"
+                );
+                let far = side
+                    .points
+                    .iter()
+                    .map(|q| near_main(*q))
+                    .fold(0.0f32, f32::max);
+                assert!(far <= 140.0, "within 140 m: {far}");
+                let lift = side.points[side.points.len() / 2][2]
+                    - main
+                        .points
+                        .iter()
+                        .min_by(|x, y| {
+                            (x[0] - side.points[side.points.len() / 2][0])
+                                .hypot(x[1] - side.points[side.points.len() / 2][1])
+                                .total_cmp(
+                                    &(y[0] - side.points[side.points.len() / 2][0])
+                                        .hypot(y[1] - side.points[side.points.len() / 2][1]),
+                                )
+                        })
+                        .expect("main")[2];
+                if far > 5.0 {
+                    braids += 1;
+                } else if (lift - 7.5).abs() < 0.5 {
+                    uppers += 1;
+                }
+            }
+        }
+        assert!(
+            braids >= 1 && uppers >= 1,
+            "braids {braids}, upper levels {uppers}"
+        );
+    }
+
+    #[test]
+    fn sea_caves_get_blowholes_and_raised_caves_at_old_sea_levels() {
+        // A low island: thin rock over the backs of the caves.
+        let mut low = hill();
+        low.fill_with(|x, y| {
+            let (dx, dy) = (x as f32 - 63.5, y as f32 - 63.5);
+            let r = (dx * dx + dy * dy).sqrt();
+            if r < 40.0 {
+                138.0 + (40.0 - r) * 0.25
+            } else {
+                60.0
+            }
+        });
+        let blow: usize = (1..=4u64)
+            .map(|seed| {
+                make(
+                    CaveParams {
+                        kind: CaveKind::SeaCave,
+                        seed,
+                        sea_level_m: 120.0,
+                        complexity: 3,
+                        ..Default::default()
+                    },
+                    &low,
+                )
+                .system
+                .entrances
+                .iter()
+                .filter(|e| e.kind == EntranceKind::Shaft)
+                .count()
+            })
+            .sum();
+        assert!(blow >= 1, "{blow} blowholes");
+        // The tall island with an old sea level at 150 m: a second line of caves, floors at ~149 m.
+        let mut tall = hill();
+        tall.fill_with(|x, y| {
+            let (dx, dy) = (x as f32 - 63.5, y as f32 - 63.5);
+            let r = (dx * dx + dy * dy).sqrt();
+            if r < 40.0 {
+                200.0 + (40.0 - r) * 2.0
+            } else {
+                60.0
+            }
+        });
+        let g = make(
+            CaveParams {
+                kind: CaveKind::SeaCave,
+                seed: 5,
+                sea_level_m: 120.0,
+                old_sea_levels_m: vec![150.0],
+                complexity: 2,
+                ..Default::default()
+            },
+            &tall,
+        );
+        let floors: Vec<f32> = g
+            .system
+            .passages
+            .iter()
+            .filter(|q| q.profile == Profile::Arch)
+            .map(|q| q.points[0][2] - q.half_height_m[0])
+            .collect();
+        assert!(
+            floors.iter().any(|f| (f - 119.0).abs() < 1.0),
+            "present-day caves {floors:?}"
+        );
+        assert!(
+            floors.iter().any(|f| (f - 149.0).abs() < 1.0),
+            "raised caves {floors:?}"
+        );
+        assert_eq!(
+            g.system.water_level_m,
+            Some(120.0),
+            "the raised caves are dry"
         );
     }
 }

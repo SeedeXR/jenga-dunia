@@ -6,9 +6,9 @@ import { orbitAt } from "./lib/camera";
 import type { CavesMeshResult, Entrance } from "./lib/ops.gen";
 
 /** Cave kinds of `jd.cave.system@1`. */
-export type CaveKindName = "karst" | "lava_tube" | "sea_cave" | "mountain" | "mine" | "tunnel" | "catacombs";
+export type CaveKindName = "karst" | "lava_tube" | "sea_cave" | "mountain" | "mine" | "tunnel" | "catacombs" | "maze" | "flank_margin";
 /** Default reach per kind, metres (scaled down on small worlds). */
-const CAVE_REACH: Record<CaveKindName, number> = { karst: 600, lava_tube: 800, sea_cave: 400, mountain: 300, mine: 250, tunnel: 400, catacombs: 120 };
+const CAVE_REACH: Record<CaveKindName, number> = { karst: 600, lava_tube: 800, sea_cave: 400, mountain: 300, mine: 250, tunnel: 400, catacombs: 120, maze: 150, flank_margin: 300 };
 interface MeshData {
   positions: Float32Array;
   normals: Float32Array;

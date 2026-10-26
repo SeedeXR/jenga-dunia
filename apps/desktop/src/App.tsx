@@ -63,6 +63,8 @@ const CAVE_KINDS: [CaveKindName, string][] = [
   ["mine", "Mine"],
   ["tunnel", "Road tunnel"],
   ["catacombs", "Catacombs"],
+  ["maze", "Maze (gypsum)"],
+  ["flank_margin", "Coastal chambers"],
 ];
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
