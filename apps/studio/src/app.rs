@@ -254,6 +254,10 @@ pub struct StudioApp {
     /// The Caves section: the kind to add, Show caves, X-ray, each cave node's `caves.mesh`
     /// summary, and the generation of the newest mesh fetch (older ones are dropped).
     cave_kind: usize,
+    /// The cave whose entrances a click on the terrain places (the viewport's tool is armed),
+    /// and whether the cave being added is a tunnel (placing starts at once).
+    cave_placing: Option<String>,
+    tunnel_pending: bool,
     show_caves: bool,
     xray: f64,
     caves: Vec<CaveRow>,
@@ -718,6 +722,8 @@ impl StudioApp {
             layer_stats: None,
             measure: None,
             cave_kind: 0,
+            cave_placing: None,
+            tunnel_pending: false,
             show_caves: true,
             xray: 0.0,
             caves: Vec::new(),
@@ -923,6 +929,13 @@ impl StudioApp {
                     self.busy = self.busy.saturating_sub(1);
                     for r in &responses {
                         self.log_response(r);
+                        // A tunnel just added: its portals are placed by clicking the terrain.
+                        if r.op == "graph.add_cave"
+                            && std::mem::take(&mut self.tunnel_pending)
+                            && let Some(id) = r.result.as_ref().and_then(|v| v["id"].as_str())
+                        {
+                            self.start_placing(id.to_owned());
+                        }
                         // A simulation layer: colour by its first mask once it is published (the
                         // desktop's pendingColor).
                         if r.op == "graph.add_simulation"
@@ -2090,7 +2103,7 @@ impl StudioApp {
         }
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            look::input(ui, &mut e.frames, 64.0, "", "Frames").on_hover_text("Frames across the timeline (t = 0 … 1)");
+            look::input(ui, &mut e.frames, 64.0, "", "Timeline frames").on_hover_text("Frames across the timeline (t = 0 … 1)");
             if look::wide_button(ui, "upload", "Export frames", false, has_project && idle)
                 .on_hover_text("Write exports/frames/: one 16-bit heightmap per frame from t = 0 to 1, keyframed parameters animating (timeline.export)")
                 .clicked()
@@ -3096,6 +3109,48 @@ impl StudioApp {
         }
     }
 
+    /// Cave `i`'s entrances as the graph holds them (metres east, north): for tests.
+    pub fn cave_entrances(&self, i: usize) -> Vec<[f64; 2]> {
+        self.cave_nodes()
+            .get(i)
+            .and_then(|n| n["params"]["entrances"].as_array().cloned())
+            .unwrap_or_default()
+            .iter()
+            .map(|e| [e[0].as_f64().unwrap_or(0.0), e[1].as_f64().unwrap_or(0.0)])
+            .collect()
+    }
+
+    /// The desktop's `startCaveEntrance`: clicks on the terrain add entrances to cave `id`; the
+    /// tool's ring is max(4 m, 0.6 % of the world's width).
+    fn start_placing(&mut self, id: String) {
+        let width = self.viewport.info().map_or(1000.0, |i| i.extent_m[0]);
+        self.viewport.tool = Some((width * 0.006).max(4.0));
+        self.cave_placing = Some(id);
+    }
+
+    fn stop_placing(&mut self) {
+        self.viewport.tool = None;
+        self.cave_placing = None;
+    }
+
+    /// A stroke drawn with the armed tool: placing cave entrances, each click (its last point,
+    /// to 0.1 m) one more entrance of the target cave, then the graph re-evaluated.
+    fn on_stroke(&mut self, stroke: &[[f32; 2]]) {
+        let (Some(id), Some(p)) = (self.cave_placing.clone(), stroke.last()) else {
+            return;
+        };
+        let r1 = |v: f32| (f64::from(v) * 10.0).round() / 10.0;
+        let request = Self::request(
+            "graph.append_param",
+            json!({ "id": id, "key": "entrances", "value": [r1(p[0]), r1(p[1])] }),
+        );
+        let lod = self.preview_lod();
+        self.chain(vec![
+            Box::new(move |_| Some(request)),
+            Box::new(move |_| Some(Self::request("graph.evaluate", json!({ "lod": lod })))),
+        ]);
+    }
+
     /// The cave nodes of the graph, in order.
     fn cave_nodes(&self) -> Vec<Value> {
         self.graph["nodes"]
@@ -3124,6 +3179,10 @@ impl StudioApp {
             .iter()
             .filter_map(|n| n["id"].as_str().map(str::to_owned))
             .collect();
+        // The cave being placed is gone (removed, undone): stop placing.
+        if self.cave_placing.as_ref().is_some_and(|p| !ids.contains(p)) {
+            self.stop_placing();
+        }
         if !self.show_caves || ids.is_empty() {
             self.caves.clear();
             return self.viewport.set_caves(&[]);
@@ -3251,6 +3310,7 @@ impl StudioApp {
         }
         // One box per cave node: its line, the exports, the entrances, the generator's notes.
         let busy = self.busy > 0;
+        let mut toggle_place: Option<String> = None;
         let mut action: Option<(&str, Value)> = None;
         for (ci, node) in self.cave_nodes().iter().enumerate() {
             let id = node["id"].as_str().unwrap_or_default().to_owned();
@@ -3292,11 +3352,29 @@ impl StudioApp {
                                     ));
                                 }
                             }
-                            // ponytail: entrance placing (a click on the terrain) lands with the
-                            // viewport tools; the button is shown, off until then.
-                            look::button(ui, None, "Place", false, false).on_hover_text(
-                                "Place entrances by clicking the terrain (sinkholes, mouths, portals — a tunnel takes two)",
-                            );
+                            let placing = self.cave_placing.as_deref() == Some(id.as_str());
+                            let fg = if placing { color::ACCENT } else { color::FG0 };
+                            let place = ui
+                                .add_enabled(
+                                    !busy,
+                                    egui::Button::new(
+                                        RichText::new(if placing { "Placing…" } else { "Place" })
+                                            .size(12.0)
+                                            .color(fg),
+                                    ),
+                                )
+                                .on_hover_text(if placing {
+                                    "Click the terrain to add entrances; click here to stop"
+                                } else {
+                                    "Place entrances by clicking the terrain (sinkholes, mouths, portals — a tunnel takes two)"
+                                });
+                            let name = format!("Place entrances of cave {}", ci + 1);
+                            place.widget_info(|| {
+                                egui::WidgetInfo::selected(egui::accesskit::Role::Button, !busy, placing, &name)
+                            });
+                            if place.clicked() {
+                                toggle_place = Some(id.clone());
+                            }
                             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                                 ui.add(
                                     egui::Label::new(
@@ -3345,6 +3423,13 @@ impl StudioApp {
                     }
                 });
             ui.add_space(8.0);
+        }
+        if let Some(id) = toggle_place {
+            if self.cave_placing.as_deref() == Some(id.as_str()) {
+                self.stop_placing();
+            } else {
+                self.start_placing(id);
+            }
         }
         if let Some((op, params)) = action {
             // An export writes a file; an entrance edit changes the graph (refresh).
@@ -4564,7 +4649,11 @@ impl StudioApp {
                 "graph.add_simulation",
                 json!({ "which": which, "max_height_m": max }),
             ),
-            Add::Cave(kind) => Self::request("graph.add_cave", json!({ "kind": kind })),
+            Add::Cave(kind) => {
+                // A tunnel needs its two portals: placing starts as soon as it is added.
+                self.tunnel_pending = kind == "tunnel";
+                Self::request("graph.add_cave", json!({ "kind": kind }))
+            }
             Add::Action(action) => Self::request(
                 "graph.splice",
                 json!({ "layer": "height", "kind": "jd.filter.action@1", "params": { "action": action } }),
@@ -5030,6 +5119,9 @@ impl eframe::App for StudioApp {
             .show(ui, |ui| {
                 self.viewport.show(ui, frame.wgpu_render_state());
                 self.record_frame(frame);
+                if let Some(stroke) = self.viewport.take_stroke() {
+                    self.on_stroke(&stroke);
+                }
                 let cam = self.viewport.camera;
                 let st = crate::chrome::State {
                     // The desktop's heading: the camera sits at θ from south towards east.

@@ -639,6 +639,41 @@ fn the_caves_section_adds_shows_x_rays_maps_and_exports_a_cave() {
     h.get(egui_kittest::kittest::by().label_contains("Karst (limestone) · "))
         .scroll_to_me();
     h.get(egui_kittest::kittest::by().label_contains(" km · "));
+    // Place: a click on the terrain adds an entrance there (the ground under the pointer).
+    let probe_entrances = |h: &Harness<'static, StudioApp>| h.state().cave_entrances(0);
+    let before = probe_entrances(&h);
+    tap(
+        &mut h,
+        Some(eframe::egui::accesskit::Role::Button),
+        "Place entrances of cave 1",
+    );
+    assert!(h.state().viewport.tool.is_some(), "the tool is armed");
+    let c = h.state().viewport.rect().center();
+    let ground = h.state().viewport.pick(c).expect("ground under the centre");
+    h.hover_at(c);
+    h.run_steps(1);
+    for pressed in [true, false] {
+        h.event(eframe::egui::Event::PointerButton {
+            pos: c,
+            button: eframe::egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        });
+        h.run_steps(1);
+    }
+    settle(&mut h, |a| a.cave_entrances(0).len() == before.len() + 1);
+    let added = *probe_entrances(&h).last().unwrap();
+    assert!(
+        (added[0] - f64::from(ground[0])).abs() < 1.0
+            && (added[1] - f64::from(ground[1])).abs() < 1.0,
+        "{added:?} vs {ground:?}"
+    );
+    tap(
+        &mut h,
+        Some(eframe::egui::accesskit::Role::Button),
+        "Place entrances of cave 1",
+    );
+    assert!(h.state().viewport.tool.is_none(), "placing stopped");
     // X-ray 20 %: the readout says so and the terrain turns see-through.
     let (_, before) = covered(&mut h);
     h.get_by_role_and_label(eframe::egui::accesskit::Role::Slider, "X-ray 0 %")
@@ -890,6 +925,22 @@ fn the_export_section_writes_every_kind_of_export() {
     let mut h = window(engine(dir.path()));
     settle(&mut h, |a| a.viewport.info().is_some());
     let exports = dir.path().join("Kit.jdproj/exports");
+    // Two timeline frames, not the default 24: each is a full evaluation, which takes CI runners
+    // longer than the wait below.
+    let frames = || {
+        egui_kittest::kittest::by()
+            .role(eframe::egui::accesskit::Role::TextInput)
+            .label("Frames")
+    };
+    h.get(frames()).scroll_to_me();
+    h.run();
+    h.get(frames()).focus();
+    h.run();
+    for _ in 0..2 {
+        h.key_press(eframe::egui::Key::Backspace);
+    }
+    h.get(frames()).type_text("2");
+    h.run();
     for (button, expect) in [
         ("Export heightmap", "height.exr"),
         ("Export", "unity"),
@@ -931,7 +982,7 @@ fn the_export_section_writes_every_kind_of_export() {
     .click();
     h.run_steps(1);
     settle(&mut h, |_| exports.join("terrain.glb").exists());
-    assert!(std::fs::read_dir(exports.join("frames")).unwrap().count() >= 24);
+    assert!(std::fs::read_dir(exports.join("frames")).unwrap().count() >= 2);
     let errors: Vec<_> = h
         .state()
         .log_lines()

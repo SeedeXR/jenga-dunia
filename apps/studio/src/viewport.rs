@@ -1399,6 +1399,12 @@ pub struct Viewport {
     pub camera: Camera,
     /// Draw the world as a framed block (walls and rim), as the desktop does by default.
     pub frame: bool,
+    /// A ground tool is armed (cave entrances, sculpt, road): the primary button draws a stroke
+    /// on the terrain instead of orbiting (the right button still orbits), and its ring of this
+    /// radius (metres) follows the pointer.
+    pub tool: Option<f32>,
+    stroke: Option<Vec<[f32; 2]>>,
+    finished_stroke: Option<Vec<[f32; 2]>>,
     sun_deg: [f32; 2],
     fog: f32,
     /// A colour layer on the terrain (its preview, lava heat ramp).
@@ -1451,6 +1457,9 @@ impl Default for Viewport {
             info: None,
             camera: Camera::fit([1.0, 1.0]),
             frame: true,
+            tool: None,
+            stroke: None,
+            finished_stroke: None,
             sun_deg: [140.0, 35.0],
             fog: 0.0,
             overlay: None,
@@ -1559,6 +1568,74 @@ impl Viewport {
         let (right, up, forward) = self.camera.basis(r.width() / r.height());
         let dir = normalize([0, 1, 2].map(|i| forward[i] + right[i] * ndc[0] + up[i] * ndc[1]));
         pick_heightfield(pv, *extent, self.camera.eye(), dir)
+    }
+
+    /// The stroke drawn with the armed tool since the last call (ground points, metres east and
+    /// north), once the button is released.
+    pub fn take_stroke(&mut self) -> Option<Vec<[f32; 2]>> {
+        self.finished_stroke.take()
+    }
+
+    /// The ground height under `[u, v]` (metres), from the shown preview (nearest sample).
+    fn height_at(&self, uv: [f32; 2]) -> Option<f32> {
+        let (pv, e) = self.shown.as_ref()?;
+        let x = ((uv[0] / e[0]) * (pv.width - 1) as f32)
+            .round()
+            .clamp(0.0, (pv.width - 1) as f32) as u32;
+        let y = ((uv[1] / e[1]) * (pv.height - 1) as f32)
+            .round()
+            .clamp(0.0, (pv.height - 1) as f32) as u32;
+        let q = *pv.data.get((y * pv.width + x) as usize)?;
+        Some(pv.min + f32::from(q) / 65535.0 * (pv.max - pv.min))
+    }
+
+    /// The tool's ring under the pointer: the desktop's RingGeometry(0.9, 1.0, 48) × radius, flat,
+    /// just above the ground, red at 85 %, drawn over everything (its `depthTest: false`).
+    fn draw_tool_ring(&self, ui: &egui::Ui) {
+        let Some(radius) = self.tool else { return };
+        let Some(at) = ui
+            .input(|i| i.pointer.hover_pos())
+            .filter(|p| self.rect.contains(*p))
+        else {
+            return;
+        };
+        let (Some(uv), Some((_, e))) = (self.pick(at), self.shown.as_ref()) else {
+            return;
+        };
+        let y = self.height_at(uv).unwrap_or(0.0) + e[0] * 0.002;
+        let (cx, cz) = (uv[0] - e[0] / 2.0, e[1] / 2.0 - uv[1]);
+        let r = self.rect;
+        let vp = self.camera.view_proj(r.width() / r.height());
+        let screen = |x: f32, z: f32| {
+            let p = [x, y, z, 1.0];
+            let c: [f32; 4] = std::array::from_fn(|i| (0..4).map(|k| vp[k][i] * p[k]).sum());
+            (c[3] > 0.0).then(|| {
+                egui::pos2(
+                    r.left() + (c[0] / c[3] + 1.0) / 2.0 * r.width(),
+                    r.top() + (1.0 - c[1] / c[3]) / 2.0 * r.height(),
+                )
+            })
+        };
+        let mut mesh = egui::Mesh::default();
+        let red = egui::Color32::from_rgb(0xff, 0x3b, 0x30).gamma_multiply(0.85);
+        for k in 0..48 {
+            let t = k as f32 / 48.0 * std::f32::consts::TAU;
+            let (s, c) = t.sin_cos();
+            let (Some(inner), Some(outer)) = (
+                screen(cx + c * radius * 0.9, cz + s * radius * 0.9),
+                screen(cx + c * radius, cz + s * radius),
+            ) else {
+                return;
+            };
+            mesh.colored_vertex(inner, red);
+            mesh.colored_vertex(outer, red);
+        }
+        for k in 0..48u32 {
+            let (a, b) = (2 * k, 2 * ((k + 1) % 48));
+            mesh.add_triangle(a, a + 1, b + 1);
+            mesh.add_triangle(a, b + 1, b);
+        }
+        ui.painter_at(r).add(egui::Shape::mesh(mesh));
     }
 
     /// Move the camera (a flythrough frame, a key's Go); the next frame re-renders.
@@ -2198,16 +2275,43 @@ impl Viewport {
                 .corner_radius(12.0)
                 .paint_at(ui, rect);
             crate::look::ring(ui, rect);
+            self.draw_tool_ring(ui);
         }
     }
 
     /// The desktop's controls: either button drags orbit (0.005 rad per point), the wheel zooms
     /// (radius × (1 + Δ · 0.001) within 0.02–20 × the world's size).
     fn handle_input(&mut self, ui: &egui::Ui, resp: &egui::Response) {
+        // A ground tool: the primary button's press, drag and release make a stroke of ground
+        // points (the desktop's `stroke`), coalesced to every 0.5 % of the world's width.
+        if self.tool.is_some() {
+            let primary_down = ui.input(|i| i.pointer.primary_down());
+            let at = ui.input(|i| i.pointer.interact_pos());
+            if resp.is_pointer_button_down_on() && primary_down && self.stroke.is_none() {
+                self.stroke = Some(Vec::new());
+            }
+            let picked = at.and_then(|a| self.pick(a));
+            let far = self.shown.as_ref().map_or(1000.0, |(_, e)| e[0]) * 0.005;
+            if let Some(stroke) = &mut self.stroke {
+                if let Some(p) = picked
+                    && stroke
+                        .last()
+                        .is_none_or(|l| (p[0] - l[0]).hypot(p[1] - l[1]) > far)
+                {
+                    stroke.push(p);
+                }
+                if !primary_down {
+                    let done = self.stroke.take().unwrap_or_default();
+                    if !done.is_empty() {
+                        self.finished_stroke = Some(done);
+                    }
+                }
+                return;
+            }
+        }
         let d = resp.drag_delta();
-        if (resp.dragged_by(PointerButton::Primary) || resp.dragged_by(PointerButton::Secondary))
-            && d != egui::Vec2::ZERO
-        {
+        let orbit_primary = resp.dragged_by(PointerButton::Primary) && self.tool.is_none();
+        if (orbit_primary || resp.dragged_by(PointerButton::Secondary)) && d != egui::Vec2::ZERO {
             self.camera.theta -= d.x * 0.005;
             self.camera.phi = (self.camera.phi - d.y * 0.005).clamp(0.15, 1.5);
             self.dirty = true;
