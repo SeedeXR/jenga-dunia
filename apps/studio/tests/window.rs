@@ -275,6 +275,35 @@ fn the_sun_card_writes_the_look_and_toggles_the_maps() {
     settle(&mut h, |a| {
         a.log_lines().any(|l| l.text == "project.set_look: ok")
     });
+    // An HDRI on the dome: bake one (sun from the west, 20° up), load it, take its sun, clear it.
+    let exr = dir.path().join("west.exr");
+    let r = probe.invoke(Request::new(
+        "sky.bake",
+        json!({ "sun_azimuth_deg": 270.0, "sun_elevation_deg": 20.0, "width": 256, "path": exr }),
+    ));
+    assert!(r.error.is_none(), "{:?}", r.error);
+    // The field holds `sky.exr`; select-all-and-type is awkward in kittest, so set it directly.
+    h.state_mut().set_hdri_path(&exr.display().to_string());
+    h.get_by_label("Load").click();
+    h.run_steps(1);
+    settle(&mut h, |a| {
+        a.log_lines()
+            .any(|l| l.text.starts_with("sky.load_hdri: ok"))
+    });
+    assert!(h.state().viewport_readout().contains(" · hdri"));
+    h.get_by_label("Use sun").click();
+    h.run_steps(2);
+    // The brightest pixel of a 256-wide map sits within a degree of the baked sun.
+    let readout = h.state().viewport_readout();
+    assert!(
+        ["sun 19°/270°", "sun 20°/270°", "sun 21°/270°"]
+            .iter()
+            .any(|t| readout.contains(t)),
+        "{readout}"
+    );
+    h.get_by_label("×").click();
+    h.run_steps(2);
+    assert!(!h.state().viewport_readout().contains(" · hdri"));
     // PBR off: the ramp colours (no maps); on again: the maps come back.
     h.get_by_role_and_label(eframe::egui::accesskit::Role::CheckBox, "Textured (PBR)")
         .click();

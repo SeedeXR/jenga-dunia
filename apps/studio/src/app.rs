@@ -81,6 +81,8 @@ enum Msg {
     Lakes(String, Result<Option<jd_terrain::preview::Preview>, String>),
     /// The wind sea for a wind (`ocean.waves`).
     Waves([Option<f64>; 3], Box<Response>),
+    /// An HDRI's preview (`sky.load_hdri`).
+    Hdri(String, Result<(crate::viewport::Image, [f64; 3]), String>),
     /// The horizon skirt's preview (`terrain.horizon`).
     Horizon(Result<jd_terrain::preview::Preview, String>),
     /// The physical-sky preview (`sky.preview`, decoded) for this sun.
@@ -103,6 +105,12 @@ impl SunLook {
             f("fog", 0.0),
         ])
     }
+}
+
+/// An HDRI on the dome (`sky.load_hdri`): the sun it implies (its size is the dome's).
+#[derive(Debug, Clone)]
+struct Hdri {
+    sun: [f64; 2],
 }
 
 /// A log line's colour.
@@ -162,6 +170,10 @@ pub struct StudioApp {
     pbr: bool,
     look_due: Option<Instant>,
     sky_due: Option<Instant>,
+    /// The physical sky's last image, and an HDRI that replaces it on the dome.
+    sky_img: Option<crate::viewport::Image>,
+    hdri_path: String,
+    hdri: Option<Hdri>,
     /// The wind the last `ocean.waves` was fetched for, and its result.
     waves_for: Option<[Option<f64>; 3]>,
     waves: Option<Value>,
@@ -212,6 +224,9 @@ impl StudioApp {
             pbr: true,
             look_due: None,
             sky_due: None,
+            sky_img: None,
+            hdri_path: "sky.exr".into(),
+            hdri: None,
             waves_for: None,
             waves: None,
         };
@@ -243,6 +258,16 @@ impl StudioApp {
     /// Engine calls still running (buttons and refreshes).
     pub fn busy(&self) -> bool {
         self.busy > 0 || self.reads > 0 || self.refreshing
+    }
+
+    /// The header's viewport readout as it reads now.
+    pub fn viewport_readout(&self) -> String {
+        self.viewport_info()
+    }
+
+    /// Set the HDRI field (tests).
+    pub fn set_hdri_path(&mut self, path: &str) {
+        path.clone_into(&mut self.hdri_path);
     }
 
     /// The log, oldest first.
@@ -476,6 +501,28 @@ impl StudioApp {
                         Err(e) => self.log(format!("terrain.horizon: {e}"), Level::Error),
                     }
                 }
+                Msg::Hdri(path, r) => {
+                    self.reads = self.reads.saturating_sub(1);
+                    match r {
+                        Ok((img, [az, el, lum])) => {
+                            let [w, h] = img.size;
+                            self.log(
+                                format!(
+                                    "sky.load_hdri: ok {w}×{h} sun {}°/{}° luminance {lum:.2}",
+                                    el.round(),
+                                    az.round()
+                                ),
+                                Level::Info,
+                            );
+                            self.hdri = Some(Hdri { sun: [az, el] });
+                            self.viewport.set_sky(Some(img));
+                        }
+                        Err(_) => self.log(
+                            format!("sky.load_hdri: E_INPUT_INVALID could not read {path}"),
+                            Level::Error,
+                        ),
+                    }
+                }
                 Msg::Sky(sun, sky) => {
                     self.reads = self.reads.saturating_sub(1);
                     match sky {
@@ -486,7 +533,11 @@ impl StudioApp {
                                 format!("sky.preview: ok {w}×{h} sun {el}°/{az}° turbidity {turbidity} clouds {} %", (clouds * 100.0).round()),
                                 Level::Info,
                             );
-                            self.viewport.set_sky(Some(img));
+                            // An HDRI keeps the dome; the physical sky waits for its ×.
+                            if self.hdri.is_none() {
+                                self.viewport.set_sky(Some(img.clone()));
+                            }
+                            self.sky_img = Some(img);
                         }
                         Err(e) => self.log(format!("sky.preview: {e}"), Level::Error),
                     }
@@ -772,6 +823,36 @@ impl StudioApp {
         });
     }
 
+    /// The desktop's `loadHdri`: the EXR (in assets/ or absolute) as the dome's image.
+    fn load_hdri(&mut self) {
+        let path = self.hdri_path.trim().to_owned();
+        let request = Self::request("sky.load_hdri", json!({ "path": path, "width": 512 }));
+        let (server, tx, ctx) = (self.server.clone(), self.tx.clone(), self.ctx.clone());
+        self.reads += 1;
+        std::thread::spawn(move || {
+            let r = server.invoke(request);
+            let out = match &r.result {
+                Some(v) => crate::viewport::Image::from_png_base64(
+                    v["png_base64"].as_str().unwrap_or_default(),
+                )
+                .map(|img| {
+                    let f = |k: &str| v[k].as_f64().unwrap_or(0.0);
+                    (
+                        img,
+                        [
+                            f("sun_azimuth_deg"),
+                            f("sun_elevation_deg"),
+                            f("mean_luminance"),
+                        ],
+                    )
+                }),
+                None => Err(r.error.map(|e| e.message).unwrap_or_default()),
+            };
+            let _ = tx.send(Msg::Hdri(path, out));
+            ctx.request_repaint();
+        });
+    }
+
     /// The desktop's `refreshHorizon`: the noise continued over 3 × the world at 256².
     fn fetch_horizon(&mut self) {
         if !self.show_horizon || self.project.is_none() {
@@ -959,6 +1040,31 @@ impl StudioApp {
             3.0,
             "Atmospheric haze for the sky dome: 2 clear mountain air, 3 clear, 6 hazy, 10 thick haze (Preetham daylight model)",
         );
+        let mut hdri_action = None;
+        let has_hdri = self.hdri.is_some();
+        let can_load =
+            self.project.is_some() && self.busy == 0 && !self.hdri_path.trim().is_empty();
+        look::field(ui, "HDRI", |ui| {
+            if look::button(ui, None, "×", false, has_hdri)
+                .on_hover_text("Back to the physical sky")
+                .clicked()
+            {
+                hdri_action = Some(0);
+            }
+            if look::button(ui, None, "Use sun", false, has_hdri)
+                .on_hover_text("Point the sun where the HDRI is brightest")
+                .clicked()
+            {
+                hdri_action = Some(1);
+            }
+            if look::button(ui, None, "Load", false, can_load)
+                .on_hover_text("Load the HDRI onto the dome (sky.load_hdri)")
+                .clicked()
+            {
+                hdri_action = Some(2);
+            }
+            look::input(ui, &mut self.hdri_path, 96.0, "", "HDRI");
+        });
         slider(
             ui,
             format!("Clouds {} %", (clouds * 100.0).round()),
@@ -986,6 +1092,21 @@ impl StudioApp {
             0.0,
             "Rain falling in the viewport (look only); the rain itself is the jd.climate.rain node's field — wet surfaces come from a material on that layer",
         );
+        match hdri_action {
+            Some(0) => {
+                self.hdri = None;
+                self.viewport.set_sky(self.sky_img.clone());
+            }
+            Some(1) => {
+                if let Some(h) = &self.hdri {
+                    az = h.sun[0].round();
+                    el = h.sun[1].round().clamp(3.0, 90.0);
+                    edited = true;
+                }
+            }
+            Some(2) => self.load_hdri(),
+            _ => {}
+        }
         if edited {
             // Snap to the slider's 0.05 steps the way the desktop's inputs report them.
             let r2 = |v: f64| (v * 100.0).round() / 100.0;
@@ -1223,6 +1344,9 @@ impl StudioApp {
         }
         if let Some([w, h]) = self.viewport.sky_px() {
             s += &format!(" · sky {w}×{h}");
+        }
+        if self.hdri.is_some() {
+            s += " · hdri";
         }
         if self.viewport.frame && self.viewport.info().is_some() {
             s += " · box";
