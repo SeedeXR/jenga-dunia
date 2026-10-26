@@ -28,6 +28,10 @@ pub enum Action {
     Horizon,
     /// Insert this node before the height output (the layer strip).
     Insert(usize),
+    /// Sculpt on / off.
+    Sculpt,
+    /// Draw a road (the next drag) / stop.
+    Road,
 }
 
 /// What a layer-strip button adds (the core's workflow ops, shared with the desktop).
@@ -131,6 +135,10 @@ pub struct State {
     pub enabled: bool,
     /// Still possible (a terrain is shown).
     pub can_still: bool,
+    /// The brush is armed (Sculpt reads "Sculpting…").
+    pub sculpting: bool,
+    /// The next drag lays a road (Road reads "Drawing road…").
+    pub road: bool,
 }
 
 /// `fill-jd-bg-1/80` and friends: a token at an opacity.
@@ -215,7 +223,29 @@ pub fn show(ui: &mut Ui, rect: Rect, st: &State) -> Option<Action> {
         x += 32.0;
     }
     // Top right: Graph, Sculpt (right-28), Road (right-52), Horizon (right-72), Grid (right-[23.5rem]).
-    // ponytail: Sculpt, Road and Grid are the next P3 slices; shown disabled until then.
+    // ponytail: Grid is the next P3 slice; shown disabled until then.
+    let (sculpt_label, sculpt_tip) = if st.sculpting {
+        (
+            "Sculpting…",
+            "Sculpting: drag on the terrain to paint a stroke (click to stop)",
+        )
+    } else {
+        (
+            "Sculpt",
+            "Sculpt: adds a stroke node before the output and paints with the brush",
+        )
+    };
+    let (road_label, road_tip) = if st.road {
+        (
+            "Drawing road…",
+            "Drag on the terrain to lay the road (one drag = one road node)",
+        )
+    } else {
+        (
+            "Road",
+            "Road: the next drag on the terrain becomes a spline node that flattens a road bed along it",
+        )
+    };
     for (right, icon, label, tip, act) in [
         (
             8.0,
@@ -227,17 +257,11 @@ pub fn show(ui: &mut Ui, rect: Rect, st: &State) -> Option<Action> {
         (
             112.0,
             "brush",
-            "Sculpt",
-            "Sculpt: adds a stroke node before the output and paints with the brush",
-            None,
+            sculpt_label,
+            sculpt_tip,
+            Some(Action::Sculpt),
         ),
-        (
-            208.0,
-            "route",
-            "Road",
-            "Road: the next drag on the terrain becomes a spline node that flattens a road bed along it",
-            None,
-        ),
+        (208.0, "route", road_label, road_tip, Some(Action::Road)),
         (
             288.0,
             "horizon",
@@ -264,7 +288,12 @@ pub fn show(ui: &mut Ui, rect: Rect, st: &State) -> Option<Action> {
             vec2(w, 24.0),
         );
         let enabled = act.is_some() && (act == Some(Action::Graph) || st.enabled);
-        let on = act == Some(Action::Horizon) && st.horizon;
+        let on = match act {
+            Some(Action::Horizon) => st.horizon,
+            Some(Action::Sculpt) => st.sculpting,
+            Some(Action::Road) => st.road,
+            _ => false,
+        };
         if chip(ui, r, icon, Some(label), tip, enabled, on).clicked() {
             action = act;
         }

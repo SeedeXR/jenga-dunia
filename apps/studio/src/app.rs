@@ -72,6 +72,8 @@ enum Tag {
     Jobs,
     /// `graph.kinds`, once (the Layers section's `+`).
     Kinds,
+    /// `graph.sculpt_target` for the brush: its strokes node, then sculpting.
+    SculptTarget,
     /// An export or bake: busy while it runs and logged, as a button's op, but nothing on screen
     /// changed, so no refresh (the desktop's `run`).
     Export,
@@ -256,8 +258,13 @@ pub struct StudioApp {
     cave_kind: usize,
     /// The cave whose entrances a click on the terrain places (the viewport's tool is armed),
     /// and whether the cave being added is a tunnel (placing starts at once).
-    cave_placing: Option<String>,
     tunnel_pending: bool,
+    /// The viewport's ground tool (sculpt, road, cave entrances), the brush, the strokes node it
+    /// paints into, and the grid tool's state.
+    drawing: Option<Drawing>,
+    brush: Brush,
+    sculpt_node: Option<String>,
+    grid: GridPanel,
     show_caves: bool,
     xray: f64,
     caves: Vec<CaveRow>,
@@ -527,6 +534,67 @@ fn badge(ui: &mut egui::Ui, cat: &str) {
         });
 }
 
+/// What a stroke on the terrain does (the desktop's `drawing` / `sculpting`).
+#[derive(Debug, Clone, PartialEq)]
+enum Drawing {
+    /// The brush: strokes into the strokes node, transforms into the transforms node.
+    Sculpt,
+    /// The next drag is a road (a spline node), then back to orbiting.
+    Road,
+    /// Each click is an entrance of this cave node.
+    Cave(String),
+}
+
+/// A road's bed width (the desktop's `roadWidthM`).
+const ROAD_WIDTH_M: f32 = 12.0;
+
+/// The brush (the desktop's `brush` defaults: raise, 150 m, 40 m, amount 0.5, soft, plain).
+#[derive(Debug, Clone, PartialEq)]
+struct Brush {
+    mode: String,
+    radius_m: f64,
+    strength_m: f64,
+    amount: f64,
+    hardness: f64,
+    target_m: Option<f64>,
+    angle_deg: f64,
+    factor: f64,
+    tilt_deg: f64,
+    alpha: String,
+}
+
+impl Default for Brush {
+    fn default() -> Self {
+        Self {
+            mode: "raise".into(),
+            radius_m: 150.0,
+            strength_m: 40.0,
+            amount: 0.5,
+            hardness: 0.0,
+            target_m: None,
+            angle_deg: 30.0,
+            factor: 1.5,
+            tilt_deg: 15.0,
+            alpha: "plain".into(),
+        }
+    }
+}
+
+impl Brush {
+    /// The transform this mode applies, when it is one (rotate, scale, tilt, push, align).
+    fn transform(&self) -> Option<&'static str> {
+        ["rotate", "scale", "tilt", "push", "align"]
+            .into_iter()
+            .find(|m| *m == self.mode)
+    }
+}
+
+/// The grid tool (the desktop's `grid`: 32 cells a side, smoothness 0.25, step 10 m, …).
+#[derive(Debug, Clone, PartialEq, Default)]
+struct GridPanel {
+    on: bool,
+}
+
 /// The DEM providers (`geo.fetch_dem`'s `provider`) and their labels.
 const GEO_PROVIDERS: [(&str, &str); 3] = [
     ("terrarium", "Terrarium"),
@@ -722,8 +790,11 @@ impl StudioApp {
             layer_stats: None,
             measure: None,
             cave_kind: 0,
-            cave_placing: None,
             tunnel_pending: false,
+            drawing: None,
+            brush: Brush::default(),
+            sculpt_node: None,
+            grid: GridPanel::default(),
             show_caves: true,
             xray: 0.0,
             caves: Vec::new(),
@@ -1234,6 +1305,15 @@ impl StudioApp {
                 if r.result.is_some() {
                     self.diag[k] = r.result;
                 }
+            }
+            Tag::SculptTarget => {
+                self.log_response(&r);
+                if let Some(id) = r.result.as_ref().and_then(|v| v["id"].as_str()) {
+                    self.sculpt_node = Some(id.to_owned());
+                    self.selected_node = Some(id.to_owned());
+                    self.drawing = Some(Drawing::Sculpt);
+                }
+                self.refresh();
             }
             Tag::Kinds => {
                 if let Some(k) = r.result.as_ref().and_then(Value::as_array) {
@@ -3120,35 +3200,390 @@ impl StudioApp {
             .collect()
     }
 
-    /// The desktop's `startCaveEntrance`: clicks on the terrain add entrances to cave `id`; the
-    /// tool's ring is max(4 m, 0.6 % of the world's width).
+    /// The desktop's `startCaveEntrance`: clicks on the terrain add entrances to cave `id`.
     fn start_placing(&mut self, id: String) {
-        let width = self.viewport.info().map_or(1000.0, |i| i.extent_m[0]);
-        self.viewport.tool = Some((width * 0.006).max(4.0));
-        self.cave_placing = Some(id);
+        self.drawing = Some(Drawing::Cave(id));
     }
 
+    /// Back to orbiting: no ground tool.
     fn stop_placing(&mut self) {
-        self.viewport.tool = None;
-        self.cave_placing = None;
+        self.drawing = None;
     }
 
-    /// A stroke drawn with the armed tool: placing cave entrances, each click (its last point,
-    /// to 0.1 m) one more entrance of the target cave, then the graph re-evaluated.
+    /// The desktop's `startSculpting`: the strokes node in front of the height output (found or
+    /// spliced by the core), then the brush paints into it; the grid tool goes off.
+    fn start_sculpting(&mut self, layer: &str, clamp: Option<[f64; 2]>) {
+        let mut params = json!({ "layer": layer, "kind": "strokes" });
+        if let Some(c) = clamp {
+            params["clamp"] = json!(c);
+        }
+        self.grid.on = false;
+        self.invoke(Tag::SculptTarget, "graph.sculpt_target", params);
+    }
+
+    /// The ground tool's ring (metres) for the current drawing mode: the brush radius, half the
+    /// road's width, or max(4 m, 0.6 % of the world's width) for a cave entrance.
+    fn tool_radius(&self) -> Option<f32> {
+        let width = self.viewport.info().map_or(1000.0, |i| i.extent_m[0]);
+        match self.drawing.as_ref()? {
+            Drawing::Sculpt => Some(self.brush.radius_m as f32),
+            Drawing::Road => Some(ROAD_WIDTH_M / 2.0),
+            Drawing::Cave(_) => Some((width * 0.006).max(4.0)),
+        }
+    }
+
+    /// A stroke drawn with the armed tool (the desktop's `addStroke`): a cave entrance (its last
+    /// point), a road (one drag, a spline node in front of the height output, then back to
+    /// orbiting), a transform (rotate / scale / tilt / push / align into the transforms node), or
+    /// a brush stroke into the strokes node — each followed by an evaluation.
     fn on_stroke(&mut self, stroke: &[[f32; 2]]) {
-        let (Some(id), Some(p)) = (self.cave_placing.clone(), stroke.last()) else {
+        let r1 = |v: f32| (f64::from(v) * 10.0).round() / 10.0;
+        let Some(drawing) = self.drawing.clone() else {
             return;
         };
-        let r1 = |v: f32| (f64::from(v) * 10.0).round() / 10.0;
-        let request = Self::request(
-            "graph.append_param",
-            json!({ "id": id, "key": "entrances", "value": [r1(p[0]), r1(p[1])] }),
-        );
+        let Some(&last) = stroke.last() else { return };
+        let mut steps: Vec<Step> = Vec::new();
+        match drawing {
+            Drawing::Cave(id) => {
+                let r = Self::request(
+                    "graph.append_param",
+                    json!({ "id": id, "key": "entrances", "value": [r1(last[0]), r1(last[1])] }),
+                );
+                steps.push(Box::new(move |_| Some(r)));
+            }
+            Drawing::Road => {
+                self.drawing = None;
+                if stroke.len() < 2 {
+                    return;
+                }
+                let points: Vec<[f64; 2]> = stroke.iter().map(|p| [r1(p[0]), r1(p[1])]).collect();
+                let r = Self::request(
+                    "graph.splice",
+                    json!({ "layer": "height", "kind": "jd.terrain.spline@1", "params": { "points": points, "width_m": ROAD_WIDTH_M } }),
+                );
+                steps.push(Box::new(move |_| Some(r)));
+            }
+            Drawing::Sculpt => {
+                let b = self.brush.clone();
+                if let Some(kind) = b.transform() {
+                    // The drag's start is the centre; its end gives the push vector and the
+                    // direction a tilt rises toward.
+                    let p0 = stroke[0];
+                    let d = [last[0] - p0[0], last[1] - p0[1]];
+                    let azimuth = (f64::from(d[0].atan2(d[1])).to_degrees() + 360.0)
+                        .rem_euclid(360.0)
+                        .round();
+                    let op = json!({
+                        "kind": kind,
+                        "center_m": [r1(p0[0]), r1(p0[1])],
+                        "radius_m": b.radius_m,
+                        "shape": "round",
+                        "falloff": ((1.0 - b.hardness) * 100.0).round() / 100.0,
+                        "angle_deg": if kind == "tilt" { b.tilt_deg } else { b.angle_deg },
+                        "azimuth_deg": azimuth,
+                        "factor": b.factor,
+                        "vector_m": [r1(d[0]), r1(d[1])],
+                        "strength": b.amount,
+                    });
+                    let target = Self::request(
+                        "graph.sculpt_target",
+                        json!({ "layer": "height", "kind": "transforms" }),
+                    );
+                    steps.push(Box::new(move |_| Some(target)));
+                    steps.push(Box::new(move |done| {
+                        let id = done[0].result.as_ref()?["id"].clone();
+                        Some(Self::request(
+                            "graph.append_param",
+                            json!({ "id": id, "key": "ops", "value": op }),
+                        ))
+                    }));
+                } else {
+                    let Some(id) = self.sculpt_node.clone() else {
+                        return;
+                    };
+                    let lower = b.mode == "lower";
+                    let mut value = json!({
+                        "points": stroke.iter().map(|p| [r1(p[0]), r1(p[1])]).collect::<Vec<_>>(),
+                        "radius_m": b.radius_m,
+                        "strength_m": if lower { -b.strength_m.abs() } else { b.strength_m },
+                        "mode": if lower { "raise" } else { b.mode.as_str() },
+                        "amount": b.amount,
+                        "hardness": b.hardness,
+                    });
+                    if b.mode == "flatten"
+                        && let Some(t) = b.target_m
+                    {
+                        value["target_m"] = json!(t);
+                    }
+                    if b.alpha != "plain" {
+                        value["alpha"] = json!(b.alpha);
+                    }
+                    // One journal entry per stroke (graph.append_param), not the whole array.
+                    let r = Self::request(
+                        "graph.append_param",
+                        json!({ "id": id, "key": "strokes", "value": value }),
+                    );
+                    steps.push(Box::new(move |_| Some(r)));
+                }
+            }
+        }
         let lod = self.preview_lod();
-        self.chain(vec![
-            Box::new(move |_| Some(request)),
-            Box::new(move |_| Some(Self::request("graph.evaluate", json!({ "lod": lod })))),
-        ]);
+        steps.push(Box::new(move |_| {
+            Some(Self::request("graph.evaluate", json!({ "lod": lod })))
+        }));
+        self.chain(steps);
+    }
+
+    /// The right column's Brush section, shown while a ground tool is armed (the desktop's
+    /// `sculpting`): mode, its transform fields, the alpha, radius, strength or amount, the
+    /// flatten height, hardness, the strokes node's layer settings, and the shortcuts.
+    fn brush_card(&mut self, ui: &mut egui::Ui) {
+        use crate::widgets::Range;
+        look::section(ui, "Brush");
+        let b = &mut self.brush;
+        look::field(ui, "Mode", |ui| {
+            egui::ComboBox::from_id_salt("brush-mode")
+                .width(144.0)
+                .selected_text(
+                    RichText::new(if b.mode == "push" {
+                        "push / pull"
+                    } else {
+                        b.mode.as_str()
+                    })
+                    .size(12.0),
+                )
+                .show_ui(ui, |ui| {
+                    for m in [
+                        "raise", "lower", "smooth", "flatten", "rotate", "scale", "tilt", "push",
+                        "align",
+                    ] {
+                        ui.selectable_value(
+                            &mut b.mode,
+                            m.to_owned(),
+                            if m == "push" { "push / pull" } else { m },
+                        );
+                    }
+                })
+                .response
+                .widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::accesskit::Role::ComboBox, true, "Brush mode")
+                });
+        });
+        let number_field = |ui: &mut egui::Ui, label: &str, v: &mut f64, tip: &str| {
+            look::field(ui, label, |ui| {
+                let mut text = number(&json!(*v));
+                let r = look::input(ui, &mut text, 112.0, "", label);
+                let r = if tip.is_empty() {
+                    r
+                } else {
+                    r.on_hover_text(tip)
+                };
+                if r.changed() {
+                    *v = text.trim().parse().unwrap_or(0.0);
+                }
+            });
+        };
+        match b.mode.as_str() {
+            "rotate" => number_field(
+                ui,
+                "Angle (°)",
+                &mut b.angle_deg,
+                "Click (or drag) on the terrain: the footprint turns this much counter-clockwise about where you pressed",
+            ),
+            "scale" => number_field(
+                ui,
+                "Factor",
+                &mut b.factor,
+                "Relief about the footprint's mean: 0 levels it, 2 doubles it",
+            ),
+            "tilt" => number_field(
+                ui,
+                "Tilt (°)",
+                &mut b.tilt_deg,
+                "Drag on the terrain: the footprint tilts this much, rising in the drag's direction",
+            ),
+            _ => {}
+        }
+        if b.transform().is_some() {
+            let hint = match b.mode.as_str() {
+                "push" => "Drag: the terrain under the brush slides with the drag (grab).",
+                "align" => "Click: the footprint is levelled onto its own best-fit plane.",
+                _ => {
+                    "Press where the footprint is centred; each drag is one transform in a jd.sculpt.transforms node."
+                }
+            };
+            ui.add(egui::Label::new(RichText::new(hint).size(11.0).color(color::FG2)).wrap());
+        }
+        // The alphas: seven square buttons, the chosen one outlined in the accent.
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            let side = ((ui.available_width() - 6.0 * 4.0) / 7.0).floor();
+            for (k, icon, title) in [
+                ("plain", "circle", "Plain: the smooth round falloff"),
+                (
+                    "noise",
+                    "sparkles",
+                    "Noise: fractal value noise, 0.25..1 of the stroke",
+                ),
+                (
+                    "crater",
+                    "circle-dot",
+                    "Crater: a raised rim round a sunken bowl",
+                ),
+                (
+                    "ridges",
+                    "waves-vertical",
+                    "Ridges: parallel bands across the stroke",
+                ),
+                ("rocks", "gem", "Rocks: rounded rock bumps"),
+                ("dots", "grip", "Dots: scattered round dots"),
+                (
+                    "checker",
+                    "grid-2x-2",
+                    "Checker: full and quarter strength squares",
+                ),
+            ] {
+                let on = b.alpha == k;
+                let (rect, r) = ui.allocate_exact_size(vec2(side, side), egui::Sense::click());
+                let fill = if on { color::BG3 } else { color::BG2 };
+                let stroke = if on {
+                    Stroke::new(1.0, color::ACCENT)
+                } else {
+                    Stroke::new(1.0, egui::Color32::from_white_alpha(13))
+                };
+                ui.painter()
+                    .rect(rect, 6.0, fill, stroke, egui::StrokeKind::Inside);
+                let tint = if on || r.hovered() {
+                    color::FG0
+                } else {
+                    color::FG2
+                };
+                egui::Image::new(look::icon(icon)).tint(tint).paint_at(
+                    ui,
+                    egui::Rect::from_center_size(rect.center(), vec2(14.0, 14.0)),
+                );
+                let r = r.on_hover_text(title);
+                r.widget_info(|| {
+                    egui::WidgetInfo::selected(egui::accesskit::Role::RadioButton, true, on, title)
+                });
+                if r.clicked() {
+                    b.alpha = k.to_owned();
+                }
+            }
+        });
+        ui.add_space(4.0);
+        number_field(ui, "Radius (m)", &mut b.radius_m, "");
+        if b.mode == "raise" || b.mode == "lower" {
+            number_field(ui, "Strength (m)", &mut b.strength_m, "");
+        } else {
+            number_field(ui, "Amount (0–1)", &mut b.amount, "");
+        }
+        if b.mode == "flatten" {
+            look::field(ui, "Height (m)", |ui| {
+                let mut text = b.target_m.map(|t| number(&json!(t))).unwrap_or_default();
+                let r = look::input(ui, &mut text, 112.0, "under 1st point", "Height (m)")
+                    .on_hover_text("Flatten to this height; empty = the height under the first point of the stroke");
+                if r.changed() {
+                    b.target_m = text.trim().parse().ok();
+                }
+            });
+        }
+        let label = format!("Hardness {:.2}", b.hardness);
+        look::field(ui, &label, |ui| {
+            ui.add(
+                Range::new(&mut b.hardness, 0.0..=1.0, &label)
+                    .step(0.05)
+                    .reset(0.0),
+            )
+            .on_hover_text("0 = soft falloff over the whole radius, 1 = hard edge");
+        });
+        let what = match b.mode.as_str() {
+            "raise" => "Drag on the terrain to raise it.",
+            "lower" => "Drag on the terrain to lower it.",
+            "smooth" => "Drag to blend heights towards their local mean.",
+            _ => "Drag to pull heights towards the target height.",
+        };
+        ui.add(
+            egui::Label::new(
+                RichText::new(format!("{what} Each stroke is one undo step."))
+                    .size(12.0)
+                    .color(color::FG2),
+            )
+            .wrap(),
+        );
+        // The strokes node's layer settings (committed on leaving a field), and Fit to terrain.
+        let node = self.sculpt_node.as_ref().and_then(|id| {
+            self.graph["nodes"]
+                .as_array()?
+                .iter()
+                .find(|n| n["id"] == id.as_str())
+                .cloned()
+        });
+        let mut set: Option<(&str, Value)> = None;
+        if let Some(n) = &node {
+            egui::Frame::new()
+                .fill(color::BG2.gamma_multiply(0.6))
+                .corner_radius(8.0)
+                .inner_margin(Margin::same(8))
+                .show(ui, |ui| {
+                    ui.label(RichText::new("Layer settings").font(crate::theme::semibold(12.5)).color(color::FG0));
+                    for (key, label, default, tip) in [
+                        ("height_scale", "Height scale", 1.0, "Multiplies what the strokes changed (0 hides the layer)"),
+                        ("height_offset_m", "Height offset (m)", 0.0, "Added wherever the layer applies"),
+                        ("blending", "Blending", 1.0, "Opacity of the whole layer, 0..1"),
+                        ("level_step_m", "Level step (m)", 0.0, "Quantise the change into steps of this height (0 = off)"),
+                    ] {
+                        let current = number(&json!(n["params"][key].as_f64().unwrap_or(default)));
+                        look::field(ui, label, |ui| {
+                            if let Some(v) = look::commit_input(ui, &current, 96.0, "", label, tip)
+                                .and_then(|t| t.parse::<f64>().ok())
+                            {
+                                set = Some((key, json!(v)));
+                            }
+                        });
+                    }
+                    ui.horizontal(|ui| {
+                        let placed = !n["params"]["area"].is_null();
+                        ui.label(RichText::new(if placed { "area: placed" } else { "area: whole terrain" }).size(11.0).color(color::FG2));
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if look::button(ui, None, "Fit to terrain", true, placed)
+                                .on_hover_text("Apply the layer over the whole terrain (clears the area; place one in the inspector)")
+                                .clicked()
+                            {
+                                set = Some(("area", Value::Null));
+                            }
+                        });
+                    });
+                });
+        }
+        if let (Some((key, value)), Some(n)) = (set, node) {
+            let lod = self.preview_lod();
+            let r = Self::request(
+                "graph.set_param",
+                json!({ "id": n["id"], "key": key, "value": value }),
+            );
+            self.chain(vec![
+                Box::new(move |_| Some(r)),
+                Box::new(move |_| Some(Self::request("graph.evaluate", json!({ "lod": lod })))),
+            ]);
+        }
+        ui.add_space(6.0);
+        egui::Grid::new("brush-shortcuts")
+            .num_columns(2)
+            .spacing(vec2(8.0, 0.0))
+            .show(ui, |ui| {
+                for (k, v) in [
+                    ("Left drag", "stroke"),
+                    ("Right drag", "orbit"),
+                    ("Ctrl + wheel", "radius"),
+                    ("Shift + wheel", "strength"),
+                ] {
+                    ui.label(RichText::new(k).size(11.0).color(color::FG2));
+                    ui.label(RichText::new(v).size(11.0).color(color::FG2));
+                    ui.end_row();
+                }
+            });
+        ui.add_space(12.0);
     }
 
     /// The cave nodes of the graph, in order.
@@ -3180,7 +3615,7 @@ impl StudioApp {
             .filter_map(|n| n["id"].as_str().map(str::to_owned))
             .collect();
         // The cave being placed is gone (removed, undone): stop placing.
-        if self.cave_placing.as_ref().is_some_and(|p| !ids.contains(p)) {
+        if matches!(&self.drawing, Some(Drawing::Cave(p)) if !ids.contains(p)) {
             self.stop_placing();
         }
         if !self.show_caves || ids.is_empty() {
@@ -3352,7 +3787,7 @@ impl StudioApp {
                                     ));
                                 }
                             }
-                            let placing = self.cave_placing.as_deref() == Some(id.as_str());
+                            let placing = self.drawing == Some(Drawing::Cave(id.clone()));
                             let fg = if placing { color::ACCENT } else { color::FG0 };
                             let place = ui
                                 .add_enabled(
@@ -3425,7 +3860,7 @@ impl StudioApp {
             ui.add_space(8.0);
         }
         if let Some(id) = toggle_place {
-            if self.cave_placing.as_deref() == Some(id.as_str()) {
+            if self.drawing == Some(Drawing::Cave(id.clone())) {
                 self.stop_placing();
             } else {
                 self.start_placing(id);
@@ -4054,13 +4489,12 @@ impl StudioApp {
         }
         let ready = self.scatter.mask.is_some() && self.busy == 0;
         let placed = self.scatter_points.as_ref().map(Vec::len);
-        let (mut place, mut export) = (false, false);
+        let (mut place, mut export, mut paint) = (false, false, false);
         ui.horizontal_wrapped(|ui| {
             place = look::button(ui, None, "Place", false, ready)
                 .on_hover_text("Place instances from the mask (one jittered candidate per spacing cell, kept with probability = mask value)")
                 .clicked();
-            // ponytail: Paint density needs the sculpt tool (Brush panel, P4); shown, off until then.
-            look::button(ui, None, "Paint density", false, false).on_hover_text("Paint the density by hand: a clamped stroke node goes in front of the mask's output; drag on the terrain to add density (strength 0.5), negative strength to thin it");
+            paint = look::button(ui, None, "Paint density", false, ready).on_hover_text("Paint the density by hand: a clamped stroke node goes in front of the mask's output; drag on the terrain to add density (strength 0.5), negative strength to thin it").clicked();
             look::input(ui, &mut self.scatter_model, 96.0, "pine.fbx", "Model").on_hover_text("Your own model to instance: a binary FBX in the project's assets/ (metres, +Y up; import it with ⌘I). Empty = the 1 m proxy, or a generated rock for rock-named masks");
             export = look::button(ui, None, "Export .glb", false, placed.is_some_and(|n| n > 0) && self.busy == 0)
                 .on_hover_text("Write exports/<mask>.glb: the model (or the 1 m proxy) instanced with EXT_mesh_gpu_instancing")
@@ -4071,6 +4505,12 @@ impl StudioApp {
         });
         if place {
             self.place_scatter();
+        }
+        // The desktop's paintDensity: the mask's strokes node, clamped to 0..1, a 0.5 m raise.
+        if paint && let Some(mask) = self.scatter.mask.clone() {
+            self.brush.mode = "raise".into();
+            self.brush.strength_m = 0.5;
+            self.start_sculpting(&mask, Some([0.0, 1.0]));
         }
         if export && let Some(mask) = self.scatter.mask.clone() {
             let mut params = self.scatter_request();
@@ -4608,6 +5048,20 @@ impl StudioApp {
                 }
             }
             Action::Insert(k) => self.add_layer(crate::chrome::STRIP[k].3),
+            Action::Sculpt => {
+                if self.drawing.is_some() {
+                    self.drawing = None;
+                } else {
+                    self.start_sculpting("height", None);
+                }
+            }
+            Action::Road => {
+                self.drawing = if self.drawing == Some(Drawing::Road) {
+                    None
+                } else {
+                    Some(Drawing::Road)
+                };
+            }
         }
     }
 
@@ -5075,6 +5529,9 @@ impl eframe::App for StudioApp {
                 }))
                 .show(ui, |ui| {
                     look::scroll_card(ui, "panel-right", |ui| {
+                        if self.drawing.is_some() {
+                            self.brush_card(ui);
+                        }
                         self.sun_card(ui, frame);
                         ui.add_space(12.0);
                         self.scatter_card(ui);
@@ -5114,6 +5571,9 @@ impl eframe::App for StudioApp {
                 bottom: 8,
             }
         };
+        // The ground tool's ring, after the side columns: a Sculpt / Place / Road click there arms
+        // (or disarms) it for this very frame's viewport.
+        self.viewport.tool = self.tool_radius();
         egui::CentralPanel::default()
             .frame(bg.inner_margin(margin))
             .show(ui, |ui| {
@@ -5121,6 +5581,16 @@ impl eframe::App for StudioApp {
                 self.record_frame(frame);
                 if let Some(stroke) = self.viewport.take_stroke() {
                     self.on_stroke(&stroke);
+                }
+                // The desktop's `adjustBrush`: the radius in whole metres (≥ 1), the strength to
+                // 0.1 m.
+                if let Some((radius, factor)) = self.viewport.take_adjust() {
+                    let f = f64::from(factor);
+                    if radius {
+                        self.brush.radius_m = (self.brush.radius_m * f).round().max(1.0);
+                    } else {
+                        self.brush.strength_m = (self.brush.strength_m * f * 10.0).round() / 10.0;
+                    }
                 }
                 let cam = self.viewport.camera;
                 let st = crate::chrome::State {
@@ -5133,6 +5603,9 @@ impl eframe::App for StudioApp {
                     horizon: self.show_horizon,
                     enabled: self.project.is_some() && self.busy == 0,
                     can_still: self.project.is_some() && self.viewport.info().is_some(),
+                    // The desktop's `sculpting` is on for any ground tool (road, entrances too).
+                    sculpting: self.drawing.is_some(),
+                    road: self.drawing == Some(Drawing::Road),
                 };
                 if let Some(action) = crate::chrome::show(ui, self.viewport.rect(), &st) {
                     self.chrome_action(action, ui.ctx(), frame);

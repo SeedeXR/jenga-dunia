@@ -1405,6 +1405,9 @@ pub struct Viewport {
     pub tool: Option<f32>,
     stroke: Option<Vec<[f32; 2]>>,
     finished_stroke: Option<Vec<[f32; 2]>>,
+    /// Over the armed tool, Ctrl / ⌘ + wheel sizes the brush and Shift + wheel sets its strength
+    /// (the desktop's `onAdjust`): (radius?, factor) since the last call.
+    adjust: Option<(bool, f32)>,
     sun_deg: [f32; 2],
     fog: f32,
     /// A colour layer on the terrain (its preview, lava heat ramp).
@@ -1460,6 +1463,7 @@ impl Default for Viewport {
             tool: None,
             stroke: None,
             finished_stroke: None,
+            adjust: None,
             sun_deg: [140.0, 35.0],
             fog: 0.0,
             overlay: None,
@@ -1568,6 +1572,11 @@ impl Viewport {
         let (right, up, forward) = self.camera.basis(r.width() / r.height());
         let dir = normalize([0, 1, 2].map(|i| forward[i] + right[i] * ndc[0] + up[i] * ndc[1]));
         pick_heightfield(pv, *extent, self.camera.eye(), dir)
+    }
+
+    /// A brush adjustment from the wheel since the last call: (radius?, factor).
+    pub fn take_adjust(&mut self) -> Option<(bool, f32)> {
+        self.adjust.take()
     }
 
     /// The stroke drawn with the armed tool since the last call (ground points, metres east and
@@ -2315,6 +2324,26 @@ impl Viewport {
             self.camera.theta -= d.x * 0.005;
             self.camera.phi = (self.camera.phi - d.y * 0.005).clamp(0.15, 1.5);
             self.dirty = true;
+        }
+        if resp.hovered() && self.tool.is_some() {
+            // egui turns Ctrl / ⌘ + wheel into a zoom delta and Shift + wheel into a sideways
+            // scroll; over the brush they size it and set its strength instead of zooming.
+            let (zoom, scroll, shift) = ui.input(|i| {
+                let d = i.smooth_scroll_delta;
+                (
+                    i.zoom_delta(),
+                    if d.y != 0.0 { d.y } else { d.x },
+                    i.modifiers.shift,
+                )
+            });
+            if zoom != 1.0 {
+                self.adjust = Some((true, if zoom > 1.0 { 1.1 } else { 1.0 / 1.1 }));
+                return;
+            }
+            if shift && scroll != 0.0 {
+                self.adjust = Some((false, if scroll > 0.0 { 1.1 } else { 1.0 / 1.1 }));
+                return;
+            }
         }
         if resp.hovered() {
             // egui's scroll delta is the browser's `deltaY` with the sign flipped.

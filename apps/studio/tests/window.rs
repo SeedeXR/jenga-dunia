@@ -89,6 +89,27 @@ fn tap(
     h.run_steps(1);
 }
 
+/// A primary-button drag on the viewport from `a` to `b` (press, a few moves, release), as a
+/// stroke with a ground tool.
+fn drag_on(h: &mut Harness<'static, StudioApp>, a: eframe::egui::Pos2, b: eframe::egui::Pos2) {
+    h.hover_at(a);
+    h.run_steps(1);
+    let button = |pos, pressed| eframe::egui::Event::PointerButton {
+        pos,
+        button: eframe::egui::PointerButton::Primary,
+        pressed,
+        modifiers: Default::default(),
+    };
+    h.event(button(a, true));
+    h.run_steps(1);
+    for k in 1..=6 {
+        h.hover_at(a + (b - a) * (k as f32 / 6.0));
+        h.run_steps(1);
+    }
+    h.event(button(b, false));
+    h.run_steps(1);
+}
+
 /// Share of viewport pixels that are not the background colour.
 fn covered(h: &mut Harness<'static, StudioApp>) -> (f32, Vec<[u8; 4]>) {
     let img = render(h);
@@ -676,6 +697,10 @@ fn the_caves_section_adds_shows_x_rays_maps_and_exports_a_cave() {
     assert!(h.state().viewport.tool.is_none(), "placing stopped");
     // X-ray 20 %: the readout says so and the terrain turns see-through.
     let (_, before) = covered(&mut h);
+    // Scrolled into view first: egui gives no focus to a widget clipped out of its column.
+    h.get_by_role_and_label(eframe::egui::accesskit::Role::Slider, "X-ray 0 %")
+        .scroll_to_me();
+    h.run();
     h.get_by_role_and_label(eframe::egui::accesskit::Role::Slider, "X-ray 0 %")
         .focus();
     h.run();
@@ -683,7 +708,11 @@ fn the_caves_section_adds_shows_x_rays_maps_and_exports_a_cave() {
         h.key_press(eframe::egui::Key::ArrowRight);
         h.run();
     }
-    assert!(h.state().viewport_readout().contains(" · x-ray 20 %"));
+    assert!(
+        h.state().viewport_readout().contains(" · x-ray 20 %"),
+        "{}",
+        h.state().viewport_readout()
+    );
     let (_, after) = covered(&mut h);
     let changed = before.iter().zip(&after).filter(|(a, b)| a != b).count();
     assert!(
@@ -1270,6 +1299,97 @@ fn the_layer_stack_adds_bypasses_reorders_and_removes() {
     tap(&mut h, Some(button), "Remove filter.terrace");
     settle(&mut h, |_| node("jd.filter.terrace@1").is_none());
     assert_eq!(feed(&out["id"]), Some(thermal));
+}
+
+#[test]
+fn sculpt_paints_strokes_and_transforms_and_the_road_lays_a_spline() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = engine(dir.path());
+    let probe = server.clone();
+    let mut h = window(server);
+    settle(&mut h, |a| a.viewport.info().is_some());
+    let node = |kind: &str| {
+        let g = probe
+            .invoke(Request::new("graph.list", json!({})))
+            .result
+            .unwrap();
+        g["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|n| n["kind"] == kind)
+            .cloned()
+    };
+    let button = eframe::egui::accesskit::Role::Button;
+    // Sculpt: the strokes node goes in front of the output, the brush and its panel arm.
+    h.get_by_label("Sculpt: adds a stroke node before the output and paints with the brush")
+        .click();
+    h.run_steps(1);
+    settle(&mut h, |a| a.viewport.tool.is_some());
+    assert!(node("jd.sculpt.strokes@1").is_some());
+    h.get_by_role_and_label(eframe::egui::accesskit::Role::ComboBox, "Brush mode");
+    assert_eq!(h.state().viewport.tool, Some(150.0), "the brush radius");
+    // A drag is one raise stroke.
+    let r = h.state().viewport.rect();
+    let (a, b) = (
+        r.center() - eframe::egui::vec2(40.0, 0.0),
+        r.center() + eframe::egui::vec2(40.0, 0.0),
+    );
+    drag_on(&mut h, a, b);
+    settle(&mut h, |_| {
+        node("jd.sculpt.strokes@1").is_some_and(|n| {
+            n["params"]["strokes"]
+                .as_array()
+                .is_some_and(|s| s.len() == 1)
+        })
+    });
+    let stroke = node("jd.sculpt.strokes@1").unwrap()["params"]["strokes"][0].clone();
+    assert_eq!(
+        (stroke["mode"].as_str(), stroke["radius_m"].as_f64()),
+        (Some("raise"), Some(150.0)),
+        "{stroke}"
+    );
+    assert!(stroke["points"].as_array().unwrap().len() >= 2, "{stroke}");
+    // Ctrl / ⌘ + wheel over the brush sizes it (×1.1).
+    h.hover_at(r.center());
+    h.event(eframe::egui::Event::Zoom(1.2));
+    h.run_steps(2);
+    assert_eq!(h.state().viewport.tool, Some(165.0));
+    // Rotate: the drag becomes an op of a transforms node.
+    tap(
+        &mut h,
+        Some(eframe::egui::accesskit::Role::ComboBox),
+        "Brush mode",
+    );
+    h.run();
+    h.get_by_label("rotate").click();
+    h.run();
+    drag_on(&mut h, a, b);
+    settle(&mut h, |_| {
+        node("jd.sculpt.transforms@1")
+            .is_some_and(|n| n["params"]["ops"].as_array().is_some_and(|o| o.len() == 1))
+    });
+    assert_eq!(
+        node("jd.sculpt.transforms@1").unwrap()["params"]["ops"][0]["kind"],
+        "rotate"
+    );
+    // Sculpt again: back to orbiting.
+    h.get_by_role_and_label(
+        button,
+        "Sculpting: drag on the terrain to paint a stroke (click to stop)",
+    )
+    .click();
+    h.run();
+    assert!(h.state().viewport.tool.is_none());
+    // Road: one drag lays a spline node, then the tool is off.
+    h.get_by_role_and_label(button, "Road: the next drag on the terrain becomes a spline node that flattens a road bed along it").click();
+    h.run();
+    assert_eq!(h.state().viewport.tool, Some(6.0), "half the road's width");
+    drag_on(&mut h, a, b);
+    settle(&mut h, |_| node("jd.terrain.spline@1").is_some());
+    let road = node("jd.terrain.spline@1").unwrap();
+    assert_eq!(road["params"]["width_m"], 12.0);
+    assert!(h.state().viewport.tool.is_none(), "one drag, one road");
 }
 
 /// `JD_STUDIO_CAPTURE=<png> cargo test -p jd-studio --test window -- --ignored capture`: the

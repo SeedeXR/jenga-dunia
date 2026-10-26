@@ -115,6 +115,17 @@ pub fn icon(name: &str) -> ImageSource<'static> {
         };
     }
     icons!(
+        "circle",
+        "circle-dot",
+        "gem",
+        "grid-2x-2",
+        "grip",
+        "panel-bottom",
+        "panel-right",
+        "panel-right-close",
+        "panel-right-open",
+        "sparkles",
+        "waves-vertical",
         "arrow-down",
         "arrow-up",
         "chevron-down",
@@ -369,4 +380,32 @@ pub fn commit_input(
         ui.data_mut(|d| d.insert_temp(id, text));
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn every_icon_file_is_registered() {
+        // An icon missing from `icon`'s list falls back to the circle without a word (the brush
+        // alphas all drew circles once): every SVG in assets/icons/ must map to itself.
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/icons");
+        for entry in std::fs::read_dir(dir).expect("icons") {
+            let name = entry
+                .expect("entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned();
+            let Some(stem) = name.strip_suffix(".svg") else {
+                continue;
+            };
+            let uri = match super::icon(stem) {
+                eframe::egui::ImageSource::Bytes { uri, .. } => uri.to_string(),
+                other => panic!("{stem}: {other:?}"),
+            };
+            assert!(
+                uri.ends_with(&format!("/{stem}.svg")),
+                "{stem} is not registered ({uri})"
+            );
+        }
+    }
 }

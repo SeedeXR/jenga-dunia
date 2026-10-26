@@ -215,5 +215,17 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   target (eframe persistence; window size and egui memory not persisted, as the desktop). Fixed:
   a widget asking for more than the available width grew the left panel every frame (guarded by
   a layout-stability check in the first window test).
-  Next: the viewport click tools (cave entrances, sculpt + Brush, grid + Grid, road); selection
-  sync with the Editor; live evaluation in Studio; then P5 (default switch, packaging, docs).
+- P3 / P4 slice 10 — the ground tools: the viewport's armed tool (primary drag = a stroke of
+  ground points, right drag orbits, the desktop's red ring, Ctrl/⌘ + wheel radius, Shift + wheel
+  strength); Drawing = Sculpt | Road | Cave(id). Sculpt: graph.sculpt_target (new core op, the
+  desktop's strokesNodeFor / transformsNodeFor, shared) → strokes (raise / lower / smooth /
+  flatten, alphas) into the strokes node, transforms (rotate / scale / tilt / push / align) into
+  the transforms node; the Brush section (mode, fields, alphas, radius, strength / amount,
+  height, hardness, layer settings, Fit to terrain, shortcuts) while a tool is armed, as the
+  desktop's `sculpting`. Road: one drag → jd.terrain.spline@1 (12 m), then orbit. Paint density:
+  the mask's strokes node clamped 0..1, raise 0.5. Cave entrances placed by click. Studio's
+  strokes go to the strokes node chosen when sculpting started (the desktop selects the
+  transforms node after a transform stroke and then stops painting — a desktop follow-up).
+  Fixed: 11 icon files were never registered (the alphas drew circles) → every_icon_file_is_registered.
+  Next: the Grid tool (overlay, cell selection, the Grid section); selection sync with the Editor;
+  live evaluation in Studio; then P5 (default switch, packaging, docs).
