@@ -1594,8 +1594,8 @@ export default function App() {
       {/* Bottom: log */}
       <section className="jd-panel mx-2 mb-2 overflow-y-auto px-3 py-2 font-mono text-xs" data-testid="log">
         {s.log.length === 0 && <span className="text-jd-fg-2">Operations and warnings appear here.</span>}
-        {s.log.map((e, i) => (
-          <div key={i} className={e.level === "error" ? "text-jd-error" : e.level === "warn" ? "text-jd-warn" : "text-jd-fg-1"}>
+        {s.log.map((e) => (
+          <div key={e.seq} data-seq={e.seq} className={e.level === "error" ? "text-jd-error" : e.level === "warn" ? "text-jd-warn" : "text-jd-fg-1"}>
             {new Date(e.ts).toLocaleTimeString()} {e.text}
           </div>
         ))}

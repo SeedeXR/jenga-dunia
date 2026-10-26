@@ -144,8 +144,12 @@ export async function selectNode(node: Locator): Promise<void> {
 }
 
 /** How many lines of the op log contain `text` (assert on a count, not on text that an earlier op already logged). */
-export function logCount(page: Page, text: string | RegExp): Promise<number> {
-  return page.getByTestId("log").locator("div", { hasText: text }).count();
+/** The newest log line matching `text`, as its session sequence number (0: none): it rises with
+ *  each new match even once the 200-line log is full and old matches scroll out, which a count of
+ *  the visible lines does not (a connect could then add one match as another dropped off). */
+export async function logCount(page: Page, text: string | RegExp): Promise<number> {
+  const seqs = await page.getByTestId("log").locator("div", { hasText: text }).evaluateAll((els) => els.map((e) => Number(e.getAttribute("data-seq"))));
+  return Math.max(0, ...seqs);
 }
 
 const EVALUATED = /graph\.evaluate: ok|terrain\.generate: ok/;

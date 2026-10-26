@@ -104,6 +104,13 @@ export interface LogEntry {
   ts: number;
   level: "info" | "warn" | "error";
   text: string;
+  /** 1, 2, 3… across the session: still rises once the log is full (e2e `logCount` reads it). */
+  seq: number;
+}
+
+/** The log with `entry` appended, numbered, keeping the last 200. */
+export function appendLog(log: LogEntry[], entry: Omit<LogEntry, "seq">): LogEntry[] {
+  return [...log.slice(-199), { ...entry, seq: (log.at(-1)?.seq ?? 0) + 1 }];
 }
 
 export type GraphNode = NodeView;
@@ -367,13 +374,13 @@ function describe(r: Response): { level: LogEntry["level"]; text: string } {
 }
 
 export const useStore = create<State>((set, get) => {
-  const log = (r: Response) => set((s) => ({ log: [...s.log.slice(-199), { ts: Date.now(), ...describe(r) }] }));
+  const log = (r: Response) => set((s) => ({ log: appendLog(s.log, { ts: Date.now(), ...describe(r) }) }));
   // `invoke` rejects (transport/deserialisation failures, or commands returning Err) never escape
   // as unhandled rejections: they become error log entries.
   const logFailure = (what: string, e: unknown) => {
     const err = e as Partial<JdError> | string | undefined;
     const text = typeof err === "string" ? err : err && typeof err === "object" && "code" in err ? `${err.code} ${err.message ?? ""}${err.next ? ` — ${err.next}` : ""}` : String(e);
-    set((s) => ({ log: [...s.log.slice(-199), { ts: Date.now(), level: "error", text: `${what}: ${text}` }] }));
+    set((s) => ({ log: appendLog(s.log, { ts: Date.now(), level: "error", text: `${what}: ${text}` }) }));
   };
   // While an op is in flight, poll the core's job table so long evaluations show progress and
   // can be cancelled; the poll uses `op` directly so it never appears in the log.
@@ -465,7 +472,7 @@ export const useStore = create<State>((set, get) => {
       set({ maps: r?.maps ?? null, mapsMs: r?.ms ?? 0 });
       if (r) {
         const n = get().materials.length;
-        set((st) => ({ log: [...st.log.slice(-199), { ts: Date.now(), level: "info", text: `terrain.textures: ok ${r.maps.px[0]}×${r.maps.px[1]}${n ? ` with ${n} material layer${n === 1 ? "" : "s"}` : ""} in ${r.ms.toFixed(0)} ms` }] }));
+        set((st) => ({ log: appendLog(st.log, { ts: Date.now(), level: "info", text: `terrain.textures: ok ${r.maps.px[0]}×${r.maps.px[1]}${n ? ` with ${n} material layer${n === 1 ? "" : "s"}` : ""} in ${r.ms.toFixed(0)} ms` }) }));
       }
     } catch (e) {
       logFailure("terrain.textures", e);
@@ -571,7 +578,7 @@ export const useStore = create<State>((set, get) => {
           if (r.status === "ok" && r.result) await adopt(r.result);
           else if (r.error?.code === "E_GRAPH_MISSING_INPUT") {
             // Half-wired graphs are normal while editing: say what is missing, without an error entry.
-            set((s) => ({ log: [...s.log.slice(-199), { ts: Date.now(), level: "info", text: `live preview waiting: ${r.error?.message ?? ""}` }] }));
+            set((s) => ({ log: appendLog(s.log, { ts: Date.now(), level: "info", text: `live preview waiting: ${r.error?.message ?? ""}` }) }));
           } else log(r);
         } catch (e) {
           logFailure("graph.evaluate (live)", e);
@@ -868,7 +875,7 @@ export const useStore = create<State>((set, get) => {
     },
     reportCrash: async (message, stack, source) => {
       const r = await op<{ path: string }>("diag.crash_report", { message: message.slice(0, 4000), stack: stack.slice(0, 16000), source }).catch(() => null);
-      set((st) => ({ log: [...st.log.slice(-199), { ts: Date.now(), level: "error", text: `crash report${r?.status === "ok" && r.result ? `: ${r.result.path}` : " (not written)"} — ${message}` }] }));
+      set((st) => ({ log: appendLog(st.log, { ts: Date.now(), level: "error", text: `crash report${r?.status === "ok" && r.result ? `: ${r.result.path}` : " (not written)"} — ${message}` }) }));
     },
     sun: { azimuth_deg: 140, elevation_deg: 35, turbidity: 3, clouds: 0, fog: 0, rain: 0 },
     setSun: (patch) => {
@@ -927,7 +934,7 @@ export const useStore = create<State>((set, get) => {
       if (!blob) return logFailure("still", "the canvas gave no image");
       const n = Date.now() % 100000;
       const path = await writeExport(`stills/view_${n}.png`, blob);
-      set((st) => ({ log: [...st.log.slice(-199), { ts: Date.now(), level: path ? "info" : "error", text: path ? `still: ${path} (${(blob.size / 1024).toFixed(0)} KB)` : "still: write failed" }] }));
+      set((st) => ({ log: appendLog(st.log, { ts: Date.now(), level: path ? "info" : "error", text: path ? `still: ${path} (${(blob.size / 1024).toFixed(0)} KB)` : "still: write failed" }) }));
     },
     recordFlythrough: async (frames) => {
       const v = get().viewport;
@@ -943,7 +950,7 @@ export const useStore = create<State>((set, get) => {
         if (blob && (await writeExport(`flythrough/frame_${String(k).padStart(4, "0")}.png`, blob))) written++;
       }
       v.setOrbit(start);
-      set((st) => ({ log: [...st.log.slice(-199), { ts: Date.now(), level: written === frames ? "info" : "warn", text: `flythrough: ${written}/${frames} frames → exports/flythrough/ (ffmpeg -framerate 24 -i frame_%04d.png …)` }] }));
+      set((st) => ({ log: appendLog(st.log, { ts: Date.now(), level: written === frames ? "info" : "warn", text: `flythrough: ${written}/${frames} frames → exports/flythrough/ (ffmpeg -framerate 24 -i frame_%04d.png …)` }) }));
     },
     hdri: null,
     loadHdri: async (path) => {
@@ -952,7 +959,7 @@ export const useStore = create<State>((set, get) => {
       if (!r) return log({ op: "sky.load_hdri", schema_version: 1, request_id: "", status: "error", error: { code: "E_INPUT_INVALID", message: `could not read ${path}` } });
       set({ hdri: { path, bitmap: r.bitmap, px: r.px, sun: r.sun } });
       old?.bitmap.close();
-      set((st) => ({ log: [...st.log.slice(-199), { ts: Date.now(), level: "info", text: `sky.load_hdri: ok ${r.px[0]}×${r.px[1]} sun ${Math.round(r.sun.elevation_deg)}°/${Math.round(r.sun.azimuth_deg)}° luminance ${r.luminance.toFixed(2)}` }] }));
+      set((st) => ({ log: appendLog(st.log, { ts: Date.now(), level: "info", text: `sky.load_hdri: ok ${r.px[0]}×${r.px[1]} sun ${Math.round(r.sun.elevation_deg)}°/${Math.round(r.sun.azimuth_deg)}° luminance ${r.luminance.toFixed(2)}` }) }));
     },
     clearHdri: () => {
       const old = get().hdri;
@@ -966,7 +973,7 @@ export const useStore = create<State>((set, get) => {
         const old = get().sky;
         set({ sky: r });
         old?.bitmap.close();
-        if (r) set((st) => ({ log: [...st.log.slice(-199), { ts: Date.now(), level: "info", text: `sky.preview: ok ${r.px[0]}×${r.px[1]} sun ${elevation_deg}°/${azimuth_deg}° turbidity ${turbidity} clouds ${Math.round(clouds * 100)} %` }] }));
+        if (r) set((st) => ({ log: appendLog(st.log, { ts: Date.now(), level: "info", text: `sky.preview: ok ${r.px[0]}×${r.px[1]} sun ${elevation_deg}°/${azimuth_deg}° turbidity ${turbidity} clouds ${Math.round(clouds * 100)} %` }) }));
       } catch (e) {
         logFailure("sky.preview", e);
       }
