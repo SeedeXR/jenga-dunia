@@ -1,7 +1,9 @@
-//! The 3-D viewport: the selected layer's preview as a sun-lit height-ramp mesh, rendered by
-//! wgpu into Studio's own colour and depth targets (4× MSAA when the adapter allows it) and shown
-//! in an egui panel as a native texture (ADR-0017; `docs/research/option-b-stack.md` §1 B).
-//! Drag to orbit, right-drag to pan, scroll to zoom, double-click to fit.
+//! The 3-D viewport, a port of the desktop's three.js scene (`apps/desktop/src/viewport/
+//! TerrainView.tsx`): the layer's preview as a mesh with the height ramp and slope rock (or the
+//! baked PBR maps), lit like three's `MeshStandardMaterial` by the sun and the hemisphere light,
+//! with distance fog and the sky dome (the physical-sky preview, or the gradient), rendered by
+//! wgpu into Studio's own colour and depth targets (4× MSAA when supported) and shown in an egui
+//! panel as a native texture. Either button drags orbit, the wheel zooms.
 
 use eframe::egui::{self, Align2, FontId, PointerButton, Rect, Sense, TextureId};
 use eframe::egui_wgpu::{RenderState, wgpu};
@@ -22,41 +24,193 @@ struct Vertex {
     normal: [f32; 3],
     /// Linear RGB: the height ramp blended to rock by slope, as the desktop's vertex colours.
     color: [f32; 3],
+    /// Map coordinates: u east, v north from the south edge (the baked maps' row 0).
+    uv: [f32; 2],
 }
 
+/// Everything the shaders read, in WGSL's uniform layout (16-byte rows).
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Uniforms {
     view_proj: [[f32; 4]; 4],
-    /// Direction towards the sun (xyz), w unused.
-    sun: [f32; 4],
+    /// Camera position (w unused).
+    eye: [f32; 4],
+    /// The view basis for the sky rays: right × tan(fov/2)·aspect, up × tan(fov/2), forward.
+    right: [f32; 4],
+    up: [f32; 4],
+    forward: [f32; 4],
+    /// Towards the sun (xyz), w unused.
+    sun_dir: [f32; 4],
+    /// The sun's colour × intensity (linear).
+    sun_light: [f32; 4],
+    /// The hemisphere light's sky and ground colours × intensity (linear).
+    hemi_sky: [f32; 4],
+    hemi_ground: [f32; 4],
+    /// Fog colour (rgb) and planes: x near, y far (view depth, metres).
+    fog_color: [f32; 4],
+    fog: [f32; 4],
+    /// x: baked maps on, y: emissive map on, z: sky texture on, w: sky radius (metres).
+    flags: [f32; 4],
 }
 
 const SHADER: &str = r"
-struct Uniforms { view_proj: mat4x4<f32>, sun: vec4<f32> };
-@group(0) @binding(0) var<uniform> u: Uniforms;
+struct U {
+    view_proj: mat4x4<f32>,
+    eye: vec4<f32>, right: vec4<f32>, up: vec4<f32>, forward: vec4<f32>,
+    sun_dir: vec4<f32>, sun_light: vec4<f32>, hemi_sky: vec4<f32>, hemi_ground: vec4<f32>,
+    fog_color: vec4<f32>, fog: vec4<f32>, flags: vec4<f32>,
+};
+@group(0) @binding(0) var<uniform> u: U;
+@group(0) @binding(1) var samp: sampler;
+@group(0) @binding(2) var albedo_map: texture_2d<f32>;
+@group(0) @binding(3) var normal_map: texture_2d<f32>;
+@group(0) @binding(4) var rough_map: texture_2d<f32>;
+@group(0) @binding(5) var emissive_map: texture_2d<f32>;
+@group(0) @binding(6) var sky_map: texture_2d<f32>;
+
+const PI: f32 = 3.141592653589793;
+const RECIPROCAL_PI: f32 = 0.3183098861837907;
 
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
-    @location(0) normal: vec3<f32>,
-    @location(1) color: vec3<f32>,
+    @location(0) world: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) color: vec3<f32>,
+    @location(3) uv: vec2<f32>,
 };
 
 @vertex
-fn vs_main(@location(0) pos: vec3<f32>, @location(1) normal: vec3<f32>, @location(2) color: vec3<f32>) -> VsOut {
+fn vs_main(@location(0) pos: vec3<f32>, @location(1) normal: vec3<f32>, @location(2) color: vec3<f32>, @location(3) uv: vec2<f32>) -> VsOut {
     var o: VsOut;
     o.clip = u.view_proj * vec4<f32>(pos, 1.0);
+    o.world = pos;
     o.normal = normal;
     o.color = color;
+    o.uv = uv;
     return o;
+}
+
+// three.js's physical BRDF (MeshStandardMaterial, metalness 0): Schlick Fresnel, height-correlated
+// Smith visibility, GGX distribution, Lambert diffuse.
+fn brdf_ggx(l: vec3<f32>, v: vec3<f32>, n: vec3<f32>, roughness: f32) -> vec3<f32> {
+    let alpha = roughness * roughness;
+    let h = normalize(l + v);
+    let dnl = clamp(dot(n, l), 0.0, 1.0);
+    let dnv = clamp(dot(n, v), 0.0, 1.0);
+    let dnh = clamp(dot(n, h), 0.0, 1.0);
+    let dvh = clamp(dot(v, h), 0.0, 1.0);
+    let f0 = vec3<f32>(0.04);
+    let fresnel = f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - dvh, 5.0);
+    let a2 = alpha * alpha;
+    let gv = dnl * sqrt(a2 + (1.0 - a2) * dnv * dnv);
+    let gl = dnv * sqrt(a2 + (1.0 - a2) * dnl * dnl);
+    let vis = 0.5 / max(gv + gl, 1e-6);
+    let denom = dnh * dnh * (a2 - 1.0) + 1.0;
+    let d = RECIPROCAL_PI * a2 / (denom * denom);
+    return fresnel * (vis * d);
+}
+
+fn fogged(c: vec3<f32>, world: vec3<f32>) -> vec3<f32> {
+    let depth = dot(world - u.eye.xyz, u.forward.xyz);
+    return mix(c, u.fog_color.rgb, smoothstep(u.fog.x, u.fog.y, depth));
 }
 
 @fragment
 fn fs_main(i: VsOut) -> @location(0) vec4<f32> {
-    let n = normalize(i.normal);
-    let sun = max(dot(n, normalize(u.sun.xyz)), 0.0);
-    let sky = 0.25 + 0.15 * n.y;
-    return vec4<f32>(i.color * (sky + 0.9 * sun), 1.0);
+    let flat_n = normalize(i.normal);
+    var albedo = i.color;
+    var roughness = 0.95;
+    var n = flat_n;
+    var emissive = vec3<f32>(0.0);
+    // The framed block's walls carry uv −1: their own colour, never the maps.
+    if (u.flags.x > 0.5 && i.uv.x >= 0.0) {
+        albedo = textureSample(albedo_map, samp, i.uv).rgb;
+        roughness = textureSample(rough_map, samp, i.uv).g;
+        // Tangent space: +x east (u), +y north (v), +z out of the surface (glTF), on the mesh
+        // normal (three's normalMap on a plane).
+        let m = textureSample(normal_map, samp, i.uv).xyz * 2.0 - 1.0;
+        let t = normalize(vec3<f32>(1.0, 0.0, 0.0) - flat_n * flat_n.x);
+        let b = normalize(vec3<f32>(0.0, 0.0, -1.0) + flat_n * flat_n.z);
+        n = normalize(t * m.x + b * m.y + flat_n * m.z);
+        if (u.flags.y > 0.5) {
+            emissive = textureSample(emissive_map, samp, i.uv).rgb;
+        }
+    }
+    // three: roughness ≥ 0.0525, plus the geometry's own roughness from the normal's derivatives.
+    let dxy = max(abs(dpdx(flat_n)), abs(dpdy(flat_n)));
+    roughness = min(max(roughness, 0.0525) + max(max(dxy.x, dxy.y), dxy.z), 1.0);
+    let v = normalize(u.eye.xyz - i.world);
+    let l = normalize(u.sun_dir.xyz);
+    let irradiance = clamp(dot(n, l), 0.0, 1.0) * u.sun_light.rgb;
+    let diffuse_color = albedo;
+    var c = irradiance * RECIPROCAL_PI * diffuse_color + irradiance * brdf_ggx(l, v, n, roughness);
+    let hemi = mix(u.hemi_ground.rgb, u.hemi_sky.rgb, 0.5 * n.y + 0.5);
+    c += hemi * RECIPROCAL_PI * diffuse_color;
+    c += emissive;
+    return vec4<f32>(fogged(c, i.world), 1.0);
+}
+
+// The framed block's rim: teal lines (0x3fd0c9), unlit, fogged like three's LineBasicMaterial.
+struct LineOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) world: vec3<f32>,
+};
+
+@vertex
+fn line_vs(@location(0) pos: vec3<f32>) -> LineOut {
+    var o: LineOut;
+    o.clip = u.view_proj * vec4<f32>(pos, 1.0);
+    o.world = pos;
+    return o;
+}
+
+@fragment
+fn line_fs(i: LineOut) -> @location(0) vec4<f32> {
+    return vec4<f32>(fogged(vec3<f32>(0.0497, 0.6308, 0.5841), i.world), 1.0);
+}
+
+// The sky: a full-screen triangle; each pixel's ray meets the dome (a sphere of radius flags.w
+// around the origin, as the desktop's scaled sphere) and reads the equirectangular preview —
+// row 0 the zenith, column 0 north, clockwise — or the gradient. No fog, behind everything.
+struct SkyOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) ndc: vec2<f32>,
+};
+
+@vertex
+fn sky_vs(@builtin(vertex_index) i: u32) -> SkyOut {
+    let p = vec2<f32>(f32((i << 1u) & 2u) * 2.0 - 1.0, f32(i & 2u) * 2.0 - 1.0);
+    var o: SkyOut;
+    o.clip = vec4<f32>(p, 1.0, 1.0);
+    o.ndc = p;
+    return o;
+}
+
+@fragment
+fn sky_fs(i: SkyOut) -> @location(0) vec4<f32> {
+    let ray = normalize(u.forward.xyz + u.right.xyz * i.ndc.x + u.up.xyz * i.ndc.y);
+    // Where the ray leaves the dome (the camera is inside it).
+    let o = u.eye.xyz;
+    let b = dot(o, ray);
+    let c = dot(o, o) - u.flags.w * u.flags.w;
+    let t = -b + sqrt(max(b * b - c, 0.0));
+    let d = normalize(o + ray * t);
+    if (u.flags.z > 0.5) {
+        let azimuth = atan2(d.x, -d.z);
+        let uv = vec2<f32>(fract(azimuth / (2.0 * PI) + 1.0), acos(clamp(d.y, -1.0, 1.0)) / PI);
+        return vec4<f32>(textureSampleLevel(sky_map, samp, uv, 0.0).rgb, 1.0);
+    }
+    // The gradient dome: horizon → zenith above, quickly to the dark ground below.
+    let zenith = vec3<f32>(0.0176, 0.0595, 0.1946);
+    let horizon = vec3<f32>(0.4851, 0.5711, 0.6939);
+    let ground = vec3<f32>(0.0116, 0.0176, 0.0319);
+    var col: vec3<f32>;
+    if (d.y >= 0.0) {
+        col = mix(horizon, zenith, pow(d.y, 0.6));
+    } else {
+        col = mix(horizon, ground, min(1.0, -d.y * 10.0));
+    }
+    return vec4<f32>(col, 1.0);
 }
 ";
 
@@ -82,6 +236,38 @@ fn ramp(q: u16) -> [f32; 3] {
     [0, 1, 2].map(|i| c0[i] + (c1[i] - c0[i]) * f)
 }
 
+/// An sRGB hex colour in linear RGB (three's `new Color(0xrrggbb)` in its linear working space).
+fn hex(rgb: u32) -> [f32; 3] {
+    [16, 8, 0].map(|s| srgb_to_linear(((rgb >> s) & 0xff) as u8) as f32)
+}
+
+/// The desktop's lights for a sun at this azimuth / elevation (`TerrainView.tsx`): the sun's
+/// colour × intensity, then the hemisphere light's sky and ground colours × intensity.
+pub fn lights(azimuth_deg: f32, elevation_deg: f32) -> ([f32; 3], [f32; 3], [f32; 3], [f32; 3]) {
+    let (az, el) = (azimuth_deg.to_radians(), elevation_deg.to_radians());
+    // Azimuth is where the light comes FROM, clockwise from north (−z).
+    let dir = [az.sin() * el.cos(), el.sin(), -az.cos() * el.cos()];
+    let warm = ((20.0 - elevation_deg) / 20.0).clamp(0.0, 1.0);
+    let (white, amber) = ([1.0, 1.0, 1.0], hex(0xffa054));
+    let sun_i = 1.6 * (0.55 + 0.45 * el.sin());
+    let sun = [0, 1, 2].map(|i| (white[i] + (amber[i] - white[i]) * warm) * sun_i);
+    let hemi_i = 0.9 * (0.6 + 0.4 * el.sin());
+    let (sky, ground) = (hex(0xdfe8ff), hex(0x3a3630));
+    (
+        dir,
+        sun,
+        sky.map(|c| c * hemi_i),
+        ground.map(|c| c * hemi_i),
+    )
+}
+
+/// The desktop's fog planes (`applyFog`): 0 → a faint aerial perspective from 2× to 12× the
+/// world's size, 1 → the view closes within the world.
+pub fn fog_planes(size: f32, amount: f32) -> [f32; 2] {
+    let f = amount.clamp(0.0, 1.0);
+    [size * (2.0 - 1.95 * f), size * (12.0 - 11.2 * f)]
+}
+
 /// The desktop's orbit camera (`TerrainView.tsx`): around the origin, `theta` about the vertical
 /// axis, `phi` from the zenith, fov 50°.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -92,9 +278,11 @@ pub struct Camera {
     pub phi: f32,
     /// Distance from the origin (metres).
     pub radius: f32,
-    /// The world's larger side (metres): clip planes and zoom limits follow it.
+    /// The world's larger side (metres): clip planes, zoom limits, fog and the dome follow it.
     pub size: f32,
 }
+
+const FOV_DEG: f32 = 50.0;
 
 impl Camera {
     /// The home view for a world of this extent: θ 0.6, φ 1.0, radius 1.3 × the larger side.
@@ -122,9 +310,18 @@ impl Camera {
         let near = (self.size * 0.001).max(0.1);
         let far = self.size * 50.0;
         mul(
-            perspective(50f32.to_radians(), aspect, near, far),
+            perspective(FOV_DEG.to_radians(), aspect, near, far),
             look_at(self.eye(), [0.0, 0.0, 0.0]),
         )
+    }
+
+    /// right, up, forward scaled for sky rays (`forward + right·x + up·y` through NDC x, y).
+    fn basis(&self, aspect: f32) -> ([f32; 3], [f32; 3], [f32; 3]) {
+        let f = normalize(sub([0.0, 0.0, 0.0], self.eye()));
+        let r = normalize(cross(f, [0.0, 1.0, 0.0]));
+        let u = cross(r, f);
+        let t = (FOV_DEG.to_radians() / 2.0).tan();
+        (r.map(|c| c * t * aspect), u.map(|c| c * t), f)
     }
 }
 
@@ -185,6 +382,45 @@ fn srgb_to_linear(c: u8) -> f64 {
     }
 }
 
+/// An RGBA8 image (PNG-decoded) for a texture.
+#[derive(Clone)]
+pub struct Image {
+    /// Width, height.
+    pub size: [u32; 2],
+    /// RGBA rows, top first.
+    pub rgba: Vec<u8>,
+}
+
+impl Image {
+    /// Decode a base64 PNG (the ops' `*_png_base64`).
+    pub fn from_png_base64(b64: &str) -> Result<Self, String> {
+        use base64::Engine as _;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(b64)
+            .map_err(|e| format!("bad base64: {e}"))?;
+        let img = image::load_from_memory_with_format(&bytes, image::ImageFormat::Png)
+            .map_err(|e| format!("bad PNG: {e}"))?
+            .into_rgba8();
+        Ok(Self {
+            size: [img.width(), img.height()],
+            rgba: img.into_raw(),
+        })
+    }
+}
+
+/// The baked material maps of the shown layer (`terrain.textures`).
+#[derive(Clone)]
+pub struct Maps {
+    /// Albedo (sRGB).
+    pub albedo: Image,
+    /// Tangent-space normal (+x east, +y north, +z up).
+    pub normal: Image,
+    /// Roughness in G.
+    pub roughness: Image,
+    /// Emitted light (sRGB), when any material glows.
+    pub emissive: Option<Image>,
+}
+
 /// What the viewport shows, for readouts and tests.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TerrainInfo {
@@ -199,10 +435,16 @@ pub struct TerrainInfo {
 }
 
 struct Gpu {
-    pipeline: wgpu::RenderPipeline,
+    terrain: wgpu::RenderPipeline,
+    lines: wgpu::RenderPipeline,
+    sky: wgpu::RenderPipeline,
+    layout: wgpu::BindGroupLayout,
     uniforms: wgpu::Buffer,
-    bind_group: wgpu::BindGroup,
+    sampler: wgpu::Sampler,
     samples: u32,
+    /// Textures bound in slots 2–6 (a 1 × 1 stand-in where nothing is loaded).
+    textures: [wgpu::TextureView; 5],
+    bind_group: wgpu::BindGroup,
 }
 
 struct Targets {
@@ -216,10 +458,49 @@ struct Targets {
     tex_id: TextureId,
 }
 
+/// The framed block's wall triangles and rim line points.
+type Frame = (Vec<Vertex>, Vec<[f32; 3]>);
+
 struct Mesh {
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
     count: u32,
+    /// The framed block: wall triangles (terrain pipeline) and rim lines.
+    walls: Option<(wgpu::Buffer, u32)>,
+    rim: Option<(wgpu::Buffer, u32)>,
+}
+
+/// The framed block of a preview (the desktop's `buildFrame`): walls from the edge profile down
+/// to `base`, flat-shaded facing out, and the rim — the edge profile and the base rectangle.
+fn frame_geometry(vertices: &[Vertex], w: u32, h: u32, base: f32) -> Frame {
+    // The boundary once around: north row west → east, east column north → south, south row
+    // east → west, west column south → north (rows run south → north in `vertices`).
+    let mut ring: Vec<(u32, u32)> = (0..w).map(|x| (x, h - 1)).collect();
+    ring.extend((0..h - 1).rev().map(|y| (w - 1, y)));
+    ring.extend((0..w - 1).rev().map(|x| (x, 0)));
+    ring.extend((1..h - 1).map(|y| (0, y)));
+    let wall = hex(0x2a2f36);
+    let (mut walls, mut rim) = (Vec::new(), Vec::new());
+    for k in 0..ring.len() {
+        let (a, b) = (ring[k], ring[(k + 1) % ring.len()]);
+        let pa = vertices[(a.1 * w + a.0) as usize].pos;
+        let pb = vertices[(b.1 * w + b.0) as usize].pos;
+        let (qa, qb) = ([pa[0], base, pa[2]], [pb[0], base, pb[2]]);
+        // Outward: the walk is clockwise seen from above, so the edge direction (e.x, e.z) turns
+        // to (e.z, −e.x): east along the north row → north, south down the east column → east.
+        let e = normalize(sub(pb, pa));
+        let normal = normalize([e[2], 0.0, -e[0]]);
+        for pos in [pa, pb, qb, pa, qb, qa] {
+            walls.push(Vertex {
+                pos,
+                normal,
+                color: wall,
+                uv: [-1.0, -1.0],
+            });
+        }
+        rim.extend_from_slice(&[pa, pb, qa, qb]);
+    }
+    (walls, rim)
 }
 
 /// The viewport's state; [`Viewport::show`] draws it into the remaining space of a `Ui`.
@@ -227,11 +508,19 @@ pub struct Viewport {
     gpu: Option<Gpu>,
     targets: Option<Targets>,
     mesh: Option<Mesh>,
-    pending: Option<(Vec<Vertex>, Vec<u32>)>,
+    pending: Option<(Vec<Vertex>, Vec<u32>, Option<Frame>)>,
+    pending_maps: Option<Option<Maps>>,
+    pending_sky: Option<Option<Image>>,
     info: Option<TerrainInfo>,
     /// The camera; set it and the next frame re-renders.
     pub camera: Camera,
-    sun: [f32; 3],
+    /// Draw the world as a framed block (walls and rim), as the desktop does by default.
+    pub frame: bool,
+    sun_deg: [f32; 2],
+    fog: f32,
+    maps_px: Option<[u32; 2]>,
+    emissive: bool,
+    sky_px: Option<[u32; 2]>,
     dirty: bool,
     rect: Rect,
     renders: u64,
@@ -239,20 +528,25 @@ pub struct Viewport {
 
 impl Default for Viewport {
     fn default() -> Self {
-        let mut v = Self {
+        Self {
             gpu: None,
             targets: None,
             mesh: None,
             pending: None,
+            pending_maps: None,
+            pending_sky: None,
             info: None,
             camera: Camera::fit([1.0, 1.0]),
-            sun: [0.0, 1.0, 0.0],
+            frame: true,
+            sun_deg: [140.0, 35.0],
+            fog: 0.0,
+            maps_px: None,
+            emissive: false,
+            sky_px: None,
             dirty: true,
             rect: Rect::NOTHING,
             renders: 0,
-        };
-        v.set_sun(140.0, 35.0);
-        v
+        }
     }
 }
 
@@ -288,6 +582,7 @@ impl Viewport {
                     ],
                     normal,
                     color: [0, 1, 2].map(|i| c[i] + (ROCK[i] - c[i]) * slope),
+                    uv: [x as f32 / (w - 1) as f32, y as f32 / (h - 1) as f32],
                 });
             }
         }
@@ -308,7 +603,12 @@ impl Viewport {
         if refit {
             self.camera = Camera::fit(extent_m);
         }
-        self.pending = Some((vertices, indices));
+        // The desktop's frame (on by default): the base sits 15 % of the relief (≥ 10 m) below.
+        let frame = self.frame.then(|| {
+            let base = pv.min - (pv.max - pv.min).mul_add(0.15, 0.0).max(10.0);
+            frame_geometry(&vertices, w, h, base)
+        });
+        self.pending = Some((vertices, indices, frame));
         self.dirty = true;
     }
 
@@ -317,19 +617,50 @@ impl Viewport {
         self.mesh = None;
         self.pending = None;
         self.info = None;
+        self.set_maps(None);
         self.dirty = true;
     }
 
-    /// Sun direction from azimuth (clockwise from north) and elevation, in degrees.
+    /// Shade with these baked maps (`None`: the ramp vertex colours).
+    pub fn set_maps(&mut self, maps: Option<Maps>) {
+        self.maps_px = maps.as_ref().map(|m| m.albedo.size);
+        self.emissive = maps.as_ref().is_some_and(|m| m.emissive.is_some());
+        self.pending_maps = Some(maps);
+        self.dirty = true;
+    }
+
+    /// The physical-sky preview on the dome (`None`: the gradient).
+    pub fn set_sky(&mut self, sky: Option<Image>) {
+        self.sky_px = sky.as_ref().map(|s| s.size);
+        self.pending_sky = Some(sky);
+        self.dirty = true;
+    }
+
+    /// Sun from azimuth (clockwise from north) and elevation, in degrees.
     pub fn set_sun(&mut self, azimuth_deg: f32, elevation_deg: f32) {
-        let (az, el) = (azimuth_deg.to_radians(), elevation_deg.to_radians());
-        self.sun = [az.sin() * el.cos(), el.sin(), -az.cos() * el.cos()];
+        self.sun_deg = [azimuth_deg, elevation_deg];
+        self.dirty = true;
+    }
+
+    /// Fog amount 0..1 (the Sun panel's Fog).
+    pub fn set_fog(&mut self, amount: f32) {
+        self.fog = amount;
         self.dirty = true;
     }
 
     /// The terrain shown, if any.
     pub fn info(&self) -> Option<&TerrainInfo> {
         self.info.as_ref()
+    }
+
+    /// The baked maps' size while they shade the terrain.
+    pub fn maps_px(&self) -> Option<[u32; 2]> {
+        self.maps_px
+    }
+
+    /// The sky preview's size while it is on the dome.
+    pub fn sky_px(&self) -> Option<[u32; 2]> {
+        self.sky_px
     }
 
     /// Where the viewport was drawn last frame (points).
@@ -415,11 +746,25 @@ impl Viewport {
             );
             return;
         };
-        if self.gpu.is_none() {
-            self.gpu = Some(create_gpu(rs));
+        let gpu = self.gpu.get_or_insert_with(|| create_gpu(rs));
+        let mut rebind = false;
+        if let Some(maps) = self.pending_maps.take() {
+            let views = maps_views(rs, maps.as_ref());
+            gpu.textures[..4].clone_from_slice(&views);
+            rebind = true;
         }
-        if let Some((v, i)) = self.pending.take() {
-            self.mesh = Some(upload(rs, &v, &i));
+        if let Some(sky) = self.pending_sky.take() {
+            gpu.textures[4] = match &sky {
+                Some(img) => upload_image(rs, img, true, false),
+                None => stand_in(rs, true),
+            };
+            rebind = true;
+        }
+        if rebind {
+            gpu.bind_group = bind_group(rs, gpu);
+        }
+        if let Some((v, i, frame)) = self.pending.take() {
+            self.mesh = Some(upload(rs, &v, &i, frame.as_ref()));
         }
         let ppp = ui.ctx().pixels_per_point();
         let size = [
@@ -494,13 +839,37 @@ impl Viewport {
         }
     }
 
+    fn uniforms(&self, aspect: f32) -> Uniforms {
+        let cam = &self.camera;
+        let (dir, sun, sky, ground) = lights(self.sun_deg[0], self.sun_deg[1]);
+        let (right, up, forward) = cam.basis(aspect);
+        let fog = fog_planes(cam.size, self.fog);
+        let w = |v: [f32; 3]| [v[0], v[1], v[2], 0.0];
+        Uniforms {
+            view_proj: cam.view_proj(aspect),
+            eye: w(cam.eye()),
+            right: w(right),
+            up: w(up),
+            forward: w(forward),
+            sun_dir: w(dir),
+            sun_light: w(sun),
+            hemi_sky: w(sky),
+            hemi_ground: w(ground),
+            fog_color: w(hex(0xb9c7d9)),
+            fog: [fog[0], fog[1], 0.0, 0.0],
+            flags: [
+                f32::from(u8::from(self.maps_px.is_some())),
+                f32::from(u8::from(self.emissive)),
+                f32::from(u8::from(self.sky_px.is_some())),
+                cam.size * 40.0,
+            ],
+        }
+    }
+
     fn render(&mut self, rs: &RenderState, size: [u32; 2]) {
+        let u = self.uniforms(size[0] as f32 / size[1] as f32);
         let (Some(gpu), Some(t), Some(mesh)) = (&self.gpu, &self.targets, &self.mesh) else {
             return;
-        };
-        let u = Uniforms {
-            view_proj: self.camera.view_proj(size[0] as f32 / size[1] as f32),
-            sun: [self.sun[0], self.sun[1], self.sun[2], 0.0],
         };
         rs.queue
             .write_buffer(&gpu.uniforms, 0, bytemuck::bytes_of(&u));
@@ -542,11 +911,22 @@ impl Viewport {
                 }),
                 ..Default::default()
             });
-            pass.set_pipeline(&gpu.pipeline);
             pass.set_bind_group(0, &gpu.bind_group, &[]);
+            pass.set_pipeline(&gpu.sky);
+            pass.draw(0..3, 0..1);
+            pass.set_pipeline(&gpu.terrain);
             pass.set_vertex_buffer(0, mesh.vertices.slice(..));
             pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..mesh.count, 0, 0..1);
+            if let Some((walls, n)) = &mesh.walls {
+                pass.set_vertex_buffer(0, walls.slice(..));
+                pass.draw(0..*n, 0..1);
+            }
+            if let Some((rim, n)) = &mesh.rim {
+                pass.set_pipeline(&gpu.lines);
+                pass.set_vertex_buffer(0, rim.slice(..));
+                pass.draw(0..*n, 0..1);
+            }
         }
         rs.queue.submit([encoder.finish()]);
         self.renders += 1;
@@ -563,6 +943,113 @@ fn notice(painter: &egui::Painter, rect: Rect, text: &str) {
     );
 }
 
+/// A texture with its full mip chain (box-filtered on the CPU, as three generates mips).
+fn upload_image(rs: &RenderState, img: &Image, srgb: bool, mips: bool) -> wgpu::TextureView {
+    use wgpu::util::DeviceExt as _;
+    let mut levels = vec![(img.size, img.rgba.clone())];
+    if mips {
+        while let Some(([w, h], data)) = levels.last()
+            && (*w > 1 || *h > 1)
+        {
+            let (nw, nh) = ((w / 2).max(1), (h / 2).max(1));
+            let mut next = vec![0u8; (nw * nh * 4) as usize];
+            for y in 0..nh {
+                for x in 0..nw {
+                    for c in 0..4 {
+                        let px = |xx: u32, yy: u32| {
+                            u32::from(data[((yy.min(h - 1) * w + xx.min(w - 1)) * 4 + c) as usize])
+                        };
+                        let sum = px(2 * x, 2 * y)
+                            + px(2 * x + 1, 2 * y)
+                            + px(2 * x, 2 * y + 1)
+                            + px(2 * x + 1, 2 * y + 1);
+                        next[((y * nw + x) * 4 + c) as usize] = (sum / 4) as u8;
+                    }
+                }
+            }
+            levels.push(([nw, nh], next));
+        }
+    }
+    let format = if srgb {
+        wgpu::TextureFormat::Rgba8UnormSrgb
+    } else {
+        wgpu::TextureFormat::Rgba8Unorm
+    };
+    let data: Vec<u8> = levels.iter().flat_map(|(_, d)| d.iter().copied()).collect();
+    rs.device
+        .create_texture_with_data(
+            &rs.queue,
+            &wgpu::TextureDescriptor {
+                label: Some("viewport map"),
+                size: wgpu::Extent3d {
+                    width: img.size[0],
+                    height: img.size[1],
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: levels.len() as u32,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            },
+            wgpu::util::TextureDataOrder::MipMajor,
+            &data,
+        )
+        .create_view(&Default::default())
+}
+
+fn stand_in(rs: &RenderState, srgb: bool) -> wgpu::TextureView {
+    let img = Image {
+        size: [1, 1],
+        rgba: vec![128, 128, 255, 255],
+    };
+    upload_image(rs, &img, srgb, false)
+}
+
+fn maps_views(rs: &RenderState, maps: Option<&Maps>) -> [wgpu::TextureView; 4] {
+    match maps {
+        Some(m) => [
+            upload_image(rs, &m.albedo, true, true),
+            upload_image(rs, &m.normal, false, true),
+            upload_image(rs, &m.roughness, false, true),
+            m.emissive
+                .as_ref()
+                .map_or_else(|| stand_in(rs, true), |e| upload_image(rs, e, true, true)),
+        ],
+        None => [
+            stand_in(rs, true),
+            stand_in(rs, false),
+            stand_in(rs, false),
+            stand_in(rs, true),
+        ],
+    }
+}
+
+fn bind_group(rs: &RenderState, gpu: &Gpu) -> wgpu::BindGroup {
+    let mut entries = vec![
+        wgpu::BindGroupEntry {
+            binding: 0,
+            resource: gpu.uniforms.as_entire_binding(),
+        },
+        wgpu::BindGroupEntry {
+            binding: 1,
+            resource: wgpu::BindingResource::Sampler(&gpu.sampler),
+        },
+    ];
+    for (k, view) in gpu.textures.iter().enumerate() {
+        entries.push(wgpu::BindGroupEntry {
+            binding: 2 + k as u32,
+            resource: wgpu::BindingResource::TextureView(view),
+        });
+    }
+    rs.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("viewport"),
+        layout: &gpu.layout,
+        entries: &entries,
+    })
+}
+
 fn create_gpu(rs: &RenderState) -> Gpu {
     let device = &rs.device;
     let supports_4x = |f: wgpu::TextureFormat| {
@@ -577,7 +1064,7 @@ fn create_gpu(rs: &RenderState) -> Gpu {
         1
     };
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("terrain"),
+        label: Some("viewport"),
         source: wgpu::ShaderSource::Wgsl(SHADER.into()),
     });
     let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
@@ -586,34 +1073,64 @@ fn create_gpu(rs: &RenderState) -> Gpu {
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
+    let texture_entry = |binding| wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Texture {
+            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+            view_dimension: wgpu::TextureViewDimension::D2,
+            multisampled: false,
+        },
+        count: None,
+    };
     let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("viewport"),
-        entries: &[wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
-                min_binding_size: None,
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
             },
-            count: None,
-        }],
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+            texture_entry(2),
+            texture_entry(3),
+            texture_entry(4),
+            texture_entry(5),
+            texture_entry(6),
+        ],
     });
-    let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("viewport"),
-        layout: &layout,
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: uniforms.as_entire_binding(),
-        }],
+        address_mode_u: wgpu::AddressMode::Repeat,
+        address_mode_v: wgpu::AddressMode::ClampToEdge,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        mipmap_filter: wgpu::MipmapFilterMode::Linear,
+        ..Default::default()
     });
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("viewport"),
         bind_group_layouts: &[Some(&layout)],
         immediate_size: 0,
     });
-    let attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x3];
-    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+    let attributes =
+        wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x3, 3 => Float32x2];
+    let multisample = wgpu::MultisampleState {
+        count: samples,
+        ..Default::default()
+    };
+    let target = [Some(COLOR_SRGB.into())];
+    let terrain = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("terrain"),
         layout: Some(&pipeline_layout),
         vertex: wgpu::VertexState {
@@ -634,25 +1151,108 @@ fn create_gpu(rs: &RenderState) -> Gpu {
             stencil: Default::default(),
             bias: Default::default(),
         }),
-        multisample: wgpu::MultisampleState {
-            count: samples,
-            ..Default::default()
-        },
+        multisample,
         fragment: Some(wgpu::FragmentState {
             module: &shader,
             entry_point: Some("fs_main"),
             compilation_options: Default::default(),
-            targets: &[Some(COLOR_SRGB.into())],
+            targets: &target,
         }),
         multiview_mask: None,
         cache: None,
     });
-    Gpu {
-        pipeline,
+    let line_attributes = wgpu::vertex_attr_array![0 => Float32x3];
+    let lines = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("rim"),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("line_vs"),
+            compilation_options: Default::default(),
+            buffers: &[Some(wgpu::VertexBufferLayout {
+                array_stride: 12,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &line_attributes,
+            })],
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::LineList,
+            ..Default::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(wgpu::CompareFunction::LessEqual),
+            stencil: Default::default(),
+            bias: Default::default(),
+        }),
+        multisample,
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("line_fs"),
+            compilation_options: Default::default(),
+            targets: &target,
+        }),
+        multiview_mask: None,
+        cache: None,
+    });
+    let sky = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("sky"),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("sky_vs"),
+            compilation_options: Default::default(),
+            buffers: &[],
+        },
+        primitive: wgpu::PrimitiveState::default(),
+        // Behind everything, writes no depth (the desktop's dome: renderOrder −1, depthWrite off).
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH,
+            depth_write_enabled: Some(false),
+            depth_compare: Some(wgpu::CompareFunction::Always),
+            stencil: Default::default(),
+            bias: Default::default(),
+        }),
+        multisample,
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("sky_fs"),
+            compilation_options: Default::default(),
+            targets: &target,
+        }),
+        multiview_mask: None,
+        cache: None,
+    });
+    let mut gpu = Gpu {
+        terrain,
+        lines,
+        sky,
+        layout,
         uniforms,
-        bind_group,
+        sampler,
         samples,
-    }
+        textures: [
+            stand_in(rs, true),
+            stand_in(rs, false),
+            stand_in(rs, false),
+            stand_in(rs, true),
+            stand_in(rs, true),
+        ],
+        // Replaced right below; wgpu needs a real group to start from.
+        bind_group: rs.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &rs
+                .device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: None,
+                    entries: &[],
+                }),
+            entries: &[],
+        }),
+    };
+    gpu.bind_group = bind_group(rs, &gpu);
+    gpu
 }
 
 fn create_targets(
@@ -736,8 +1336,36 @@ fn create_targets(
     }
 }
 
-fn upload(rs: &RenderState, vertices: &[Vertex], indices: &[u32]) -> Mesh {
+fn upload(rs: &RenderState, vertices: &[Vertex], indices: &[u32], frame: Option<&Frame>) -> Mesh {
     use wgpu::util::DeviceExt as _;
+    let buffer = |label, contents: &[u8], usage| {
+        rs.device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(label),
+                contents,
+                usage,
+            })
+    };
+    let walls = frame.map(|(w, _)| {
+        (
+            buffer(
+                "frame walls",
+                bytemuck::cast_slice(w),
+                wgpu::BufferUsages::VERTEX,
+            ),
+            w.len() as u32,
+        )
+    });
+    let rim = frame.map(|(_, r)| {
+        (
+            buffer(
+                "frame rim",
+                bytemuck::cast_slice(r),
+                wgpu::BufferUsages::VERTEX,
+            ),
+            r.len() as u32,
+        )
+    });
     let vertices = rs
         .device
         .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -757,6 +1385,8 @@ fn upload(rs: &RenderState, vertices: &[Vertex], indices: &[u32]) -> Mesh {
         vertices,
         indices,
         count,
+        walls,
+        rim,
     }
 }
 
@@ -780,6 +1410,10 @@ mod tests {
         assert!(p[2] > 0.0 && p[2] < 1.0, "{p:?}");
         let up = apply(cam.view_proj(1.5), [0.0, 100.0, 0.0]);
         assert!(up[1] > 0.0, "{up:?}");
+        // The sky rays agree with the projection: the screen's top edge is fov / 2 above forward.
+        let (_, u, f) = cam.basis(1.5);
+        let top = normalize([f[0] + u[0], f[1] + u[1], f[2] + u[2]]);
+        assert!((dot(top, f).acos() - 25f32.to_radians()).abs() < 1e-4);
     }
 
     #[test]
@@ -789,6 +1423,33 @@ mod tests {
         // Index 127 of 255 (t = 0.498): just short of the 0.5 stop.
         let mid = ramp(127 << 8);
         assert!((mid[0] - 0.618).abs() < 0.01, "{mid:?}");
+    }
+
+    #[test]
+    fn lights_and_fog_follow_the_desktop() {
+        // Sun at 90° elevation: full intensity white from straight above; hemi at 0.9.
+        let (dir, sun, sky, _) = lights(140.0, 90.0);
+        assert!((dir[1] - 1.0).abs() < 1e-6);
+        assert!(sun.iter().all(|c| (c - 1.6).abs() < 1e-5), "{sun:?}");
+        assert!((sky[2] - 0.9).abs() < 1e-3, "{sky:?}");
+        // From the east at the horizon: warm, dimmer.
+        let (dir, sun, ..) = lights(90.0, 0.0);
+        assert!(
+            (dir[0] - 1.0).abs() < 1e-6 && dir[2].abs() < 1e-6,
+            "{dir:?}"
+        );
+        assert!(
+            (sun[0] - 1.6 * 0.55).abs() < 1e-5 && sun[2] < 0.2,
+            "{sun:?}"
+        );
+        assert_eq!(fog_planes(1000.0, 0.0), [2000.0, 12000.0]);
+        let closed = fog_planes(1000.0, 1.0);
+        assert!(
+            (closed[0] - 50.0).abs() < 1e-3 && (closed[1] - 800.0).abs() < 1e-2,
+            "{closed:?}"
+        );
+        // three's hex colours are sRGB, converted to linear.
+        assert!((hex(0xb9c7d9)[0] - 0.4851).abs() < 1e-3);
     }
 
     #[test]
@@ -802,11 +1463,12 @@ mod tests {
         };
         let mut v = Viewport::default();
         v.set_terrain(&pv, [200.0, 100.0]);
-        let (verts, idx) = v.pending.as_ref().expect("mesh");
+        let (verts, idx, _) = v.pending.as_ref().expect("mesh");
         assert_eq!((verts.len(), idx.len()), (6, 2 * 2 * 3));
-        // Row 0 is the south edge (+z); heights are absolute.
+        // Row 0 is the south edge (+z); heights are absolute; uv v runs north from it.
         assert_eq!(verts[0].pos, [-100.0, 10.0, 50.0]);
         assert_eq!(verts[5].pos, [100.0, 20.0, -50.0]);
+        assert_eq!((verts[0].uv, verts[5].uv), ([0.0, 0.0], [1.0, 1.0]));
         assert_eq!(verts[0].normal, [0.0, 1.0, 0.0]);
         assert_eq!(verts[0].color, [0.16, 0.3, 0.2]);
         // Normals lean away from higher ground: west of the raised corner (vertex 4) towards −x,
@@ -814,5 +1476,22 @@ mod tests {
         assert!(verts[4].normal[0] < 0.0, "{:?}", verts[4].normal);
         assert!(verts[2].normal[2] > 0.0, "{:?}", verts[2].normal);
         assert_eq!(v.info().expect("info").triangles, 4);
+        // The framed block: the 3 × 2 boundary has 6 steps → 12 wall triangles, 24 rim points;
+        // the base sits max(10, 15 % of 10 m) = 10 m under the lowest point.
+        let (_, _, frame) = v.pending.as_ref().expect("mesh");
+        let (walls, rim) = frame.as_ref().expect("frame");
+        assert_eq!((walls.len(), rim.len()), (36, 24));
+        assert!(
+            walls
+                .iter()
+                .all(|w| w.uv == [-1.0, -1.0] && w.normal[1] == 0.0)
+        );
+        assert_eq!(rim.iter().map(|p| p[1]).fold(f32::MAX, f32::min), 0.0);
+        // Walls face out: the north wall's normal points north (−z).
+        let north = walls
+            .iter()
+            .find(|w| w.pos[2] == -50.0 && w.pos[0] == 0.0)
+            .expect("north wall");
+        assert!(north.normal[2] < -0.99, "{:?}", north.normal);
     }
 }

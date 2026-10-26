@@ -172,6 +172,10 @@ fn capture_for_docs() {
         .wgpu()
         .with_context_setup(jd_studio::theme::install)
         .build_eframe(move |cc| StudioApp::new(cc, server, Options::default()));
-    settle(&mut h, |a| a.viewport.info().is_some());
+    settle(&mut h, |a| {
+        a.viewport.info().is_some()
+            && a.viewport.maps_px().is_some()
+            && a.viewport.sky_px().is_some()
+    });
     h.render().expect("render").save(&out).expect("save png");
 }

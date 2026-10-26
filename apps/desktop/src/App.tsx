@@ -10,6 +10,7 @@ import type { FractalKind, HeightmapFormat, NoiseKind } from "./lib/ops.gen";
 import type { Preview } from "./lib/api";
 import { LANGS, type Lang, translate } from "./lib/i18n";
 import { Range } from "./components/Range";
+import { HorizonIcon } from "./components/HorizonIcon";
 
 /** A resizable panel's size, kept in the browser store (`jd.layout.<key>`) and restored on launch: the
  *  inline style sets the saved px, a ResizeObserver writes every change (try/catch: storage may be off). */
@@ -864,7 +865,7 @@ export default function App() {
               aria-pressed={s.showHorizon}
               data-testid="horizon-toggle"
             >
-              <Mountain size={14} /> Horizon
+              <HorizonIcon size={14} /> Horizon
             </button>
             <button className="btn absolute top-2 right-2" onClick={() => setShowGraph((v) => !v)} data-testid="toggle-graph">
               <Workflow size={14} /> {showGraph ? "Hide graph" : "Graph"}

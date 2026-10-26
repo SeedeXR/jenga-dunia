@@ -86,4 +86,17 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   framed block + rim, viewport chrome (inner toolbar, compass, ruler, hints, layer strip);
   P4: right column (Terrain · Noise, Export, …) and the rest of the left (Real world, Reference
   image, Layers, Settings). The graph area is the Editor window by design.
+- P3 slice 1 (the default look): three's MeshStandardMaterial ported to WGSL (Lambert / π,
+  GGX + height-correlated Smith + Schlick, roughness floor 0.0525 + geometry roughness), the
+  desktop's sun (1.6 · (0.55 + 0.45 sin el), amber below 20°) and hemisphere light (0.9 · …,
+  0xdfe8ff / 0x3a3630), linear fog on view depth (2–12× size, 0xb9c7d9), the sky dome (ray to a
+  40× size sphere; `sky.preview` equirect 512 at exposure 0.15, else the gradient), baked PBR maps
+  (`terrain.textures`, CPU mip chains, tangent space +x east +y north on the mesh normal),
+  the framed block (walls 0x2a2f36 to min − max(10, 15 % relief), teal 0x3fd0c9 rim lines).
+  Header readout now equal to the desktop's (… · pbr 1024×1024 · sky 512×256 · box · preview …).
+  Owner: the Horizon button's icon is now owner-supplied `horizon.svg` (desktop component +
+  Studio asset).
+  Next in P3: viewport chrome (inner toolbar: home / still / fullscreen / frame; Grid, Horizon,
+  Road, Sculpt, Hide graph; compass strip; height ruler; hints; layer strip), then sea, lakes,
+  scatter, caves, overlays, rain, post, sculpt / grid / road / cave tools, flythrough.
 

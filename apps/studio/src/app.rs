@@ -73,6 +73,28 @@ enum Msg {
     },
     EditorExited(std::process::ExitStatus),
     Log(String, Level),
+    /// Baked maps for a layer (`terrain.textures`, decoded on the worker) and the bake's time.
+    Maps(String, Result<crate::viewport::Maps, String>, u64),
+    /// The physical-sky preview (`sky.preview`, decoded) for this sun.
+    Sky(SunLook, Result<crate::viewport::Image, String>),
+}
+
+/// The look's sun as the sky preview needs it: azimuth, elevation, turbidity, clouds, fog.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SunLook([f64; 5]);
+
+impl SunLook {
+    /// From `project.info`'s `look.sun` (the desktop's defaults when unset).
+    fn of(look_sun: &Value) -> Self {
+        let f = |k: &str, d: f64| look_sun[k].as_f64().unwrap_or(d);
+        Self([
+            f("azimuth_deg", 140.0),
+            f("elevation_deg", 35.0),
+            f("turbidity", 3.0),
+            f("clouds", 0.0),
+            f("fog", 0.0),
+        ])
+    }
 }
 
 /// A log line's colour.
@@ -123,6 +145,7 @@ pub struct StudioApp {
     fullscreen: bool,
     editor: Option<Editor>,
     editor_error: Option<String>,
+    sky_for: Option<SunLook>,
 }
 
 impl StudioApp {
@@ -163,7 +186,10 @@ impl StudioApp {
             fullscreen: false,
             editor: None,
             editor_error: None,
+            sky_for: None,
         };
+        // The desktop bakes the sky on mount, project or not.
+        app.fetch_sky(SunLook::of(&Value::Null));
         if let Some(path) = &options.editor {
             app.start_editor(path.clone());
         }
@@ -361,6 +387,52 @@ impl StudioApp {
                     }
                 }
                 Msg::Log(text, level) => self.log(text, level),
+                Msg::Maps(layer, maps, ms) => {
+                    self.reads = self.reads.saturating_sub(1);
+                    // Moved to another layer while baking: this result is stale.
+                    if self.layer.as_deref() != Some(layer.as_str()) {
+                        continue;
+                    }
+                    match maps {
+                        Ok(m) => {
+                            let [w, h] = m.albedo.size;
+                            let n = self
+                                .project
+                                .as_ref()
+                                .and_then(|p| p["look"]["materials"].as_array())
+                                .map_or(0, Vec::len);
+                            let with = if n == 0 {
+                                String::new()
+                            } else {
+                                format!(" with {n} material layer{}", if n == 1 { "" } else { "s" })
+                            };
+                            self.log(
+                                format!("terrain.textures: ok {w}×{h}{with} in {ms} ms"),
+                                Level::Info,
+                            );
+                            self.viewport.set_maps(Some(m));
+                        }
+                        Err(e) => {
+                            self.log(format!("terrain.textures: {e}"), Level::Error);
+                            self.viewport.set_maps(None);
+                        }
+                    }
+                }
+                Msg::Sky(sun, sky) => {
+                    self.reads = self.reads.saturating_sub(1);
+                    match sky {
+                        Ok(img) => {
+                            let [w, h] = img.size;
+                            let [az, el, turbidity, clouds, _] = sun.0;
+                            self.log(
+                                format!("sky.preview: ok {w}×{h} sun {el}°/{az}° turbidity {turbidity} clouds {} %", (clouds * 100.0).round()),
+                                Level::Info,
+                            );
+                            self.viewport.set_sky(Some(img));
+                        }
+                        Err(e) => self.log(format!("sky.preview: {e}"), Level::Error),
+                    }
+                }
             }
         }
     }
@@ -383,11 +455,11 @@ impl StudioApp {
                     return self.refresh_done();
                 }
                 let info = r.result.unwrap_or_default();
-                let sun = &info["look"]["sun"];
-                if let (Some(az), Some(el)) =
-                    (sun["azimuth_deg"].as_f64(), sun["elevation_deg"].as_f64())
-                {
-                    self.viewport.set_sun(az as f32, el as f32);
+                let sun = SunLook::of(&info["look"]["sun"]);
+                self.viewport.set_sun(sun.0[0] as f32, sun.0[1] as f32);
+                self.viewport.set_fog(sun.0[4] as f32);
+                if self.sky_for != Some(sun) {
+                    self.fetch_sky(sun);
                 }
                 if self.path_input.is_empty() {
                     self.path_input = info["path"].as_str().unwrap_or_default().to_owned();
@@ -464,6 +536,7 @@ impl StudioApp {
                 match r.result.as_ref().map(decode_preview) {
                     Some(Ok((pv, bytes))) => {
                         self.viewport.set_terrain(&pv, extent);
+                        self.fetch_maps();
                         self.preview = Some((
                             lod,
                             bytes as f64 / 1_048_576.0,
@@ -476,6 +549,85 @@ impl StudioApp {
                 self.refresh_done();
             }
         }
+    }
+
+    /// The desktop's `refreshSky`: the physical sky for the look's sun, 512 wide, three times the
+    /// bake's exposure (the dome is seen tonemapped).
+    fn fetch_sky(&mut self, sun: SunLook) {
+        self.sky_for = Some(sun);
+        let [az, el, turbidity, clouds, fog] = sun.0;
+        let request = Self::request(
+            "sky.preview",
+            json!({ "sun_azimuth_deg": az, "sun_elevation_deg": el.max(1.0), "turbidity": turbidity, "cloud_cover": clouds, "fog": fog, "exposure": 0.15, "width": 512 }),
+        );
+        let (server, tx, ctx) = (self.server.clone(), self.tx.clone(), self.ctx.clone());
+        self.reads += 1;
+        std::thread::spawn(move || {
+            let r = server.invoke(request);
+            let sky = match (&r.result, &r.error) {
+                (Some(v), _) => crate::viewport::Image::from_png_base64(
+                    v["png_base64"].as_str().unwrap_or_default(),
+                ),
+                (None, Some(e)) => Err(format!("{} {}", e.code.as_str(), e.message)),
+                (None, None) => Err("no result".into()),
+            };
+            let _ = tx.send(Msg::Sky(sun, sky));
+            ctx.request_repaint();
+        });
+    }
+
+    /// The desktop's `refreshMaps`: albedo / normal / roughness (/ emissive) baked from the full
+    /// field for height-like layers; a live preview (`#lod<N>`) keeps the previous maps.
+    fn fetch_maps(&mut self) {
+        let Some(layer) = self.layer.clone() else {
+            return;
+        };
+        if !layer
+            .split('#')
+            .next()
+            .is_some_and(|b| b.starts_with("height"))
+        {
+            return self.viewport.set_maps(None);
+        }
+        if layer.contains("#lod") {
+            return;
+        }
+        let materials = self.project.as_ref().map_or(json!([]), |p| {
+            p["look"]["materials"]
+                .as_array()
+                .map_or(json!([]), |m| Value::Array(m.clone()))
+        });
+        let request = Self::request(
+            "terrain.textures",
+            json!({ "materials": materials, "layer": layer, "max_px": PREVIEW_MAX_PX }),
+        );
+        let (server, tx, ctx) = (self.server.clone(), self.tx.clone(), self.ctx.clone());
+        self.reads += 1;
+        std::thread::spawn(move || {
+            let started = Instant::now();
+            let r = server.invoke(request);
+            let maps = match (&r.result, &r.error) {
+                (Some(v), _) => (|| {
+                    let png = |k: &str| {
+                        crate::viewport::Image::from_png_base64(v[k].as_str().unwrap_or_default())
+                    };
+                    Ok(crate::viewport::Maps {
+                        albedo: png("albedo_png_base64")?,
+                        normal: png("normal_png_base64")?,
+                        roughness: png("roughness_png_base64")?,
+                        emissive: match v["emissive_png_base64"].as_str() {
+                            Some(e) => Some(crate::viewport::Image::from_png_base64(e)?),
+                            None => None,
+                        },
+                    })
+                })(),
+                (None, Some(e)) => Err(format!("{} {}", e.code.as_str(), e.message)),
+                (None, None) => Err("no result".into()),
+            };
+            let ms = started.elapsed().as_millis() as u64;
+            let _ = tx.send(Msg::Maps(layer, maps, ms));
+            ctx.request_repaint();
+        });
     }
 
     fn world_inputs(&self) -> Option<(f64, u32)> {
@@ -673,6 +825,15 @@ impl StudioApp {
             let az = sun["azimuth_deg"].as_f64().unwrap_or(140.0);
             let el = sun["elevation_deg"].as_f64().unwrap_or(35.0);
             s += &format!(" · sun {el}°/{az}°");
+        }
+        if let Some([w, h]) = self.viewport.maps_px() {
+            s += &format!(" · pbr {w}×{h}");
+        }
+        if let Some([w, h]) = self.viewport.sky_px() {
+            s += &format!(" · sky {w}×{h}");
+        }
+        if self.viewport.frame && self.viewport.info().is_some() {
+            s += " · box";
         }
         if let Some((lod, mb, ms)) = self.preview {
             s += &format!(" · preview lod {lod}, {mb:.2} MB in {ms} ms");
