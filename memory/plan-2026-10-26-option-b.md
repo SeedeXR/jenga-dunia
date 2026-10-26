@@ -146,6 +146,17 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   writer thread, the desktop's summary line), Play (4 s), Still, key list (heading · up ·
   distance, Go, remove); `Camera::along` = lib/camera.ts orbitAt (Catmull-Rom, unwrapped theta,
   log radius). CI: the e2e log cap (200 lines) made `logCount` plateau in long specs → log
-  entries carry `seq`, logCount reads the newest. Next: Scatter, Caves (+ x-ray), Actions,
-  Simulation layers, Materials, Noise, Export; then the left column (Real world, Reference image,
-  Layers, Settings).
+  entries carry `seq`, logCount reads the newest.
+- P4 slice 4 (Scatter) + P3 instances: Mask (published layers) / Spacing / Seed / Grow, Place,
+  model, Export .glb, count; the look's scatter restored from and written to project.json; points
+  re-placed after each terrain show while the mask is published (refreshScatter). Viewport: one
+  instanced pipeline (inst_vs, terrain shading) with three's ConeGeometry(0.3, 1, 6) or the
+  desktop's rockGeometry (IcosahedronGeometry(0.5, 1) + its LCG in JS double arithmetic), sized
+  max(spacing·0.35, extent·0.012) × 0.75..1.25 × age; readout `N instances`. Parity capture
+  JD_PARITY_SCATTER / JD_STUDIO_SCATTER: 10,609 instances on both. Paint density waits for the
+  sculpt tool (Brush panel). Fixes found on the way: Studio's own look write ran a full refresh
+  (preview + map re-bake per slider step) → Tag::Look logs only; a map bake landing after PBR
+  off re-applied the maps → dropped; the columns' overlay scroll bar covered the right-aligned
+  controls once a column scrolled → the right padding moved inside the scroll area
+  (look::scroll_card). Next: Caves (+ x-ray), Actions, Simulation layers, Materials, Noise,
+  Export; then the left column (Real world, Reference image, Layers, Settings).

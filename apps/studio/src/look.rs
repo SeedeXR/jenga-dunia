@@ -29,6 +29,31 @@ pub fn card() -> Frame {
         .inner_margin(Margin::same(12))
 }
 
+/// A side column: the card scrolling its content, with the card's right padding inside the
+/// scroll area as the desktop's `overflow-y-auto` panel has it, so the overlay scroll bar sits in
+/// that gutter and never covers the right-aligned controls.
+pub fn scroll_card(ui: &mut Ui, id: &str, add: impl FnOnce(&mut Ui)) {
+    card()
+        .inner_margin(Margin {
+            right: 0,
+            ..Margin::same(12)
+        })
+        .show(ui, |ui| {
+            ui.set_min_size(ui.available_size());
+            egui::ScrollArea::vertical()
+                .id_salt(id)
+                .auto_shrink(false)
+                .show(ui, |ui| {
+                    Frame::new()
+                        .inner_margin(Margin {
+                            right: 12,
+                            ..Margin::ZERO
+                        })
+                        .show(ui, add);
+                });
+        });
+}
+
 /// `.jd-section`: a chevron (`▾`, `text-[10px] text-jd-fg-2`) and a semibold 12.5 px title.
 pub fn section(ui: &mut Ui, title: &str) {
     ui.horizontal(|ui| {

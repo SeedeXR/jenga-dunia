@@ -59,6 +59,11 @@ enum Tag {
     InfoOnly,
     Stats(String),
     Preview([f32; 2], u32, Instant),
+    /// `terrain.scatter` for the viewport (points inline).
+    Scatter,
+    /// Studio's own `project.set_look`: logged only, as the desktop's `writeLook` (its
+    /// `project_changed` event re-reads the project; no terrain changed).
+    Look,
 }
 
 type Step = Box<dyn FnOnce(&[Response]) -> Option<Request> + Send>;
@@ -183,6 +188,41 @@ pub struct StudioApp {
     fly_keys: Vec<Camera>,
     fly_frames: String,
     fly: Option<Fly>,
+    /// The Scatter section (the look's `scatter`), the points placed from it, and the model field.
+    scatter: ScatterLook,
+    scatter_points: Option<Vec<[f32; 5]>>,
+    scatter_model: String,
+}
+
+/// The look's scatter settings as the panel edits them (number fields as typed).
+#[derive(Debug, Clone, PartialEq)]
+struct ScatterLook {
+    mask: Option<String>,
+    spacing_m: String,
+    seed: String,
+    grow: bool,
+}
+
+impl ScatterLook {
+    /// From the project's look (`None`: the desktop's defaults, spacing 40, seed 1).
+    fn of(v: &Value) -> Self {
+        Self {
+            mask: v["mask"].as_str().map(str::to_owned),
+            spacing_m: number(v.get("spacing_m").unwrap_or(&json!(40))),
+            seed: number(v.get("seed").unwrap_or(&json!(1))),
+            grow: v["grow"].as_bool().unwrap_or(false),
+        }
+    }
+
+    /// The look's JSON (a number field that does not parse is 0, as the desktop's `Number`).
+    fn json(&self) -> Value {
+        json!({
+            "mask": self.mask,
+            "spacing_m": self.spacing_m.trim().parse::<f64>().unwrap_or(0.0),
+            "seed": self.seed.trim().parse::<i64>().unwrap_or(0),
+            "grow": self.grow,
+        })
+    }
 }
 
 /// A flythrough run along the keys.
@@ -251,6 +291,9 @@ impl StudioApp {
             fly_keys: Vec::new(),
             fly_frames: "48".into(),
             fly: None,
+            scatter: ScatterLook::of(&Value::Null),
+            scatter_points: None,
+            scatter_model: String::new(),
         };
         // The desktop bakes the sky on mount, project or not.
         app.fetch_sky(SunLook::of(&Value::Null));
@@ -468,8 +511,8 @@ impl StudioApp {
                 Msg::Log(text, level) => self.log(text, level),
                 Msg::Maps(layer, maps, ms) => {
                     self.reads = self.reads.saturating_sub(1);
-                    // Moved to another layer while baking: this result is stale.
-                    if self.layer.as_deref() != Some(layer.as_str()) {
+                    // Moved to another layer, or PBR switched off, while baking: stale.
+                    if self.layer.as_deref() != Some(layer.as_str()) || !self.pbr {
                         continue;
                     }
                     match maps {
@@ -588,6 +631,11 @@ impl StudioApp {
                 let info = r.result.unwrap_or_default();
                 if self.look_due.is_none() {
                     self.sun = SunLook::of(&info["look"]["sun"]);
+                    let scatter = ScatterLook::of(&info["look"]["scatter"]);
+                    if scatter != self.scatter {
+                        self.scatter = scatter;
+                        self.drop_scatter_points();
+                    }
                 }
                 self.apply_sun();
                 if self.sky_for != Some(self.sun) && self.sky_due.is_none() {
@@ -670,10 +718,33 @@ impl StudioApp {
                     json!({ "layer": layer, "lod": lod }),
                 );
             }
+            Tag::Look => self.log_response(&r),
+            Tag::Scatter => {
+                self.log_response(&r);
+                if let Some(points) = r.result.as_ref().and_then(|v| v["points"].as_array()) {
+                    let f = |p: &Value, k: &str, or: f64| p[k].as_f64().unwrap_or(or) as f32;
+                    self.scatter_points = Some(
+                        points
+                            .iter()
+                            .map(|p| {
+                                [
+                                    f(p, "u", 0.0),
+                                    f(p, "v", 0.0),
+                                    f(p, "z", 0.0),
+                                    f(p, "r", 0.0),
+                                    f(p, "age", 1.0),
+                                ]
+                            })
+                            .collect(),
+                    );
+                    self.show_scatter();
+                }
+            }
             Tag::Preview(extent, lod, started) => {
                 match r.result.as_ref().map(decode_preview) {
                     Some(Ok((pv, bytes))) => {
                         self.viewport.set_terrain(&pv, extent);
+                        self.refresh_scatter();
                         self.fetch_maps();
                         self.fetch_horizon();
                         self.fetch_lakes(lod);
@@ -975,18 +1046,14 @@ impl StudioApp {
     fn write_look(&mut self) {
         let Some(p) = &self.project else { return };
         let look = &p["look"];
-        let scatter = if look["scatter"].is_null() {
-            json!({ "mask": null, "spacing_m": 40, "seed": 1, "grow": false })
-        } else {
-            look["scatter"].clone()
-        };
+        let scatter = self.scatter.json();
         let [az, el, turbidity, clouds, fog] = self.sun.0;
         let params = json!({
             "materials": look["materials"].as_array().cloned().unwrap_or_default(),
             "scatter": scatter,
             "sun": { "azimuth_deg": az, "elevation_deg": el, "turbidity": turbidity, "clouds": clouds, "fog": fog },
         });
-        self.invoke(Tag::User, "project.set_look", params);
+        self.invoke(Tag::Look, "project.set_look", params);
     }
 
     /// Fire the debounced look write and sky bake when due.
@@ -1306,6 +1373,143 @@ impl StudioApp {
         }
     }
 
+    /// The desktop's `scatterReq`: heights from `height` when published, else the first layer.
+    fn scatter_request(&self) -> Value {
+        let height = if self.layers.iter().any(|l| l == "height") {
+            "height"
+        } else {
+            self.layers.first().map_or("height", String::as_str)
+        };
+        let look = self.scatter.json();
+        json!({ "mask": self.scatter.mask.clone().unwrap_or_default(), "height": height, "spacing_m": look["spacing_m"], "seed": look["seed"], "follow_time": self.scatter.grow })
+    }
+
+    /// Place: the points for the viewport.
+    fn place_scatter(&mut self) {
+        if self.scatter.mask.is_some() {
+            let params = self.scatter_request();
+            self.invoke(Tag::Scatter, "terrain.scatter", params);
+        }
+    }
+
+    /// The desktop's `refreshScatter`: re-placed while the mask is still published, dropped when
+    /// it is not.
+    fn refresh_scatter(&mut self) {
+        let Some(mask) = &self.scatter.mask else {
+            return;
+        };
+        if self.layers.contains(mask) {
+            self.place_scatter();
+        } else {
+            self.scatter.mask = None;
+            self.drop_scatter_points();
+        }
+    }
+
+    fn drop_scatter_points(&mut self) {
+        self.scatter_points = None;
+        self.viewport.set_instances(None);
+    }
+
+    /// The placed points in the viewport: the 1 m proxy cone (rocks for rock-named masks), sized
+    /// max(spacing · 0.35, extent · 0.012) as the desktop.
+    fn show_scatter(&mut self) {
+        let extent = self
+            .project
+            .as_ref()
+            .and_then(|p| p["world"]["extent_m"][0].as_f64())
+            .unwrap_or(0.0);
+        let spacing = self.scatter.json()["spacing_m"].as_f64().unwrap_or(0.0);
+        let mask = self
+            .scatter
+            .mask
+            .as_deref()
+            .unwrap_or_default()
+            .to_lowercase();
+        let instances = self
+            .scatter_points
+            .as_ref()
+            .map(|points| crate::viewport::Instances {
+                points: points.clone(),
+                size_m: (spacing * 0.35).max(extent * 0.012) as f32,
+                rock: ["debris", "rock", "boulder", "scree", "talus"]
+                    .iter()
+                    .any(|w| mask.contains(w)),
+            });
+        self.viewport.set_instances(instances.as_ref());
+    }
+
+    /// The right column's Scatter section (the desktop's, in its order).
+    fn scatter_card(&mut self, ui: &mut egui::Ui) {
+        look::section(ui, "Scatter");
+        let before = self.scatter.clone();
+        let layers = self.layers.clone();
+        let sc = &mut self.scatter;
+        look::field(ui, "Mask", |ui| {
+            egui::ComboBox::from_id_salt("scatter-mask")
+                .width(112.0)
+                .selected_text(RichText::new(sc.mask.as_deref().unwrap_or("none")).size(12.0))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut sc.mask, None, "none");
+                    for l in &layers {
+                        ui.selectable_value(&mut sc.mask, Some(l.clone()), l);
+                    }
+                })
+                .response
+                .on_hover_text(
+                    "0..1 layer used as the instance density (a class mask, rivers, wetness…)",
+                )
+                .widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::accesskit::Role::ComboBox, true, "Mask")
+                });
+        });
+        look::field(ui, "Spacing (m)", |ui| {
+            look::input(ui, &mut sc.spacing_m, 112.0, "", "Spacing (m)");
+        });
+        look::field(ui, "Seed", |ui| {
+            look::input(ui, &mut sc.seed, 112.0, "", "Seed");
+        });
+        look::field(ui, "Grow with timeline", |ui| {
+            look::checkbox(ui, &mut sc.grow, "Grow with timeline").on_hover_text("The population follows the timeline: nobody at t = 0, saplings as it advances, full-grown by t = 1; off = always full-grown");
+        });
+        if self.scatter != before {
+            // The desktop's setScatter: the points go, the look is written after the debounce.
+            self.drop_scatter_points();
+            if self.project.is_some() {
+                self.look_due = Some(Instant::now() + std::time::Duration::from_millis(400));
+            }
+        }
+        let ready = self.scatter.mask.is_some() && self.busy == 0;
+        let placed = self.scatter_points.as_ref().map(Vec::len);
+        let (mut place, mut export) = (false, false);
+        ui.horizontal_wrapped(|ui| {
+            place = look::button(ui, None, "Place", false, ready)
+                .on_hover_text("Place instances from the mask (one jittered candidate per spacing cell, kept with probability = mask value)")
+                .clicked();
+            // ponytail: Paint density needs the sculpt tool (Brush panel, P4); shown, off until then.
+            look::button(ui, None, "Paint density", false, false).on_hover_text("Paint the density by hand: a clamped stroke node goes in front of the mask's output; drag on the terrain to add density (strength 0.5), negative strength to thin it");
+            look::input(ui, &mut self.scatter_model, 96.0, "pine.fbx", "Model").on_hover_text("Your own model to instance: a binary FBX in the project's assets/ (metres, +Y up; import it with ⌘I). Empty = the 1 m proxy, or a generated rock for rock-named masks");
+            export = look::button(ui, None, "Export .glb", false, placed.is_some_and(|n| n > 0) && self.busy == 0)
+                .on_hover_text("Write exports/<mask>.glb: the model (or the 1 m proxy) instanced with EXT_mesh_gpu_instancing")
+                .clicked();
+            if let Some(n) = placed {
+                ui.label(RichText::new(format!("{} instances", thousands(n as u64))).size(12.0).color(color::FG2));
+            }
+        });
+        if place {
+            self.place_scatter();
+        }
+        if export && let Some(mask) = self.scatter.mask.clone() {
+            let mut params = self.scatter_request();
+            params["path"] = json!(format!("{mask}.glb"));
+            let model = self.scatter_model.trim();
+            if !model.is_empty() {
+                params["model"] = json!(model);
+            }
+            self.invoke(Tag::User, "terrain.scatter", params);
+        }
+    }
+
     fn world_inputs(&self) -> Option<(f64, u32)> {
         Some((
             self.extent_input.trim().parse().ok()?,
@@ -1603,6 +1807,12 @@ impl StudioApp {
             s += &format!(" · fog {} %", (fog * 100.0).round());
         }
         s += &format!(" · sun {}°/{}°", number(&json!(el)), number(&json!(az)));
+        if self.viewport.instance_count() > 0 {
+            s += &format!(
+                " · {} instances",
+                thousands(self.viewport.instance_count() as u64)
+            );
+        }
         if self.viewport.lake_cells() > 0 {
             s += &format!(
                 " · lakes {} cells",
@@ -2165,12 +2375,10 @@ impl eframe::App for StudioApp {
                     bottom: 8,
                 }))
                 .show(ui, |ui| {
-                    look::card().show(ui, |ui| {
-                        ui.set_min_size(ui.available_size());
-                        ScrollArea::vertical()
-                            .id_salt("panel-right")
-                            .auto_shrink(false)
-                            .show(ui, |ui| self.sun_card(ui, frame));
+                    look::scroll_card(ui, "panel-right", |ui| {
+                        self.sun_card(ui, frame);
+                        ui.add_space(12.0);
+                        self.scatter_card(ui);
                     });
                 });
             egui::Panel::left("panel-left")
@@ -2184,12 +2392,7 @@ impl eframe::App for StudioApp {
                     bottom: 8,
                 }))
                 .show(ui, |ui| {
-                    look::card().show(ui, |ui| {
-                        ui.set_min_size(ui.available_size());
-                        ScrollArea::vertical()
-                            .auto_shrink(false)
-                            .show(ui, |ui| self.project_card(ui));
-                    });
+                    look::scroll_card(ui, "panel-left", |ui| self.project_card(ui));
                 });
         }
         let margin = if self.fullscreen {

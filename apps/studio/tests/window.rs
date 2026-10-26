@@ -35,6 +35,9 @@ fn engine(dir: &std::path::Path) -> Arc<Server> {
 fn window(server: Arc<Server>) -> Harness<'static, StudioApp> {
     Harness::builder()
         .with_size([1200.0, 800.0])
+        // Engine replies land on worker threads and each asks for a repaint, so `run` may need
+        // more than kittest's default 4 steps to settle on a slow runner (CI saw 10).
+        .with_max_steps(64)
         .wgpu()
         .with_context_setup(jd_studio::theme::install)
         .build_eframe(move |cc| StudioApp::new(cc, server, Options::default()))
@@ -302,7 +305,7 @@ fn the_sun_card_writes_the_look_and_toggles_the_maps() {
         "{readout}"
     );
     h.get_by_label("×").click();
-    h.run_steps(2);
+    h.run();
     assert!(!h.state().viewport_readout().contains(" · hdri"));
     // PBR off: the ramp colours (no maps); on again: the maps come back.
     h.get_by_role_and_label(eframe::egui::accesskit::Role::CheckBox, "Textured (PBR)")
@@ -444,6 +447,83 @@ fn the_camera_row_keys_records_and_plays_a_flythrough() {
     h.get_by_label("0 keys");
 }
 
+#[test]
+fn the_scatter_section_places_saves_and_exports_instances() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = engine(dir.path());
+    let probe = server.clone();
+    let mut h = window(server);
+    settle(&mut h, |a| a.viewport.info().is_some());
+    // Mask: the height layer (above 1 everywhere, so every 40 m cell keeps its candidate).
+    h.get_by_role_and_label(eframe::egui::accesskit::Role::ComboBox, "Mask")
+        .scroll_to_me();
+    h.run();
+    h.get_by_role_and_label(eframe::egui::accesskit::Role::ComboBox, "Mask")
+        .click();
+    h.run();
+    h.get_by_label("height").click();
+    h.run();
+    // The section is below the Sun card: scroll the right column to it, as a user would.
+    h.get_by_label("Place").scroll_to_me();
+    h.run();
+    h.get_by_label("Place").click();
+    h.run_steps(1);
+    settle(&mut h, |a| a.viewport.instance_count() > 0);
+    let n = h.state().viewport.instance_count();
+    // 2048 m at 40 m: 51 or 52 cells a side.
+    assert!((2601..=2704).contains(&n), "{n} instances");
+    let readout = h.state().viewport_readout();
+    assert!(
+        readout.contains(&format!(" · {} instances", thousands(n))),
+        "{readout}"
+    );
+    h.get_by_label(&format!("{} instances", thousands(n)));
+    // The look on disk carries the mask after the 400 ms debounce.
+    let until = Instant::now() + Duration::from_secs(20);
+    loop {
+        h.step();
+        let info = probe
+            .invoke(Request::new("project.info", json!({})))
+            .result
+            .unwrap();
+        if info["look"]["scatter"]["mask"] == "height" {
+            assert_eq!(info["look"]["scatter"]["spacing_m"], 40.0);
+            break;
+        }
+        assert!(
+            Instant::now() < until,
+            "the scatter look was not written: {}",
+            info["look"]
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // Export .glb: the proxy instanced into exports/height.glb.
+    h.get_by_label("Export .glb").scroll_to_me();
+    h.run();
+    h.get_by_label("Export .glb").click();
+    h.run_steps(1);
+    // Place logged one `terrain.scatter: ok`; the export is the second.
+    settle(&mut h, |a| {
+        a.log_lines()
+            .filter(|l| l.text.starts_with("terrain.scatter: ok"))
+            .count()
+            >= 2
+    });
+    assert!(dir.path().join("Kit.jdproj/exports/height.glb").exists());
+}
+
+fn thousands(n: usize) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
 /// `JD_STUDIO_CAPTURE=<png> cargo test -p jd-studio --test window -- --ignored capture`: the
 /// window rendered offscreen (no screen capture involved) on the project the desktop's
 /// `e2e/parity-capture.spec.ts` builds — same world, seed and starter graph — at the same
@@ -469,6 +549,7 @@ fn capture_for_docs() {
     let server = Arc::new(server);
     let mut h = Harness::builder()
         .with_size([1440.0, 900.0])
+        .with_max_steps(64)
         .wgpu()
         .with_context_setup(jd_studio::theme::install)
         .build_eframe(move |cc| StudioApp::new(cc, server, Options::default()));
@@ -484,6 +565,23 @@ fn capture_for_docs() {
         h.run_steps(1);
         settle(&mut h, |a| a.viewport.horizon_px().is_some());
         let out = out.replace(".png", "-horizon.png");
+        h.render().expect("render").save(&out).expect("save png");
+    }
+    // Scatter (JD_STUDIO_SCATTER=1), as the desktop's JD_PARITY_SCATTER: `<capture>-scatter.png`.
+    if std::env::var_os("JD_STUDIO_SCATTER").is_some() {
+        let mask = || eframe::egui::accesskit::Role::ComboBox;
+        h.get_by_role_and_label(mask(), "Mask").scroll_to_me();
+        h.run();
+        h.get_by_role_and_label(mask(), "Mask").click();
+        h.run();
+        h.get_by_label("height").click();
+        h.run();
+        h.get_by_label("Place").scroll_to_me();
+        h.run();
+        h.get_by_label("Place").click();
+        h.run_steps(1);
+        settle(&mut h, |a| a.viewport.instance_count() > 0);
+        let out = out.replace(".png", "-scatter.png");
         h.render().expect("render").save(&out).expect("save png");
     }
     // The post effects (JD_STUDIO_POST=1), as the desktop's JD_PARITY_POST: `<capture>-post.png`.
@@ -538,6 +636,7 @@ fn capture_sea() {
     let server = Arc::new(server);
     let mut h = Harness::builder()
         .with_size([1440.0, 900.0])
+        .with_max_steps(64)
         .wgpu()
         .with_context_setup(jd_studio::theme::install)
         .build_eframe(move |cc| StudioApp::new(cc, server, Options::default()));

@@ -397,6 +397,23 @@ fn fogged(c: vec3<f32>, world: vec3<f32>) -> vec3<f32> {
     return mix(c, u.fog_color.rgb, smoothstep(u.fog.x, u.fog.y, depth));
 }
 
+// Scatter instances (three's InstancedMesh): the shape turned by `at.w` about +y, scaled, moved to
+// `at.xyz`; shaded like the terrain with the shape's colour (uv.x −1) and roughness (uv.y).
+@vertex
+fn inst_vs(@location(0) pos: vec3<f32>, @location(1) normal: vec3<f32>, @location(2) color: vec3<f32>, @location(3) uv: vec2<f32>, @location(4) at: vec4<f32>, @location(5) scale: f32) -> VsOut {
+    let c = cos(at.w);
+    let s = sin(at.w);
+    let turn = mat3x3<f32>(vec3<f32>(c, 0.0, -s), vec3<f32>(0.0, 1.0, 0.0), vec3<f32>(s, 0.0, c));
+    let world = turn * (pos * scale) + at.xyz;
+    var o: VsOut;
+    o.clip = u.view_proj * vec4<f32>(world, 1.0);
+    o.world = world;
+    o.normal = turn * normal;
+    o.color = color;
+    o.uv = uv;
+    return o;
+}
+
 @fragment
 fn fs_main(i: VsOut) -> @location(0) vec4<f32> {
     let flat_n = normalize(i.normal);
@@ -404,7 +421,11 @@ fn fs_main(i: VsOut) -> @location(0) vec4<f32> {
     var roughness = 0.95;
     var n = flat_n;
     var emissive = vec3<f32>(0.0);
-    // The framed block's walls carry uv −1: their own colour, never the maps.
+    // The framed block's walls and the scatter shapes carry uv.x −1: their own colour, never the
+    // maps; a shape's uv.y is its roughness.
+    if (i.uv.x < 0.0 && i.uv.y > 0.0) {
+        roughness = i.uv.y;
+    }
     if (u.flags.x > 0.5 && i.uv.x >= 0.0) {
         albedo = textureSample(albedo_map, samp, i.uv).rgb;
         roughness = textureSample(rough_map, samp, i.uv).g;
@@ -813,6 +834,7 @@ pub struct TerrainInfo {
 
 struct Gpu {
     terrain: wgpu::RenderPipeline,
+    instances: wgpu::RenderPipeline,
     lines: wgpu::RenderPipeline,
     sea: wgpu::RenderPipeline,
     lakes: wgpu::RenderPipeline,
@@ -841,6 +863,9 @@ struct Targets {
     tex_id: TextureId,
 }
 
+/// A scatter shape's triangles and its instances' `[x, y, z, yaw, scale]`.
+type ScatterGeometry = (Vec<Vertex>, Vec<[f32; 5]>);
+
 /// The framed block's wall triangles and rim line points.
 type Frame = (Vec<Vertex>, Vec<ColorVertex>);
 
@@ -855,6 +880,158 @@ struct Mesh {
 
 /// A preview as the desktop's `buildTerrainGeometry`: a grid over `extent_m` centred on the
 /// origin, row 0 to the south (+z), absolute heights, the height ramp blended to rock by slope.
+/// Scatter instances for the viewport: points in layer metres (u east, v north from the south
+/// edge, z height, r 0..1, age 0..1) drawn as one shape — the desktop's 1 m proxy cone, or a rock
+/// for rock-named masks.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Instances {
+    /// `[u, v, z, r, age]` per instance.
+    pub points: Vec<[f32; 5]>,
+    /// Instance size before the per-point 0.75..1.25 variation (metres).
+    pub size_m: f32,
+    /// Rocks instead of cones.
+    pub rock: bool,
+}
+
+/// One shape as a triangle list in the terrain's vertex format: its colour, uv (−1, roughness).
+fn shape_vertices(tris: &[([f32; 3], [f32; 3])], color: u32, roughness: f32) -> Vec<Vertex> {
+    let color = hex(color);
+    tris.iter()
+        .map(|&(pos, normal)| Vertex {
+            pos,
+            normal,
+            color,
+            uv: [-1.0, roughness],
+        })
+        .collect()
+}
+
+/// three's `ConeGeometry(0.3, 1, 6)` (a `CylinderGeometry` with no top radius: the torso's top row
+/// gives one triangle per segment, the bottom cap one more), moved up 0.5 so it stands on its base.
+fn cone() -> Vec<([f32; 3], [f32; 3])> {
+    let (r, segments) = (0.3_f32, 6);
+    let slope = r / 1.0;
+    let mut tris = Vec::new();
+    let at = |x: usize| {
+        let theta = x as f32 / segments as f32 * std::f32::consts::TAU;
+        theta.sin_cos()
+    };
+    for x in 0..segments {
+        let ((s0, c0), (s1, c1)) = (at(x), at(x + 1));
+        let n = |s: f32, c: f32| normalize([s, slope, c]);
+        // b, c, d of the torso quad: base x, base x + 1, apex x + 1.
+        tris.push(([r * s0, 0.0, r * c0], n(s0, c0)));
+        tris.push(([r * s1, 0.0, r * c1], n(s1, c1)));
+        tris.push(([0.0, 1.0, 0.0], n(s1, c1)));
+        // The bottom cap.
+        let down = [0.0, -1.0, 0.0];
+        tris.push(([r * s1, 0.0, r * c1], down));
+        tris.push(([r * s0, 0.0, r * c0], down));
+        tris.push(([0.0, 0.0, 0.0], down));
+    }
+    tris
+}
+
+/// `(h * 1103515245 + 12345) & 0x7fffffff` as JavaScript evaluates it: in doubles, so the product
+/// rounds once it passes 2⁵³, then the low 31 bits of the integer.
+fn js_lcg(h: i64) -> i64 {
+    ((h as f64 * 1_103_515_245.0 + 12_345.0) as i64) & 0x7fff_ffff
+}
+
+/// The desktop's `rockGeometry`: three's `IcosahedronGeometry(0.5, 1)` (non-indexed, faces
+/// subdivided as `PolyhedronGeometry` does), each vertex scaled by 0.78..1.22 from a seeded LCG,
+/// squashed to 0.65 and lifted 0.3, with flat normals (`computeVertexNormals` on a soup).
+fn rock() -> Vec<([f32; 3], [f32; 3])> {
+    let t = (1.0 + 5.0_f32.sqrt()) / 2.0;
+    let base: [[f32; 3]; 12] = [
+        [-1.0, t, 0.0],
+        [1.0, t, 0.0],
+        [-1.0, -t, 0.0],
+        [1.0, -t, 0.0],
+        [0.0, -1.0, t],
+        [0.0, 1.0, t],
+        [0.0, -1.0, -t],
+        [0.0, 1.0, -t],
+        [t, 0.0, -1.0],
+        [t, 0.0, 1.0],
+        [-t, 0.0, -1.0],
+        [-t, 0.0, 1.0],
+    ];
+    const FACES: [[usize; 3]; 20] = [
+        [0, 11, 5],
+        [0, 5, 1],
+        [0, 1, 7],
+        [0, 7, 10],
+        [0, 10, 11],
+        [1, 5, 9],
+        [5, 11, 4],
+        [11, 10, 2],
+        [10, 7, 6],
+        [7, 1, 8],
+        [3, 9, 4],
+        [3, 4, 2],
+        [3, 2, 6],
+        [3, 6, 8],
+        [3, 8, 9],
+        [4, 9, 5],
+        [2, 4, 11],
+        [6, 2, 10],
+        [8, 6, 7],
+        [9, 8, 1],
+    ];
+    let lerp = |a: [f32; 3], b: [f32; 3], t: f32| [0, 1, 2].map(|i| a[i] + (b[i] - a[i]) * t);
+    let mut soup: Vec<[f32; 3]> = Vec::with_capacity(240);
+    // subdivideFace with detail 1 (cols 2): v[i][j] over the face, then its four triangles in
+    // three's order.
+    for f in FACES {
+        let (a, b, c) = (base[f[0]], base[f[1]], base[f[2]]);
+        let cols = 2;
+        let mut v: Vec<Vec<[f32; 3]>> = Vec::new();
+        for i in 0..=cols {
+            let aj = lerp(a, c, i as f32 / cols as f32);
+            let bj = lerp(b, c, i as f32 / cols as f32);
+            let rows = cols - i;
+            v.push(
+                (0..=rows)
+                    .map(|j| {
+                        if j == 0 && i == cols {
+                            aj
+                        } else {
+                            lerp(aj, bj, j as f32 / rows as f32)
+                        }
+                    })
+                    .collect(),
+            );
+        }
+        for i in 0..cols {
+            for j in 0..2 * (cols - i) - 1 {
+                let k = j / 2;
+                if j % 2 == 0 {
+                    soup.extend([v[i][k + 1], v[i + 1][k], v[i][k]]);
+                } else {
+                    soup.extend([v[i][k + 1], v[i + 1][k + 1], v[i + 1][k]]);
+                }
+            }
+        }
+    }
+    // applyRadius(0.5), then the desktop's jitter: an LCG on 31 bits, seed 1337, computed as
+    // JavaScript does — the product rounds to a double before `& 0x7fffffff` takes its low bits.
+    let mut h: i64 = 1337;
+    for p in &mut soup {
+        let n = normalize(*p);
+        h = js_lcg(h);
+        let k = 0.78 + 0.44 * (h as f32 / 0x7fff_ffff as f32);
+        *p = [n[0] * 0.5 * k, n[1] * 0.5 * k * 0.65 + 0.3, n[2] * 0.5 * k];
+    }
+    // Flat normals: (c − b) × (a − b) per triangle.
+    soup.chunks(3)
+        .flat_map(|t| {
+            let n = normalize(cross(sub(t[2], t[1]), sub(t[0], t[1])));
+            t.iter().map(move |&p| (p, n))
+        })
+        .collect()
+}
+
 fn grid_mesh(pv: &Preview, extent_m: [f32; 2]) -> (Vec<Vertex>, Vec<u32>) {
     let (w, h) = (pv.width.max(2), pv.height.max(2));
     let q =
@@ -1022,6 +1199,10 @@ pub struct Viewport {
     pending: Option<(Vec<Vertex>, Vec<u32>, Option<Frame>)>,
     pending_maps: Option<Option<Maps>>,
     pending_skirt: Option<Option<(Vec<Vertex>, Vec<u32>)>>,
+    /// Scatter: the shape and per-instance `[x, y, z, yaw, scale]` to upload, then on the GPU.
+    pending_instances: Option<Option<ScatterGeometry>>,
+    instances: Option<(wgpu::Buffer, u32, wgpu::Buffer, u32)>,
+    instance_count: usize,
     skirt: Option<(wgpu::Buffer, wgpu::Buffer, u32)>,
     skirt_px: Option<u32>,
     /// The preview shown and its extent (the frame toggle rebuilds from it).
@@ -1068,6 +1249,9 @@ impl Default for Viewport {
             pending: None,
             pending_maps: None,
             pending_skirt: None,
+            pending_instances: None,
+            instances: None,
+            instance_count: 0,
             skirt: None,
             skirt_px: None,
             shown: None,
@@ -1176,6 +1360,7 @@ impl Viewport {
 
     /// Drop the terrain (no project, or no layer).
     pub fn clear(&mut self) {
+        self.set_instances(None);
         self.shown = None;
         self.set_horizon(None);
         self.mesh = None;
@@ -1303,6 +1488,46 @@ impl Viewport {
     /// The rain amount while it falls.
     pub fn rain(&self) -> Option<f32> {
         (!self.rain_streaks.is_empty()).then_some(self.rain)
+    }
+
+    /// Scatter instances in the terrain frame (x = u − extent/2, z = extent/2 − v), yaw 2π·r and
+    /// a 0.75..1.25 scale from `r` exactly as the GLB export writes them, young ones smaller;
+    /// `None` or no points: none.
+    pub fn set_instances(&mut self, instances: Option<&Instances>) {
+        let extent = self.shown.as_ref().map(|(_, e)| *e);
+        let built = instances
+            .zip(extent)
+            .filter(|(i, _)| !i.points.is_empty())
+            .map(|(i, e)| {
+                let shape = if i.rock {
+                    shape_vertices(&rock(), 0x5a554f, 0.95)
+                } else {
+                    shape_vertices(&cone(), 0x3c9a4c, 0.8)
+                };
+                let at: Vec<[f32; 5]> = i
+                    .points
+                    .iter()
+                    .map(|&[u, v, z, r, age]| {
+                        let k = i.size_m * (0.75 + 0.5 * (r * 7.31).rem_euclid(1.0)) * age;
+                        [
+                            u - e[0] / 2.0,
+                            z,
+                            e[1] / 2.0 - v,
+                            std::f32::consts::TAU * r,
+                            k,
+                        ]
+                    })
+                    .collect();
+                (shape, at)
+            });
+        self.instance_count = built.as_ref().map_or(0, |(_, at)| at.len());
+        self.pending_instances = Some(built);
+        self.dirty = true;
+    }
+
+    /// Scatter instances drawn.
+    pub fn instance_count(&self) -> usize {
+        self.instance_count
     }
 
     /// Wet cells of the lakes drawn.
@@ -1462,6 +1687,25 @@ impl Viewport {
         }
         if rebind {
             gpu.bind_group = bind_group(rs, gpu);
+        }
+        if let Some(pending) = self.pending_instances.take() {
+            use wgpu::util::DeviceExt as _;
+            self.instances = pending.map(|(shape, at)| {
+                let buf = |label, contents: &[u8]| {
+                    rs.device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some(label),
+                            contents,
+                            usage: wgpu::BufferUsages::VERTEX,
+                        })
+                };
+                (
+                    buf("scatter shape", bytemuck::cast_slice(&shape)),
+                    shape.len() as u32,
+                    buf("scatter instances", bytemuck::cast_slice(&at)),
+                    at.len() as u32,
+                )
+            });
         }
         if let Some(skirt) = self.pending_skirt.take() {
             use wgpu::util::DeviceExt as _;
@@ -1754,6 +1998,12 @@ impl Viewport {
                 pass.set_vertex_buffer(0, walls.slice(..));
                 pass.draw(0..*n, 0..1);
             }
+            if let Some((shape, n, at, count)) = &self.instances {
+                pass.set_pipeline(&gpu.instances);
+                pass.set_vertex_buffer(0, shape.slice(..));
+                pass.set_vertex_buffer(1, at.slice(..));
+                pass.draw(0..*n, 0..*count);
+            }
             pass.set_pipeline(&gpu.lines);
             if let Some((rim, n)) = &mesh.rim {
                 pass.set_vertex_buffer(0, rim.slice(..));
@@ -2018,6 +2268,45 @@ fn create_gpu(rs: &RenderState) -> Gpu {
         multiview_mask: None,
         cache: None,
     });
+    let instance_attributes = wgpu::vertex_attr_array![4 => Float32x4, 5 => Float32];
+    let instances = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("scatter instances"),
+        layout: Some(&pipeline_layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("inst_vs"),
+            compilation_options: Default::default(),
+            buffers: &[
+                Some(wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<Vertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &attributes,
+                }),
+                Some(wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<[f32; 5]>() as u64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &instance_attributes,
+                }),
+            ],
+        },
+        primitive: wgpu::PrimitiveState::default(),
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH,
+            depth_write_enabled: Some(true),
+            depth_compare: Some(wgpu::CompareFunction::Less),
+            stencil: Default::default(),
+            bias: Default::default(),
+        }),
+        multisample,
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs_main"),
+            compilation_options: Default::default(),
+            targets: &target,
+        }),
+        multiview_mask: None,
+        cache: None,
+    });
     let line_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4];
     let blended = [Some(wgpu::ColorTargetState {
         format: post::HDR,
@@ -2149,6 +2438,7 @@ fn create_gpu(rs: &RenderState) -> Gpu {
     });
     let mut gpu = Gpu {
         terrain,
+        instances,
         lines,
         sea,
         lakes,
@@ -2383,6 +2673,40 @@ mod tests {
         let (_, u, f) = cam.basis(1.5);
         let top = normalize([f[0] + u[0], f[1] + u[1], f[2] + u[2]]);
         assert!((dot(top, f).acos() - 25f32.to_radians()).abs() < 1e-4);
+    }
+
+    #[test]
+    fn the_scatter_shapes_are_three_s() {
+        // The rock jitter's LCG matches node: 1337 → 78628734 1460962528 2037973760 1768978176 …
+        let mut h = 1337;
+        let seq: Vec<i64> = (0..4)
+            .map(|_| {
+                h = js_lcg(h);
+                h
+            })
+            .collect();
+        assert_eq!(
+            seq,
+            [78_628_734, 1_460_962_528, 2_037_973_760, 1_768_978_176]
+        );
+        // Cone: 6 torso + 6 cap triangles, base at 0, apex at 1, radius 0.3.
+        let c = cone();
+        assert_eq!(c.len(), 36);
+        let ys: Vec<f32> = c.iter().map(|v| v.0[1]).collect();
+        assert_eq!(
+            (
+                ys.iter().cloned().fold(f32::MAX, f32::min),
+                ys.iter().cloned().fold(f32::MIN, f32::max)
+            ),
+            (0.0, 1.0)
+        );
+        // Rock: an icosahedron of detail 1 is 80 triangles; squashed into roughly 0..0.6 high.
+        let r = rock();
+        assert_eq!(r.len(), 240);
+        let (lo, hi) = r.iter().fold((f32::MAX, f32::MIN), |(lo, hi), v| {
+            (lo.min(v.0[1]), hi.max(v.0[1]))
+        });
+        assert!(lo > -0.1 && lo < 0.1 && hi > 0.5 && hi < 0.75, "{lo}..{hi}");
     }
 
     #[test]
