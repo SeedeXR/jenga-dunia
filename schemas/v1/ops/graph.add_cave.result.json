@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Added",
+  "description": "A node added by a workflow op.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "The new node.",
+      "$ref": "#/$defs/NodeId"
+    },
+    "published": {
+      "description": "Layers the op published (new `jd.output.height` nodes).",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "materials": {
+      "description": "The look's material layers afterwards (`project.set_look`), when the op added any.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "$ref": "#/$defs/MaterialSpec"
+      }
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "$defs": {
+    "NodeId": {
+      "description": "Identifies a graph node.",
+      "type": "string"
+    },
+    "MaterialSpec": {
+      "description": "One material layer of the stack.",
+      "type": "object",
+      "properties": {
+        "mask": {
+          "description": "0..1 mask layer that weights this material (omit for everywhere).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "albedo": {
+          "description": "Base colour, sRGB 0..1.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "roughness": {
+          "description": "Roughness 0..1.",
+          "type": "number",
+          "format": "float",
+          "default": 0.8999999761581421
+        },
+        "emissive": {
+          "description": "Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "number",
+            "format": "float"
+          },
+          "minItems": 3,
+          "maxItems": 3,
+          "default": null
+        },
+        "detail": {
+          "description": "Tileable detail (grain repeated every `tile_m` metres): baked into the macro maps and\nthe GLB by world position, returned as tiles for the viewport, written as tiles for\nthe engines.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DetailSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "texture": {
+          "description": "An image texture set from the project's assets/ (tileable PNGs): the albedo is sampled\ninto the maps by world position and the set is written as the layer's tile for the\nengines; `detail` wins when both are given.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TextureSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "albedo"
+      ]
+    },
+    "DetailSpec": {
+      "description": "A layer's tileable detail.",
+      "type": "object",
+      "properties": {
+        "tile_m": {
+          "description": "Metres per repeat.",
+          "type": "number",
+          "format": "float",
+          "minimum": 0.01,
+          "maximum": 100000.0,
+          "default": 8.0
+        },
+        "bump": {
+          "description": "Normal strength 0..1.",
+          "type": "number",
+          "format": "float",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "default": 0.5
+        },
+        "contrast": {
+          "description": "Albedo variation 0..1.",
+          "type": "number",
+          "format": "float",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "default": 0.30000001192092896
+        },
+        "seed": {
+          "description": "Noise seed.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0,
+          "default": 0
+        },
+        "px": {
+          "description": "Tile side in pixels (16..=2048).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 16,
+          "maximum": 2048,
+          "default": 512
+        }
+      },
+      "additionalProperties": false
+    },
+    "TextureSpec": {
+      "description": "An image texture set for a material layer.",
+      "type": "object",
+      "properties": {
+        "albedo": {
+          "description": "Tileable albedo PNG (sRGB) in the project's assets/ (or an absolute path).",
+          "type": "string"
+        },
+        "normal": {
+          "description": "Tangent-space normal PNG (+Y up), optional.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "tile_m": {
+          "description": "Metres per repeat.",
+          "type": "number",
+          "format": "float"
+        },
+        "px": {
+          "description": "Exported tile side in pixels (16..=4096; the images are resampled to it).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 1024
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "albedo",
+        "tile_m"
+      ]
+    }
+  }
+}

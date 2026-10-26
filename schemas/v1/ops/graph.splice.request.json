@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Splice",
+  "description": "`graph.splice` params.",
+  "type": "object",
+  "properties": {
+    "layer": {
+      "description": "The published layer whose output node gets the new node in front of it.",
+      "type": "string",
+      "default": "height"
+    },
+    "kind": {
+      "description": "Kind `name@version` of the node to insert (it must have an `in` input and an `out`\noutput).",
+      "$ref": "#/$defs/NodeKind"
+    },
+    "params": {
+      "description": "Its parameters.",
+      "type": "object",
+      "additionalProperties": true,
+      "default": {}
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "kind"
+  ],
+  "$defs": {
+    "NodeKind": {
+      "description": "A node kind identifier `namespace.name@version`, e.g. `jd.noise.fbm@1`.",
+      "type": "string"
+    }
+  }
+}

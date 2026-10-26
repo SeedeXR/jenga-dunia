@@ -985,87 +985,55 @@ impl StudioApp {
             Action::Fullscreen => self.set_fullscreen(ctx, !self.fullscreen),
             Action::Frame => self.viewport.set_frame(!self.viewport.frame),
             Action::Graph => self.open_editor(),
-            Action::Insert(k) => {
-                if let Some(kind) = crate::chrome::STRIP[k].3 {
-                    let params = (kind == "jd.shape.primitive@1").then(|| {
-                        let e = self.project.as_ref().map_or([1000.0, 1000.0], |p| {
-                            [p["world"]["extent_m"][0].as_f64().unwrap_or(1000.0), p["world"]["extent_m"][1].as_f64().unwrap_or(1000.0)]
-                        });
-                        let max = self.viewport.info().map_or(500.0, |i| f64::from(i.range_m[1]));
-                        json!({ "shape": "cone", "center_m": [e[0] / 2.0, e[1] / 2.0], "size_m": [e[0] / 3.0, e[1] / 3.0], "height_range_m": [0.0, (max / 3.0).max(50.0)], "op": "max" })
-                    });
-                    self.splice_before("height", kind, params);
-                }
-            }
+            Action::Insert(k) => self.add_layer(crate::chrome::STRIP[k].3),
         }
     }
 
-    /// The desktop's `spliceBefore`: a node between the height output and whatever fed it,
-    /// stacked under the output in the graph; then a live evaluation at the preview lod.
-    fn splice_before(&mut self, layer: &str, kind: &str, params: Option<Value>) {
-        let output = self.graph["nodes"].as_array().and_then(|nodes| {
-            nodes
-                .iter()
-                .find(|n| {
-                    n["kind"]
-                        .as_str()
-                        .is_some_and(|k| k.starts_with("jd.output.height@"))
-                        && n["params"]["layer"].as_str().unwrap_or("height") == layer
-                })
-                .cloned()
+    /// The desktop's `previewLod`: live evaluations stay ≤ 512² (its adaptive bias arrives with
+    /// live evaluation in Studio).
+    fn preview_lod(&self) -> u32 {
+        let res = self.project.as_ref().map_or(512.0, |p| {
+            let r = &p["world"]["resolution_px"];
+            r[0].as_f64()
+                .unwrap_or(512.0)
+                .max(r[1].as_f64().unwrap_or(512.0))
         });
-        let Some(output) = output else {
-            return self.log(format!("no `{layer}` output in the graph"), Level::Error);
+        (res / 512.0).log2().ceil().max(0.0) as u32
+    }
+
+    /// A layer-strip button: the shared workflow op (as the desktop), then a live evaluation.
+    fn add_layer(&mut self, add: crate::chrome::Add) {
+        use crate::chrome::Add;
+        let max = self
+            .viewport
+            .info()
+            .map_or(500.0, |i| f64::from(i.range_m[1]));
+        let request = match add {
+            Add::Splice(kind) => {
+                let mut params = json!({ "layer": "height", "kind": kind });
+                if kind == "jd.shape.primitive@1" {
+                    let e = self.project.as_ref().map_or([1000.0, 1000.0], |p| {
+                        let x = &p["world"]["extent_m"];
+                        [
+                            x[0].as_f64().unwrap_or(1000.0),
+                            x[1].as_f64().unwrap_or(1000.0),
+                        ]
+                    });
+                    params["params"] = json!({ "shape": "cone", "center_m": [e[0] / 2.0, e[1] / 2.0], "size_m": [e[0] / 3.0, e[1] / 3.0], "height_range_m": [0.0, (max / 3.0).max(50.0)], "op": "max" });
+                }
+                Self::request("graph.splice", params)
+            }
+            Add::Simulation(which) => Self::request(
+                "graph.add_simulation",
+                json!({ "which": which, "max_height_m": max }),
+            ),
+            Add::Cave(kind) => Self::request("graph.add_cave", json!({ "kind": kind })),
         };
-        let out_id = output["id"].clone();
-        let feed = self.graph["edges"].as_array().and_then(|edges| {
-            edges
-                .iter()
-                .find(|e| e["to"]["node"] == out_id && e["to"]["port"] == "in")
-                .cloned()
-        });
-        let pos = [
-            output["ui"]["position"][0].as_f64().unwrap_or(0.0),
-            output["ui"]["position"][1].as_f64().unwrap_or(0.0),
-        ];
-        let below = self.graph["nodes"].as_array().map_or(0, |nodes| {
-            nodes
-                .iter()
-                .filter(|n| (n["ui"]["position"][0].as_f64().unwrap_or(0.0) - pos[0]).abs() < 1.0)
-                .count()
-        });
-        let mut add = json!({ "kind": kind, "position": [pos[0], pos[1] + 140.0 * below as f64] });
-        if let Some(p) = params {
-            add["params"] = p;
-        }
-        let lod = self
-            .project
-            .as_ref()
-            .and_then(|p| p["settings"]["preview_lod"].as_u64())
-            .unwrap_or(0);
-        let id_of = |done: &[Response]| {
-            done.first()
-                .and_then(|r| r.result.as_ref())
-                .map(|v| v["id"].clone())
-        };
-        let mut steps: Vec<Step> = vec![Box::new(move |_| {
-            Some(Self::request("graph.add_node", add))
-        })];
-        if let Some(feed) = feed {
-            steps.push(Box::new(move |done| {
-                Some(Self::request("graph.connect", json!({ "from": feed["from"]["node"], "from_port": feed["from"]["port"], "to": id_of(done)?, "to_port": "in" })))
-            }));
-        }
-        steps.push(Box::new(move |done| {
-            Some(Self::request(
-                "graph.connect",
-                json!({ "from": id_of(done)?, "from_port": "out", "to": out_id, "to_port": "in" }),
-            ))
-        }));
-        steps.push(Box::new(move |_| {
-            Some(Self::request("graph.evaluate", json!({ "lod": lod })))
-        }));
-        self.chain(steps);
+        let lod = self.preview_lod();
+        self.chain(vec![
+            Box::new(move |_| Some(request)),
+            Box::new(move |_| Some(Self::request("graph.evaluate", json!({ "lod": lod })))),
+        ]);
     }
 
     fn open_editor(&mut self) {

@@ -8,7 +8,6 @@ import type { CavesMeshResult, Entrance } from "./lib/ops.gen";
 /** Cave kinds of `jd.cave.system@1`. */
 export type CaveKindName = "karst" | "lava_tube" | "sea_cave" | "mountain" | "mine" | "tunnel" | "catacombs" | "maze" | "flank_margin";
 /** Default reach per kind, metres (scaled down on small worlds). */
-const CAVE_REACH: Record<CaveKindName, number> = { karst: 600, lava_tube: 800, sea_cave: 400, mountain: 300, mine: 250, tunnel: 400, catacombs: 120, maze: 150, flank_margin: 300 };
 interface MeshData {
   positions: Float32Array;
   normals: Float32Array;
@@ -540,30 +539,6 @@ export const useStore = create<State>((set, get) => {
   let caveGen = 0;
   const caveHashes = new Map<string, string>();
   // Publish a cave's `holes` / `plan` as a layer; a second cave joins the first through a max node.
-  const publishCaveLayer = async (cave: string, port: "holes" | "plan", layer: string) => {
-    const g = get().graph;
-    const pos = g.nodes.find((n) => n.id === cave)?.ui?.position ?? [0, 0];
-    const outNode = g.nodes.find((n) => n.kind.startsWith("jd.output.height@") && String(n.params?.layer ?? "") === layer);
-    graphGen++;
-    if (!outNode) {
-      const r = await run("graph.add_node", { kind: "jd.output.height@1", params: { layer }, position: [pos[0] + 340, pos[1] + (port === "holes" ? 120 : 260)] });
-      if (r.status === "ok" && r.result) await get().connectNodes(cave, port, r.result.id, "in");
-    } else {
-      const feed = g.edges.find((e) => e.to.node === outNode.id && e.to.port === "in");
-      if (!feed) {
-        await get().connectNodes(cave, port, outNode.id, "in");
-      } else {
-        const r = await run("graph.add_node", { kind: "jd.math.max@1", position: [pos[0] + 170, pos[1] + (port === "holes" ? 120 : 260)] });
-        if (r.status === "ok" && r.result) {
-          const mx = r.result.id;
-          await get().connectNodes(feed.from.node, feed.from.port, mx, "in");
-          await get().connectNodes(cave, port, mx, "b");
-          await get().connectNodes(mx, "out", outNode.id, "in");
-        }
-      }
-    }
-    await loadGraph();
-  };
   // Preview LOD keeps live evaluations ≤ 512² so edits feel immediate; Evaluate/export use lod 0.
   const previewLod = () => {
     const res = get().project?.world.resolution_px ?? [512, 512];
@@ -617,21 +592,14 @@ export const useStore = create<State>((set, get) => {
   // The stroke node feeding the output that publishes `layer` — spliced in when there is none
   // (clamped for masks). Returns its id, or null when nothing publishes that layer.
   // Splice a new node of `kind` between whatever feeds the output publishing `layer` and that output.
+  // One implementation for the desktop and Studio (ADR-0017): the core's `graph.splice` puts the
+  // node between the layer's output and its feed, stacked under the output on the canvas.
   const spliceBefore = async (layer: string, kind: string, params: Record<string, unknown> | null): Promise<string | null> => {
-    const g = get().graph;
-    const output = g.nodes.find((n) => n.kind.startsWith("jd.output.height@") && String(n.params?.layer ?? "height") === layer);
-    if (!output) return null;
-    const feed = g.edges.find((e) => e.to.node === output.id && e.to.port === "in");
-    const pos = output.ui?.position ?? [0, 0];
-    const below = g.nodes.filter((n) => Math.abs((n.ui?.position?.[0] ?? 0) - pos[0]) < 1).length; // stack spliced nodes under the output
     graphGen++;
-    const r = await run("graph.add_node", { kind, position: [pos[0], pos[1] + 140 * below], ...(params ? { params } : {}) });
+    const r = await run("graph.splice", { layer, kind, ...(params ? { params } : {}) });
     if (r.status !== "ok" || !r.result) return null;
-    const id = r.result.id;
-    if (feed) await get().connectNodes(feed.from.node, feed.from.port, id, "in");
-    await get().connectNodes(id, "out", output.id, "in");
     await loadGraph();
-    return id;
+    return r.result.id;
   };
   const strokesNodeFor = async (layer: string, clamp: [number, number] | null): Promise<string | null> => {
     const g = get().graph;
@@ -1025,55 +993,16 @@ export const useStore = create<State>((set, get) => {
       if (id) set((s) => ({ selectedNode: id, sculpting: true, grid: { ...s.grid, on: false } }));
     },
     addSimulation: async (which) => {
-      const g = get().graph;
-      const output = g.nodes.find((n) => n.kind.startsWith("jd.output.height@") && String(n.params?.layer ?? "height") === "height");
-      if (!output) return;
-      // Snow needs a snow line inside the world: with the 6.5 °C/km lapse, a sea-level temperature of
-      // 6.5 × 0.6 × (max height in km) puts it at six tenths of the highest ground.
-      const maxM = get().layer?.stats.max ?? 500;
-      const snowTemp = Math.round(6.5 * 0.6 * (maxM / 1000) * 10) / 10;
-      const sims: Record<SimulationKind, { kind: string; params: Record<string, unknown> | null; through: boolean; publish: [string, string][]; material: MaterialSpec | null; extra?: MaterialSpec }> = {
-        snow: { kind: "jd.climate.snowpack@1", params: { steps: 40, temperature_c: snowTemp }, through: false, publish: [["cover", "snow"]], material: { mask: "snow", albedo: [0.93, 0.95, 0.98], roughness: 0.6 } },
-        debris: { kind: "jd.erosion.debris@1", params: null, through: true, publish: [["debris", "debris"]], material: { mask: "debris", albedo: [0.33, 0.3, 0.27], roughness: 0.95 } },
-        sand: { kind: "jd.erosion.aeolian@1", params: { iterations: 60 }, through: true, publish: [], material: null },
-        lava: {
-          kind: "jd.volcanic.lava@1",
-          params: { eruption_s: 1800, duration_s: 1800 },
-          through: true,
-          publish: [["heat", "heat"], ["lava", "lava"]],
-          material: { mask: "lava", albedo: [0.16, 0.15, 0.15], roughness: 0.8 },
-          // The molten part glows: an emissive layer on the heat mask, over the basalt.
-          extra: { mask: "heat", albedo: [1.0, 0.45, 0.1], roughness: 0.7, emissive: [1.0, 0.35, 0.05] },
-        },
-      };
-      const sim = sims[which];
-      let id: string | null;
-      if (sim.through) {
-        id = await spliceBefore("height", sim.kind, sim.params);
-      } else {
-        const feed = g.edges.find((e) => e.to.node === output.id && e.to.port === "in");
-        if (!feed) return;
-        const pos = output.ui?.position ?? [0, 0];
-        graphGen++;
-        const r = await run("graph.add_node", { kind: sim.kind, position: [pos[0], pos[1] + 140 * (1 + g.nodes.filter((n) => Math.abs((n.ui?.position?.[0] ?? 0) - pos[0]) < 1).length)], ...(sim.params ? { params: sim.params } : {}) });
-        if (r.status !== "ok" || !r.result) return;
-        id = r.result.id;
-        await get().connectNodes(feed.from.node, feed.from.port, id, "in");
-      }
-      if (!id) return;
-      const node = get().graph.nodes.find((n) => n.id === id);
-      const at = node?.ui?.position ?? [0, 0];
-      for (const [k, [port, layer]] of sim.publish.entries()) {
-        graphGen++;
-        const r = await run("graph.add_node", { kind: "jd.output.height@1", position: [at[0] + 320, at[1] + 140 * (k + 1)], params: { layer } });
-        if (r.status === "ok" && r.result) await get().connectNodes(id, port, r.result.id, "in");
-      }
+      // The core places the node (in front of the height, or beside it for snow), publishes its
+      // layers and adds its material rows (`graph.add_simulation`, shared with Studio).
+      graphGen++;
+      const r = await run("graph.add_simulation", { which, max_height_m: get().layer?.stats.max ?? 500 });
+      if (r.status !== "ok" || !r.result) return;
       await loadGraph();
-      const rows = [sim.material, sim.extra].filter((m): m is MaterialSpec => !!m && !get().materials.some((x) => x.mask === m.mask));
-      if (rows.length > 0) get().setMaterials([...get().materials, ...rows]);
+      if (r.result.materials) get().setMaterials(r.result.materials);
       // Colour by the first mask once the (live or explicit) evaluation has published it.
-      pendingColor = sim.publish[0]?.[1] ?? null;
-      set({ selectedNode: id });
+      pendingColor = r.result.published?.[0] ?? null;
+      set({ selectedNode: r.result.id });
     },
     applyAction: async (action) => {
       const id = await spliceBefore("height", "jd.filter.action@1", { action });
@@ -1100,14 +1029,12 @@ export const useStore = create<State>((set, get) => {
     setXray: (x) => set({ xray: Math.min(0.95, Math.max(0, x)) }),
     caveTarget: null,
     addCave: async (kind) => {
-      const e = get().project?.world.extent_m ?? [1000, 1000];
-      const n = get().graph.nodes.filter((x) => x.kind.startsWith("jd.cave.system@")).length;
-      // Reach scaled to the world so a small world still holds the cave; the mouths come from the terrain until you place them.
-      const reach = Math.round(Math.min(CAVE_REACH[kind], 0.6 * Math.min(e[0], e[1])));
-      const id = await spliceBefore("height", "jd.cave.system@1", { kind, seed: n + 1, reach_m: Math.max(20, reach) });
-      if (!id) return;
-      await publishCaveLayer(id, "holes", "cave_holes");
-      await publishCaveLayer(id, "plan", "cave_plan");
+      // Seed, reach and the published holes / plan layers come from the core (`graph.add_cave`).
+      graphGen++;
+      const r = await run("graph.add_cave", { kind });
+      if (r.status !== "ok" || !r.result) return;
+      await loadGraph();
+      const id = r.result.id;
       // A tunnel needs its two portals: start placing right away.
       set({ selectedNode: id, caveTarget: id, ...(kind === "tunnel" ? { drawing: "cave" as const, sculpting: true } : {}) });
     },

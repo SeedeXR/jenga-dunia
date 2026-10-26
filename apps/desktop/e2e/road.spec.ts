@@ -46,8 +46,9 @@ test.describe("roads against the real core", () => {
     await expect(road).toContainText("width_m=12");
     await expect(page.getByTestId("graph-inspector")).toContainText("jd.terrain.spline@1");
     await expect(page.getByTestId("road-draw")).toContainText("Road");
-    await expect(page.getByTestId("log")).toContainText("graph.connect: ok");
-    expect(await logCount(page, "graph.add_node: ok")).toBe(1);
+    // One splice in front of the height (the core's graph.splice adds and wires the node).
+    await expect(page.getByTestId("log")).toContainText("graph.splice: ok");
+    expect(await logCount(page, "graph.splice: ok")).toBe(1);
     // The live preview re-evaluates: the published height changes under the road.
     await expect.poll(async () => (await stats.textContent())?.match(/hash([0-9a-f]+)/)?.[1], { timeout: 30_000 }).not.toBe(hashBefore);
     await page.screenshot({ path: testInfo.outputPath("road.png") }); // tutorial image source

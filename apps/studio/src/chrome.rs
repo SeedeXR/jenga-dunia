@@ -28,63 +28,84 @@ pub enum Action {
     Insert(usize),
 }
 
-/// The layer strip, top to bottom: test id, icon, tooltip, node kind (None: not ported yet).
-pub const STRIP: [(&str, &str, &str, Option<&str>); 11] = [
+/// What a layer-strip button adds (the core's workflow ops, shared with the desktop).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Add {
+    /// `graph.splice` this node kind in front of the height.
+    Splice(&'static str),
+    /// `graph.add_simulation`.
+    Simulation(&'static str),
+    /// `graph.add_cave`.
+    Cave(&'static str),
+}
+
+/// The layer strip, top to bottom: test id, icon, tooltip, what it adds.
+pub const STRIP: [(&str, &str, &str, Add); 11] = [
     (
         "strip-cone",
         "mountain",
         "Shape: a cone at the world's centre (jd.shape.primitive)",
-        Some("jd.shape.primitive@1"),
+        Add::Splice("jd.shape.primitive@1"),
     ),
     (
         "strip-terrace",
         "layers",
         "Filter: terraces (jd.filter.terrace)",
-        Some("jd.filter.terrace@1"),
+        Add::Splice("jd.filter.terrace@1"),
     ),
     (
         "strip-blur",
         "blend",
         "Filter: smooth (jd.filter.blur)",
-        Some("jd.filter.blur@1"),
+        Add::Splice("jd.filter.blur@1"),
     ),
     (
         "strip-thermal",
         "thermometer",
         "Simulation: thermal erosion (jd.erosion.thermal)",
-        Some("jd.erosion.thermal@1"),
+        Add::Splice("jd.erosion.thermal@1"),
     ),
     (
         "strip-hydraulic",
         "droplets",
         "Simulation: hydraulic erosion (jd.erosion.hydraulic)",
-        Some("jd.erosion.hydraulic@1"),
+        Add::Splice("jd.erosion.hydraulic@1"),
     ),
     (
         "strip-rivers",
         "git-branch",
         "Simulation: carve rivers (jd.hydrology.rivers)",
-        Some("jd.hydrology.rivers@1"),
+        Add::Splice("jd.hydrology.rivers@1"),
     ),
-    ("strip-snow", "snowflake", "Simulation layer: snow", None),
+    (
+        "strip-snow",
+        "snowflake",
+        "Simulation layer: snow",
+        Add::Simulation("snow"),
+    ),
     (
         "strip-sand",
         "wind",
         "Simulation layer: wind-blown sand",
-        None,
+        Add::Simulation("sand"),
     ),
     (
         "strip-debris",
         "pickaxe",
         "Simulation layer: rockfall debris",
-        None,
+        Add::Simulation("debris"),
     ),
-    ("strip-lava", "flame", "Simulation layer: lava flow", None),
+    (
+        "strip-lava",
+        "flame",
+        "Simulation layer: lava flow",
+        Add::Simulation("lava"),
+    ),
     (
         "strip-cave",
         "flashlight",
         "Cave: a karst cave under the terrain (jd.cave.system); other kinds in the Caves panel",
-        None,
+        Add::Cave("karst"),
     ),
 ];
 
@@ -247,12 +268,12 @@ pub fn show(ui: &mut Ui, rect: Rect, st: &State) -> Option<Action> {
         vec2(35.0, h),
     );
     ui.painter().add(look::card().inner_margin(0).paint(strip));
-    for (k, (_, icon, tip, kind)) in STRIP.iter().enumerate() {
+    for (k, (_, icon, tip, _)) in STRIP.iter().enumerate() {
         let r = Rect::from_min_size(
             pos2(strip.left() + 4.0, strip.top() + 4.0 + k as f32 * 29.0),
             vec2(27.0, 27.0),
         );
-        let enabled = st.enabled && kind.is_some();
+        let enabled = st.enabled;
         let resp = ui
             .scope_builder(egui::UiBuilder::new().max_rect(r), |ui| {
                 look::icon_button_tinted(ui, icon, tip, enabled, color::ACCENT)

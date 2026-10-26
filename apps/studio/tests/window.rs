@@ -204,6 +204,26 @@ fn the_viewport_chrome_inserts_layers_frames_and_fits() {
             .log_lines()
             .any(|l| l.text == "graph.evaluate: ok")
     );
+    // Snow goes through the core's shared op: a snowpack beside the height, `snow` published
+    // and its material in the look — the same graph the desktop's button builds.
+    h.get_by_label("Simulation layer: snow").click();
+    h.run_steps(1);
+    settle(&mut h, |a| !a.busy());
+    assert!(
+        h.state()
+            .log_lines()
+            .any(|l| l.text == "graph.add_simulation: ok")
+    );
+    let info = probe
+        .invoke(Request::new("project.info", json!({})))
+        .result
+        .unwrap();
+    assert_eq!(info["look"]["materials"][0]["mask"], "snow");
+    assert!(
+        h.state().layers().iter().any(|l| l.starts_with("snow")),
+        "{:?}",
+        h.state().layers()
+    );
 }
 
 /// `JD_STUDIO_CAPTURE=<png> cargo test -p jd-studio --test window -- --ignored capture`: the

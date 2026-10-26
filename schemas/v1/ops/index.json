@@ -50,8 +50,18 @@
     "scope": "network-geo"
   },
   {
+    "id": "graph.add_cave",
+    "description": "Add a cave of a kind in front of the height (seeded by the cave count, reach scaled to the world) and publish its holes and plan as `cave_holes` / `cave_plan` (merged with max into existing ones) (journaled)",
+    "scope": "project-write"
+  },
+  {
     "id": "graph.add_node",
     "description": "Add a node (journaled)",
+    "scope": "project-write"
+  },
+  {
+    "id": "graph.add_simulation",
+    "description": "Add a simulation layer for the height — snow (beside it, cover published as `snow`), sand, debris (`debris`) or lava (`heat`, `lava`, glowing) in front of it — with its material rows in the look (journaled)",
     "scope": "project-write"
   },
   {
@@ -122,6 +132,11 @@
   {
     "id": "graph.set_time",
     "description": "Move the timeline (0..1, journaled): parameters written as `{\"keys\": [[t, v], …]}` interpolate here — numbers linearly, anything else stepwise — so erosion steps, sea level or wind can be scrubbed and keyframed",
+    "scope": "project-write"
+  },
+  {
+    "id": "graph.splice",
+    "description": "Insert a node in front of a published layer's output, between it and whatever fed it, stacked under the output on the canvas (journaled; the viewport's layer strip)",
     "scope": "project-write"
   },
   {

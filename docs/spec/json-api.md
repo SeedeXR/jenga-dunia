@@ -45,9 +45,13 @@ Normative companion to `docs/architecture/07-agent-interfaces.md`. JSON Schemas 
 | `graph.list_nodes` | project:ro | no | — | `nodes[]` with kinds/params/ports |
 | `graph.add_node` | project:rw | no | `kind`, `params?`, `ui?` | `node_id` |
 | `graph.connect` | project:rw | no | `from`, `to` | — |
+| `graph.splice` | project:rw | no | `layer?` (height), `kind`, `params?` | `id` — the node between the layer's output and its feed (the viewport's layer strip, ADR-0017: both UIs call it) |
+| `graph.add_simulation` | project:rw | no | `which` (snow / sand / debris / lava), `max_height_m?` | `id`, `published[]`, `materials?` (re-published layers merge with max) |
+| `graph.add_cave` | project:rw | no | `kind` | `id`, `published` (`cave_holes`, `cave_plan`) |
 | `graph.set_param` | project:rw | no | `node_id`, `key`, `value` | `dirty_count` |
 | `graph.evaluate` | project:rw | yes | `targets[]?`, `lod`, `region?` | `outputs[]` (hashes, stats) |
 | `terrain.stats` | project:ro | no | `node_id` | min/max/mean height, slope histogram |
+| `terrain.layers` | project:ro | no | — | `layers[]` (memory + cache, without evaluator ports) |
 | `sim.erode` | project:rw | yes | `node_id` or inline spec | masks produced |
 | `materials.bake` | export | yes | `targets[]`, `resolution`, `out_dir` | files, loss report |
 | `geometry.decimate` | project:rw | yes | `mesh_id`, `target_error` or `ratio`, `preserve` | stats before/after |

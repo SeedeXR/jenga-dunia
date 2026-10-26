@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AddCave",
+  "description": "`graph.add_cave` params.",
+  "type": "object",
+  "properties": {
+    "kind": {
+      "description": "Cave kind (`karst`, `lava_tube`, `sea_cave`, `mountain`, `mine`, `tunnel`, `catacombs`,\n`maze`, `flank_margin`).",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "kind"
+  ]
+}

@@ -363,6 +363,64 @@ export type GeoFetchFeaturesResult = {
   "attribution": Attribution;
 };
 
+export type GraphAddCaveRequest = {
+  /** Cave kind (`karst`, `lava_tube`, `sea_cave`, `mountain`, `mine`, `tunnel`, `catacombs`,
+`maze`, `flank_margin`). */
+  "kind": string;
+};
+
+export type DetailSpec = {
+  /** Metres per repeat. */
+  "tile_m"?: number;
+  /** Normal strength 0..1. */
+  "bump"?: number;
+  /** Albedo variation 0..1. */
+  "contrast"?: number;
+  /** Noise seed. */
+  "seed"?: number;
+  /** Tile side in pixels (16..=2048). */
+  "px"?: number;
+};
+
+export type TextureSpec = {
+  /** Tileable albedo PNG (sRGB) in the project's assets/ (or an absolute path). */
+  "albedo": string;
+  /** Tangent-space normal PNG (+Y up), optional. */
+  "normal"?: string | null;
+  /** Metres per repeat. */
+  "tile_m": number;
+  /** Exported tile side in pixels (16..=4096; the images are resampled to it). */
+  "px"?: number;
+};
+
+export type MaterialSpec = {
+  /** 0..1 mask layer that weights this material (omit for everywhere). */
+  "mask"?: string | null;
+  /** Base colour, sRGB 0..1. */
+  "albedo": [number, number, number];
+  /** Roughness 0..1. */
+  "roughness"?: number;
+  /** Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night. */
+  "emissive"?: [number, number, number] | null;
+  /** Tileable detail (grain repeated every `tile_m` metres): baked into the macro maps and
+the GLB by world position, returned as tiles for the viewport, written as tiles for
+the engines. */
+  "detail"?: DetailSpec | null;
+  /** An image texture set from the project's assets/ (tileable PNGs): the albedo is sampled
+into the maps by world position and the set is written as the layer's tile for the
+engines; `detail` wins when both are given. */
+  "texture"?: TextureSpec | null;
+};
+
+export type GraphAddCaveResult = {
+  /** The new node. */
+  "id": NodeId;
+  /** Layers the op published (new `jd.output.height` nodes). */
+  "published"?: string[];
+  /** The look's material layers afterwards (`project.set_look`), when the op added any. */
+  "materials"?: MaterialSpec[] | null;
+};
+
 export type NodeKind = string;
 
 export type GraphAddNodeRequest = {
@@ -380,6 +438,25 @@ scripted additions (CLI, MCP) never stack at the origin. */
 export type GraphAddNodeResult = {
   /** Id of the new node. */
   "id": NodeId;
+};
+
+export type Simulation = "snow" | "sand" | "debris" | "lava";
+
+export type GraphAddSimulationRequest = {
+  /** Which simulation. */
+  "which": Simulation;
+  /** The shown layer's highest point (m): snow's sea-level temperature puts the snow line
+at six tenths of it. Default 500. */
+  "max_height_m"?: number | null;
+};
+
+export type GraphAddSimulationResult = {
+  /** The new node. */
+  "id": NodeId;
+  /** Layers the op published (new `jd.output.height` nodes). */
+  "published"?: string[];
+  /** The look's material layers afterwards (`project.set_look`), when the op added any. */
+  "materials"?: MaterialSpec[] | null;
 };
 
 export type GraphAppendParamRequest = {
@@ -723,6 +800,25 @@ export type GraphSetTimeResult = {
   "redo_depth": number;
   /** Timeline position 0..1 at which keyed parameters resolve (`graph.set_time`). */
   "time"?: number;
+};
+
+export type GraphSpliceRequest = {
+  /** The published layer whose output node gets the new node in front of it. */
+  "layer"?: string;
+  /** Kind `name@version` of the node to insert (it must have an `in` input and an `out`
+output). */
+  "kind": NodeKind;
+  /** Its parameters. */
+  "params"?: Record<string, unknown>;
+};
+
+export type GraphSpliceResult = {
+  /** The new node. */
+  "id": NodeId;
+  /** Layers the op published (new `jd.output.height` nodes). */
+  "published"?: string[];
+  /** The look's material layers afterwards (`project.set_look`), when the op added any. */
+  "materials"?: MaterialSpec[] | null;
 };
 
 export type GraphUndoRequest = Record<string, unknown>;
@@ -1088,49 +1184,6 @@ export type ProjectSettings = {
   /** Evaluations whose pre-flight memory estimate exceeds this are refused (`E_RESOURCE_MEMORY`).
 Default 4 GiB — the brief's ceiling (ADR-0008). */
   "memory_budget_bytes"?: number;
-};
-
-export type DetailSpec = {
-  /** Metres per repeat. */
-  "tile_m"?: number;
-  /** Normal strength 0..1. */
-  "bump"?: number;
-  /** Albedo variation 0..1. */
-  "contrast"?: number;
-  /** Noise seed. */
-  "seed"?: number;
-  /** Tile side in pixels (16..=2048). */
-  "px"?: number;
-};
-
-export type TextureSpec = {
-  /** Tileable albedo PNG (sRGB) in the project's assets/ (or an absolute path). */
-  "albedo": string;
-  /** Tangent-space normal PNG (+Y up), optional. */
-  "normal"?: string | null;
-  /** Metres per repeat. */
-  "tile_m": number;
-  /** Exported tile side in pixels (16..=4096; the images are resampled to it). */
-  "px"?: number;
-};
-
-export type MaterialSpec = {
-  /** 0..1 mask layer that weights this material (omit for everywhere). */
-  "mask"?: string | null;
-  /** Base colour, sRGB 0..1. */
-  "albedo": [number, number, number];
-  /** Roughness 0..1. */
-  "roughness"?: number;
-  /** Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night. */
-  "emissive"?: [number, number, number] | null;
-  /** Tileable detail (grain repeated every `tile_m` metres): baked into the macro maps and
-the GLB by world position, returned as tiles for the viewport, written as tiles for
-the engines. */
-  "detail"?: DetailSpec | null;
-  /** An image texture set from the project's assets/ (tileable PNGs): the albedo is sampled
-into the maps by world position and the set is written as the layer's tile for the
-engines; `detail` wins when both are given. */
-  "texture"?: TextureSpec | null;
 };
 
 export type ScatterLook = {
@@ -3114,8 +3167,12 @@ export interface JdOps {
   "geo.fetch_dem": { request: GeoFetchDemRequest; result: GeoFetchDemResult };
   /** Fetch OpenStreetMap roads, waterways, water bodies and buildings for a lon/lat box through the Overpass API into assets/ as a GeoJSON file (ODbL; kept separately labelled), with the OSM attribution recorded */
   "geo.fetch_features": { request: GeoFetchFeaturesRequest; result: GeoFetchFeaturesResult };
+  /** Add a cave of a kind in front of the height (seeded by the cave count, reach scaled to the world) and publish its holes and plan as `cave_holes` / `cave_plan` (merged with max into existing ones) (journaled) */
+  "graph.add_cave": { request: GraphAddCaveRequest; result: GraphAddCaveResult };
   /** Add a node (journaled) */
   "graph.add_node": { request: GraphAddNodeRequest; result: GraphAddNodeResult };
+  /** Add a simulation layer for the height — snow (beside it, cover published as `snow`), sand, debris (`debris`) or lava (`heat`, `lava`, glowing) in front of it — with its material rows in the look (journaled) */
+  "graph.add_simulation": { request: GraphAddSimulationRequest; result: GraphAddSimulationResult };
   /** Push one element onto an array parameter (brush strokes): journaled with just the element, so a long sculpt session grows the journal linearly */
   "graph.append_param": { request: GraphAppendParamRequest; result: GraphAppendParamResult };
   /** Connect an output to an input (journaled; rejects bad ports, type mismatches and cycles) */
@@ -3144,6 +3201,8 @@ export interface JdOps {
   "graph.set_param": { request: GraphSetParamRequest; result: GraphSetParamResult };
   /** Move the timeline (0..1, journaled): parameters written as `{"keys": [[t, v], …]}` interpolate here — numbers linearly, anything else stepwise — so erosion steps, sea level or wind can be scrubbed and keyframed */
   "graph.set_time": { request: GraphSetTimeRequest; result: GraphSetTimeResult };
+  /** Insert a node in front of a published layer's output, between it and whatever fed it, stacked under the output on the canvas (journaled; the viewport's layer strip) */
+  "graph.splice": { request: GraphSpliceRequest; result: GraphSpliceResult };
   /** Take back the last graph edit (journaled as graph.restore) */
   "graph.undo": { request: GraphUndoRequest; result: GraphUndoResult };
   /** Request cancellation of a running job; it stops at the next node or kernel iteration with E_CANCELLED */

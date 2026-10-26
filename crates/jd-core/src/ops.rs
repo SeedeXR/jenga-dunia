@@ -1420,6 +1420,322 @@ pub mod graph {
         jd_terrain::cave_mesh(sys, hf, extent, v).map(|m| (m, v))
     }
 
+    /// `graph.splice` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct Splice {
+        /// The published layer whose output node gets the new node in front of it.
+        #[serde(default = "height_layer")]
+        pub layer: String,
+        /// Kind `name@version` of the node to insert (it must have an `in` input and an `out`
+        /// output).
+        pub kind: NodeKind,
+        /// Its parameters.
+        #[serde(default)]
+        pub params: Map<String, Value>,
+    }
+
+    /// A node added by a workflow op.
+    #[derive(Debug, Serialize, schemars::JsonSchema)]
+    pub struct Added {
+        /// The new node.
+        pub id: NodeId,
+        /// Layers the op published (new `jd.output.height` nodes).
+        #[serde(default)]
+        pub published: Vec<String>,
+        /// The look's material layers afterwards (`project.set_look`), when the op added any.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub materials: Option<Vec<crate::ops::terrain::MaterialSpec>>,
+    }
+
+    /// Simulation layers the viewport's layer strip adds.
+    #[derive(Debug, Clone, Copy, Deserialize, schemars::JsonSchema)]
+    #[serde(rename_all = "snake_case")]
+    pub enum Simulation {
+        /// `jd.climate.snowpack@1` beside the height (cover published as `snow`).
+        Snow,
+        /// `jd.erosion.aeolian@1` in front of the height.
+        Sand,
+        /// `jd.erosion.debris@1` in front of the height (`debris` published).
+        Debris,
+        /// `jd.volcanic.lava@1` in front of the height (`heat` and `lava` published, glowing).
+        Lava,
+    }
+
+    /// `graph.add_simulation` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct AddSimulation {
+        /// Which simulation.
+        pub which: Simulation,
+        /// The shown layer's highest point (m): snow's sea-level temperature puts the snow line
+        /// at six tenths of it. Default 500.
+        #[serde(default)]
+        pub max_height_m: Option<f64>,
+    }
+
+    /// `graph.add_cave` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct AddCave {
+        /// Cave kind (`karst`, `lava_tube`, `sea_cave`, `mountain`, `mine`, `tunnel`, `catacombs`,
+        /// `maze`, `flank_margin`).
+        pub kind: String,
+    }
+
+    /// The `jd.output.height` node publishing `layer`.
+    fn output_for(p: &Project, layer: &str) -> JdResult<NodeId> {
+        p.graph
+            .nodes
+            .iter()
+            .find(|(_, n)| {
+                n.kind.0.starts_with("jd.output.height@")
+                    && n.params
+                        .get("layer")
+                        .and_then(Value::as_str)
+                        .unwrap_or("height")
+                        == layer
+            })
+            .map(|(id, _)| id.clone())
+            .ok_or_else(|| {
+                JdError::new(
+                    ErrorCode::E_INPUT_INVALID,
+                    format!("the graph publishes no `{layer}` layer"),
+                )
+                .next("Add a jd.output.height node for that layer first.")
+                .detail("layer", layer)
+            })
+    }
+
+    /// What feeds a node's `in` port.
+    fn feed_of(p: &Project, node: &NodeId) -> Option<PortRef> {
+        p.graph
+            .edges
+            .iter()
+            .find(|e| &e.to.node == node && e.to.port == "in")
+            .map(|e| e.from.clone())
+    }
+
+    /// Nodes in the column of `x` (the editor stacks spliced nodes under the output).
+    fn column(p: &Project, x: f32) -> usize {
+        p.graph
+            .nodes
+            .values()
+            .filter(|n| (n.ui.position[0] - x).abs() < 1.0)
+            .count()
+    }
+
+    fn add(p: &mut Project, kind: &str, params: Value, position: [f32; 2]) -> JdResult<NodeId> {
+        let id = NodeId::new();
+        builtin::mutate(
+            p,
+            "graph.add_node",
+            serde_json::json!({ "kind": kind, "params": params, "id": id, "position": position }),
+        )?;
+        Ok(id)
+    }
+
+    fn connect(
+        p: &mut Project,
+        from: &NodeId,
+        from_port: &str,
+        to: &NodeId,
+        to_port: &str,
+    ) -> JdResult<()> {
+        builtin::mutate(
+            p,
+            "graph.connect",
+            serde_json::json!({ "from": from, "from_port": from_port, "to": to, "to_port": to_port }),
+        )
+    }
+
+    /// Insert `kind` between `layer`'s output and whatever fed it (the desktop's `spliceBefore`).
+    fn splice(p: &mut Project, layer: &str, kind: &str, params: Value) -> JdResult<NodeId> {
+        let out = output_for(p, layer)?;
+        let feed = feed_of(p, &out);
+        let pos = p.graph.nodes[&out].ui.position;
+        let below = column(p, pos[0]);
+        let id = add(p, kind, params, [pos[0], pos[1] + 140.0 * below as f32])?;
+        if let Some(f) = feed {
+            connect(p, &f.node, &f.port, &id, "in")?;
+        }
+        connect(p, &id, "out", &out, "in")?;
+        Ok(id)
+    }
+
+    /// Publish `node.port` as `layer`: a new output node at `at`; when the layer is already
+    /// published, the two are merged with `jd.math.max@1` (at `merge_at`) instead of a second
+    /// output (two outputs of one layer would stop the graph from evaluating).
+    fn publish(
+        p: &mut Project,
+        node: &NodeId,
+        port: &str,
+        layer: &str,
+        at: [f32; 2],
+        merge_at: [f32; 2],
+    ) -> JdResult<()> {
+        let existing = p
+            .graph
+            .nodes
+            .iter()
+            .find(|(_, n)| {
+                n.kind.0.starts_with("jd.output.height@")
+                    && n.params.get("layer").and_then(Value::as_str) == Some(layer)
+            })
+            .map(|(i, _)| i.clone());
+        match existing {
+            None => {
+                let out = add(
+                    p,
+                    "jd.output.height@1",
+                    serde_json::json!({ "layer": layer }),
+                    at,
+                )?;
+                connect(p, node, port, &out, "in")
+            }
+            Some(out) => match feed_of(p, &out) {
+                None => connect(p, node, port, &out, "in"),
+                Some(f) => {
+                    let mx = add(p, "jd.math.max@1", serde_json::json!({}), merge_at)?;
+                    connect(p, &f.node, &f.port, &mx, "in")?;
+                    connect(p, node, port, &mx, "b")?;
+                    connect(p, &mx, "out", &out, "in")
+                }
+            },
+        }
+    }
+
+    /// Append material rows whose mask the look does not have yet; the look's rows afterwards.
+    fn add_materials(
+        p: &mut Project,
+        rows: Vec<crate::ops::terrain::MaterialSpec>,
+    ) -> JdResult<Option<Vec<crate::ops::terrain::MaterialSpec>>> {
+        let mut materials = p.scene.look.materials.clone();
+        let fresh: Vec<_> = rows
+            .into_iter()
+            .filter(|m| !materials.iter().any(|x| x.mask == m.mask))
+            .collect();
+        if fresh.is_empty() {
+            return Ok(None);
+        }
+        materials.extend(fresh);
+        builtin::mutate(
+            p,
+            "project.set_look",
+            serde_json::json!({ "materials": materials }),
+        )?;
+        Ok(Some(materials))
+    }
+
+    fn material(
+        mask: &str,
+        albedo: [f32; 3],
+        roughness: f32,
+        emissive: Option<[f32; 3]>,
+    ) -> crate::ops::terrain::MaterialSpec {
+        crate::ops::terrain::MaterialSpec {
+            mask: Some(mask.into()),
+            albedo,
+            roughness,
+            emissive,
+            detail: None,
+            texture: None,
+        }
+    }
+
+    /// The viewport's workflow ops (ADR-0017: one implementation for the desktop and Studio).
+    fn register_workflows(r: &mut Registry) {
+        r.register::<Splice, Added, _>(
+            "graph.splice",
+            "Insert a node in front of a published layer's output, between it and whatever fed it, stacked under the output on the canvas (journaled; the viewport's layer strip)",
+            Scope::ProjectWrite,
+            |ctx, a| {
+                ctx.with_project(|p| {
+                    let id = splice(p, &a.layer, &a.kind.0, Value::Object(a.params))?;
+                    Ok((Added { id, published: Vec::new(), materials: None }, Vec::new()))
+                })
+            },
+        );
+        r.register::<AddSimulation, Added, _>(
+            "graph.add_simulation",
+            "Add a simulation layer for the height — snow (beside it, cover published as `snow`), sand, debris (`debris`) or lava (`heat`, `lava`, glowing) in front of it — with its material rows in the look (journaled)",
+            Scope::ProjectWrite,
+            |ctx, a| {
+                // Snow: with the 6.5 °C/km lapse, a sea-level temperature of 6.5 × 0.6 × (max in km)
+                // puts the snow line at six tenths of the highest ground.
+                let max_m = a.max_height_m.unwrap_or(500.0);
+                let snow_c = (6.5 * 0.6 * (max_m / 1000.0) * 10.0).round() / 10.0;
+                let (kind, params, through, publishes, rows): (&str, Value, bool, Vec<(&str, &str)>, Vec<_>) = match a.which {
+                    Simulation::Snow => ("jd.climate.snowpack@1", serde_json::json!({ "steps": 40, "temperature_c": snow_c }), false, vec![("cover", "snow")], vec![material("snow", [0.93, 0.95, 0.98], 0.6, None)]),
+                    Simulation::Debris => ("jd.erosion.debris@1", serde_json::json!({}), true, vec![("debris", "debris")], vec![material("debris", [0.33, 0.3, 0.27], 0.95, None)]),
+                    Simulation::Sand => ("jd.erosion.aeolian@1", serde_json::json!({ "iterations": 60 }), true, vec![], vec![]),
+                    Simulation::Lava => (
+                        "jd.volcanic.lava@1",
+                        serde_json::json!({ "eruption_s": 1800, "duration_s": 1800 }),
+                        true,
+                        vec![("heat", "heat"), ("lava", "lava")],
+                        // The molten part glows: an emissive layer on the heat mask, over the basalt.
+                        vec![material("lava", [0.16, 0.15, 0.15], 0.8, None), material("heat", [1.0, 0.45, 0.1], 0.7, Some([1.0, 0.35, 0.05]))],
+                    ),
+                };
+                ctx.with_project(|p| {
+                    let id = if through {
+                        splice(p, "height", kind, params)?
+                    } else {
+                        // Beside the height: fed by what feeds the output, publishing its own layer.
+                        let out = output_for(p, "height")?;
+                        let feed = feed_of(p, &out).ok_or_else(|| JdError::new(ErrorCode::E_GRAPH_MISSING_INPUT, "the height output has no input").next("Connect a terrain to the height output first."))?;
+                        let pos = p.graph.nodes[&out].ui.position;
+                        let at = [pos[0], pos[1] + 140.0 * (1 + column(p, pos[0])) as f32];
+                        let id = add(p, kind, params, at)?;
+                        connect(p, &feed.node, &feed.port, &id, "in")?;
+                        id
+                    };
+                    let at = p.graph.nodes[&id].ui.position;
+                    let mut published = Vec::new();
+                    for (k, (port, layer)) in publishes.into_iter().enumerate() {
+                        let y = at[1] + 140.0 * (k + 1) as f32;
+                        publish(p, &id, port, layer, [at[0] + 320.0, y], [at[0] + 160.0, y])?;
+                        published.push(layer.to_owned());
+                    }
+                    let materials = add_materials(p, rows)?;
+                    Ok((Added { id, published, materials }, Vec::new()))
+                })
+            },
+        );
+        r.register::<AddCave, Added, _>(
+            "graph.add_cave",
+            "Add a cave of a kind in front of the height (seeded by the cave count, reach scaled to the world) and publish its holes and plan as `cave_holes` / `cave_plan` (merged with max into existing ones) (journaled)",
+            Scope::ProjectWrite,
+            |ctx, a| {
+                let reach_of = |kind: &str| match kind {
+                    "karst" => Some(600.0),
+                    "lava_tube" => Some(800.0),
+                    "sea_cave" | "tunnel" => Some(400.0),
+                    "mountain" | "flank_margin" => Some(300.0),
+                    "mine" => Some(250.0),
+                    "catacombs" => Some(120.0),
+                    "maze" => Some(150.0),
+                    _ => None,
+                };
+                let reach = reach_of(&a.kind).ok_or_else(|| JdError::invalid("kind", format!("unknown cave kind `{}`", a.kind)))?;
+                ctx.with_project(|p| {
+                    let e = p.doc.world.extent_m;
+                    let reach = f64::round(f64::min(reach, 0.6 * e[0].min(e[1]))).max(20.0);
+                    let n = p.graph.nodes.values().filter(|x| x.kind.0.starts_with("jd.cave.system@")).count();
+                    let id = splice(p, "height", "jd.cave.system@1", serde_json::json!({ "kind": a.kind, "seed": n + 1, "reach_m": reach }))?;
+                    let pos = p.graph.nodes[&id].ui.position;
+                    let mut published = Vec::new();
+                    for (port, layer, dy) in [("holes", "cave_holes", 120.0), ("plan", "cave_plan", 260.0)] {
+                        publish(p, &id, port, layer, [pos[0] + 340.0, pos[1] + dy], [pos[0] + 170.0, pos[1] + dy])?;
+                        published.push(layer.to_owned());
+                    }
+                    Ok((Added { id, published, materials: None }, Vec::new()))
+                })
+            },
+        );
+    }
+
     fn register_caves(r: &mut Registry) {
         r.register::<CaveMeshParams, CaveMeshResult, _>(
             "caves.mesh",
@@ -2018,6 +2334,7 @@ pub mod graph {
     /// Register graph ops.
     pub fn register_all(r: &mut Registry) {
         register_caves(r);
+        register_workflows(r);
         r.register::<NodePreview, crate::ops::terrain::PreviewResult, _>(
             "graph.node_preview",
             "A small u16 preview (base64) of one node's output port — the graph evaluated at a coarse lod through the cache, so a hover thumbnail costs a cache hit after the first look",
@@ -6212,6 +6529,166 @@ mod tests {
 
     fn invoke(reg: &Registry, ctx: &Context, op: &str, params: Value) -> Response {
         reg.invoke(ctx, Request::new(op, params))
+    }
+
+    #[test]
+    fn workflow_ops_splice_simulate_and_cave_as_the_desktop_did() {
+        let reg = Registry::with_builtins();
+        let ctx = Context::default();
+        let dir = tempfile::tempdir().expect("tmp");
+        let ok = |op: &str, params: Value| {
+            let r = invoke(&reg, &ctx, op, params);
+            assert!(r.error.is_none(), "{op}: {:?}", r.error);
+            r.result.expect("result")
+        };
+        ok(
+            "project.create",
+            serde_json::json!({ "path": dir.path().join("w.jdproj"), "name": "W" }),
+        );
+        let graph = || ok("graph.list", serde_json::json!({}));
+        let node_of = |g: &Value, kind: &str| {
+            g["nodes"]
+                .as_array()
+                .expect("nodes")
+                .iter()
+                .find(|n| n["kind"] == kind)
+                .cloned()
+                .expect(kind)
+        };
+        let edge = |g: &Value, from: &Value, from_port: &str, to: &Value, to_port: &str| {
+            g["edges"].as_array().expect("edges").iter().any(|e| {
+                e["from"]["node"] == *from
+                    && e["from"]["port"] == from_port
+                    && e["to"]["node"] == *to
+                    && e["to"]["port"] == to_port
+            })
+        };
+        let g0 = graph();
+        let output = g0["nodes"]
+            .as_array()
+            .expect("nodes")
+            .iter()
+            .find(|n| {
+                n["kind"]
+                    .as_str()
+                    .expect("k")
+                    .starts_with("jd.output.height@")
+            })
+            .cloned()
+            .expect("output");
+        let feed = g0["edges"]
+            .as_array()
+            .expect("edges")
+            .iter()
+            .find(|e| e["to"]["node"] == output["id"])
+            .cloned()
+            .expect("feed");
+
+        // Splice: output ← terrace ← the old feed, stacked under the output.
+        let t = ok(
+            "graph.splice",
+            serde_json::json!({ "kind": "jd.filter.terrace@1" }),
+        );
+        let g = graph();
+        assert!(edge(
+            &g,
+            &feed["from"]["node"],
+            feed["from"]["port"].as_str().expect("p"),
+            &t["id"],
+            "in"
+        ));
+        assert!(edge(&g, &t["id"], "out", &output["id"], "in"));
+        let tn = node_of(&g, "jd.filter.terrace@1");
+        assert_eq!(tn["ui"]["position"][0], output["ui"]["position"][0]);
+
+        // Snow: beside the height, fed like the output, publishing `snow`, a snow material once.
+        let snow = ok(
+            "graph.add_simulation",
+            serde_json::json!({ "which": "snow", "max_height_m": 1000.0 }),
+        );
+        assert_eq!(snow["published"], serde_json::json!(["snow"]));
+        assert_eq!(snow["materials"][0]["mask"], "snow");
+        let g = graph();
+        let sp = node_of(&g, "jd.climate.snowpack@1");
+        assert_eq!(sp["params"]["temperature_c"], 3.9);
+        assert!(edge(&g, &t["id"], "out", &sp["id"], "in"));
+        let again = ok(
+            "graph.add_simulation",
+            serde_json::json!({ "which": "snow" }),
+        );
+        assert!(
+            again.get("materials").is_none(),
+            "the snow material is not added twice"
+        );
+
+        // Lava: in front of the height, `heat` + `lava` published, a glowing heat material.
+        let lava = ok(
+            "graph.add_simulation",
+            serde_json::json!({ "which": "lava" }),
+        );
+        assert_eq!(lava["published"], serde_json::json!(["heat", "lava"]));
+        let mats = lava["materials"].as_array().expect("materials");
+        let heat = mats
+            .iter()
+            .find(|m| m["mask"] == "heat")
+            .expect("heat material");
+        assert!(
+            (heat["emissive"][1].as_f64().expect("g") - 0.35).abs() < 1e-6,
+            "{heat}"
+        );
+        let info = ok("project.info", serde_json::json!({}));
+        assert_eq!(info["look"]["materials"].as_array().expect("look").len(), 3);
+
+        // Caves: the first publishes cave_holes / cave_plan, the second merges into them with max.
+        let c1 = ok("graph.add_cave", serde_json::json!({ "kind": "karst" }));
+        assert_eq!(
+            c1["published"],
+            serde_json::json!(["cave_holes", "cave_plan"])
+        );
+        let c2 = ok("graph.add_cave", serde_json::json!({ "kind": "maze" }));
+        let g = graph();
+        let caves: Vec<_> = g["nodes"]
+            .as_array()
+            .expect("n")
+            .iter()
+            .filter(|n| n["kind"] == "jd.cave.system@1")
+            .cloned()
+            .collect();
+        assert_eq!(caves.len(), 2);
+        assert_eq!(
+            caves.iter().find(|c| c["id"] == c1["id"]).expect("c1")["params"]["seed"],
+            1
+        );
+        assert_eq!(
+            caves.iter().find(|c| c["id"] == c2["id"]).expect("c2")["params"]["seed"],
+            2
+        );
+        // Re-published layers merge with max: the second snow's cover, the second cave's holes and plan.
+        assert_eq!(
+            g["nodes"]
+                .as_array()
+                .expect("n")
+                .iter()
+                .filter(|n| n["kind"] == "jd.math.max@1")
+                .count(),
+            3
+        );
+        let snow_outputs = g["nodes"]
+            .as_array()
+            .expect("n")
+            .iter()
+            .filter(|n| n["params"]["layer"] == "snow")
+            .count();
+        assert_eq!(snow_outputs, 1);
+        // The whole graph still evaluates.
+        ok("graph.evaluate", serde_json::json!({ "lod": 3 }));
+        let bad = invoke(
+            &reg,
+            &ctx,
+            "graph.add_cave",
+            serde_json::json!({ "kind": "volcano" }),
+        );
+        assert_eq!(bad.error.expect("error").code, ErrorCode::E_INPUT_INVALID);
     }
 
     #[test]

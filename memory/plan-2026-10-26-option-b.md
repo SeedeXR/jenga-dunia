@@ -110,4 +110,10 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   them in the same commit, its e2e unchanged. (2) Live evaluation moves to Studio (engine side)
   for edits from either window, at the desktop's adaptive preview lod; until then each window
   evaluates after its own edits.
+- P4 slice 1 (decision 1 executed): `graph.splice`, `graph.add_simulation`, `graph.add_cave` in
+  jd-core (unit-tested); the desktop's spliceBefore / addSimulation / addCave now call them (its
+  e2e tree, caves, road, actions, simulation pass; road asserts `graph.splice: ok`), and Studio's
+  layer strip is fully live through the same ops. Bug fixed on the way: adding a simulation twice
+  published its layer twice and broke evaluation; re-published layers now merge with max.
+  Studio's live evaluation uses the desktop's previewLod (⌈log₂(res / 512)⌉).
 
