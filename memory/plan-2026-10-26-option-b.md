@@ -176,6 +176,20 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   live evaluation in Studio is still to port). Entrance placing (Place) waits for the viewport
   click tools. CI: wire()'s 2.5 s log poll was too short on the runner (one log query ≈ 1.5 s
   while the page renders; trace-checked) → 10 s.
-  Next: Actions, Simulation layers, Materials, Noise, Export; then the left column (Real world,
-  Reference image, Layers, Settings); the viewport click tools (cave entrances, sculpt, grid,
-  road); live evaluation.
+- P4 slice 6 (Actions, Simulation layers): Flip X / Flip Y / Rot ⟲ / Rot ⟳ / Flatten
+  (graph.splice of jd.filter.action@1 via add_layer's new Add::Action), + snow / debris / sand /
+  lava (graph.add_simulation, its material rows written by the core) and the note; the first
+  published mask becomes the colour once evaluated (the desktop's pendingColor, also for the
+  layer strip). Found on the way: Studio's fonts had no ⟲ ⟳ ⌘ ⌥ ⇧ ⁿ (the desktop gets them from
+  the system) → a 6 KB OFL subset of STIX Two Math as the lowest-priority fallback, and
+  tests/fonts.rs renders every non-ASCII character of src/ string literals under kittest's
+  panic-on-missing-glyph; project_changed now carries `client`, and Studio skips its own (its
+  replies refresh it) — a refresh mid-chain had baked maps for a mask not yet evaluated.
+- P4 slice 7 (Materials): one row per layer of the look's stack — mask (published layers or
+  everywhere), base colour and emitted light (egui's sRGB-byte colour button = the desktop's
+  hexOf / rgbOf), roughness, detail tile + metres (committed on leaving the field), remove — and
+  `+ layer`; Studio keeps the stack itself (restored from the look, written after the 400 ms
+  debounce, maps re-baked on every edit). Core: MaterialSpec albedo / roughness / emissive are
+  f64 now — f32 read back as 0.8999999761581421 in both UIs and in the published schema default.
+  Next: Noise, Export; then the left column (Real world, Reference image, Layers, Settings); the
+  viewport click tools (cave entrances, sculpt, grid, road); live evaluation.

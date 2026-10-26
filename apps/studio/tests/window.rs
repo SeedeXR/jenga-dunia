@@ -10,7 +10,7 @@ use egui_kittest::kittest::Queryable;
 use jd_core::{Context, Registry, Request};
 use jd_ipc::{Client, ClientConfig, Server};
 use jd_studio::{Options, StudioApp};
-use serde_json::json;
+use serde_json::{Value, json};
 
 /// An engine with a small project and a generated `height` layer.
 fn engine(dir: &std::path::Path) -> Arc<Server> {
@@ -625,6 +625,129 @@ fn the_caves_section_adds_shows_x_rays_maps_and_exports_a_cave() {
             .any(|l| l.text.starts_with("caves.export: ok"))
     });
     assert!(dir.path().join("Kit.jdproj/exports/cave_1.glb").exists());
+}
+
+#[test]
+fn actions_and_simulation_layers_add_their_nodes_in_one_click() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = engine(dir.path());
+    let probe = server.clone();
+    let mut h = window(server);
+    settle(&mut h, |a| a.viewport.info().is_some());
+    let kinds = || -> Vec<(String, Value)> {
+        let g = probe
+            .invoke(Request::new("graph.list", json!({})))
+            .result
+            .unwrap();
+        g["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|n| (n["kind"].as_str().unwrap().to_owned(), n["params"].clone()))
+            .collect()
+    };
+    // Flip X: a jd.filter.action node in front of the height output, evaluated.
+    h.get_by_label("Flip X").scroll_to_me();
+    h.run();
+    h.get_by_label("Flip X").click();
+    h.run_steps(1);
+    settle(&mut h, |a| {
+        a.log_lines().any(|l| l.text == "graph.evaluate: ok")
+    });
+    assert!(
+        kinds()
+            .iter()
+            .any(|(k, p)| k == "jd.filter.action@1" && p["action"] == "flip_x"),
+        "{:?}",
+        kinds()
+    );
+    // + snow: the snowpack beside the height, `snow` published and shown as the colour.
+    h.get_by_label("+ snow").scroll_to_me();
+    h.run();
+    h.get_by_label("+ snow").click();
+    h.run_steps(1);
+    settle(&mut h, |a| a.viewport.overlay_on());
+    assert!(kinds().iter().any(|(k, _)| k == "jd.climate.snowpack@1"));
+    let readout = h.state().viewport_readout();
+    assert!(readout.contains(" · colour snow"), "{readout}");
+    // No refresh ran between adding the node and evaluating it (a map bake would ask for the
+    // `snow` mask before it is published): the log holds no engine error.
+    let errors: Vec<_> = h
+        .state()
+        .log_lines()
+        .filter(|l| l.text.contains(": E_"))
+        .map(|l| l.text.clone())
+        .collect();
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn the_materials_section_edits_the_stack_and_rebakes_the_maps() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = engine(dir.path());
+    let probe = server.clone();
+    let mut h = window(server);
+    settle(&mut h, |a| a.viewport.maps_px().is_some());
+    let look = || {
+        probe
+            .invoke(Request::new("project.info", json!({})))
+            .result
+            .unwrap()["look"]["materials"]
+            .clone()
+    };
+    // + layer: a grey, rough layer everywhere; the maps bake with it and the look stores it.
+    h.get_by_label("+ layer").scroll_to_me();
+    h.run();
+    h.get_by_label("+ layer").click();
+    h.run_steps(1);
+    settle(&mut h, |a| {
+        a.log_lines().any(|l| {
+            l.text.ends_with("with 1 material layer") || l.text.contains("with 1 material layer in")
+        })
+    });
+    let until = Instant::now() + Duration::from_secs(20);
+    while look().as_array().map_or(0, Vec::len) != 1 {
+        assert!(
+            Instant::now() < until,
+            "the material was not written: {}",
+            look()
+        );
+        h.step();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(look()[0]["roughness"], 0.9);
+    assert!(look()[0]["mask"].is_null());
+    // Its mask: the height layer.
+    h.get_by_role_and_label(eframe::egui::accesskit::Role::ComboBox, "Material 1 mask")
+        .click();
+    h.run();
+    h.get_by_label("height").click();
+    h.run();
+    let until = Instant::now() + Duration::from_secs(20);
+    while look()[0]["mask"] != "height" {
+        assert!(
+            Instant::now() < until,
+            "the mask was not written: {}",
+            look()
+        );
+        h.step();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // Remove it: the stack is empty again.
+    h.get_by_label("Remove material 1").scroll_to_me();
+    h.run();
+    h.get_by_label("Remove material 1").click();
+    h.run_steps(1);
+    let until = Instant::now() + Duration::from_secs(20);
+    while look().as_array().map_or(1, Vec::len) != 0 {
+        assert!(
+            Instant::now() < until,
+            "the removal was not written: {}",
+            look()
+        );
+        h.step();
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 /// `JD_STUDIO_CAPTURE=<png> cargo test -p jd-studio --test window -- --ignored capture`: the

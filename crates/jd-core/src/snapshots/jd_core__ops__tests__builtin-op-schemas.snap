@@ -1646,7 +1646,7 @@ expression: list
               "type": "array",
               "items": {
                 "type": "number",
-                "format": "float"
+                "format": "double"
               },
               "minItems": 3,
               "maxItems": 3
@@ -1654,8 +1654,8 @@ expression: list
             "roughness": {
               "description": "Roughness 0..1.",
               "type": "number",
-              "format": "float",
-              "default": 0.8999999761581421
+              "format": "double",
+              "default": 0.9
             },
             "emissive": {
               "description": "Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.",
@@ -1665,7 +1665,7 @@ expression: list
               ],
               "items": {
                 "type": "number",
-                "format": "float"
+                "format": "double"
               },
               "minItems": 3,
               "maxItems": 3,
@@ -1979,7 +1979,7 @@ expression: list
               "type": "array",
               "items": {
                 "type": "number",
-                "format": "float"
+                "format": "double"
               },
               "minItems": 3,
               "maxItems": 3
@@ -1987,8 +1987,8 @@ expression: list
             "roughness": {
               "description": "Roughness 0..1.",
               "type": "number",
-              "format": "float",
-              "default": 0.8999999761581421
+              "format": "double",
+              "default": 0.9
             },
             "emissive": {
               "description": "Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.",
@@ -1998,7 +1998,7 @@ expression: list
               ],
               "items": {
                 "type": "number",
-                "format": "float"
+                "format": "double"
               },
               "minItems": 3,
               "maxItems": 3,
@@ -4486,7 +4486,7 @@ expression: list
               "type": "array",
               "items": {
                 "type": "number",
-                "format": "float"
+                "format": "double"
               },
               "minItems": 3,
               "maxItems": 3
@@ -4494,8 +4494,8 @@ expression: list
             "roughness": {
               "description": "Roughness 0..1.",
               "type": "number",
-              "format": "float",
-              "default": 0.8999999761581421
+              "format": "double",
+              "default": 0.9
             },
             "emissive": {
               "description": "Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.",
@@ -4505,7 +4505,7 @@ expression: list
               ],
               "items": {
                 "type": "number",
-                "format": "float"
+                "format": "double"
               },
               "minItems": 3,
               "maxItems": 3,
@@ -6265,7 +6265,7 @@ expression: list
               "type": "array",
               "items": {
                 "type": "number",
-                "format": "float"
+                "format": "double"
               },
               "minItems": 3,
               "maxItems": 3
@@ -6273,8 +6273,8 @@ expression: list
             "roughness": {
               "description": "Roughness 0..1.",
               "type": "number",
-              "format": "float",
-              "default": 0.8999999761581421
+              "format": "double",
+              "default": 0.9
             },
             "emissive": {
               "description": "Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.",
@@ -6284,7 +6284,7 @@ expression: list
               ],
               "items": {
                 "type": "number",
-                "format": "float"
+                "format": "double"
               },
               "minItems": 3,
               "maxItems": 3,
@@ -6871,7 +6871,7 @@ expression: list
               "type": "array",
               "items": {
                 "type": "number",
-                "format": "float"
+                "format": "double"
               },
               "minItems": 3,
               "maxItems": 3
@@ -6879,8 +6879,8 @@ expression: list
             "roughness": {
               "description": "Roughness 0..1.",
               "type": "number",
-              "format": "float",
-              "default": 0.8999999761581421
+              "format": "double",
+              "default": 0.9
             },
             "emissive": {
               "description": "Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.",
@@ -6890,7 +6890,7 @@ expression: list
               ],
               "items": {
                 "type": "number",
-                "format": "float"
+                "format": "double"
               },
               "minItems": 3,
               "maxItems": 3,
@@ -7468,7 +7468,7 @@ expression: list
               "type": "array",
               "items": {
                 "type": "number",
-                "format": "float"
+                "format": "double"
               },
               "minItems": 3,
               "maxItems": 3
@@ -7476,8 +7476,8 @@ expression: list
             "roughness": {
               "description": "Roughness 0..1.",
               "type": "number",
-              "format": "float",
-              "default": 0.8999999761581421
+              "format": "double",
+              "default": 0.9
             },
             "emissive": {
               "description": "Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.",
@@ -7487,7 +7487,7 @@ expression: list
               ],
               "items": {
                 "type": "number",
-                "format": "float"
+                "format": "double"
               },
               "minItems": 3,
               "maxItems": 3,
@@ -7956,7 +7956,7 @@ expression: list
               "type": "array",
               "items": {
                 "type": "number",
-                "format": "float"
+                "format": "double"
               },
               "minItems": 3,
               "maxItems": 3
@@ -7964,8 +7964,8 @@ expression: list
             "roughness": {
               "description": "Roughness 0..1.",
               "type": "number",
-              "format": "float",
-              "default": 0.8999999761581421
+              "format": "double",
+              "default": 0.9
             },
             "emissive": {
               "description": "Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.",
@@ -7975,7 +7975,7 @@ expression: list
               ],
               "items": {
                 "type": "number",
-                "format": "float"
+                "format": "double"
               },
               "minItems": 3,
               "maxItems": 3,
@@ -8514,7 +8514,7 @@ expression: list
               "type": "array",
               "items": {
                 "type": "number",
-                "format": "float"
+                "format": "double"
               },
               "minItems": 3,
               "maxItems": 3
@@ -8522,8 +8522,8 @@ expression: list
             "roughness": {
               "description": "Roughness 0..1.",
               "type": "number",
-              "format": "float",
-              "default": 0.8999999761581421
+              "format": "double",
+              "default": 0.9
             },
             "emissive": {
               "description": "Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.",
@@ -8533,7 +8533,7 @@ expression: list
               ],
               "items": {
                 "type": "number",
-                "format": "float"
+                "format": "double"
               },
               "minItems": 3,
               "maxItems": 3,
@@ -8792,7 +8792,7 @@ expression: list
               "type": "array",
               "items": {
                 "type": "number",
-                "format": "float"
+                "format": "double"
               },
               "minItems": 3,
               "maxItems": 3
@@ -8800,8 +8800,8 @@ expression: list
             "roughness": {
               "description": "Roughness 0..1.",
               "type": "number",
-              "format": "float",
-              "default": 0.8999999761581421
+              "format": "double",
+              "default": 0.9
             },
             "emissive": {
               "description": "Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.",
@@ -8811,7 +8811,7 @@ expression: list
               ],
               "items": {
                 "type": "number",
-                "format": "float"
+                "format": "double"
               },
               "minItems": 3,
               "maxItems": 3,
@@ -9259,7 +9259,7 @@ expression: list
               "type": "array",
               "items": {
                 "type": "number",
-                "format": "float"
+                "format": "double"
               },
               "minItems": 3,
               "maxItems": 3
@@ -9267,8 +9267,8 @@ expression: list
             "roughness": {
               "description": "Roughness 0..1.",
               "type": "number",
-              "format": "float",
-              "default": 0.8999999761581421
+              "format": "double",
+              "default": 0.9
             },
             "emissive": {
               "description": "Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.",
@@ -9278,7 +9278,7 @@ expression: list
               ],
               "items": {
                 "type": "number",
-                "format": "float"
+                "format": "double"
               },
               "minItems": 3,
               "maxItems": 3,
@@ -9747,7 +9747,7 @@ expression: list
               "type": "array",
               "items": {
                 "type": "number",
-                "format": "float"
+                "format": "double"
               },
               "minItems": 3,
               "maxItems": 3
@@ -9755,8 +9755,8 @@ expression: list
             "roughness": {
               "description": "Roughness 0..1.",
               "type": "number",
-              "format": "float",
-              "default": 0.8999999761581421
+              "format": "double",
+              "default": 0.9
             },
             "emissive": {
               "description": "Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.",
@@ -9766,7 +9766,7 @@ expression: list
               ],
               "items": {
                 "type": "number",
-                "format": "float"
+                "format": "double"
               },
               "minItems": 3,
               "maxItems": 3,
@@ -10324,7 +10324,7 @@ expression: list
               "type": "array",
               "items": {
                 "type": "number",
-                "format": "float"
+                "format": "double"
               },
               "minItems": 3,
               "maxItems": 3
@@ -10332,8 +10332,8 @@ expression: list
             "roughness": {
               "description": "Roughness 0..1.",
               "type": "number",
-              "format": "float",
-              "default": 0.8999999761581421
+              "format": "double",
+              "default": 0.9
             },
             "emissive": {
               "description": "Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.",
@@ -10343,7 +10343,7 @@ expression: list
               ],
               "items": {
                 "type": "number",
-                "format": "float"
+                "format": "double"
               },
               "minItems": 3,
               "maxItems": 3,
@@ -11315,7 +11315,7 @@ expression: list
               "type": "array",
               "items": {
                 "type": "number",
-                "format": "float"
+                "format": "double"
               },
               "minItems": 3,
               "maxItems": 3
@@ -11323,8 +11323,8 @@ expression: list
             "roughness": {
               "description": "Roughness 0..1.",
               "type": "number",
-              "format": "float",
-              "default": 0.8999999761581421
+              "format": "double",
+              "default": 0.9
             },
             "emissive": {
               "description": "Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.",
@@ -11334,7 +11334,7 @@ expression: list
               ],
               "items": {
                 "type": "number",
-                "format": "float"
+                "format": "double"
               },
               "minItems": 3,
               "maxItems": 3,
@@ -11719,7 +11719,7 @@ expression: list
               "type": "array",
               "items": {
                 "type": "number",
-                "format": "float"
+                "format": "double"
               },
               "minItems": 3,
               "maxItems": 3
@@ -11727,8 +11727,8 @@ expression: list
             "roughness": {
               "description": "Roughness 0..1.",
               "type": "number",
-              "format": "float",
-              "default": 0.8999999761581421
+              "format": "double",
+              "default": 0.9
             },
             "emissive": {
               "description": "Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.",
@@ -11738,7 +11738,7 @@ expression: list
               ],
               "items": {
                 "type": "number",
-                "format": "float"
+                "format": "double"
               },
               "minItems": 3,
               "maxItems": 3,
@@ -13296,7 +13296,7 @@ expression: list
               "type": "array",
               "items": {
                 "type": "number",
-                "format": "float"
+                "format": "double"
               },
               "minItems": 3,
               "maxItems": 3
@@ -13304,8 +13304,8 @@ expression: list
             "roughness": {
               "description": "Roughness 0..1.",
               "type": "number",
-              "format": "float",
-              "default": 0.8999999761581421
+              "format": "double",
+              "default": 0.9
             },
             "emissive": {
               "description": "Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.",
@@ -13315,7 +13315,7 @@ expression: list
               ],
               "items": {
                 "type": "number",
-                "format": "float"
+                "format": "double"
               },
               "minItems": 3,
               "maxItems": 3,

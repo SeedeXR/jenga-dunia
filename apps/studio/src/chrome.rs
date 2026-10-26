@@ -39,6 +39,8 @@ pub enum Add {
     Simulation(&'static str),
     /// `graph.add_cave`.
     Cave(&'static str),
+    /// `graph.splice` a `jd.filter.action@1` with this action (the Actions section).
+    Action(&'static str),
 }
 
 /// The layer strip, top to bottom: test id, icon, tooltip, what it adds.

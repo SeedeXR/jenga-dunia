@@ -7,6 +7,11 @@ use eframe::epaint::text::{
 };
 
 const HOST_GROTESK: &[u8] = include_bytes!("../assets/fonts/HostGrotesk-wght.ttf");
+/// The symbols Host Grotesk and egui's fonts lack and the desktop gets from the system's fallback
+/// fonts — ⟲ ⟳ (Supplemental Arrows-A, U+27F0–27FF) and the shortcut keys ⌘ ⌥ ⇧, and ⁿ: a 6 KB
+/// subset of STIX Two Math (OFL 1.1, `assets/fonts/STIX-OFL.txt`). `tests/fonts.rs` keeps every
+/// UI string covered.
+const ARROWS: &[u8] = include_bytes!("../assets/fonts/JDArrows-STIXTwo.otf");
 /// The family name of Host Grotesk at weight 600 (`font-semibold`).
 const SEMIBOLD: &str = "semibold";
 
@@ -75,6 +80,17 @@ pub fn install(ctx: &egui::Context) {
             family: FontFamily::Name(SEMIBOLD.into()),
             priority: FontPriority::Lowest,
         }],
+    ));
+    ctx.add_font(FontInsert::new(
+        "jd-arrows",
+        FontData::from_static(ARROWS),
+        [FontFamily::Proportional, FontFamily::Name(SEMIBOLD.into())]
+            .into_iter()
+            .map(|family| InsertFontFamily {
+                family,
+                priority: FontPriority::Lowest,
+            })
+            .collect(),
     ));
     // The desktop's sizes: 13 px body, 12 px controls and the log (`text-xs`).
     ctx.all_styles_mut(|style| {

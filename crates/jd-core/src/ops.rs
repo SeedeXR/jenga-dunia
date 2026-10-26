@@ -1629,9 +1629,9 @@ pub mod graph {
 
     fn material(
         mask: &str,
-        albedo: [f32; 3],
-        roughness: f32,
-        emissive: Option<[f32; 3]>,
+        albedo: [f64; 3],
+        roughness: f64,
+        emissive: Option<[f64; 3]>,
     ) -> crate::ops::terrain::MaterialSpec {
         crate::ops::terrain::MaterialSpec {
             mask: Some(mask.into()),
@@ -5264,14 +5264,15 @@ pub mod terrain {
         /// 0..1 mask layer that weights this material (omit for everywhere).
         #[serde(default)]
         pub mask: Option<String>,
+        // f64 here and below: f32 reads back through JSON as 0.8999999761581421 for 0.9.
         /// Base colour, sRGB 0..1.
-        pub albedo: [f32; 3],
+        pub albedo: [f64; 3],
         /// Roughness 0..1.
         #[serde(default = "default_roughness")]
-        pub roughness: f32,
+        pub roughness: f64,
         /// Emitted light, linear RGB 0..1 (unset = none): a lava flow's `heat` layer, embers, windows at night.
         #[serde(default)]
-        pub emissive: Option<[f32; 3]>,
+        pub emissive: Option<[f64; 3]>,
         /// Tileable detail (grain repeated every `tile_m` metres): baked into the macro maps and
         /// the GLB by world position, returned as tiles for the viewport, written as tiles for
         /// the engines.
@@ -5480,7 +5481,7 @@ pub mod terrain {
         pub normal_png_base64: String,
     }
 
-    fn default_roughness() -> f32 {
+    fn default_roughness() -> f64 {
         0.9
     }
 
@@ -5499,9 +5500,9 @@ pub mod terrain {
                     .transpose()?;
                 Ok(jd_terrain::MaterialLayer {
                     mask,
-                    albedo: m.albedo,
-                    roughness: m.roughness,
-                    emissive: m.emissive.unwrap_or([0.0; 3]),
+                    albedo: m.albedo.map(|c| c as f32),
+                    roughness: m.roughness as f32,
+                    emissive: m.emissive.unwrap_or([0.0; 3]).map(|c| c as f32),
                     detail: detail_of(&m.detail),
                     texture: texture_of(ctx, &m.texture)?,
                 })
@@ -5998,7 +5999,7 @@ pub mod terrain {
                     .zip(&mat_fields)
                     .zip(&textures)
                     .enumerate()
-                    .map(|(i, ((m, f), t))| jd_terrain::ProfileMaterial { name: m.mask.clone().unwrap_or_else(|| format!("material_{i}")), mask: f.as_ref(), albedo: m.albedo, roughness: m.roughness, emissive: m.emissive.unwrap_or([0.0; 3]), detail: detail_of(&m.detail), texture: t.clone() })
+                    .map(|(i, ((m, f), t))| jd_terrain::ProfileMaterial { name: m.mask.clone().unwrap_or_else(|| format!("material_{i}")), mask: f.as_ref(), albedo: m.albedo.map(|c| c as f32), roughness: m.roughness as f32, emissive: m.emissive.unwrap_or([0.0; 3]).map(|c| c as f32), detail: detail_of(&m.detail), texture: t.clone() })
                     .collect();
                 let geo = ctx.with_project(|proj| {
                     let w = &proj.doc.world;

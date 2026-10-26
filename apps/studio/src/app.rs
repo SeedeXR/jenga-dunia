@@ -61,8 +61,8 @@ enum Tag {
     Preview([f32; 2], u32, Instant),
     /// `terrain.scatter` for the viewport (points inline).
     Scatter,
-    /// Studio's own `project.set_look`: logged only, as the desktop's `writeLook` (its
-    /// `project_changed` event re-reads the project; no terrain changed).
+    /// Studio's own `project.set_look`: logged, then the project re-read (no terrain changed;
+    /// the desktop's `writeLook` only logs).
     Look,
 }
 
@@ -203,8 +203,13 @@ pub struct StudioApp {
     scatter_points: Option<Vec<[f32; 5]>>,
     scatter_model: String,
     /// The toolbar's colour layer (the desktop's `colorLayer`): drawn on the terrain instead of
-    /// the height ramp.
+    /// the height ramp; and one chosen before it is published (a simulation layer just added),
+    /// adopted by the evaluation that publishes it.
     color_layer: Option<String>,
+    pending_color: Option<String>,
+    /// The material stack (the look's `materials`, the desktop's `materials`): mask, albedo,
+    /// emissive, roughness, optional detail tile — as JSON, the shape the engine reads.
+    materials: Vec<Value>,
     /// The Caves section: the kind to add, Show caves, X-ray, each cave node's `caves.mesh`
     /// summary, and the generation of the newest mesh fetch (older ones are dropped).
     cave_kind: usize,
@@ -344,6 +349,8 @@ impl StudioApp {
             scatter_points: None,
             scatter_model: String::new(),
             color_layer: None,
+            pending_color: None,
+            materials: Vec::new(),
             cave_kind: 0,
             show_caves: true,
             xray: 0.0,
@@ -538,12 +545,25 @@ impl StudioApp {
                     self.busy = self.busy.saturating_sub(1);
                     for r in &responses {
                         self.log_response(r);
+                        // A simulation layer: colour by its first mask once it is published (the
+                        // desktop's pendingColor).
+                        if r.op == "graph.add_simulation"
+                            && let Some(first) =
+                                r.result.as_ref().and_then(|v| v["published"][0].as_str())
+                        {
+                            self.pending_color = Some(first.to_owned());
+                        }
                     }
                     self.refresh();
                 }
                 Msg::Event { topic, data } => {
                     if topic == "project_changed" {
-                        tracing::debug!(op = %data["op"], "project changed");
+                        tracing::debug!(op = %data["op"], client = %data["client"], "project changed");
+                        // Studio's own writes refresh from their replies (a refresh here would
+                        // run mid-chain, e.g. bake maps for a layer not evaluated yet).
+                        if data["client"] == "gui-studio" {
+                            continue;
+                        }
                         // A look write changes no terrain: re-read the project, not the preview.
                         if data["op"] == "project.set_look" {
                             self.invoke(Tag::InfoOnly, "project.info", json!({}));
@@ -573,11 +593,7 @@ impl StudioApp {
                     match maps {
                         Ok(m) => {
                             let [w, h] = m.albedo.size;
-                            let n = self
-                                .project
-                                .as_ref()
-                                .and_then(|p| p["look"]["materials"].as_array())
-                                .map_or(0, Vec::len);
+                            let n = self.materials.len();
                             let with = if n == 0 {
                                 String::new()
                             } else {
@@ -716,6 +732,10 @@ impl StudioApp {
                 let info = r.result.unwrap_or_default();
                 if self.look_due.is_none() {
                     self.sun = SunLook::of(&info["look"]["sun"]);
+                    self.materials = info["look"]["materials"]
+                        .as_array()
+                        .cloned()
+                        .unwrap_or_default();
                     let scatter = ScatterLook::of(&info["look"]["scatter"]);
                     if scatter != self.scatter {
                         self.scatter = scatter;
@@ -803,7 +823,10 @@ impl StudioApp {
                     json!({ "layer": layer, "lod": lod }),
                 );
             }
-            Tag::Look => self.log_response(&r),
+            Tag::Look => {
+                self.log_response(&r);
+                self.invoke(Tag::InfoOnly, "project.info", json!({}));
+            }
             Tag::Scatter => {
                 self.log_response(&r);
                 if let Some(points) = r.result.as_ref().and_then(|v| v["points"].as_array()) {
@@ -1001,6 +1024,195 @@ impl StudioApp {
             let _ = tx.send(Msg::Lakes(layer, pv));
             ctx.request_repaint();
         });
+    }
+
+    /// The right column's Actions and Simulation layers sections (the desktop's, in its order):
+    /// one-click nodes in front of the height output (or beside it, snow).
+    fn actions_card(&mut self, ui: &mut egui::Ui) {
+        use crate::chrome::Add;
+        const ACTIONS: [(&str, &str, &str); 5] = [
+            ("flip_x", "Flip X", "Mirror the terrain east ↔ west"),
+            ("flip_y", "Flip Y", "Mirror the terrain north ↔ south"),
+            (
+                "rotate_left",
+                "Rot ⟲",
+                "Turn the terrain 90° counter-clockwise (square worlds)",
+            ),
+            (
+                "rotate_right",
+                "Rot ⟳",
+                "Turn the terrain 90° clockwise (square worlds)",
+            ),
+            (
+                "flatten",
+                "Flatten",
+                "Flatten the terrain to its mean height (set height_m in the inspector)",
+            ),
+        ];
+        const SIMULATIONS: [(&str, &str); 4] = [
+            (
+                "snow",
+                "A season of snow on the terrain (jd.climate.snowpack): the cover becomes the `snow` layer, a snow material and the viewport colour",
+            ),
+            (
+                "debris",
+                "Rockfall debris (jd.erosion.debris) in front of the height output: boulder aprons, the `debris` layer and a rock material",
+            ),
+            (
+                "sand",
+                "Wind-blown sand (jd.erosion.aeolian) in front of the height output: dunes along the world wind",
+            ),
+            (
+                "lava",
+                "A lava flow from the summit (jd.volcanic.lava) in front of the height output: the `heat` glow and `lava` thickness layers, a basalt material",
+            ),
+        ];
+        let enabled = self.project.is_some() && self.busy == 0;
+        let mut add = None;
+        look::section(ui, "Actions");
+        ui.horizontal_wrapped(|ui| {
+            for (k, label, tip) in ACTIONS {
+                if look::button(ui, None, label, false, enabled)
+                    .on_hover_text(format!("{tip} — a jd.filter.action node in front of the output; undo or bypass it in the layer stack"))
+                    .clicked()
+                {
+                    add = Some(Add::Action(k));
+                }
+            }
+        });
+        ui.add_space(12.0);
+        look::section(ui, "Simulation layers");
+        ui.horizontal_wrapped(|ui| {
+            for (k, tip) in SIMULATIONS {
+                if look::button(ui, None, &format!("+ {k}"), false, enabled)
+                    .on_hover_text(tip)
+                    .clicked()
+                {
+                    add = Some(Add::Simulation(k));
+                }
+            }
+        });
+        ui.add(
+            egui::Label::new(
+                RichText::new("One click adds the node, publishes its masks as layers and a material; tune it in the graph inspector.")
+                    .size(12.0)
+                    .color(color::FG2),
+            )
+            .wrap(),
+        );
+        if let Some(a) = add {
+            self.add_layer(a);
+        }
+    }
+
+    /// The right column's Materials section (the desktop's): one row per layer of the stack —
+    /// mask, base colour, emitted light, roughness, detail tile and its metres, remove — and
+    /// `+ layer`. An edit writes the look after the debounce and re-bakes the maps.
+    fn materials_card(&mut self, ui: &mut egui::Ui) {
+        look::section(ui, "Materials");
+        // The desktop's `hexOf` / `rgbOf`: 0..1 channels as bytes, no transfer curve.
+        let bytes = |v: &Value| -> [u8; 3] {
+            std::array::from_fn(|i| {
+                (v[i].as_f64().unwrap_or(0.0).clamp(0.0, 1.0) * 255.0).round() as u8
+            })
+        };
+        let unit = |b: [u8; 3]| json!(b.map(|c| f64::from(c) / 255.0));
+        let layers = self.layers.clone();
+        let before = self.materials.clone();
+        let mut remove = None;
+        for (i, m) in self.materials.iter_mut().enumerate() {
+            ui.horizontal_wrapped(|ui| {
+                let mut mask = m["mask"].as_str().map(str::to_owned);
+                egui::ComboBox::from_id_salt(("material-mask", i))
+                    .width(96.0)
+                    .selected_text(RichText::new(mask.as_deref().unwrap_or("everywhere")).size(12.0))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut mask, None, "everywhere");
+                        for l in &layers {
+                            ui.selectable_value(&mut mask, Some(l.clone()), l);
+                        }
+                    })
+                    .response
+                    .on_hover_text("0..1 mask layer that weights this material (everywhere when empty)")
+                    .widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::accesskit::Role::ComboBox, true, format!("Material {} mask", i + 1))
+                    });
+                m["mask"] = json!(mask);
+                let mut albedo = bytes(&m["albedo"]);
+                if egui::color_picker::color_edit_button_srgb(ui, &mut albedo)
+                    .on_hover_text("Base colour")
+                    .changed()
+                {
+                    m["albedo"] = unit(albedo);
+                }
+                let mut glow = if m["emissive"].is_null() { [0; 3] } else { bytes(&m["emissive"]) };
+                if egui::color_picker::color_edit_button_srgb(ui, &mut glow)
+                    .on_hover_text("Emitted light (black = none): glows in the viewport and the GLB, listed for the engines")
+                    .changed()
+                {
+                    m["emissive"] = if glow == [0; 3] { Value::Null } else { unit(glow) };
+                }
+                let mut rough = number(&json!(m["roughness"].as_f64().unwrap_or(0.9)));
+                if look::input(ui, &mut rough, 56.0, "", &format!("Material {} roughness", i + 1))
+                    .on_hover_text("Roughness 0..1")
+                    .changed()
+                    && let Ok(r) = rough.trim().parse::<f64>()
+                {
+                    m["roughness"] = json!(r);
+                }
+                let mut detail = !m["detail"].is_null();
+                if look::checkbox(ui, &mut detail, &format!("Material {} detail", i + 1))
+                    .on_hover_text("Tileable detail: a seamless grain tile repeated every tile_m metres, blended by this layer's mask in the viewport, baked into exported maps by world position, written as tiles for Unity and Unreal")
+                    .changed()
+                {
+                    m["detail"] = if detail {
+                        json!({ "tile_m": 8, "bump": 0.5, "contrast": 0.3, "seed": i, "px": 512 })
+                    } else {
+                        Value::Null
+                    };
+                }
+                if detail {
+                    // Committed on Enter or leaving the field, as the desktop's onBlur.
+                    let id = ui.scope_id().with(("material-tile", i));
+                    let mut tile = ui.data_mut(|d| d.get_temp::<String>(id)).unwrap_or_else(|| number(&m["detail"]["tile_m"]));
+                    let r = look::input(ui, &mut tile, 56.0, "", &format!("Material {} tile (m)", i + 1))
+                        .on_hover_text("Metres per repeat of the detail tile");
+                    if r.lost_focus() {
+                        if let Ok(v) = tile.trim().parse::<f64>()
+                            && v > 0.0
+                        {
+                            m["detail"]["tile_m"] = json!(v);
+                        }
+                        ui.data_mut(|d| d.remove::<String>(id));
+                    } else if r.has_focus() {
+                        ui.data_mut(|d| d.insert_temp(id, tile));
+                    }
+                }
+                let x = look::button(ui, None, "×", false, true).on_hover_text("Remove this layer");
+                x.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::accesskit::Role::Button, true, format!("Remove material {}", i + 1))
+                });
+                if x.clicked() {
+                    remove = Some(i);
+                }
+            });
+        }
+        if let Some(i) = remove {
+            self.materials.remove(i);
+        }
+        if look::button(ui, None, "+ layer", false, self.project.is_some())
+            .on_hover_text("Add a material layer: the stack blends albedo and roughness over the base, each layer by its mask, in order (terrain.textures / export materials)")
+            .clicked()
+        {
+            self.materials.push(json!({ "mask": null, "albedo": [0.5, 0.5, 0.5], "roughness": 0.9 }));
+        }
+        if self.materials != before {
+            // The desktop's setMaterials: the look after the debounce, the maps now.
+            if self.project.is_some() {
+                self.look_due = Some(Instant::now() + std::time::Duration::from_millis(400));
+            }
+            self.fetch_maps();
+        }
     }
 
     /// The cave nodes of the graph, in order.
@@ -1269,6 +1481,9 @@ impl StudioApp {
     /// The desktop's `refreshColor`: the colour layer's preview at the terrain's LOD, dropped when
     /// the layer is no longer published.
     fn fetch_color(&mut self, lod: u32) {
+        if let Some(pending) = self.pending_color.take_if(|p| self.layers.contains(p)) {
+            self.color_layer = Some(pending);
+        }
         let Some(name) = self.color_layer.clone() else {
             return self.viewport.set_overlay(None);
         };
@@ -1360,11 +1575,7 @@ impl StudioApp {
         if layer.contains("#lod") {
             return;
         }
-        let materials = self.project.as_ref().map_or(json!([]), |p| {
-            p["look"]["materials"]
-                .as_array()
-                .map_or(json!([]), |m| Value::Array(m.clone()))
-        });
+        let materials = Value::Array(self.materials.clone());
         let request = Self::request(
             "terrain.textures",
             json!({ "materials": materials, "layer": layer, "max_px": PREVIEW_MAX_PX }),
@@ -1419,12 +1630,13 @@ impl StudioApp {
 
     /// The desktop's `writeLook`: materials, scatter and sun in one `project.set_look`.
     fn write_look(&mut self) {
-        let Some(p) = &self.project else { return };
-        let look = &p["look"];
+        if self.project.is_none() {
+            return;
+        }
         let scatter = self.scatter.json();
         let [az, el, turbidity, clouds, fog] = self.sun.0;
         let params = json!({
-            "materials": look["materials"].as_array().cloned().unwrap_or_default(),
+            "materials": self.materials,
             "scatter": scatter,
             "sun": { "azimuth_deg": az, "elevation_deg": el, "turbidity": turbidity, "clouds": clouds, "fog": fog },
         });
@@ -2463,6 +2675,10 @@ impl StudioApp {
                 json!({ "which": which, "max_height_m": max }),
             ),
             Add::Cave(kind) => Self::request("graph.add_cave", json!({ "kind": kind })),
+            Add::Action(action) => Self::request(
+                "graph.splice",
+                json!({ "layer": "height", "kind": "jd.filter.action@1", "params": { "action": action } }),
+            ),
         };
         let lod = self.preview_lod();
         self.chain(vec![
@@ -2862,6 +3078,10 @@ impl eframe::App for StudioApp {
                         self.scatter_card(ui);
                         ui.add_space(12.0);
                         self.caves_card(ui);
+                        ui.add_space(12.0);
+                        self.actions_card(ui);
+                        ui.add_space(12.0);
+                        self.materials_card(ui);
                     });
                 });
             egui::Panel::left("panel-left")
