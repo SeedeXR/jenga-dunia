@@ -79,9 +79,11 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 }));
 
 const menuListeners: ((e: { payload: string }) => void)[] = [];
+const engineListeners: ((e: { payload: { topic: string; data: Record<string, unknown> } }) => void)[] = [];
 vi.mock("@tauri-apps/api/event", () => ({
-  listen: vi.fn(async (name: string, cb: (e: { payload: string }) => void) => {
-    if (name === "menu") menuListeners.push(cb); // other events (project-opened) are not exercised here
+  listen: vi.fn(async (name: string, cb: (e: { payload: unknown }) => void) => {
+    if (name === "menu") menuListeners.push(cb as (typeof menuListeners)[number]); // project-opened is not exercised here
+    if (name === "engine-event") engineListeners.push(cb as (typeof engineListeners)[number]);
     return () => undefined;
   }),
 }));
@@ -254,6 +256,27 @@ describe("App", () => {
     ]);
     const stroke = calls.find((c) => (c.args as { request?: { op: string; params: { key?: string } } }).request?.op === "graph.append_param" && (c.args as { request: { params: { key?: string } } }).request.params.key === "strokes");
     expect(stroke).toMatchObject({ args: { request: { params: { value: { points: [[10, 20], [30, 40]], radius_m: 150, mode: "flatten", amount: 0.5 } } } } });
+  });
+
+  it("connected to Studio: its graph edits reload the graph, selections cross both ways", async () => {
+    render(<App />);
+    await waitFor(() => expect(engineListeners.length).toBeGreaterThan(0));
+    const emit = (topic: string, data: Record<string, unknown>) => engineListeners.forEach((cb) => cb({ payload: { topic, data } }));
+    // Studio selected a node (a layer row): the Editor follows, and does not echo it back.
+    calls.length = 0;
+    emit("selection", { nodes: ["01SCULPT00000000000000000A"], source: "gui-studio" });
+    expect(useStore.getState().selectedNode).toBe("01SCULPT00000000000000000A");
+    // The Editor's own selection goes out as ui.select.
+    useStore.getState().setSelectedNode("01NOISE");
+    await waitFor(() => expect(calls.some((c) => (c.args as { request?: { op: string; params: { nodes: string[] } } }).request?.op === "ui.select")).toBe(true));
+    // A graph edit by Studio reloads the graph; the Editor's own is already applied.
+    calls.length = 0;
+    emit("project_changed", { op: "graph.splice", client: "gui-studio" });
+    await waitFor(() => expect(calls.some((c) => (c.args as { request?: { op: string } }).request?.op === "graph.list")).toBe(true));
+    calls.length = 0;
+    emit("project_changed", { op: "graph.splice", client: "gui-editor" });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(calls.some((c) => (c.args as { request?: { op: string } }).request?.op === "graph.list")).toBe(false);
   });
 
   it("a world preset fills resolution and extent (Unreal 2049²)", async () => {

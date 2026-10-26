@@ -779,7 +779,12 @@ export const useStore = create<State>((set, get) => {
       await op("jobs.cancel", { id }).catch((e) => logFailure("jobs.cancel", e));
     },
     selectedNode: null,
-    setSelectedNode: (id) => set({ selectedNode: id }),
+    setSelectedNode: (id) => {
+      if (get().selectedNode === id) return;
+      set({ selectedNode: id });
+      // Studio highlights it too (ADR-0017: the selection crosses as `ui.select` → `selection`).
+      void op("ui.select", { nodes: id ? [id] : [] }).catch(() => undefined);
+    },
     sculpting: false,
     setSculpting: (on) => set({ sculpting: on, ...(on ? {} : { drawing: null }) }),
     brush: { radius_m: 150, strength_m: 40, mode: "raise", amount: 0.5, hardness: 0, target_m: null, angle_deg: 30, factor: 1.5, tilt_deg: 15, alpha: "plain" },

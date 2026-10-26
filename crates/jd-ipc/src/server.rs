@@ -191,6 +191,23 @@ impl Shared {
     }
 
     fn invoke(&self, request: Request) -> Response {
+        // `ui.select { nodes }`: a window's selection, announced to the others as `selection
+        // { nodes, source }` (node ↔ viewport); the engine has nothing to do with it.
+        if request.op == "ui.select" {
+            let source = request.client.as_ref().map(|c| c.kind.clone());
+            let nodes = request
+                .params
+                .get("nodes")
+                .cloned()
+                .unwrap_or_else(|| json!([]));
+            self.emit("selection", json!({ "nodes": nodes, "source": source }));
+            return Response::ok(
+                "ui.select",
+                request.request_id.unwrap_or_default(),
+                json!({}),
+                Vec::new(),
+            );
+        }
         let op = request.op.clone();
         let client = request.client.as_ref().map(|c| c.kind.clone());
         let scope = self.registry.get(&op).map(|o| o.scope);

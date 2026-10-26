@@ -357,6 +357,28 @@ export default function App() {
     };
   }, []);
 
+  // Connected to Studio (ADR-0017): a graph edit made there reloads the graph here, and Studio's
+  // selection (a layer row, a viewport pick) selects the node here.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    type EngineEvent = { topic: string; data: { op?: string; client?: string | null; nodes?: string[]; source?: string | null } };
+    listen<EngineEvent>("engine-event", ({ payload: { topic, data } }) => {
+      const st = useStore.getState();
+      if (topic === "project_changed" && data.client !== "gui-editor" && data.op?.startsWith("graph.")) void st.loadGraph();
+      if (topic === "selection" && data.source !== "gui-editor") st.setSelectedNode(data.nodes?.[0] ?? null);
+    })
+      .then((u) => {
+        if (cancelled) u();
+        else unlisten = u;
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
   // macOS hands double-clicked .jdproj documents to a running app: the core opened it, re-read.
   useEffect(() => {
     let unlisten: (() => void) | undefined;

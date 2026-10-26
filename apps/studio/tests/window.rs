@@ -192,9 +192,15 @@ fn the_window_shows_the_project_renders_its_terrain_and_orbits() {
 fn a_write_from_the_editor_refreshes_the_window() {
     let dir = tempfile::tempdir().unwrap();
     let server = engine(dir.path());
+    let seen: Arc<std::sync::Mutex<Vec<Value>>> = Arc::default();
+    let s = seen.clone();
     let editor = Client::connect(
         ClientConfig::new(server.socket(), server.token(), "editor"),
-        Box::new(|_, _| {}),
+        Box::new(move |topic, data| {
+            if topic == "selection" {
+                s.lock().unwrap().push(data.clone());
+            }
+        }),
         Box::new(|_| {}),
     )
     .expect("connect");
@@ -210,6 +216,34 @@ fn a_write_from_the_editor_refreshes_the_window() {
     settle(&mut h, |a| a.layers().iter().any(|l| l == "ridges"));
     // The selection stays where the user left it.
     assert_eq!(h.state().layer(), Some("height"));
+    // Selection sync: a node picked in the Editor is selected here …
+    let r = editor
+        .call(Request::new(
+            "ui.select",
+            json!({ "nodes": ["01JDGRAPH000000000000N01SE"] }),
+        ))
+        .expect("ui.select");
+    assert!(r.error.is_none(), "{:?}", r.error);
+    settle(&mut h, |a| {
+        a.selected_node() == Some("01JDGRAPH000000000000N01SE")
+    });
+    // … and a layer row clicked here reaches the Editor as `selection` from gui-studio.
+    tap(&mut h, None, "Noise");
+    let until = Instant::now() + Duration::from_secs(10);
+    while !seen
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|d| d["source"] == "gui-studio")
+    {
+        assert!(
+            Instant::now() < until,
+            "no selection from Studio: {:?}",
+            seen.lock().unwrap()
+        );
+        h.step();
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 #[test]

@@ -234,5 +234,9 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   Smoothness, Height + Set height, Clear, Step + Raise / Lower — square stamps in the strokes node,
   one stroke — and Duplicate / Rotate / Scale / Tilt / Align of the selection's bounding block into
   the transforms node, the shortcuts). P3 viewport and P4 panels are now complete.
-  Next: selection sync with the Editor (node ↔ viewport); live evaluation in Studio; then P5
-  (default switch, packaging, docs).
+- Selection sync and the Editor's live graph: `ui.select { nodes }` → the server's `selection
+  { nodes, source }` (jd-ipc answers it; the desktop alone answers it locally). The Editor selects
+  what Studio selects, sends its own selection, and reloads its graph on another client's graph.*
+  write (it listened to no engine event before — Studio's stack / sculpt / splice edits did not
+  show in the Editor's graph). Studio follows the Editor's selection (stack row highlight).
+  Next: live evaluation in Studio; then P5 (default switch, packaging, docs).

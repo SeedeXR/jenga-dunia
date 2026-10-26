@@ -218,6 +218,12 @@ fn project_writes_and_emitted_events_reach_every_client() {
             "the writer, so a window can skip its own writes"
         );
     }
+    // A window's selection reaches the others as `selection`, named by its source.
+    a.call(Request::new("ui.select", json!({ "nodes": ["n1"] })))
+        .expect("ui.select");
+    let sel = wait_for(&ev_b, "selection");
+    assert_eq!(sel["nodes"], json!(["n1"]));
+    assert_eq!(sel["source"], "gui-test");
     // Only the write announced a change.
     assert_eq!(
         ev_a.lock()

@@ -33,6 +33,13 @@ impl Engine {
     /// Run one operation (blocking). `Err` only for a transport failure.
     fn invoke(&self, request: Request) -> Result<Response, jd_types::JdError> {
         match self {
+            // Alone, a selection has no other window to reach (Studio's server answers it).
+            Engine::Local { .. } if request.op == "ui.select" => Ok(Response::ok(
+                "ui.select",
+                request.request_id.unwrap_or_default(),
+                serde_json::json!({}),
+                Vec::new(),
+            )),
             Engine::Local { registry, ctx } => Ok(registry.invoke(ctx, request)),
             Engine::Remote(client) => client.call(request),
         }

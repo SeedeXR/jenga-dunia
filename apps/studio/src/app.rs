@@ -1045,6 +1045,10 @@ impl StudioApp {
                     self.refresh();
                 }
                 Msg::Event { topic, data } => {
+                    // The Editor's selection (a node clicked in the graph) highlights here.
+                    if topic == "selection" && data["source"] != "gui-studio" {
+                        self.selected_node = data["nodes"][0].as_str().map(str::to_owned);
+                    }
                     if topic == "project_changed" {
                         tracing::debug!(op = %data["op"], client = %data["client"], "project changed");
                         // Studio's own writes refresh from their replies (a refresh here would
@@ -3195,8 +3199,10 @@ impl StudioApp {
         self.stack.closed = closed;
         if let Some(id) = select {
             // The Editor's inspector follows over the protocol's `selection` event.
-            self.server
-                .emit("selection", json!({ "nodes": [id], "source": "studio" }));
+            self.server.emit(
+                "selection",
+                json!({ "nodes": [id], "source": "gui-studio" }),
+            );
             self.selected_node = Some(id);
         }
         if let Some((op, params)) = act {
@@ -3213,6 +3219,11 @@ impl StudioApp {
                 self.selected_node = None;
             }
         }
+    }
+
+    /// The node selected here or in the Editor (`selection` events cross both ways).
+    pub fn selected_node(&self) -> Option<&str> {
+        self.selected_node.as_deref()
     }
 
     /// The grid tool's selected cells: for tests.
