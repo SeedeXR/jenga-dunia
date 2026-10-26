@@ -77,13 +77,10 @@ fn the_window_shows_the_project_renders_its_terrain_and_orbits() {
     let mut h = window(engine(dir.path()));
     settle(&mut h, |a| a.viewport.info().is_some());
     assert_eq!(h.state().layer(), Some("height"));
-    assert_eq!(
-        h.get_all_by_label("Kittest").count(),
-        2,
-        "top bar and Project panel"
-    );
-    h.get_by_label("Generate terrain");
-    h.get_by_label("Open Editor");
+    // The desktop's header readout and toolbar (a tooltip is the button's accessible name).
+    h.get_by_label("Kittest — 256² · 2048 m");
+    h.get_by_label("Generate terrain (⌘G)");
+    h.get_by_label("Open the node editor");
     let info = h.state().viewport.info().unwrap().clone();
     assert_eq!((info.size, info.extent_m), ([256, 256], [2048.0, 2048.0]));
 
@@ -95,7 +92,10 @@ fn the_window_shows_the_project_renders_its_terrain_and_orbits() {
     );
 
     // Drag across the viewport: the camera orbits and the scene is rendered again.
-    let (yaw, renders) = (h.state().viewport.camera.yaw, h.state().viewport.renders());
+    let (theta, renders) = (
+        h.state().viewport.camera.theta,
+        h.state().viewport.renders(),
+    );
     let c = h.state().viewport.rect().center();
     h.drag_at(c);
     h.step();
@@ -106,9 +106,9 @@ fn the_window_shows_the_project_renders_its_terrain_and_orbits() {
     h.drop_at(c + eframe::egui::vec2(120.0, 0.0));
     h.run_steps(2);
     assert!(
-        h.state().viewport.camera.yaw < yaw - 0.5,
-        "yaw {yaw} -> {}",
-        h.state().viewport.camera.yaw
+        h.state().viewport.camera.theta < theta - 0.5,
+        "theta {theta} -> {}",
+        h.state().viewport.camera.theta
     );
     assert!(h.state().viewport.renders() > renders);
     let (_, after) = covered(&mut h);
@@ -145,33 +145,30 @@ fn a_write_from_the_editor_refreshes_the_window() {
 }
 
 /// `JD_STUDIO_CAPTURE=<png> cargo test -p jd-studio --test window -- --ignored capture`: the
-/// window rendered offscreen at 2× for the user guide (no screen capture involved).
+/// window rendered offscreen (no screen capture involved) on the project the desktop's
+/// `e2e/parity-capture.spec.ts` builds — same world, seed and starter graph — at the same
+/// 1440 × 900, for side-by-side parity checks and the user guide.
 #[test]
-#[ignore = "writes a documentation image"]
+#[ignore = "writes a parity / documentation image"]
 fn capture_for_docs() {
     let out = std::env::var("JD_STUDIO_CAPTURE").expect("JD_STUDIO_CAPTURE=<path.png>");
     let dir = tempfile::tempdir().unwrap();
     let server = Server::bind(Registry::with_builtins(), Context::default()).expect("bind");
-    let world = json!({ "resolution_px": [1024, 1024], "extent_m": [4096.0, 4096.0], "tile_size": 512, "halo": 0, "origin": [0.0, 0.0], "seed": 42 });
+    // The desktop's New: world 4096 m, 1024 px, tile 512, halo 4, seed 42; then Generate.
+    let world = json!({ "resolution_px": [1024, 1024], "extent_m": [4096.0, 4096.0], "tile_size": 512, "halo": 4, "origin": [0, 0], "seed": 42 });
     for (op, params) in [
         (
             "project.create",
             json!({ "path": dir.path().join("Hills.jdproj"), "name": "Hills", "world": world }),
         ),
-        (
-            "terrain.generate",
-            json!({ "noise": { "height_range_m": [40.0, 460.0] } }),
-        ),
+        ("graph.evaluate", json!({ "lod": 0 })),
     ] {
-        assert!(
-            server.invoke(Request::new(op, params)).error.is_none(),
-            "{op}"
-        );
+        let r = server.invoke(Request::new(op, params));
+        assert!(r.error.is_none(), "{op}: {:?}", r.error);
     }
     let server = Arc::new(server);
     let mut h = Harness::builder()
         .with_size([1440.0, 900.0])
-        .with_pixels_per_point(2.0)
         .wgpu()
         .with_context_setup(jd_studio::theme::install)
         .build_eframe(move |cc| StudioApp::new(cc, server, Options::default()));

@@ -21,6 +21,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { nodePreview, type Preview } from "../lib/api";
 import { num } from "../lib/expr";
 import { type GraphNode, useStore } from "../state";
+import { Range } from "../components/Range";
 
 type JdNodeData = { kind: string; label: string; params: Record<string, unknown>; inputs: string[]; outputs: string[]; selected?: boolean };
 
@@ -416,7 +417,7 @@ function Inner() {
           </button>
           <label className="ml-2 flex items-center gap-1 text-xs text-jd-fg-1" title="Timeline: keyframed parameters (t:v, t:v in the inspector) resolve here; journaled, undoable">
             <Clock size={12} />
-            <input type="range" min={0} max={1} step={0.01} value={s.graph.time ?? 0} onChange={(e) => s.setTime(Number(e.target.value))} disabled={!s.project} className="w-24" data-testid="graph-time" />
+            <Range min={0} max={1} step={0.01} value={s.graph.time ?? 0} onChange={(e) => s.setTime(Number(e.target.value))} disabled={!s.project} className="w-24" onReset={() => s.setTime(0)} data-testid="graph-time" />
             <span className="w-8 font-mono" data-testid="graph-time-value">{(s.graph.time ?? 0).toFixed(2)}</span>
           </label>
         </div>

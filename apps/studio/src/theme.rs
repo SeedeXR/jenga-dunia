@@ -1,8 +1,19 @@
 //! Studio's look: Host Grotesk (OFL, `assets/fonts/`) and the desktop app's dark tokens
 //! (`apps/desktop/src/index.css`, `--color-jd-*`), so the two windows read as one product.
 
-use eframe::egui::{self, Color32, FontData, FontFamily};
-use eframe::epaint::text::{FontInsert, FontPriority, InsertFontFamily};
+use eframe::egui::{self, Color32, FontData, FontFamily, FontId, TextStyle};
+use eframe::epaint::text::{
+    FontInsert, FontPriority, FontTweak, InsertFontFamily, VariationCoords,
+};
+
+const HOST_GROTESK: &[u8] = include_bytes!("../assets/fonts/HostGrotesk-wght.ttf");
+/// The family name of Host Grotesk at weight 600 (`font-semibold`).
+const SEMIBOLD: &str = "semibold";
+
+/// Host Grotesk semibold at `size` points (headings, the brand name).
+pub fn semibold(size: f32) -> FontId {
+    FontId::new(size, FontFamily::Name(SEMIBOLD.into()))
+}
 
 /// The `--color-jd-*` tokens. A test checks them against the CSS so the two cannot drift.
 pub mod color {
@@ -35,14 +46,53 @@ pub mod color {
 
 /// Install the font and the dark palette on a context (the app and the test harness).
 pub fn install(ctx: &egui::Context) {
+    egui_extras::install_image_loaders(ctx);
     ctx.add_font(FontInsert::new(
         "host-grotesk",
-        FontData::from_static(include_bytes!("../assets/fonts/HostGrotesk-wght.ttf")),
+        FontData::from_static(HOST_GROTESK),
         vec![InsertFontFamily {
             family: FontFamily::Proportional,
             priority: FontPriority::Highest,
         }],
     ));
+    // The same variable font at wght 600 as its own family; the regular face backs it up for
+    // anything it lacks.
+    ctx.add_font(FontInsert::new(
+        "host-grotesk-semibold",
+        FontData::from_static(HOST_GROTESK).tweak(FontTweak {
+            coords: VariationCoords::new([(b"wght", 600.0)]),
+            ..Default::default()
+        }),
+        vec![InsertFontFamily {
+            family: FontFamily::Name(SEMIBOLD.into()),
+            priority: FontPriority::Highest,
+        }],
+    ));
+    ctx.add_font(FontInsert::new(
+        "host-grotesk-fallback",
+        FontData::from_static(HOST_GROTESK),
+        vec![InsertFontFamily {
+            family: FontFamily::Name(SEMIBOLD.into()),
+            priority: FontPriority::Lowest,
+        }],
+    ));
+    // The desktop's sizes: 13 px body, 12 px controls and the log (`text-xs`).
+    ctx.all_styles_mut(|style| {
+        use FontFamily::{Monospace, Proportional};
+        style.text_styles = [
+            (
+                TextStyle::Heading,
+                FontId::new(12.5, FontFamily::Name(SEMIBOLD.into())),
+            ),
+            (TextStyle::Body, FontId::new(13.0, Proportional)),
+            (TextStyle::Button, FontId::new(12.0, Proportional)),
+            (TextStyle::Small, FontId::new(12.0, Proportional)),
+            (TextStyle::Monospace, FontId::new(12.0, Monospace)),
+        ]
+        .into();
+        style.spacing.button_padding = egui::vec2(8.0, 4.0);
+        style.spacing.item_spacing = egui::vec2(8.0, 4.0);
+    });
     let mut v = egui::Visuals::dark();
     v.panel_fill = color::BG1;
     v.window_fill = color::BG2;
@@ -55,10 +105,28 @@ pub fn install(ctx: &egui::Context) {
     v.selection.stroke.color = color::ACCENT;
     v.widgets.noninteractive.bg_stroke.color = color::LINE;
     v.widgets.noninteractive.fg_stroke.color = color::FG1;
-    v.widgets.inactive.weak_bg_fill = color::BG3;
-    v.widgets.inactive.bg_fill = color::BG3;
+    // `.btn`: bg-2 with a white/5 hairline; hover bg-3 and white/10; rounded-md.
+    let hair = egui::Color32::from_rgba_premultiplied(13, 13, 13, 13);
+    let hair_hover = egui::Color32::from_rgba_premultiplied(26, 26, 26, 26);
+    for w in [
+        &mut v.widgets.inactive,
+        &mut v.widgets.hovered,
+        &mut v.widgets.active,
+        &mut v.widgets.open,
+    ] {
+        w.corner_radius = egui::CornerRadius::same(6);
+        w.expansion = 0.0;
+    }
+    v.widgets.inactive.weak_bg_fill = color::BG2;
+    v.widgets.inactive.bg_fill = color::BG2;
+    v.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, hair);
     v.widgets.inactive.fg_stroke.color = color::FG0;
+    v.widgets.hovered.weak_bg_fill = color::BG3;
+    v.widgets.hovered.bg_fill = color::BG3;
+    v.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, hair_hover);
     v.widgets.hovered.fg_stroke.color = color::FG0;
+    // Text fields (`inputCls`): bg-2, focus border accent.
+    v.text_edit_bg_color = Some(color::BG2);
     v.widgets.active.weak_bg_fill = color::PRIMARY;
     v.widgets.active.bg_fill = color::PRIMARY;
     ctx.set_visuals_of(egui::Theme::Dark, v);

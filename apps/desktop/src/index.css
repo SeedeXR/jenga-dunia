@@ -43,6 +43,67 @@ select {
 input[type="range"] {
   accent-color: var(--color-jd-primary);
 }
+
+/* The Lightroom-style slider (components/Range.tsx; Spectrum's tokens: 2 px track, ring handle with a
+   2 px border that thickens while pressed, a 4 px gap in the track around the handle). Studio's egui
+   slider (apps/studio/src/widgets.rs) draws the same. */
+.jd-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 16px;
+  background: transparent;
+  cursor: pointer;
+  --fill-a: 0%;
+  --fill-b: 0%;
+  --range-bg: var(--color-jd-bg-1);
+}
+.jd-range::-webkit-slider-runnable-track {
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--color-jd-bg-3) var(--fill-a), var(--color-jd-fg-1) var(--fill-a), var(--color-jd-fg-1) var(--fill-b), var(--color-jd-bg-3) var(--fill-b));
+}
+.jd-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -6px;
+  border-radius: 50%;
+  background: var(--range-bg);
+  border: 2px solid var(--color-jd-fg-1);
+  box-shadow: 0 0 0 3px var(--range-bg);
+  transition: border-width 80ms ease, border-color 80ms ease;
+}
+.jd-range:hover::-webkit-slider-thumb {
+  border-color: var(--color-jd-fg-0);
+}
+.jd-range:active::-webkit-slider-thumb {
+  border-width: 5px;
+  border-color: var(--color-jd-fg-0);
+}
+.jd-range:focus-visible {
+  outline: none;
+}
+.jd-range:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px var(--range-bg), 0 0 0 5px var(--color-jd-accent);
+}
+.jd-range::-moz-range-track {
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--color-jd-bg-3) var(--fill-a), var(--color-jd-fg-1) var(--fill-a), var(--color-jd-fg-1) var(--fill-b), var(--color-jd-bg-3) var(--fill-b));
+}
+.jd-range::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--range-bg);
+  border: 2px solid var(--color-jd-fg-1);
+  box-shadow: 0 0 0 3px var(--range-bg);
+}
+.jd-range:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--color-jd-bg-3) transparent;

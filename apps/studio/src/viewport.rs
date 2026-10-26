@@ -3,7 +3,7 @@
 //! in an egui panel as a native texture (ADR-0017; `docs/research/option-b-stack.md` §1 B).
 //! Drag to orbit, right-drag to pan, scroll to zoom, double-click to fit.
 
-use eframe::egui::{self, Align2, Color32, FontId, PointerButton, Rect, Sense, TextureId};
+use eframe::egui::{self, Align2, FontId, PointerButton, Rect, Sense, TextureId};
 use eframe::egui_wgpu::{RenderState, wgpu};
 use jd_terrain::preview::Preview;
 
@@ -20,8 +20,8 @@ const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 struct Vertex {
     pos: [f32; 3],
     normal: [f32; 3],
-    /// Height in 0..1 over the layer's range, for the colour ramp.
-    h: f32,
+    /// Linear RGB: the height ramp blended to rock by slope, as the desktop's vertex colours.
+    color: [f32; 3],
 }
 
 #[repr(C)]
@@ -39,83 +39,91 @@ struct Uniforms { view_proj: mat4x4<f32>, sun: vec4<f32> };
 struct VsOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) normal: vec3<f32>,
-    @location(1) h: f32,
+    @location(1) color: vec3<f32>,
 };
 
 @vertex
-fn vs_main(@location(0) pos: vec3<f32>, @location(1) normal: vec3<f32>, @location(2) h: f32) -> VsOut {
+fn vs_main(@location(0) pos: vec3<f32>, @location(1) normal: vec3<f32>, @location(2) color: vec3<f32>) -> VsOut {
     var o: VsOut;
     o.clip = u.view_proj * vec4<f32>(pos, 1.0);
     o.normal = normal;
-    o.h = h;
+    o.color = color;
     return o;
-}
-
-// Hypsometric ramp in linear colour: lowland green, upland olive, ochre, rock grey, snow.
-fn ramp(h: f32) -> vec3<f32> {
-    let c0 = vec3<f32>(0.05, 0.16, 0.06);
-    let c1 = vec3<f32>(0.26, 0.30, 0.10);
-    let c2 = vec3<f32>(0.36, 0.25, 0.14);
-    let c3 = vec3<f32>(0.40, 0.38, 0.36);
-    let c4 = vec3<f32>(0.85, 0.87, 0.90);
-    if (h < 0.3) { return mix(c0, c1, h / 0.3); }
-    if (h < 0.6) { return mix(c1, c2, (h - 0.3) / 0.3); }
-    if (h < 0.85) { return mix(c2, c3, (h - 0.6) / 0.25); }
-    return mix(c3, c4, (h - 0.85) / 0.15);
 }
 
 @fragment
 fn fs_main(i: VsOut) -> @location(0) vec4<f32> {
     let n = normalize(i.normal);
-    // Steep ground shows rock whatever its height.
-    let base = mix(ramp(clamp(i.h, 0.0, 1.0)), vec3<f32>(0.30, 0.28, 0.26), smoothstep(0.25, 0.55, 1.0 - n.y));
     let sun = max(dot(n, normalize(u.sun.xyz)), 0.0);
     let sky = 0.25 + 0.15 * n.y;
-    return vec4<f32>(base * (sky + 0.9 * sun), 1.0);
+    return vec4<f32>(i.color * (sky + 0.9 * sun), 1.0);
 }
 ";
 
-/// Orbit camera around a target point (metres, y up, north = −z).
+/// The desktop's height ramp (`TerrainView.tsx` `STOPS`, linear RGB) and rock colour.
+const STOPS: [(f32, [f32; 3]); 5] = [
+    (0.0, [0.16, 0.3, 0.2]),
+    (0.25, [0.36, 0.48, 0.24]),
+    (0.5, [0.62, 0.52, 0.34]),
+    (0.75, [0.52, 0.5, 0.48]),
+    (1.0, [0.95, 0.95, 0.97]),
+];
+const ROCK: [f32; 3] = [0.42, 0.4, 0.38];
+
+/// `RAMP[q >> 8]`: the stop interpolation at one of 256 steps, exactly as the desktop builds it.
+fn ramp(q: u16) -> [f32; 3] {
+    let t = f32::from(q >> 8) / 255.0;
+    let mut k = 0;
+    while k < STOPS.len() - 2 && t > STOPS[k + 1].0 {
+        k += 1;
+    }
+    let ((t0, c0), (t1, c1)) = (STOPS[k], STOPS[k + 1]);
+    let f = (t - t0) / (t1 - t0).max(1e-6);
+    [0, 1, 2].map(|i| c0[i] + (c1[i] - c0[i]) * f)
+}
+
+/// The desktop's orbit camera (`TerrainView.tsx`): around the origin, `theta` about the vertical
+/// axis, `phi` from the zenith, fov 50°.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Camera {
     /// Rotation about the vertical axis (radians).
-    pub yaw: f32,
-    /// Elevation above the horizon (radians).
-    pub pitch: f32,
-    /// Distance from the target (metres).
-    pub distance: f32,
-    /// The point orbited.
-    pub target: [f32; 3],
+    pub theta: f32,
+    /// Angle from straight up (radians, 0.15..1.5).
+    pub phi: f32,
+    /// Distance from the origin (metres).
+    pub radius: f32,
+    /// The world's larger side (metres): clip planes and zoom limits follow it.
+    pub size: f32,
 }
 
 impl Camera {
-    /// A three-quarter view that frames a terrain of this extent and relief.
-    pub fn fit(extent_m: [f32; 2], relief_m: f32) -> Self {
+    /// The home view for a world of this extent: θ 0.6, φ 1.0, radius 1.3 × the larger side.
+    pub fn fit(extent_m: [f32; 2]) -> Self {
+        let size = extent_m[0].max(extent_m[1]).max(1.0);
         Self {
-            yaw: 0.7,
-            pitch: 0.55,
-            distance: 1.6 * extent_m[0].max(extent_m[1]).max(relief_m).max(1.0),
-            target: [0.0, relief_m * 0.2, 0.0],
+            theta: 0.6,
+            phi: 1.0,
+            radius: size * 1.3,
+            size,
         }
     }
 
     fn eye(&self) -> [f32; 3] {
-        let (sy, cy) = self.yaw.sin_cos();
-        let (sp, cp) = self.pitch.sin_cos();
-        let t = self.target;
+        let (st, ct) = self.theta.sin_cos();
+        let (sp, cp) = self.phi.sin_cos();
         [
-            t[0] + self.distance * cp * sy,
-            t[1] + self.distance * sp,
-            t[2] + self.distance * cp * cy,
+            self.radius * sp * st,
+            self.radius * cp,
+            self.radius * sp * ct,
         ]
     }
 
     fn view_proj(&self, aspect: f32) -> [[f32; 4]; 4] {
-        let near = self.distance * 0.01;
-        let far = self.distance * 20.0;
+        let near = (self.size * 0.001).max(0.1);
+        let far = self.size * 50.0;
         mul(
-            perspective(45f32.to_radians(), aspect, near, far),
-            look_at(self.eye(), self.target),
+            perspective(50f32.to_radians(), aspect, near, far),
+            look_at(self.eye(), [0.0, 0.0, 0.0]),
         )
     }
 }
@@ -199,6 +207,8 @@ struct Gpu {
 
 struct Targets {
     size: [u32; 2],
+    /// The colour texture (what egui shows; Still reads it back).
+    color: wgpu::Texture,
     /// The sRGB view we render (or resolve) into.
     target: wgpu::TextureView,
     msaa: Option<wgpu::TextureView>,
@@ -235,7 +245,7 @@ impl Default for Viewport {
             mesh: None,
             pending: None,
             info: None,
-            camera: Camera::fit([1.0, 1.0], 0.0),
+            camera: Camera::fit([1.0, 1.0]),
             sun: [0.0, 1.0, 0.0],
             dirty: true,
             rect: Rect::NOTHING,
@@ -251,29 +261,33 @@ impl Viewport {
     /// extent changes (a new project), not on every refresh.
     pub fn set_terrain(&mut self, pv: &Preview, extent_m: [f32; 2]) {
         let (w, h) = (pv.width.max(2), pv.height.max(2));
-        let at = |x: u32, y: u32| {
-            let i = (y.min(pv.height - 1) * pv.width + x.min(pv.width - 1)) as usize;
-            pv.min + f32::from(pv.data[i]) / 65535.0 * (pv.max - pv.min)
+        let q = |x: u32, y: u32| {
+            pv.data[(y.min(pv.height - 1) * pv.width + x.min(pv.width - 1)) as usize]
         };
-        let relief = (pv.max - pv.min).max(1e-3);
+        let at = |x: u32, y: u32| pv.min + f32::from(q(x, y)) / 65535.0 * (pv.max - pv.min);
         let (dx, dz) = (extent_m[0] / (w - 1) as f32, extent_m[1] / (h - 1) as f32);
         let mut vertices = Vec::with_capacity((w * h) as usize);
         for y in 0..h {
             for x in 0..w {
-                let hh = at(x, y);
-                // Central differences (one-sided at the border) for the normal.
+                let height = at(x, y);
+                // Central differences (one-sided at the border). The preview's row 0 is the south
+                // edge (+z), as in the desktop, so z falls as the row index grows.
                 let (l, r) = (at(x.saturating_sub(1), y), at(x + 1, y));
-                let (n, s) = (at(x, y.saturating_sub(1)), at(x, y + 1));
+                let (south, north) = (at(x, y.saturating_sub(1)), at(x, y + 1));
                 let nx = (l - r) / (dx * (x.min(w - 2) + 1 - x.saturating_sub(1)) as f32);
-                let nz = (n - s) / (dz * (y.min(h - 2) + 1 - y.saturating_sub(1)) as f32);
+                let nz = (north - south) / (dz * (y.min(h - 2) + 1 - y.saturating_sub(1)) as f32);
+                let normal = normalize([nx, 1.0, nz]);
+                // Steep faces read as rock regardless of altitude (the desktop's slope blend).
+                let slope = ((1.0 - normal[1]) * 1.4).clamp(0.0, 1.0);
+                let c = ramp(q(x, y));
                 vertices.push(Vertex {
                     pos: [
                         x as f32 * dx - extent_m[0] / 2.0,
-                        hh - pv.min,
-                        y as f32 * dz - extent_m[1] / 2.0,
+                        height,
+                        extent_m[1] / 2.0 - y as f32 * dz,
                     ],
-                    normal: normalize([nx, 1.0, nz]),
-                    h: (hh - pv.min) / relief,
+                    normal,
+                    color: [0, 1, 2].map(|i| c[i] + (ROCK[i] - c[i]) * slope),
                 });
             }
         }
@@ -292,7 +306,7 @@ impl Viewport {
             triangles: indices.len() as u64 / 3,
         });
         if refit {
-            self.camera = Camera::fit(extent_m, pv.max - pv.min);
+            self.camera = Camera::fit(extent_m);
         }
         self.pending = Some((vertices, indices));
         self.dirty = true;
@@ -323,6 +337,62 @@ impl Viewport {
         self.rect
     }
 
+    /// The last rendered frame as RGBA8 rows (Still): `(width, height, pixels)`.
+    pub fn capture(&self, rs: &RenderState) -> Option<(u32, u32, Vec<u8>)> {
+        let t = self.targets.as_ref()?;
+        self.mesh.as_ref()?;
+        let [w, h] = t.size;
+        let row = (w * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
+            * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let buffer = rs.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("still"),
+            size: u64::from(row * h),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = rs
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("still"),
+            });
+        encoder.copy_texture_to_buffer(
+            t.color.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(row),
+                    rows_per_image: Some(h),
+                },
+            },
+            wgpu::Extent3d {
+                width: w,
+                height: h,
+                depth_or_array_layers: 1,
+            },
+        );
+        let index = rs.queue.submit([encoder.finish()]);
+        let slice = buffer.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |r| {
+            let _ = tx.send(r);
+        });
+        rs.device
+            .poll(wgpu::PollType::Wait {
+                submission_index: Some(index),
+                timeout: Some(std::time::Duration::from_secs(5)),
+            })
+            .ok()?;
+        rx.recv().ok()?.ok()?;
+        let data = slice.get_mapped_range().ok()?;
+        let mut out = Vec::with_capacity((w * h * 4) as usize);
+        for y in 0..h as usize {
+            let start = y * row as usize;
+            out.extend_from_slice(&data[start..start + (w * 4) as usize]);
+        }
+        Some((w, h, out))
+    }
+
     /// How many times the 3-D scene has been rendered (tests: a camera move re-renders).
     pub fn renders(&self) -> u64 {
         self.renders
@@ -335,7 +405,8 @@ impl Viewport {
         self.rect = rect;
         self.handle_input(ui, &resp);
         let painter = ui.painter_at(rect);
-        painter.rect_filled(rect, 0.0, color::BG0);
+        painter.rect_filled(rect, 12.0, color::BG0);
+        crate::look::ring(ui, rect);
         let Some(rs) = rs else {
             notice(
                 &painter,
@@ -374,8 +445,10 @@ impl Viewport {
             self.dirty = false;
         }
         if let Some(t) = &self.targets {
-            let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-            painter.image(t.tex_id, rect, uv, Color32::WHITE);
+            egui::Image::from_texture(egui::load::SizedTexture::new(t.tex_id, rect.size()))
+                .corner_radius(12.0)
+                .paint_at(ui, rect);
+            crate::look::ring(ui, rect);
         }
         if let Some(i) = &self.info {
             let text = format!(
@@ -398,33 +471,26 @@ impl Viewport {
         }
     }
 
+    /// The desktop's controls: either button drags orbit (0.005 rad per point), the wheel zooms
+    /// (radius × (1 + Δ · 0.001) within 0.02–20 × the world's size).
     fn handle_input(&mut self, ui: &egui::Ui, resp: &egui::Response) {
         let d = resp.drag_delta();
-        if resp.dragged_by(PointerButton::Primary) && d != egui::Vec2::ZERO {
-            self.camera.yaw -= d.x * 0.008;
-            self.camera.pitch = (self.camera.pitch + d.y * 0.008).clamp(0.05, 1.5);
-            self.dirty = true;
-        }
-        if resp.dragged_by(PointerButton::Secondary) && d != egui::Vec2::ZERO {
-            // Pan on the ground plane, scaled so the ground follows the pointer roughly.
-            let k = self.camera.distance * 0.0015;
-            let (sy, cy) = self.camera.yaw.sin_cos();
-            self.camera.target[0] -= (cy * d.x - sy * d.y) * k;
-            self.camera.target[2] -= (-sy * d.x - cy * d.y) * k;
+        if (resp.dragged_by(PointerButton::Primary) || resp.dragged_by(PointerButton::Secondary))
+            && d != egui::Vec2::ZERO
+        {
+            self.camera.theta -= d.x * 0.005;
+            self.camera.phi = (self.camera.phi - d.y * 0.005).clamp(0.15, 1.5);
             self.dirty = true;
         }
         if resp.hovered() {
+            // egui's scroll delta is the browser's `deltaY` with the sign flipped.
             let scroll = ui.input(|i| i.smooth_scroll_delta.y);
             if scroll != 0.0 {
-                self.camera.distance = (self.camera.distance * (-scroll * 0.002).exp()).max(1.0);
+                let size = self.camera.size;
+                self.camera.radius =
+                    (self.camera.radius * (1.0 - scroll * 0.001)).clamp(size * 0.02, size * 20.0);
                 self.dirty = true;
             }
-        }
-        if resp.double_clicked()
-            && let Some(i) = &self.info
-        {
-            self.camera = Camera::fit(i.extent_m, i.range_m[1] - i.range_m[0]);
-            self.dirty = true;
         }
     }
 
@@ -546,7 +612,7 @@ fn create_gpu(rs: &RenderState) -> Gpu {
         bind_group_layouts: &[Some(&layout)],
         immediate_size: 0,
     });
-    let attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32];
+    let attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x3];
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("terrain"),
         layout: Some(&pipeline_layout),
@@ -617,7 +683,9 @@ fn create_targets(
         "viewport colour",
         COLOR,
         1,
-        wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        wgpu::TextureUsages::RENDER_ATTACHMENT
+            | wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_SRC,
         &[COLOR_SRGB],
     );
     let view_as = |format| {
@@ -660,6 +728,7 @@ fn create_targets(
     };
     Targets {
         size,
+        color,
         target,
         msaa,
         depth,
@@ -703,18 +772,27 @@ mod tests {
     }
 
     #[test]
-    fn the_camera_target_projects_to_the_screen_centre_inside_the_depth_range() {
-        let cam = Camera::fit([4096.0, 4096.0], 400.0);
-        let p = apply(cam.view_proj(1.5), cam.target);
+    fn the_home_view_is_the_desktops_and_looks_at_the_origin() {
+        let cam = Camera::fit([4096.0, 2048.0]);
+        assert_eq!((cam.theta, cam.phi, cam.radius), (0.6, 1.0, 4096.0 * 1.3));
+        let p = apply(cam.view_proj(1.5), [0.0, 0.0, 0.0]);
         assert!(p[0].abs() < 1e-4 && p[1].abs() < 1e-4, "{p:?}");
         assert!(p[2] > 0.0 && p[2] < 1.0, "{p:?}");
-        // Above the target appears above the centre (y up on screen).
-        let up = apply(cam.view_proj(1.5), [0.0, cam.target[1] + 100.0, 0.0]);
+        let up = apply(cam.view_proj(1.5), [0.0, 100.0, 0.0]);
         assert!(up[1] > 0.0, "{up:?}");
     }
 
     #[test]
-    fn a_preview_becomes_a_grid_mesh_with_upward_normals_on_flat_ground() {
+    fn the_ramp_matches_the_desktops_stops() {
+        assert_eq!(ramp(0), [0.16, 0.3, 0.2]);
+        assert_eq!(ramp(u16::MAX), [0.95, 0.95, 0.97]);
+        // Index 127 of 255 (t = 0.498): just short of the 0.5 stop.
+        let mid = ramp(127 << 8);
+        assert!((mid[0] - 0.618).abs() < 0.01, "{mid:?}");
+    }
+
+    #[test]
+    fn a_preview_becomes_the_desktops_mesh() {
         let pv = Preview {
             width: 3,
             height: 2,
@@ -726,10 +804,15 @@ mod tests {
         v.set_terrain(&pv, [200.0, 100.0]);
         let (verts, idx) = v.pending.as_ref().expect("mesh");
         assert_eq!((verts.len(), idx.len()), (6, 2 * 2 * 3));
-        assert_eq!(verts[0].pos, [-100.0, 0.0, -50.0]);
-        assert_eq!(verts[5].pos, [100.0, 10.0, 50.0]);
-        assert_eq!((verts[0].h, verts[5].h), (0.0, 1.0));
+        // Row 0 is the south edge (+z); heights are absolute.
+        assert_eq!(verts[0].pos, [-100.0, 10.0, 50.0]);
+        assert_eq!(verts[5].pos, [100.0, 20.0, -50.0]);
         assert_eq!(verts[0].normal, [0.0, 1.0, 0.0]);
+        assert_eq!(verts[0].color, [0.16, 0.3, 0.2]);
+        // Normals lean away from higher ground: west of the raised corner (vertex 4) towards −x,
+        // south of it (vertex 2, the ground rising northwards) towards +z.
+        assert!(verts[4].normal[0] < 0.0, "{:?}", verts[4].normal);
+        assert!(verts[2].normal[2] > 0.0, "{:?}", verts[2].normal);
         assert_eq!(v.info().expect("info").triangles, 4);
     }
 }

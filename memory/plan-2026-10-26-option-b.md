@@ -71,3 +71,19 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   write from another client refreshing Studio, and accessibility; Linux CI installs lavapipe.
   `deny.toml`: epaint_default_fonts font-licence exception; zbus 5 "unmaintained" ignores
   (accesskit_unix, no upgrade).
+- P2b slice 1: the Lightroom slider in both UIs (React `Range` on the native input — keyboard,
+  a11y and Playwright `fill()` unchanged — with Spectrum's 2 px track, ring handle, track gap,
+  double-click reset; egui `widgets::Range` drawn the same, kittest-tested); Studio chrome ported
+  1:1: header (brand mark SVG, version, `name — res² · extent m`, lucide toolbar rendered from the
+  desktop's own lucide-react by `scripts/studio-icons.mjs`, viewport readout, layer picker),
+  `jd-panel` cards, `▾` sections, `Field` rows, Project card (Path/Name/Extent/Resolution/Preset,
+  New/Open/Save, Import, id/dirty/journal), log card (local time, `describe` format); native
+  dialogs via rfd; Still writes exports/stills/ from the render target; the desktop's camera
+  (θ 0.6, φ 1.0, r 1.3·size, fov 50°, both buttons orbit, wheel zoom), ramp stops, slope rock,
+  absolute heights and south-row orientation (Studio's mesh had been mirrored N/S).
+  Side-by-side (`e2e/parity-capture.spec.ts` vs the window test's `capture_for_docs`): left to do —
+  P3: the desktop's default look is textured PBR (`terrain.textures`), sky dome (`sky.preview`),
+  framed block + rim, viewport chrome (inner toolbar, compass, ruler, hints, layer strip);
+  P4: right column (Terrain · Noise, Export, …) and the rest of the left (Real world, Reference
+  image, Layers, Settings). The graph area is the Editor window by design.
+

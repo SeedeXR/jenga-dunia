@@ -1,0 +1,180 @@
+//! The desktop UI's building blocks in egui — `apps/desktop/src/index.css` (`.btn`,
+//! `.btn-primary`, `.jd-panel`, `.jd-section`) and `App.tsx` (`Field`, `inputCls`, the toolbar's
+//! icon buttons) — so Studio and the Editor look the same (owner rule, ADR-0017).
+
+use eframe::egui::{
+    self, Align, Color32, CornerRadius, Frame, ImageSource, Layout, Margin, Response, RichText,
+    Sense, Shadow, Stroke, StrokeKind, Ui, WidgetInfo, accesskit::Role, pos2, vec2,
+};
+
+use crate::theme::{self, color};
+
+/// `border-white/5`.
+pub const HAIRLINE: Color32 = Color32::from_rgba_premultiplied(13, 13, 13, 13);
+/// `border-white/10`.
+pub const HAIRLINE_HOVER: Color32 = Color32::from_rgba_premultiplied(26, 26, 26, 26);
+
+/// `.jd-panel`: a floating card (`rounded-xl bg-jd-bg-1`, a soft shadow, a `white/5` ring).
+pub fn card() -> Frame {
+    Frame::new()
+        .fill(color::BG1)
+        .corner_radius(CornerRadius::same(12))
+        .stroke(Stroke::new(1.0, HAIRLINE))
+        .shadow(Shadow {
+            offset: [0, 10],
+            blur: 30,
+            spread: 0,
+            color: Color32::from_black_alpha(115),
+        })
+        .inner_margin(Margin::same(12))
+}
+
+/// `.jd-section`: a chevron (`▾`, `text-[10px] text-jd-fg-2`) and a semibold 12.5 px title.
+pub fn section(ui: &mut Ui, title: &str) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        let (r, _) = ui.allocate_exact_size(vec2(8.0, 12.0), Sense::hover());
+        let c = r.center();
+        ui.painter().add(egui::Shape::convex_polygon(
+            vec![
+                pos2(c.x - 3.5, c.y - 1.75),
+                pos2(c.x + 3.5, c.y - 1.75),
+                pos2(c.x, c.y + 2.25),
+            ],
+            color::FG2,
+            Stroke::NONE,
+        ));
+        ui.label(
+            RichText::new(title)
+                .font(theme::semibold(12.5))
+                .color(color::FG0),
+        );
+    });
+    ui.add_space(8.0);
+}
+
+/// `Field`: the label (`text-xs text-jd-fg-1`) on the left, the control on the right, `py-1`.
+pub fn field(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui)) {
+    ui.add_space(2.0);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(label).size(12.0).color(color::FG1));
+        ui.with_layout(Layout::right_to_left(Align::Center), add);
+    });
+    ui.add_space(2.0);
+}
+
+/// `inputCls`: a right-aligned text field `w-28` (112 px) on `bg-jd-bg-2`.
+pub fn input(ui: &mut Ui, value: &mut String, width: f32, hint: &str, name: &str) -> Response {
+    let r = ui.add(
+        egui::TextEdit::singleline(value)
+            .desired_width(width)
+            .align(egui::Align2::RIGHT_CENTER)
+            .font(egui::FontId::proportional(12.0))
+            .hint_text(hint),
+    );
+    let name = name.to_owned();
+    r.widget_info(|| WidgetInfo::labeled(Role::TextInput, true, &name));
+    r
+}
+
+/// An icon from `assets/icons/` (lucide, rendered by `scripts/studio-icons.mjs`).
+pub fn icon(name: &str) -> ImageSource<'static> {
+    macro_rules! icons {
+        ($($n:literal),* $(,)?) => {
+            match name {
+                $($n => egui::include_image!(concat!("../assets/icons/", $n, ".svg")),)*
+                _ => egui::include_image!("../assets/icons/circle.svg"),
+            }
+        };
+    }
+    icons!(
+        "file-plus",
+        "folder-open",
+        "save",
+        "file-input",
+        "download",
+        "undo-2",
+        "redo-2",
+        "wand-2",
+        "play",
+        "camera",
+        "maximize-2",
+        "folder-search",
+        "folder-plus",
+        "upload",
+        "globe",
+        "workflow",
+        "panel-left-close",
+        "panel-left-open",
+    )
+}
+
+/// `.btn` (or `.btn-primary` when `primary`): an optional 14 px icon and 12 px text.
+pub fn button(
+    ui: &mut Ui,
+    icon_name: Option<&str>,
+    text: &str,
+    primary: bool,
+    enabled: bool,
+) -> Response {
+    let fg = if primary { Color32::WHITE } else { color::FG0 };
+    let label = RichText::new(text).size(12.0).color(fg);
+    let mut b = match icon_name {
+        Some(i) => egui::Button::image_and_text(
+            egui::Image::new(icon(i))
+                .fit_to_exact_size(vec2(14.0, 14.0))
+                .tint(fg),
+            label,
+        ),
+        None => egui::Button::new(label),
+    };
+    if primary {
+        b = b.fill(color::PRIMARY).stroke(Stroke::NONE);
+    }
+    ui.add_enabled(enabled, b)
+}
+
+/// The toolbar's icon buttons: a 15 px icon in `fg-1`, `p-1.5`, `hover:bg-jd-bg-3`; the
+/// tooltip is also the accessible name.
+pub fn icon_button(ui: &mut Ui, icon_name: &str, tip: &str, enabled: bool) -> Response {
+    let size = vec2(27.0, 27.0);
+    let (rect, resp) = ui.allocate_exact_size(
+        size,
+        if enabled {
+            Sense::click()
+        } else {
+            Sense::hover()
+        },
+    );
+    if ui.is_rect_visible(rect) {
+        let hovered = enabled && resp.hovered();
+        if hovered {
+            ui.painter().rect_filled(rect, 6.0, color::BG3);
+        }
+        let tint = match (enabled, hovered) {
+            (false, _) => color::FG1.gamma_multiply(0.3),
+            (true, true) => color::FG0,
+            (true, false) => color::FG1,
+        };
+        egui::Image::new(icon(icon_name)).tint(tint).paint_at(
+            ui,
+            egui::Rect::from_center_size(rect.center(), vec2(15.0, 15.0)),
+        );
+    }
+    let tip_owned = tip.to_owned();
+    resp.widget_info(|| WidgetInfo::labeled(Role::Button, enabled, &tip_owned));
+    resp.on_hover_text(tip)
+}
+
+/// The toolbar's separators (`mx-1 h-4 w-px bg-jd-line`).
+pub fn toolbar_separator(ui: &mut Ui) {
+    let (r, _) = ui.allocate_exact_size(vec2(9.0, 16.0), Sense::hover());
+    ui.painter()
+        .vline(r.center().x, r.y_range(), Stroke::new(1.0, color::LINE));
+}
+
+/// A rounded frame around a rect (the viewport's `rounded-xl ring-1 ring-white/5`).
+pub fn ring(ui: &Ui, rect: egui::Rect) {
+    ui.painter()
+        .rect_stroke(rect, 12.0, Stroke::new(1.0, HAIRLINE), StrokeKind::Inside);
+}

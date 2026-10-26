@@ -3,7 +3,9 @@
 
 pub mod app;
 pub mod editor;
+pub mod look;
 pub mod theme;
 pub mod viewport;
+pub mod widgets;
 
 pub use app::{Options, StudioApp};

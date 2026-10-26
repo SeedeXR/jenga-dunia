@@ -9,6 +9,7 @@ import { type Brush as BrushTool, type CaveKindName, type NoiseSettings, useStor
 import type { FractalKind, HeightmapFormat, NoiseKind } from "./lib/ops.gen";
 import type { Preview } from "./lib/api";
 import { LANGS, type Lang, translate } from "./lib/i18n";
+import { Range } from "./components/Range";
 
 /** A resizable panel's size, kept in the browser store (`jd.layout.<key>`) and restored on launch: the
  *  inline style sets the saved px, a ResizeObserver writes every change (try/catch: storage may be off). */
@@ -974,7 +975,7 @@ export default function App() {
                 </Field>
               )}
               <Field label={`Hardness ${s.brush.hardness.toFixed(2)}`}>
-                <input type="range" min={0} max={1} step={0.05} value={s.brush.hardness} onChange={(e) => s.setBrush({ hardness: Number(e.target.value) })} className="w-28" title="0 = soft falloff over the whole radius, 1 = hard edge" data-testid="brush-hardness" />
+                <Range min={0} max={1} step={0.05} value={s.brush.hardness} onChange={(e) => s.setBrush({ hardness: Number(e.target.value) })} className="w-28" title="0 = soft falloff over the whole radius, 1 = hard edge" onReset={() => s.setBrush({ hardness: 0 })} data-testid="brush-hardness" />
               </Field>
               <p className="mb-2 text-xs text-jd-fg-2">
                 {s.brush.mode === "raise" ? "Drag on the terrain to raise it." : s.brush.mode === "lower" ? "Drag on the terrain to lower it." : s.brush.mode === "smooth" ? "Drag to blend heights towards their local mean." : "Drag to pull heights towards the target height."} Each stroke is one undo step.
@@ -1024,7 +1025,7 @@ export default function App() {
                 <span className="text-xs" data-testid="grid-count">{s.grid.selected.length} cell{s.grid.selected.length === 1 ? "" : "s"}</span>
               </Field>
               <Field label={`Smoothness ${s.grid.smoothness.toFixed(2)}`}>
-                <input type="range" min={0} max={1} step={0.05} value={s.grid.smoothness} onChange={(e) => s.setGrid({ smoothness: Number(e.target.value) })} className="w-28" title="How far the selection's edge blends into its surroundings (0 = hard cell edges)" data-testid="grid-smoothness" />
+                <Range min={0} max={1} step={0.05} value={s.grid.smoothness} onChange={(e) => s.setGrid({ smoothness: Number(e.target.value) })} className="w-28" title="How far the selection's edge blends into its surroundings (0 = hard cell edges)" onReset={() => s.setGrid({ smoothness: 0.25 })} data-testid="grid-smoothness" />
               </Field>
               <Field label="Height (m)">
                 <input className={inputCls} type="number" value={s.grid.height_m} onChange={(e) => s.setGrid({ height_m: Number(e.target.value) })} data-testid="grid-height" />
@@ -1079,13 +1080,13 @@ export default function App() {
             <input type="checkbox" checked={s.pbr} onChange={(e) => s.setPbr(e.target.checked)} title="Shade the terrain with baked albedo, normal and roughness maps (full-field relief at any preview LOD); off = height-ramp vertex colours" data-testid="pbr-toggle" />
           </Field>
           <Field label={`Azimuth ${s.sun.azimuth_deg}°`}>
-            <input className="w-28" type="range" min={0} max={359} value={s.sun.azimuth_deg} onChange={(e) => s.setSun({ azimuth_deg: Number(e.target.value) })} title="Direction the light comes from, clockwise from north" data-testid="sun-azimuth" />
+            <Range className="w-28" min={0} max={359} value={s.sun.azimuth_deg} onChange={(e) => s.setSun({ azimuth_deg: Number(e.target.value) })} title="Direction the light comes from, clockwise from north" onReset={() => s.setSun({ azimuth_deg: 140 })} data-testid="sun-azimuth" />
           </Field>
           <Field label={`Elevation ${s.sun.elevation_deg}°`}>
-            <input className="w-28" type="range" min={3} max={90} value={s.sun.elevation_deg} onChange={(e) => s.setSun({ elevation_deg: Number(e.target.value) })} title="Height of the sun above the horizon; low sun is warm and long-shadowed" data-testid="sun-elevation" />
+            <Range className="w-28" min={3} max={90} value={s.sun.elevation_deg} onChange={(e) => s.setSun({ elevation_deg: Number(e.target.value) })} title="Height of the sun above the horizon; low sun is warm and long-shadowed" onReset={() => s.setSun({ elevation_deg: 35 })} data-testid="sun-elevation" />
           </Field>
           <Field label={`Turbidity ${s.sun.turbidity}`}>
-            <input className="w-28" type="range" min={2} max={10} step={0.5} value={s.sun.turbidity} onChange={(e) => s.setSun({ turbidity: Number(e.target.value) })} title="Atmospheric haze for the sky dome: 2 clear mountain air, 3 clear, 6 hazy, 10 thick haze (Preetham daylight model)" data-testid="sun-turbidity" />
+            <Range className="w-28" min={2} max={10} step={0.5} value={s.sun.turbidity} onChange={(e) => s.setSun({ turbidity: Number(e.target.value) })} title="Atmospheric haze for the sky dome: 2 clear mountain air, 3 clear, 6 hazy, 10 thick haze (Preetham daylight model)" onReset={() => s.setSun({ turbidity: 3 })} data-testid="sun-turbidity" />
           </Field>
           <Field label="HDRI">
             <span className="flex gap-1">
@@ -1102,13 +1103,13 @@ export default function App() {
             </span>
           </Field>
           <Field label={`Exposure ${s.post.exposure}`}>
-            <input className="w-28" type="range" min={0.25} max={4} step={0.05} value={s.post.exposure} onChange={(e) => s.setPost({ exposure: Number(e.target.value) })} title="Tone-mapping exposure (ACES while any effect is on); 1 = the plain render" data-testid="post-exposure" />
+            <Range className="w-28" min={0.25} max={4} step={0.05} value={s.post.exposure} onChange={(e) => s.setPost({ exposure: Number(e.target.value) })} title="Tone-mapping exposure (ACES while any effect is on); 1 = the plain render" onReset={() => s.setPost({ exposure: 1 })} fillFrom={1} data-testid="post-exposure" />
           </Field>
           <Field label={`Bloom ${s.post.bloom}`}>
-            <input className="w-28" type="range" min={0} max={1} step={0.05} value={s.post.bloom} onChange={(e) => s.setPost({ bloom: Number(e.target.value) })} title="Bloom strength on the bright parts (sun glints, lava glow); 0 = off" data-testid="post-bloom" />
+            <Range className="w-28" min={0} max={1} step={0.05} value={s.post.bloom} onChange={(e) => s.setPost({ bloom: Number(e.target.value) })} title="Bloom strength on the bright parts (sun glints, lava glow); 0 = off" onReset={() => s.setPost({ bloom: 0 })} data-testid="post-bloom" />
           </Field>
           <Field label={`Vignette ${s.post.vignette}`}>
-            <input className="w-28" type="range" min={0} max={1} step={0.05} value={s.post.vignette} onChange={(e) => s.setPost({ vignette: Number(e.target.value) })} title="Darken the frame's corners; 0 = off" data-testid="post-vignette" />
+            <Range className="w-28" min={0} max={1} step={0.05} value={s.post.vignette} onChange={(e) => s.setPost({ vignette: Number(e.target.value) })} title="Darken the frame's corners; 0 = off" onReset={() => s.setPost({ vignette: 0 })} data-testid="post-vignette" />
           </Field>
           <Field label="Camera">
             <span className="flex flex-wrap gap-1">
@@ -1150,13 +1151,13 @@ export default function App() {
             </ol>
           )}
           <Field label={`Clouds ${Math.round(s.sun.clouds * 100)} %`}>
-            <input className="w-28" type="range" min={0} max={1} step={0.05} value={s.sun.clouds} onChange={(e) => s.setSun({ clouds: Number(e.target.value) })} title="Cloud cover on the sky dome and in the HDRI bake: a seeded cumulus-like noise layer, brighter on the sun side" data-testid="sky-clouds" />
+            <Range className="w-28" min={0} max={1} step={0.05} value={s.sun.clouds} onChange={(e) => s.setSun({ clouds: Number(e.target.value) })} title="Cloud cover on the sky dome and in the HDRI bake: a seeded cumulus-like noise layer, brighter on the sun side" onReset={() => s.setSun({ clouds: 0 })} data-testid="sky-clouds" />
           </Field>
           <Field label={`Fog ${Math.round(s.sun.fog * 100)} %`}>
-            <input className="w-28" type="range" min={0} max={1} step={0.05} value={s.sun.fog} onChange={(e) => s.setSun({ fog: Number(e.target.value) })} title="Viewport fog: 0 keeps the faint aerial perspective, 1 closes the view within the world's width (a look setting — bakes and exports are untouched)" data-testid="sky-fog" />
+            <Range className="w-28" min={0} max={1} step={0.05} value={s.sun.fog} onChange={(e) => s.setSun({ fog: Number(e.target.value) })} title="Viewport fog: 0 keeps the faint aerial perspective, 1 closes the view within the world's width (a look setting — bakes and exports are untouched)" onReset={() => s.setSun({ fog: 0 })} data-testid="sky-fog" />
           </Field>
           <Field label={`Rain ${Math.round(s.sun.rain * 100)} %`}>
-            <input className="w-28" type="range" min={0} max={1} step={0.05} value={s.sun.rain} onChange={(e) => s.setSun({ rain: Number(e.target.value) })} title="Rain falling in the viewport (look only); the rain itself is the jd.climate.rain node's field — wet surfaces come from a material on that layer" data-testid="sun-rain" />
+            <Range className="w-28" min={0} max={1} step={0.05} value={s.sun.rain} onChange={(e) => s.setSun({ rain: Number(e.target.value) })} title="Rain falling in the viewport (look only); the rain itself is the jd.climate.rain node's field — wet surfaces come from a material on that layer" onReset={() => s.setSun({ rain: 0 })} data-testid="sun-rain" />
           </Field>
           <h2 className="mt-4 mb-2 jd-section">{tr("Scatter")}</h2>
           <Field label="Mask">
@@ -1213,7 +1214,7 @@ export default function App() {
             </button>
           </Field>
           <Field label={`X-ray ${Math.round(s.xray * 100)} %`}>
-            <input className="w-28" type="range" min={0} max={0.9} step={0.05} value={s.xray} onChange={(e) => s.setXray(Number(e.target.value))} title="See through the terrain to the caves under it" data-testid="caves-xray" />
+            <Range className="w-28" min={0} max={0.9} step={0.05} value={s.xray} onChange={(e) => s.setXray(Number(e.target.value))} title="See through the terrain to the caves under it" onReset={() => s.setXray(0)} data-testid="caves-xray" />
           </Field>
           {caveNodes.map((n, ci) => {
             const v = s.caves.find((c) => c.id === n.id);
@@ -1420,7 +1421,7 @@ export default function App() {
           {noiseNode && (
             <>
               <Field label={`Strength ${Number(noiseNode.params?.strength ?? 1).toFixed(2)}`}>
-                <input className="w-28" type="range" min={0} max={2} step={0.05} defaultValue={Number(noiseNode.params?.strength ?? 1)} key={`str-${noiseNode.id}-${String(noiseNode.params?.strength ?? 1)}`} onPointerUp={(e) => void s.setParam(noiseNode.id, "strength", Number((e.target as HTMLInputElement).value))} onKeyUp={(e) => void s.setParam(noiseNode.id, "strength", Number((e.target as HTMLInputElement).value))} title="General strength: scales the relief around the middle of the height range (World Creator's General Strength)" data-testid="noise-strength" />
+                <Range className="w-28" min={0} max={2} step={0.05} defaultValue={Number(noiseNode.params?.strength ?? 1)} key={`str-${noiseNode.id}-${String(noiseNode.params?.strength ?? 1)}`} onPointerUp={(e) => void s.setParam(noiseNode.id, "strength", Number((e.target as HTMLInputElement).value))} onKeyUp={(e) => void s.setParam(noiseNode.id, "strength", Number((e.target as HTMLInputElement).value))} title="General strength: scales the relief around the middle of the height range (World Creator's General Strength)" onReset={() => void s.setParam(noiseNode.id, "strength", 1)} fillFrom={1} data-testid="noise-strength" />
               </Field>
               <div className="mb-2" data-testid="octave-bars" title="Strength per octave, coarsest first (fbm): drag a bar and release to apply; double-click to reset all to 1">
                 <div className="mb-1 flex items-center justify-between text-xs text-jd-fg-1">

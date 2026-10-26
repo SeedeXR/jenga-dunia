@@ -1,7 +1,8 @@
-//! Studio's window (ADR-0017, Phase 2): the engine server, the viewport, the Project, Terrain,
-//! Layers and Editor panels, and the log. Every operation runs on a worker thread through the
-//! same `Server::invoke` the Editor's calls use (client `gui-studio`), so Studio's own writes
-//! are announced to the Editor and the Editor's writes refresh the viewport.
+//! Studio's window (ADR-0017): the engine server, the viewport and the desktop UI around it —
+//! the same header, toolbar, Project card and log as `apps/desktop/src/App.tsx` (owner rule: no
+//! visible change from the process split). Every operation runs on a worker thread through the
+//! same `Server::invoke` the Editor's calls use (client `gui-studio`), so Studio's own writes are
+//! announced to the Editor and the Editor's writes refresh the viewport.
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -9,19 +10,32 @@ use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Instant;
 
-use eframe::egui::{self, RichText};
+use eframe::egui::{self, Align, Layout, Margin, RichText, ScrollArea, Stroke};
 use jd_core::{Request, Response, Status};
 use jd_ipc::Server;
 use serde_json::{Value, json};
 
 use crate::editor::{self, Editor};
-use crate::theme::color;
+use crate::look;
+use crate::theme::{self, color};
 use crate::viewport::Viewport;
 
-/// The viewport mesh keeps at most this many samples along a side (≈ 0.5 M triangles).
-const PREVIEW_MAX_PX: u32 = 512;
-/// Log lines kept.
-const LOG_LINES: usize = 500;
+/// The viewport mesh keeps at most this many samples along a side: the desktop's default
+/// `previewMaxPx` (1024² ≈ 2 M triangles; its 2048² option arrives with Settings, P4).
+const PREVIEW_MAX_PX: u32 = 1024;
+/// Log lines kept (the desktop keeps 200).
+const LOG_LINES: usize = 200;
+
+/// World size presets, as the desktop's `PRESETS` (Unity / Unreal want 2ⁿ+1 samples).
+pub const PRESETS: [(&str, u32, f64); 7] = [
+    ("Preview 512² · 2 km", 512, 2048.0),
+    ("Square 2048² · 8 km", 2048, 8192.0),
+    ("Square 4096² · 16 km", 4096, 16384.0),
+    ("Unity 1025² · 2 km", 1025, 2048.0),
+    ("Unity / Unreal 2049² · 8 km", 2049, 8192.0),
+    ("Unreal 4033² · 16 km", 4033, 16128.0),
+    ("Unity 4097² · 16 km", 4097, 16384.0),
+];
 
 /// How Studio starts.
 #[derive(Debug, Default, Clone)]
@@ -38,33 +52,49 @@ enum Tag {
     /// A button: log it, then refresh.
     User,
     Info,
+    Graph,
     Layers,
     Stats(String),
-    Preview([f32; 2]),
+    Preview([f32; 2], u32, Instant),
 }
+
+type Step = Box<dyn FnOnce(&[Response]) -> Option<Request> + Send>;
 
 enum Msg {
     Reply {
         tag: Tag,
         response: Box<Response>,
-        ms: u64,
     },
+    /// A chain of operations run on one worker (import, export): their responses in order.
+    Chain(Vec<Response>),
     Event {
         topic: String,
         data: Value,
     },
     EditorExited(std::process::ExitStatus),
+    Log(String, Level),
 }
 
-/// One log line.
+/// A log line's colour.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Level {
+    /// `text-jd-fg-1`.
+    Info,
+    /// `text-jd-warn`.
+    Warn,
+    /// `text-jd-error`.
+    Error,
+}
+
+/// One log line, as the desktop prints it: local time, then `op: status` or the error.
 #[derive(Debug, Clone)]
 pub struct LogLine {
-    /// Seconds since Studio started.
-    pub at_s: f32,
+    /// `7:14:28 PM`.
+    pub time: String,
     /// The text.
     pub text: String,
-    /// Shown in the error colour.
-    pub error: bool,
+    /// Its colour.
+    pub level: Level,
 }
 
 /// The Studio application.
@@ -73,18 +103,24 @@ pub struct StudioApp {
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
     ctx: egui::Context,
-    started: Instant,
     project: Option<Value>,
+    graph: Value,
     layers: Vec<String>,
     layer: Option<String>,
     /// The 3-D view.
     pub viewport: Viewport,
     log: VecDeque<LogLine>,
-    in_flight: usize,
+    busy: usize,
+    reads: usize,
     refreshing: bool,
     refresh_again: bool,
+    preview: Option<(u32, f64, u64)>,
     path_input: String,
     name_input: String,
+    extent_input: String,
+    resolution_input: String,
+    import_input: String,
+    fullscreen: bool,
     editor: Option<Editor>,
     editor_error: Option<String>,
 }
@@ -93,7 +129,7 @@ impl StudioApp {
     /// Build the app around a bound engine server; installs the theme, starts the Editor when
     /// asked, and loads whatever project the engine has open.
     pub fn new(cc: &eframe::CreationContext<'_>, server: Arc<Server>, options: Options) -> Self {
-        crate::theme::install(&cc.egui_ctx);
+        theme::install(&cc.egui_ctx);
         let (tx, rx) = mpsc::channel();
         let (events, ctx) = (tx.clone(), cc.egui_ctx.clone());
         server.on_event(move |topic, data| {
@@ -108,24 +144,26 @@ impl StudioApp {
             tx,
             rx,
             ctx: cc.egui_ctx.clone(),
-            started: Instant::now(),
             project: None,
+            graph: Value::Null,
             layers: Vec::new(),
             layer: None,
             viewport: Viewport::default(),
             log: VecDeque::new(),
-            in_flight: 0,
+            busy: 0,
+            reads: 0,
             refreshing: false,
             refresh_again: false,
+            preview: None,
             path_input: String::new(),
             name_input: "World".into(),
+            extent_input: "4096".into(),
+            resolution_input: "1024".into(),
+            import_input: String::new(),
+            fullscreen: false,
             editor: None,
             editor_error: None,
         };
-        app.log(
-            format!("Engine listening (session {}).", app.server.session()),
-            false,
-        );
         if let Some(path) = &options.editor {
             app.start_editor(path.clone());
         }
@@ -149,9 +187,9 @@ impl StudioApp {
         &self.layers
     }
 
-    /// Engine calls still running.
+    /// Engine calls still running (buttons and refreshes).
     pub fn busy(&self) -> bool {
-        self.in_flight > 0 || self.refreshing
+        self.busy > 0 || self.reads > 0 || self.refreshing
     }
 
     /// The log, oldest first.
@@ -159,15 +197,46 @@ impl StudioApp {
         self.log.iter()
     }
 
-    fn log(&mut self, text: String, error: bool) {
+    fn log(&mut self, text: String, level: Level) {
         if self.log.len() == LOG_LINES {
             self.log.pop_front();
         }
-        self.log.push_back(LogLine {
-            at_s: self.started.elapsed().as_secs_f32(),
-            text,
-            error,
-        });
+        // `toLocaleTimeString()` in the desktop (en-US): 7:14:28 PM.
+        let time = jiff::Zoned::now().strftime("%-I:%M:%S %p").to_string();
+        self.log.push_back(LogLine { time, text, level });
+    }
+
+    /// The desktop's `describe`: `op: status (warnings)` or `op: CODE message — next`.
+    fn log_response(&mut self, r: &Response) {
+        if let Some(e) = &r.error {
+            let next = if e.next.is_empty() {
+                String::new()
+            } else {
+                format!(" — {}", e.next)
+            };
+            self.log(
+                format!("{}: {} {}{next}", r.op, e.code.as_str(), e.message),
+                Level::Error,
+            );
+            return;
+        }
+        let warns: Vec<String> = r
+            .warnings
+            .iter()
+            .map(|w| format!("{}: {}", w.code, w.message))
+            .collect();
+        let status = serde_json::to_value(r.status)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_owned))
+            .unwrap_or_default();
+        if warns.is_empty() {
+            self.log(format!("{}: {status}", r.op), Level::Info);
+        } else {
+            self.log(
+                format!("{}: {status} ({})", r.op, warns.join("; ")),
+                Level::Warn,
+            );
+        }
     }
 
     fn start_editor(&mut self, path: PathBuf) {
@@ -177,35 +246,69 @@ impl StudioApp {
             ctx.request_repaint();
         });
         if let editor::Status::Failed(msg) = &editor.status {
-            self.log(msg.clone(), true);
-        } else {
-            self.log("Editor started.".into(), false);
+            self.log(msg.clone(), Level::Error);
         }
         self.editor = Some(editor);
     }
 
-    /// Run an operation on a worker thread; its reply comes back as a message.
-    fn invoke(&mut self, tag: Tag, op: &str, params: Value) {
+    fn request(op: &str, params: Value) -> Request {
         let mut request = Request::new(op, params);
         request.client.get_or_insert_default().kind = "gui-studio".into();
+        request
+    }
+
+    /// Run an operation on a worker thread; its reply comes back as a message.
+    fn invoke(&mut self, tag: Tag, op: &str, params: Value) {
+        let request = Self::request(op, params);
         let (server, tx, ctx) = (self.server.clone(), self.tx.clone(), self.ctx.clone());
+        let user = matches!(tag, Tag::User);
         let spawned = std::thread::Builder::new()
             .name("studio-op".into())
             .spawn(move || {
-                let started = Instant::now();
                 let response = Box::new(server.invoke(request));
-                let ms = started.elapsed().as_millis() as u64;
-                let _ = tx.send(Msg::Reply { tag, response, ms });
+                let _ = tx.send(Msg::Reply { tag, response });
                 ctx.request_repaint();
             });
         match spawned {
-            Ok(_) => self.in_flight += 1,
-            Err(e) => self.log(format!("{op}: could not start a worker thread: {e}"), true),
+            Ok(_) if user => self.busy += 1,
+            Ok(_) => self.reads += 1,
+            Err(e) => self.log(
+                format!("{op}: could not start a worker thread: {e}"),
+                Level::Error,
+            ),
         }
     }
 
-    /// Re-read the project, its layers and the selected layer's preview (coalesced: a refresh
-    /// requested while one runs runs once more afterwards).
+    /// Run `steps` on one worker, each seeing the previous responses; stops at the first error.
+    fn chain(&mut self, steps: Vec<Step>) {
+        let (server, tx, ctx) = (self.server.clone(), self.tx.clone(), self.ctx.clone());
+        let spawned = std::thread::Builder::new()
+            .name("studio-chain".into())
+            .spawn(move || {
+                let mut done: Vec<Response> = Vec::new();
+                for step in steps {
+                    let Some(request) = step(&done) else { break };
+                    let r = server.invoke(request);
+                    let failed = r.status == Status::Error;
+                    done.push(r);
+                    if failed {
+                        break;
+                    }
+                }
+                let _ = tx.send(Msg::Chain(done));
+                ctx.request_repaint();
+            });
+        match spawned {
+            Ok(_) => self.busy += 1,
+            Err(e) => self.log(
+                format!("could not start a worker thread: {e}"),
+                Level::Error,
+            ),
+        }
+    }
+
+    /// Re-read the project, its graph and layers, and the selected layer's preview (coalesced: a
+    /// refresh requested while one runs runs once more afterwards).
     fn refresh(&mut self) {
         if self.refreshing {
             self.refresh_again = true;
@@ -225,9 +328,20 @@ impl StudioApp {
     fn drain(&mut self) {
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
-                Msg::Reply { tag, response, ms } => {
-                    self.in_flight = self.in_flight.saturating_sub(1);
-                    self.on_reply(tag, *response, ms);
+                Msg::Reply { tag, response } => {
+                    if matches!(tag, Tag::User) {
+                        self.busy = self.busy.saturating_sub(1);
+                    } else {
+                        self.reads = self.reads.saturating_sub(1);
+                    }
+                    self.on_reply(tag, *response);
+                }
+                Msg::Chain(responses) => {
+                    self.busy = self.busy.saturating_sub(1);
+                    for r in &responses {
+                        self.log_response(r);
+                    }
+                    self.refresh();
                 }
                 Msg::Event { topic, data } => {
                     if topic == "project_changed" {
@@ -238,42 +352,34 @@ impl StudioApp {
                 Msg::EditorExited(status) => {
                     if let Some(editor) = &mut self.editor {
                         let line = editor.exited(status);
-                        let crashed = !status.success();
-                        self.log(line, crashed);
+                        let level = if status.success() {
+                            Level::Info
+                        } else {
+                            Level::Error
+                        };
+                        self.log(line, level);
                     }
                 }
+                Msg::Log(text, level) => self.log(text, level),
             }
         }
     }
 
-    fn on_reply(&mut self, tag: Tag, r: Response, ms: u64) {
+    fn on_reply(&mut self, tag: Tag, r: Response) {
         let failed = r.status == Status::Error;
-        if let Some(e) = &r.error
-            && !matches!(tag, Tag::Info)
-        {
-            let next = if e.next.is_empty() {
-                String::new()
-            } else {
-                format!(" {}", e.next)
-            };
-            self.log(
-                format!("{}: {} {}.{next}", r.op, e.code.as_str(), e.message),
-                true,
-            );
-        }
         match tag {
             Tag::User => {
-                if !failed {
-                    self.log(format!("{}: ok ({ms} ms)", r.op), false);
-                }
+                self.log_response(&r);
                 self.refresh();
             }
             Tag::Info => {
                 if failed {
                     // No project open: nothing to show.
                     self.project = None;
+                    self.graph = Value::Null;
                     self.layers.clear();
                     self.viewport.clear();
+                    self.preview = None;
                     return self.refresh_done();
                 }
                 let info = r.result.unwrap_or_default();
@@ -287,9 +393,18 @@ impl StudioApp {
                     self.path_input = info["path"].as_str().unwrap_or_default().to_owned();
                 }
                 self.project = Some(info);
+                self.invoke(Tag::Graph, "graph.list", json!({}));
                 self.invoke(Tag::Layers, "terrain.layers", json!({}));
             }
+            Tag::Graph => {
+                if !failed {
+                    self.graph = r.result.unwrap_or_default();
+                }
+            }
             Tag::Layers => {
+                if failed {
+                    self.log_response(&r);
+                }
                 self.layers = r
                     .result
                     .as_ref()
@@ -313,12 +428,14 @@ impl StudioApp {
                     ),
                     None => {
                         self.viewport.clear();
+                        self.preview = None;
                         self.refresh_done();
                     }
                 }
             }
             Tag::Stats(layer) => {
                 let Some(size) = r.result.as_ref().map(|v| &v["size_px"]) else {
+                    self.log_response(&r);
                     return self.refresh_done();
                 };
                 let longest = size[0].as_u64().max(size[1].as_u64()).unwrap_or(1) as u32;
@@ -338,191 +455,603 @@ impl StudioApp {
                         ]
                     });
                 self.invoke(
-                    Tag::Preview(extent),
+                    Tag::Preview(extent, lod, Instant::now()),
                     "terrain.preview",
                     json!({ "layer": layer, "lod": lod }),
                 );
             }
-            Tag::Preview(extent) => {
-                if let Some(v) = &r.result {
-                    match decode_preview(v) {
-                        Ok(pv) => self.viewport.set_terrain(&pv, extent),
-                        Err(e) => self.log(format!("terrain.preview: {e}"), true),
+            Tag::Preview(extent, lod, started) => {
+                match r.result.as_ref().map(decode_preview) {
+                    Some(Ok((pv, bytes))) => {
+                        self.viewport.set_terrain(&pv, extent);
+                        self.preview = Some((
+                            lod,
+                            bytes as f64 / 1_048_576.0,
+                            started.elapsed().as_millis() as u64,
+                        ));
                     }
+                    Some(Err(e)) => self.log(format!("layer_preview: {e}"), Level::Error),
+                    None => self.log_response(&r),
                 }
                 self.refresh_done();
             }
         }
     }
 
-    fn top_bar(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.label(
-                RichText::new("Jenga Dunia Studio")
-                    .strong()
-                    .color(color::FG0),
+    fn world_inputs(&self) -> Option<(f64, u32)> {
+        Some((
+            self.extent_input.trim().parse().ok()?,
+            self.resolution_input.trim().parse().ok()?,
+        ))
+    }
+
+    fn new_project(&mut self, path: String) {
+        let Some((extent, resolution)) = self.world_inputs() else {
+            return self.log(
+                "project.create: extent and resolution must be numbers".into(),
+                Level::Error,
             );
-            if let Some(p) = &self.project {
-                ui.separator();
-                ui.label(p["name"].as_str().unwrap_or_default());
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if self.busy() {
-                    ui.spinner();
-                    ui.label(RichText::new("Working").color(color::FG2));
+        };
+        let name = self.name_input.trim().to_owned();
+        self.invoke(
+            Tag::User,
+            "project.create",
+            json!({ "path": path, "name": name, "world": { "extent_m": [extent, extent], "resolution_px": [resolution, resolution], "tile_size": 512, "halo": 4, "origin": [0, 0], "seed": 42 } }),
+        );
+    }
+
+    /// The desktop's `importAsset`: copy into assets/, then a `jd.input.heightmap@1` node right of
+    /// the graph.
+    fn import_asset(&mut self, path: String) {
+        let right = self.graph["nodes"].as_array().map_or(0.0, |nodes| {
+            nodes
+                .iter()
+                .filter_map(|n| n["ui"]["position"][0].as_f64())
+                .fold(-320.0, f64::max)
+        });
+        self.chain(vec![
+            Box::new(move |_| {
+                Some(Self::request(
+                    "project.import_asset",
+                    json!({ "path": path }),
+                ))
+            }),
+            Box::new(move |done| {
+                let name = done.last()?.result.as_ref()?["name"].clone();
+                Some(Self::request(
+                    "graph.add_node",
+                    json!({ "kind": "jd.input.heightmap@1", "params": { "path": name }, "position": [right + 320.0, 0] }),
+                ))
+            }),
+        ]);
+    }
+
+    /// The desktop's `exportHeightmap`: a live preview only published `height#lod<N>`, so the full
+    /// resolution is evaluated first.
+    fn export_heightmap(&mut self, path: String) {
+        let format = format_for(&path);
+        let live = self.layer.as_deref().is_some_and(|l| l.contains("#lod"));
+        let mut steps: Vec<Step> = Vec::new();
+        if live {
+            steps.push(Box::new(|_| {
+                Some(Self::request("graph.evaluate", json!({ "lod": 0 })))
+            }));
+        }
+        steps.push(Box::new(move |_| {
+            Some(Self::request(
+                "terrain.export_heightmap",
+                json!({ "layer": "height", "path": path, "format": format }),
+            ))
+        }));
+        self.chain(steps);
+    }
+
+    /// Toolbar Still: the viewport's last frame as PNG in exports/stills/.
+    fn save_still(&mut self, frame: &eframe::Frame) {
+        let Some(rs) = frame.wgpu_render_state() else {
+            return;
+        };
+        let Some((w, h, rgba)) = self.viewport.capture(rs) else {
+            return self.log("still: the viewport gave no image".into(), Level::Error);
+        };
+        let mut png = Vec::new();
+        let encoded = image::RgbaImage::from_raw(w, h, rgba)
+            .ok_or_else(|| "bad frame size".to_owned())
+            .and_then(|img| {
+                img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+                    .map_err(|e| e.to_string())
+            });
+        if let Err(e) = encoded {
+            return self.log(format!("still: {e}"), Level::Error);
+        }
+        use base64::Engine as _;
+        let n = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis() % 100_000);
+        let request = Self::request(
+            "project.write_export",
+            json!({ "path": format!("stills/view_{n}.png"), "bytes_base64": base64::engine::general_purpose::STANDARD.encode(&png) }),
+        );
+        let (server, tx, ctx, kb) = (
+            self.server.clone(),
+            self.tx.clone(),
+            self.ctx.clone(),
+            png.len() / 1024,
+        );
+        std::thread::spawn(move || {
+            let r = server.invoke(request);
+            let line = match r.result.as_ref().and_then(|v| v["path"].as_str()) {
+                Some(p) => (format!("still: {p} ({kb} KB)"), Level::Info),
+                None => ("still: write failed".to_owned(), Level::Error),
+            };
+            let _ = tx.send(Msg::Log(line.0, line.1));
+            ctx.request_repaint();
+        });
+    }
+
+    fn header(&mut self, ui: &mut egui::Ui, frame: &eframe::Frame) {
+        let rect = ui.max_rect();
+        ui.painter().hline(
+            rect.x_range(),
+            rect.bottom(),
+            Stroke::new(1.0, look::HAIRLINE),
+        );
+        ui.horizontal_centered(|ui| {
+            ui.spacing_mut().item_spacing.x = 12.0;
+            ui.add(
+                egui::Image::new(egui::include_image!("../../desktop/public/jd-mark.svg"))
+                    .fit_to_exact_size(egui::vec2(20.0, 20.0)),
+            )
+            .widget_info(|| {
+                egui::WidgetInfo::labeled(egui::accesskit::Role::Image, true, "Jenga Dunia")
+            });
+            ui.label(
+                RichText::new("Jenga Dunia")
+                    .font(theme::semibold(13.0))
+                    .color(color::FG0)
+                    .extra_letter_spacing(0.3),
+            );
+            ui.label(
+                RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
+                    .size(12.0)
+                    .color(color::FG2),
+            );
+            let readout = match &self.project {
+                Some(p) => format!(
+                    "{} — {}² · {} m",
+                    p["name"].as_str().unwrap_or_default(),
+                    p["world"]["resolution_px"][0],
+                    number(&p["world"]["extent_m"][0])
+                ),
+                None => "no project".into(),
+            };
+            ui.label(RichText::new(readout).size(12.0).color(color::FG2));
+            self.toolbar(ui, frame);
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if self.busy > 0 {
+                    ui.label(RichText::new("working…").size(12.0).color(color::ACCENT));
+                }
+                ui.label(
+                    RichText::new(self.viewport_info())
+                        .size(12.0)
+                        .color(color::FG2),
+                );
+                if self.layers.len() > 1 {
+                    let mut selected = self.layer.clone();
+                    egui::ComboBox::from_id_salt("layer-pick")
+                        .selected_text(
+                            RichText::new(selected.clone().unwrap_or_default()).size(12.0),
+                        )
+                        .show_ui(ui, |ui| {
+                            for l in &self.layers {
+                                ui.selectable_value(&mut selected, Some(l.clone()), l);
+                            }
+                        })
+                        .response
+                        .widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::accesskit::Role::ComboBox,
+                                true,
+                                "layer",
+                            )
+                        });
+                    ui.label(RichText::new("layer").size(12.0).color(color::FG2));
+                    if selected != self.layer {
+                        self.layer = selected;
+                        self.refresh();
+                    }
                 }
             });
         });
     }
 
-    fn side_panel(&mut self, ui: &mut egui::Ui) {
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.heading("Project");
-            match self.project.clone() {
-                Some(p) => {
-                    let w = &p["world"];
-                    egui::Grid::new("project").num_columns(2).show(ui, |ui| {
-                        for (k, v) in [
-                            ("Name", p["name"].as_str().unwrap_or_default().to_owned()),
-                            ("Path", p["path"].as_str().unwrap_or_default().to_owned()),
-                            (
-                                "Extent",
-                                format!(
-                                    "{:.0} x {:.0} m",
-                                    w["extent_m"][0].as_f64().unwrap_or(0.0),
-                                    w["extent_m"][1].as_f64().unwrap_or(0.0)
-                                ),
-                            ),
-                            (
-                                "Resolution",
-                                format!("{} x {} px", w["resolution_px"][0], w["resolution_px"][1]),
-                            ),
-                            ("Seed", w["seed"].to_string()),
-                        ] {
-                            ui.label(RichText::new(k).color(color::FG2));
-                            ui.label(v);
-                            ui.end_row();
-                        }
-                    });
-                    ui.horizontal(|ui| {
-                        if ui.button("Save").clicked() {
-                            self.invoke(Tag::User, "project.save", json!({}));
-                        }
-                        if ui.button("Close").clicked() {
-                            self.invoke(Tag::User, "project.close", json!({}));
-                        }
-                    });
-                }
-                None => {
-                    ui.label(RichText::new("No project open.").color(color::FG2));
-                }
+    fn viewport_info(&self) -> String {
+        let tris = self.viewport.info().map_or(0, |i| i.triangles);
+        let mut s = format!("viewport: wgpu · {} tris", thousands(tris));
+        if let Some(p) = &self.project {
+            let sun = &p["look"]["sun"];
+            let az = sun["azimuth_deg"].as_f64().unwrap_or(140.0);
+            let el = sun["elevation_deg"].as_f64().unwrap_or(35.0);
+            s += &format!(" · sun {el}°/{az}°");
+        }
+        if let Some((lod, mb, ms)) = self.preview {
+            s += &format!(" · preview lod {lod}, {mb:.2} MB in {ms} ms");
+        }
+        s
+    }
+
+    fn toolbar(&mut self, ui: &mut egui::Ui, frame: &eframe::Frame) {
+        let (x, y) = (ui.cursor().left() - 4.0, ui.max_rect().center().y);
+        ui.painter()
+            .vline(x, y - 9.0..=y + 9.0, Stroke::new(1.0, color::LINE));
+        ui.spacing_mut().item_spacing.x = 2.0;
+        let (has_project, idle) = (self.project.is_some(), self.busy == 0);
+        let undo = self.graph["undo_depth"].as_u64().unwrap_or(0) > 0;
+        let redo = self.graph["redo_depth"].as_u64().unwrap_or(0) > 0;
+        if look::icon_button(ui, "file-plus", "New project… (⌘N)", idle).clicked()
+            && let Some(p) = rfd::FileDialog::new()
+                .set_title("New Jenga Dunia project")
+                .set_file_name(format!("{}.jdproj", self.name_input.trim()))
+                .save_file()
+        {
+            let mut p = p.display().to_string();
+            if !p.ends_with(".jdproj") {
+                p.push_str(".jdproj"); // a project is a directory
             }
-            ui.add_space(6.0);
-            let label = ui.label("Project path");
-            ui.text_edit_singleline(&mut self.path_input)
-                .labelled_by(label.id);
-            let label = ui.label("Name for a new project");
-            ui.text_edit_singleline(&mut self.name_input)
-                .labelled_by(label.id);
-            ui.horizontal(|ui| {
-                let path = self.path_input.trim().to_owned();
-                if ui
-                    .add_enabled(!path.is_empty(), egui::Button::new("Open"))
-                    .clicked()
-                {
-                    self.invoke(Tag::User, "project.open", json!({ "path": path }));
-                }
-                if ui
-                    .add_enabled(!path.is_empty(), egui::Button::new("New"))
-                    .clicked()
-                {
-                    let name = self.name_input.trim().to_owned();
-                    self.invoke(
-                        Tag::User,
-                        "project.create",
-                        json!({ "path": path, "name": name }),
-                    );
-                }
-            });
-
-            ui.separator();
-            ui.heading("Terrain");
-            ui.add_enabled_ui(self.project.is_some(), |ui| {
-                ui.horizontal(|ui| {
-                    if ui.button("Generate terrain").clicked() {
-                        self.invoke(Tag::User, "terrain.generate", json!({}));
+            self.path_input = p.clone();
+            self.new_project(p);
+        }
+        if look::icon_button(ui, "folder-open", "Open project… (⌘O)", idle).clicked()
+            && let Some(p) = rfd::FileDialog::new()
+                .set_title("Open Jenga Dunia project")
+                .pick_folder()
+        {
+            self.path_input = p.display().to_string();
+            self.invoke(Tag::User, "project.open", json!({ "path": p }));
+        }
+        if look::icon_button(ui, "save", "Save (⌘S)", has_project && idle).clicked() {
+            self.invoke(Tag::User, "project.save", json!({}));
+        }
+        if look::icon_button(
+            ui,
+            "file-input",
+            "Import a DEM, heightmap or FBX into assets/ (⌘I)",
+            has_project && idle,
+        )
+        .clicked()
+            && let Some(p) = pick_asset()
+        {
+            self.import_input = p.clone();
+            self.import_asset(p);
+        }
+        if look::icon_button(
+            ui,
+            "download",
+            "Export the heightmap… (⌘E)",
+            self.layer.is_some() && idle,
+        )
+        .clicked()
+            && let Some(p) = rfd::FileDialog::new()
+                .set_title("Export heightmap")
+                .set_file_name("height.exr")
+                .add_filter("OpenEXR (32-bit float)", &["exr"])
+                .add_filter("PNG (16-bit)", &["png"])
+                .add_filter("RAW 16-bit", &["r16"])
+                .add_filter("RAW 32-bit float", &["r32"])
+                .add_filter("TIFF (32-bit float)", &["tif", "tiff"])
+                .save_file()
+        {
+            self.export_heightmap(p.display().to_string());
+        }
+        look::toolbar_separator(ui);
+        if look::icon_button(
+            ui,
+            "undo-2",
+            "Undo graph edit (⌥⌘Z)",
+            has_project && undo && idle,
+        )
+        .clicked()
+        {
+            self.invoke(Tag::User, "graph.undo", json!({}));
+        }
+        if look::icon_button(
+            ui,
+            "redo-2",
+            "Redo graph edit (⇧⌥⌘Z)",
+            has_project && redo && idle,
+        )
+        .clicked()
+        {
+            self.invoke(Tag::User, "graph.redo", json!({}));
+        }
+        look::toolbar_separator(ui);
+        // ponytail: the desktop's Generate first copies the Noise panel into the graph's noise
+        // node; Studio's Noise panel arrives with the panel port (P4), until then both evaluate.
+        if look::icon_button(ui, "wand-2", "Generate terrain (⌘G)", has_project && idle).clicked()
+        {
+            self.invoke(Tag::User, "graph.evaluate", json!({ "lod": 0 }));
+        }
+        if look::icon_button(ui, "play", "Evaluate the graph", has_project && idle).clicked() {
+            self.invoke(Tag::User, "graph.evaluate", json!({ "lod": 0 }));
+        }
+        look::toolbar_separator(ui);
+        if look::icon_button(
+            ui,
+            "camera",
+            "Save the viewport as a still (exports/stills/)",
+            has_project && self.viewport.info().is_some() && idle,
+        )
+        .clicked()
+        {
+            self.save_still(frame);
+        }
+        if look::icon_button(ui, "maximize-2", "Fullscreen viewport (Esc leaves)", true).clicked() {
+            self.set_fullscreen(ui.ctx(), !self.fullscreen);
+        }
+        look::toolbar_separator(ui);
+        // Studio's own addition: the Editor (node graph) window's state.
+        let (tip, running) = match self.editor.as_ref().map(|e| &e.status) {
+            Some(editor::Status::Running(pid)) => {
+                (format!("Node editor running (process {pid})"), true)
+            }
+            Some(editor::Status::Closed) => ("Open the node editor".into(), false),
+            Some(editor::Status::GaveUp(m) | editor::Status::Failed(m)) => {
+                (format!("{m} — click to open it again"), false)
+            }
+            None => (
+                self.editor_error.clone().map_or_else(
+                    || "Open the node editor".into(),
+                    |e| format!("{e} — click to retry"),
+                ),
+                false,
+            ),
+        };
+        if look::icon_button(ui, "workflow", &tip, !running).clicked() {
+            match &mut self.editor {
+                Some(e) => e.reopen(),
+                None => match editor::locate(None) {
+                    Ok(path) => self.start_editor(path),
+                    Err(msg) => {
+                        self.log(msg.clone(), Level::Error);
+                        self.editor_error = Some(msg);
                     }
-                    if ui.button("Evaluate graph").clicked() {
-                        let lod = self
-                            .project
-                            .as_ref()
-                            .and_then(|p| p["settings"]["preview_lod"].as_u64())
-                            .unwrap_or(0);
-                        self.invoke(Tag::User, "graph.evaluate", json!({ "lod": lod }));
-                    }
-                });
-                let mut selected = self.layer.clone();
-                egui::ComboBox::from_label("Layer")
-                    .selected_text(selected.clone().unwrap_or_else(|| "none".into()))
-                    .show_ui(ui, |ui| {
-                        for l in &self.layers {
-                            ui.selectable_value(&mut selected, Some(l.clone()), l);
-                        }
-                    });
-                if selected != self.layer {
-                    self.layer = selected;
-                    self.refresh();
-                }
-            });
+                },
+            }
+        }
+    }
 
-            ui.separator();
-            ui.heading("Editor");
-            let status = match self.editor.as_ref().map(|e| &e.status) {
-                Some(editor::Status::Running(pid)) => format!("Running (process {pid})"),
-                Some(editor::Status::Closed) => "Closed".into(),
-                Some(editor::Status::GaveUp(m) | editor::Status::Failed(m)) => m.clone(),
-                None => self
-                    .editor_error
-                    .clone()
-                    .unwrap_or_else(|| "Not started".into()),
-            };
-            ui.label(RichText::new(status).color(color::FG1));
-            let running = matches!(
-                self.editor.as_ref().map(|e| &e.status),
-                Some(editor::Status::Running(_))
+    fn set_fullscreen(&mut self, ctx: &egui::Context, on: bool) {
+        self.fullscreen = on;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(on));
+    }
+
+    fn project_card(&mut self, ui: &mut egui::Ui) {
+        look::section(ui, "Project");
+        let idle = self.busy == 0;
+        look::field(ui, "Path", |ui| {
+            if look::button(ui, Some("folder-search"), "", false, idle)
+                .on_hover_text("Browse… (opens an existing project)")
+                .clicked()
+                && let Some(p) = rfd::FileDialog::new()
+                    .set_title("Open Jenga Dunia project")
+                    .pick_folder()
+            {
+                self.path_input = p.display().to_string();
+                self.invoke(Tag::User, "project.open", json!({ "path": p }));
+            }
+            look::input(
+                ui,
+                &mut self.path_input,
+                112.0,
+                "~/Worlds/Hills.jdproj",
+                "Path",
             );
-            if ui
-                .add_enabled(!running, egui::Button::new("Open Editor"))
+        });
+        look::field(ui, "Name", |ui| {
+            look::input(ui, &mut self.name_input, 144.0, "", "Name");
+        });
+        look::field(ui, "Extent (m)", |ui| {
+            look::input(ui, &mut self.extent_input, 112.0, "", "Extent (m)");
+        });
+        look::field(ui, "Resolution (px)", |ui| {
+            look::input(ui, &mut self.resolution_input, 112.0, "", "Resolution (px)");
+        });
+        look::field(ui, "Preset", |ui| {
+            let mut chosen: Option<usize> = None;
+            egui::ComboBox::from_id_salt("world-preset")
+                .width(144.0)
+                .selected_text(RichText::new("choose…").size(12.0))
+                .show_ui(ui, |ui| {
+                    for (i, (label, ..)) in PRESETS.iter().enumerate() {
+                        if ui.selectable_label(false, *label).clicked() {
+                            chosen = Some(i);
+                        }
+                    }
+                })
+                .response
+                .on_hover_text(
+                    "Engine-friendly sizes: Unity and Unreal heightmaps are 2ⁿ+1 samples",
+                )
+                .widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::accesskit::Role::ComboBox, true, "Preset")
+                });
+            if let Some(i) = chosen {
+                self.resolution_input = PRESETS[i].1.to_string();
+                self.extent_input = PRESETS[i].2.to_string();
+            }
+        });
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            let path = self.path_input.trim().to_owned();
+            if look::button(
+                ui,
+                Some("folder-plus"),
+                "New",
+                true,
+                !path.is_empty() && idle,
+            )
+            .on_hover_text("Create at the path above (⌘N opens a dialog)")
+            .clicked()
+            {
+                self.new_project(path.clone());
+            }
+            if look::button(
+                ui,
+                Some("folder-open"),
+                "Open",
+                false,
+                !path.is_empty() && idle,
+            )
+            .clicked()
+            {
+                self.invoke(Tag::User, "project.open", json!({ "path": path }));
+            }
+            if look::button(
+                ui,
+                Some("save"),
+                "Save",
+                false,
+                self.project.is_some() && idle,
+            )
+            .clicked()
+            {
+                self.invoke(Tag::User, "project.save", json!({}));
+            }
+        });
+        let Some(p) = self.project.clone() else {
+            return;
+        };
+        look::field(ui, "Import", |ui| {
+            if look::button(ui, Some("folder-search"), "", false, idle)
+                .on_hover_text("Browse…")
+                .clicked()
+                && let Some(path) = pick_asset()
+            {
+                self.import_input = path.clone();
+                self.import_asset(path);
+            }
+            let path = self.import_input.trim().to_owned();
+            if look::button(ui, Some("upload"), "", false, !path.is_empty() && idle)
+                .on_hover_text("Import this file (⌘I opens a dialog)")
                 .clicked()
             {
-                match &mut self.editor {
-                    Some(e) => e.reopen(),
-                    None => match editor::locate(None) {
-                        Ok(path) => self.start_editor(path),
-                        Err(msg) => {
-                            self.log(msg.clone(), true);
-                            self.editor_error = Some(msg);
-                        }
-                    },
-                }
+                self.import_asset(path);
             }
+            look::input(
+                ui,
+                &mut self.import_input,
+                112.0,
+                "dem.tif, sculpt.fbx…",
+                "Import",
+            );
         });
-    }
-
-    fn log_panel(&mut self, ui: &mut egui::Ui) {
-        let row = ui.text_style_height(&egui::TextStyle::Body);
-        egui::ScrollArea::vertical()
-            .stick_to_bottom(true)
-            .auto_shrink(false)
-            .show_rows(ui, row, self.log.len(), |ui, range| {
-                for line in self.log.range(range) {
-                    let c = if line.error { color::ERROR } else { color::FG1 };
-                    ui.label(
-                        RichText::new(format!("{:>7.1} s  {}", line.at_s, line.text)).color(c),
-                    );
-                }
+        ui.add_space(12.0);
+        egui::Grid::new("project-meta")
+            .num_columns(2)
+            .spacing([8.0, 4.0])
+            .show(ui, |ui| {
+                let dt = |ui: &mut egui::Ui, t: &str| {
+                    ui.label(RichText::new(t).size(12.0).color(color::FG2));
+                };
+                dt(ui, "id");
+                ui.label(
+                    RichText::new(p["project_id"].as_str().unwrap_or_default())
+                        .monospace()
+                        .size(12.0)
+                        .color(color::FG1),
+                );
+                ui.end_row();
+                dt(ui, "dirty");
+                dt(ui, &p["dirty"].to_string());
+                ui.end_row();
+                dt(ui, "journal");
+                dt(ui, &p["pending_journal"].to_string());
+                ui.end_row();
             });
     }
+
+    fn log_card(&mut self, ui: &mut egui::Ui) {
+        look::card()
+            .inner_margin(Margin::symmetric(12, 8))
+            .show(ui, |ui| {
+                ui.set_min_size(ui.available_size());
+                ScrollArea::vertical()
+                    .stick_to_bottom(true)
+                    .auto_shrink(false)
+                    .show(ui, |ui| {
+                        if self.log.is_empty() {
+                            ui.label(
+                                RichText::new("Operations and warnings appear here.")
+                                    .monospace()
+                                    .size(12.0)
+                                    .color(color::FG2),
+                            );
+                        }
+                        for line in &self.log {
+                            let c = match line.level {
+                                Level::Info => color::FG1,
+                                Level::Warn => color::WARN,
+                                Level::Error => color::ERROR,
+                            };
+                            ui.label(
+                                RichText::new(format!("{} {}", line.time, line.text))
+                                    .monospace()
+                                    .size(12.0)
+                                    .color(c),
+                            );
+                        }
+                    });
+            });
+    }
+}
+
+fn pick_asset() -> Option<String> {
+    rfd::FileDialog::new()
+        .set_title("Import heightmap or mesh")
+        .add_filter(
+            "Heightmaps and meshes",
+            &["png", "exr", "tif", "tiff", "r16", "r32", "fbx"],
+        )
+        .pick_file()
+        .map(|p| p.display().to_string())
+}
+
+/// The desktop's `formatFor`: the heightmap format from the file extension.
+fn format_for(path: &str) -> &'static str {
+    match path
+        .rsplit('.')
+        .next()
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
+        Some("png") => "png16",
+        Some("r16") => "raw_r16",
+        Some("r32") => "raw_r32",
+        Some("tif" | "tiff") => "tiff32",
+        _ => "exr",
+    }
+}
+
+/// A JSON number as JavaScript prints it (4096, not 4096.0).
+fn number(v: &Value) -> String {
+    match v.as_f64() {
+        Some(f) if f.fract() == 0.0 => format!("{f:.0}"),
+        Some(f) => f.to_string(),
+        None => v.to_string(),
+    }
+}
+
+/// `toLocaleString()` for a count: 522,242.
+fn thousands(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// `height` when published, else the first `height#lod…`, else the first layer.
@@ -535,29 +1064,74 @@ fn default_layer(layers: &[String]) -> Option<String> {
         .cloned()
 }
 
-fn decode_preview(v: &Value) -> Result<jd_terrain::preview::Preview, String> {
+fn decode_preview(v: &Value) -> Result<(jd_terrain::preview::Preview, usize), String> {
     use base64::Engine as _;
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(v["bytes_base64"].as_str().unwrap_or_default())
         .map_err(|e| format!("bad base64: {e}"))?;
+    let n = bytes.len();
     jd_terrain::preview::Preview::from_bytes(&bytes)
+        .map(|p| (p, n))
         .ok_or_else(|| "the preview bytes are not in the wire format".to_owned())
 }
 
 impl eframe::App for StudioApp {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         self.drain();
-        egui::Panel::top("top").show(ui, |ui| self.top_bar(ui));
-        egui::Panel::bottom("log")
-            .resizable(true)
-            .default_size(150.0)
-            .show(ui, |ui| self.log_panel(ui));
-        egui::Panel::left("side")
-            .resizable(true)
-            .default_size(300.0)
-            .show(ui, |ui| self.side_panel(ui));
+        if self.fullscreen && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.set_fullscreen(ui.ctx(), false);
+        }
+        let bg = egui::Frame::new().fill(color::BG0);
+        if !self.fullscreen {
+            // The desktop's grid: a 40 px header, the panels, a 160 px log.
+            egui::Panel::top("header")
+                .exact_size(40.0)
+                .frame(
+                    egui::Frame::new()
+                        .fill(color::BG1)
+                        .inner_margin(Margin::symmetric(12, 0)),
+                )
+                .show(ui, |ui| self.header(ui, frame));
+            egui::Panel::bottom("log")
+                .exact_size(160.0)
+                .frame(bg.inner_margin(Margin {
+                    left: 8,
+                    right: 8,
+                    top: 0,
+                    bottom: 8,
+                }))
+                .show(ui, |ui| self.log_card(ui));
+            egui::Panel::left("panel-left")
+                .resizable(true)
+                .default_size(272.0)
+                .size_range(212.0..=532.0)
+                .frame(bg.inner_margin(Margin {
+                    left: 8,
+                    right: 4,
+                    top: 8,
+                    bottom: 8,
+                }))
+                .show(ui, |ui| {
+                    look::card().show(ui, |ui| {
+                        ui.set_min_size(ui.available_size());
+                        ScrollArea::vertical()
+                            .auto_shrink(false)
+                            .show(ui, |ui| self.project_card(ui));
+                    });
+                });
+        }
+        let margin = if self.fullscreen {
+            Margin::ZERO
+        } else {
+            Margin {
+                left: 4,
+                right: 8,
+                top: 8,
+                bottom: 8,
+            }
+        };
         egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
+            .frame(bg.inner_margin(margin))
             .show(ui, |ui| self.viewport.show(ui, frame.wgpu_render_state()));
     }
 
@@ -566,5 +1140,21 @@ impl eframe::App for StudioApp {
         if let Some(editor) = &mut self.editor {
             editor.stop(std::time::Duration::from_secs(3));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn readouts_print_like_the_desktop() {
+        assert_eq!(thousands(522_242), "522,242");
+        assert_eq!(thousands(12), "12");
+        assert_eq!(number(&json!(4096.0)), "4096");
+        assert_eq!(number(&json!(0.5)), "0.5");
+        assert_eq!(format_for("a/b.PNG"), "png16");
+        assert_eq!(format_for("x.tiff"), "tiff32");
+        assert_eq!(format_for("x"), "exr");
     }
 }
