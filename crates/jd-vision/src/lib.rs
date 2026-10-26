@@ -946,4 +946,127 @@ mod tests {
             eprintln!("JD_DA3_CAMERA_MODEL unset: skipping the camera head");
         }
     }
+
+    /// Ground truth of `fixtures/vicunas-altiplano.jpg` (see its README): two adult vicuñas on a
+    /// flat playa, 1504 × 1004. Rows / columns of the front hooves, shoulder heights in pixels,
+    /// the eye-level horizon row they imply, and the distance ratio far / near (lens-free).
+    const VIC_NEAR: (f32, f32, f32) = (677.0, 619.9, 48.75); // column, hoof row, shoulder px
+    const VIC_FAR: (f32, f32, f32) = (957.0, 588.75, 33.5);
+    const VIC_HORIZON: f32 = 520.4;
+    const VIC_RATIO: f32 = 1.455;
+    /// Camera height for an 86 cm shoulder (sources say 75–96 cm: 1.53–1.96 m).
+    const VIC_CAMERA_M: f32 = 1.76;
+
+    fn vicunas() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/vicunas-altiplano.jpg")
+    }
+
+    /// Median depth of the ground just under a pair of hooves (rows below the contact, columns
+    /// either side of the legs), so the animal itself is not sampled.
+    fn ground_at(d: &Depth, col: f32, row: f32) -> f32 {
+        let mut v: Vec<f32> = Vec::new();
+        for y in (row + 1.0) as u32..=(row + 5.0) as u32 {
+            for x in (col - 10.0) as u32..=(col + 10.0) as u32 {
+                let z = d.depth_m[(y * d.width + x) as usize];
+                if z.is_finite() && z > 0.0 {
+                    v.push(z);
+                }
+            }
+        }
+        v.sort_by(f32::total_cmp);
+        v[v.len() / 2]
+    }
+
+    /// The checks every depth model is held to on the photograph: the far / near ratio at the
+    /// vicuñas' feet (no lens or scale needed), and, with the camera-height prior, the shoulder
+    /// heights the depth implies. Returns (ratio, unaided camera height, shoulders with prior).
+    fn vicuna_check(name: &str, raw: &Depth, primed: &Depth) -> (f32, f32, [f32; 2]) {
+        assert_eq!(
+            (raw.width, raw.height),
+            (1504, 1004),
+            "{name}: the fixture's own grid"
+        );
+        let (near, far) = (
+            ground_at(raw, VIC_NEAR.0, VIC_NEAR.1),
+            ground_at(raw, VIC_FAR.0, VIC_FAR.1),
+        );
+        let ratio = far / near;
+        let fov = raw.fov_x_deg.expect("fov");
+        let f_px = (raw.width as f32 * 0.5) / (fov.to_radians() * 0.5).tan();
+        // Unaided: the camera height the metric depth implies (level camera over the plane).
+        let cam = near * (VIC_NEAR.1 - VIC_HORIZON) / f_px;
+        // With the camera-height prior: each adult's shoulder from its depth and the focal length.
+        let pf = primed.fov_x_deg.expect("fov");
+        let pf_px = (primed.width as f32 * 0.5) / (pf.to_radians() * 0.5).tan();
+        let sh = [
+            VIC_NEAR.2 * ground_at(primed, VIC_NEAR.0, VIC_NEAR.1) / pf_px,
+            VIC_FAR.2 * ground_at(primed, VIC_FAR.0, VIC_FAR.1) / pf_px,
+        ];
+        eprintln!(
+            "VICUNAS {name}: fov {fov:.1}° | depth near {near:.2} m far {far:.2} m ratio {ratio:.3} (truth {VIC_RATIO}) | unaided camera height {cam:.2} m | prior {VIC_CAMERA_M} m: ground {:?}, shoulders {:.2} / {:.2} m",
+            primed.ground, sh[0], sh[1]
+        );
+        // Measured 2026-10-26 (docs/research/research-log/2026-10-26-real-photo-depth.md):
+        // MoGe-2 ratio 1.277, camera 2.17 m, shoulders 0.69 / 0.61 m; DA3 1.344, 1.20 m,
+        // 1.09 / 1.01 m. The bounds keep that accuracy from regressing; they are not the truth.
+        assert!(
+            (ratio / VIC_RATIO - 1.0).abs() < 0.15,
+            "{name}: far / near {ratio} vs {VIC_RATIO}"
+        );
+        assert!(
+            (1.0..=3.0).contains(&cam),
+            "{name}: unaided camera height {cam} m (truth 1.53–1.96)"
+        );
+        let g = primed
+            .ground
+            .as_ref()
+            .expect("a ground plane under the playa");
+        assert!(
+            g.inliers > 0.9,
+            "{name}: the playa is a plane ({})",
+            g.inliers
+        );
+        for s in sh {
+            assert!(
+                (0.55..=1.2).contains(&s),
+                "{name}: shoulder {s} m (reported 0.75–0.96)"
+            );
+        }
+        assert!(
+            (sh[0] / sh[1] - 1.0).abs() < 0.15,
+            "{name}: the two adults are the same size: {sh:?}"
+        );
+        (ratio, cam, sh)
+    }
+
+    /// Needs `JD_MOGE_MODEL` (and for DA3 `JD_DA3_MODEL` + `JD_DA3_CAMERA_MODEL`); skipped otherwise.
+    #[test]
+    fn a_real_photograph_of_vicunas_on_a_playa_reads_at_the_right_depths() {
+        let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
+        let img = vicunas();
+        let mut ran = 0;
+        if let Ok(model) = std::env::var("JD_MOGE_MODEL") {
+            let m = Path::new(&model);
+            let raw = depth_from_image(&img, m, 1504, 1800, None, None).expect("moge");
+            let primed = depth_from_image_with(&img, m, 1504, 1800, None, None, Some(VIC_CAMERA_M))
+                .expect("moge primed");
+            vicuna_check("MoGe-2", &raw, &primed);
+            ran += 1;
+        }
+        if let (Ok(model), Ok(cam)) = (
+            std::env::var("JD_DA3_MODEL"),
+            std::env::var("JD_DA3_CAMERA_MODEL"),
+        ) {
+            let (m, c) = (Path::new(&model), Path::new(&cam));
+            let raw = depth_from_image(&img, m, 1504, 1800, None, Some(c)).expect("da3");
+            let primed =
+                depth_from_image_with(&img, m, 1504, 1800, None, Some(c), Some(VIC_CAMERA_M))
+                    .expect("da3 primed");
+            vicuna_check("DA3", &raw, &primed);
+            ran += 1;
+        }
+        if ran == 0 {
+            eprintln!("no depth model set: skipping the vicuña photograph");
+        }
+    }
 }

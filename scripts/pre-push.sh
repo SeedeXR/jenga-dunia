@@ -5,6 +5,13 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
+# The depth models, when downloaded to ~/models (cli-quickstart "Depth from a photograph"): the
+# jd-vision tests then hold them to the vicuña photograph's ground truth; CI has no models and skips.
+for pair in "JD_MOGE_MODEL moge" "JD_DA3_MODEL da3" "JD_DA3_CAMERA_MODEL da3base"; do
+  read -r name dir <<< "$pair"
+  f="$HOME/models/$dir/model.onnx"
+  if [ -z "${!name:-}" ] && [ -f "$f" ]; then export "$name=$f"; fi
+done
 cargo test --workspace
 cargo deny check
 cargo run -q -p jd-cli -- schema --write schemas/v1 >/dev/null

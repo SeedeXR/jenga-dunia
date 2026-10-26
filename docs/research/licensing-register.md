@@ -74,3 +74,8 @@ Default: MoGe-2 (MIT — verify weight LICENSE file before GA), DA3 small/base/m
 
 ## Algorithms/code reuse (see `opensource-rea.md` §6)
 Port with attribution: TerraForge3D shaders (MIT), SebLague erosion (MIT), ProceduralTerrains core (MIT). Study only, never copy: weigert repos (README-only MIT / no LICENSE), ANT Landscape (GPL), kosmos (GPL), soillib (LGPL), Unity Terrain Tools (Unity Companion), Unreal source, Houdini.
+
+## Test fixtures (media)
+| File | Source | Licence | Note |
+|---|---|---|---|
+| `crates/jd-vision/fixtures/vicunas-altiplano.jpg` | Unsplash, Persnickety Prints, photo `rKY-BDYokVE` (downscaled 4×) | Unsplash License (VERIFIED 2026-10-26): copy, modify, distribute, use commercially, no attribution required; no selling unmodified, no competing service | real-photo depth ground truth (`crates/jd-vision/fixtures/README.md`); credited anyway |
