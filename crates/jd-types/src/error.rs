@@ -34,6 +34,7 @@ pub enum ErrorCode {
     E_NETWORK,
     E_LICENSE_NOT_ACCEPTED,
     E_INTERNAL,
+    E_ENGINE_UNAVAILABLE,
 }
 
 impl ErrorCode {
@@ -63,6 +64,7 @@ impl ErrorCode {
         ErrorCode::E_NETWORK,
         ErrorCode::E_LICENSE_NOT_ACCEPTED,
         ErrorCode::E_INTERNAL,
+        ErrorCode::E_ENGINE_UNAVAILABLE,
     ];
 
     /// CLI process exit code for this error (`docs/architecture/07-agent-interfaces.md`).
@@ -116,6 +118,7 @@ fn static_name(code: ErrorCode) -> &'static str {
         E_NETWORK => "E_NETWORK",
         E_LICENSE_NOT_ACCEPTED => "E_LICENSE_NOT_ACCEPTED",
         E_INTERNAL => "E_INTERNAL",
+        E_ENGINE_UNAVAILABLE => "E_ENGINE_UNAVAILABLE",
     }
 }
 

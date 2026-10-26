@@ -415,6 +415,11 @@ impl Registry {
         let started = std::time::Instant::now();
         let handler = op.handler.clone();
         let detached = op.detached;
+        let client = req
+            .client
+            .as_ref()
+            .map(|c| c.kind.clone())
+            .unwrap_or_default();
         let Request {
             op: op_id, params, ..
         } = req;
@@ -448,10 +453,10 @@ impl Registry {
         if let Some(root) = ctx.project_root() {
             let line = match &outcome {
                 Ok((_, warnings)) => {
-                    serde_json::json!({ "ts": crate::project::now_rfc3339(), "op": op_id, "request_id": request_id, "outcome": if detached { "accepted" } else { "ok" }, "duration_ms": duration_ms, "warnings": warnings.iter().map(|w| w.code.clone()).collect::<Vec<_>>() })
+                    serde_json::json!({ "ts": crate::project::now_rfc3339(), "op": op_id, "request_id": request_id, "client": client, "outcome": if detached { "accepted" } else { "ok" }, "duration_ms": duration_ms, "warnings": warnings.iter().map(|w| w.code.clone()).collect::<Vec<_>>() })
                 }
                 Err(e) => {
-                    serde_json::json!({ "ts": crate::project::now_rfc3339(), "op": op_id, "request_id": request_id, "outcome": "error", "duration_ms": duration_ms, "code": e.code.as_str(), "message": e.message })
+                    serde_json::json!({ "ts": crate::project::now_rfc3339(), "op": op_id, "request_id": request_id, "client": client, "outcome": "error", "duration_ms": duration_ms, "code": e.code.as_str(), "message": e.message })
                 }
             };
             append_op_log(&root, &line);

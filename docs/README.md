@@ -28,6 +28,7 @@ Round 1 (2026-10-19): research and architecture only; no code. Diagrams are Merm
 | 11 | [Diagnostics, logging, errors](architecture/11-diagnostics.md) |
 | 12 | [UI workspace and design language](architecture/12-ui-workspace.md) |
 | 13 | [Geo and vision modules](architecture/13-geo-vision.md) |
+| 14 | [Studio ↔ Editor protocol](architecture/14-studio-editor-protocol.md) |
 
 ## Decisions (`adr/`)
 [ADR index](adr/README.md) — 0001 one core/three adapters · 0002 DAG graph · 0003 viewport hosting (prototype gate) · 0004 frontend stack · 0005 f32 tiles · 0006 erosion order · 0007 determinism · 0008 performance methodology · 0009 out-of-process plugins · 0010 REA/clean-room policy · 0011 project as directory · 0012 format strategy

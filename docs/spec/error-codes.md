@@ -28,6 +28,7 @@ Single source of truth for stable error codes used by the Rust core, GUI, CLI (e
 | `E_NETWORK` | — | Remote fetch failed (DEM/OSM/model download) | `host`, `status`, `retryable` | 1 |
 | `E_LICENSE_NOT_ACCEPTED` | — | Optional component requires accepting its licence first | `component`, `license`, `url` | 7 |
 | `E_INTERNAL` | — | Unexpected failure (bug); diagnostic bundle suggested | `panic_message?` | 1 |
+| `E_ENGINE_UNAVAILABLE` | — | The engine process (Studio) is not running, refused the connection or went away mid-call (ADR-0017) | `socket`, `orderly?` (a `bye`: Studio ended the session on purpose) | 1 |
 
 Rules:
 - Adapters map crate-level `thiserror` enums to these codes at the `jd-core` boundary; crates never invent ad-hoc string codes.

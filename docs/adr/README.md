@@ -20,3 +20,4 @@ Format: Status · Date · Context · Decision · Alternatives rejected (and why)
 | [0014](0014-geo-fetch-policy.md) | Geo data over the network: one client, allowlisted hosts, adaptive and cached | Accepted |
 | [0015](0015-fbx-sdk-in-process-oracle.md) | The Autodesk FBX SDK in process, as a verification oracle (supersedes ADR-0009 for FBX) | Accepted |
 | [0016](0016-caves-as-an-implicit-volume-beside-the-heightfield.md) | Caves as an implicit volume beside the heightfield | Accepted |
+| [0017](0017-studio-and-editor-two-processes.md) | Studio (egui, engine + viewport) and Editor (Tauri, node graph): two processes over a local socket | Accepted |

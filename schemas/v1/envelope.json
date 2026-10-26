@@ -146,7 +146,8 @@
         "E_PROJECT_CORRUPT",
         "E_NETWORK",
         "E_LICENSE_NOT_ACCEPTED",
-        "E_INTERNAL"
+        "E_INTERNAL",
+        "E_ENGINE_UNAVAILABLE"
       ]
     },
     "Warning": {

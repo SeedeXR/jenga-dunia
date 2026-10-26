@@ -5,6 +5,13 @@
 //! - `ops_list`: operation descriptions + schemas for generated inspectors.
 //! - `layer_preview`: a downsampled u16 heightfield as raw bytes for the viewport
 //!   (`tauri::ipc::Response`, no JSON encoding of large buffers).
+//!
+//! The engine runs in this process unless Studio launched us with `JD_ENGINE_SOCKET` /
+//! `JD_ENGINE_TOKEN` (ADR-0017): then the three commands forward to Studio's engine over
+//! `jd-ipc`, and losing it ends this process.
+
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 
 use jd_core::{Context, Registry, Request, Response};
 use jd_terrain::preview::preview_u16;
@@ -13,10 +20,28 @@ use tauri::menu::PredefinedMenuItem;
 use tauri::menu::{Menu, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::{Emitter, Manager, State};
 
-/// Shared registry + session context.
+/// Where operations run.
+#[derive(Clone)]
+enum Engine {
+    /// In this process (the single-process app).
+    Local { registry: Registry, ctx: Context },
+    /// In Studio's process, over its socket.
+    Remote(Arc<jd_ipc::Client>),
+}
+
+impl Engine {
+    /// Run one operation (blocking). `Err` only for a transport failure.
+    fn invoke(&self, request: Request) -> Result<Response, jd_types::JdError> {
+        match self {
+            Engine::Local { registry, ctx } => Ok(registry.invoke(ctx, request)),
+            Engine::Remote(client) => client.call(request),
+        }
+    }
+}
+
+/// Shared engine handle.
 pub struct AppState {
-    registry: Registry,
-    ctx: Context,
+    engine: Engine,
 }
 
 fn join_error(e: tauri::Error) -> jd_types::JdError {
@@ -33,15 +58,23 @@ async fn op(
     mut request: Request,
 ) -> Result<Response, jd_types::JdError> {
     request.client.get_or_insert_default().kind = "gui".into();
-    let (registry, ctx) = (state.registry.clone(), state.ctx.clone());
-    tauri::async_runtime::spawn_blocking(move || registry.invoke(&ctx, request))
+    let engine = state.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || engine.invoke(request))
         .await
-        .map_err(join_error)
+        .map_err(join_error)?
 }
 
 #[tauri::command]
-fn ops_list(state: State<'_, AppState>) -> Vec<jd_core::ops::OperationInfo> {
-    state.registry.list()
+async fn ops_list(
+    state: State<'_, AppState>,
+) -> Result<Vec<jd_core::ops::OperationInfo>, jd_types::JdError> {
+    let engine = state.engine.clone();
+    tauri::async_runtime::spawn_blocking(move || match engine {
+        Engine::Local { registry, .. } => Ok(registry.list()),
+        Engine::Remote(client) => client.list_ops(),
+    })
+    .await
+    .map_err(join_error)?
 }
 
 #[tauri::command]
@@ -50,13 +83,78 @@ async fn layer_preview(
     layer: String,
     lod: u8,
 ) -> Result<tauri::ipc::Response, jd_types::JdError> {
-    let ctx = state.ctx.clone();
-    let bytes = tauri::async_runtime::spawn_blocking(move || {
-        ctx.with_layer(&layer, |hf| Ok(preview_u16(hf, lod).to_bytes()))
+    let engine = state.engine.clone();
+    let bytes = tauri::async_runtime::spawn_blocking(move || match engine {
+        Engine::Local { ctx, .. } => {
+            ctx.with_layer(&layer, |hf| Ok(preview_u16(hf, lod).to_bytes()))
+        }
+        // The same bytes, base64 inside `terrain.preview`'s result.
+        Engine::Remote(client) => {
+            let r = client.call(Request::new(
+                "terrain.preview",
+                serde_json::json!({ "layer": layer, "lod": lod }),
+            ))?;
+            if let Some(e) = r.error {
+                return Err(e);
+            }
+            use base64::Engine as _;
+            let b64 = r.result.as_ref().and_then(|v| v["bytes_base64"].as_str());
+            base64::engine::general_purpose::STANDARD
+                .decode(b64.unwrap_or_default())
+                .map_err(|e| {
+                    jd_types::JdError::new(
+                        jd_types::ErrorCode::E_SERIALIZE,
+                        format!("terrain.preview returned bad base64: {e}"),
+                    )
+                })
+        }
     })
     .await
     .map_err(join_error)??;
     Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// Connect to Studio's engine (ADR-0017). Events reach the frontend as `engine-event`
+/// `{ topic, data }`; Studio's `shutdown` closes this window quietly; any other loss tells
+/// the user and exits, since an Editor without its engine can do nothing.
+fn connect_engine(
+    cfg: jd_ipc::ClientConfig,
+    handle: Arc<OnceLock<tauri::AppHandle>>,
+) -> Result<jd_ipc::Client, jd_types::JdError> {
+    let quitting = Arc::new(AtomicBool::new(false));
+    let (ev_handle, ev_quitting) = (handle.clone(), quitting.clone());
+    let on_event = Box::new(move |topic: &str, data: &serde_json::Value| {
+        let Some(app) = ev_handle.get() else { return };
+        if topic == "shutdown" {
+            ev_quitting.store(true, Ordering::SeqCst);
+            tracing::info!(reason = %data["reason"], "Studio is shutting down; closing the editor");
+            app.exit(0);
+        } else if let Err(e) = app.emit(
+            "engine-event",
+            serde_json::json!({ "topic": topic, "data": data }),
+        ) {
+            tracing::warn!(error = %e, topic, "engine event not delivered");
+        }
+    });
+    let on_lost = Box::new(move |e: &jd_types::JdError| {
+        if quitting.load(Ordering::SeqCst) {
+            return;
+        }
+        tracing::error!(code = e.code.as_str(), "lost the engine: {}", e.message);
+        match handle.get() {
+            Some(app) => {
+                use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+                app.dialog()
+                    .message(format!("{}\n\n{}", e.message, e.next))
+                    .title("Jenga Dunia: engine lost")
+                    .kind(MessageDialogKind::Error)
+                    .blocking_show();
+                app.exit(1);
+            }
+            None => std::process::exit(1),
+        }
+    });
+    jd_ipc::Client::connect(cfg, on_event, on_lost)
 }
 
 /// Native menu bar: platform-conventional App/File/Edit/Window menus with standard accelerators.
@@ -153,13 +251,29 @@ pub fn run() {
     let context = tauri::generate_context!();
     // Logging first: macOS can deliver the document-open Apple Event before `setup` runs.
     init_logging(&context.config().identifier);
-    let state = AppState {
-        registry: Registry::with_builtins(),
-        ctx: Context::default(),
+    let handle = Arc::new(OnceLock::new());
+    let engine = match jd_ipc::ClientConfig::from_env("editor") {
+        None => Engine::Local {
+            registry: Registry::with_builtins(),
+            ctx: Context::default(),
+        },
+        Some(cfg) => match connect_engine(cfg, handle.clone()) {
+            Ok(client) => Engine::Remote(Arc::new(client)),
+            Err(e) => {
+                tracing::error!(
+                    code = e.code.as_str(),
+                    "cannot reach the engine: {}",
+                    e.message
+                );
+                eprintln!("{}", serde_json::to_string(&e).unwrap_or_default());
+                std::process::exit(1);
+            }
+        },
     };
     tauri::Builder::default()
-        .manage(state)
-        .setup(|app| {
+        .manage(AppState { engine })
+        .setup(move |app| {
+            let _ = handle.set(app.handle().clone());
             // `jd-app <path.jdproj>` (CLI / Linux / Windows file association) opens that project
             // before the window appears; the frontend reads it back with `project.info` on mount.
             // macOS delivers double-clicked documents as an Apple Event instead — see
@@ -269,10 +383,13 @@ fn log_dir(identifier: &str) -> Option<std::path::PathBuf> {
 
 /// Open a project in the shared core; returns true on success (failures are logged, not fatal).
 fn open_project(state: &AppState, path: &str, source: &str) -> bool {
-    let resp = state.registry.invoke(
-        &state.ctx,
-        Request::new("project.open", serde_json::json!({ "path": path })),
-    );
+    let resp = state
+        .engine
+        .invoke(Request::new(
+            "project.open",
+            serde_json::json!({ "path": path }),
+        ))
+        .unwrap_or_else(|e| Response::error("project.open", Default::default(), e));
     match resp.error {
         None => {
             tracing::info!(%path, source, "opened project");

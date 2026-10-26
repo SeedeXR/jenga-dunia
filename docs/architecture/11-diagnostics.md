@@ -53,6 +53,7 @@ classDiagram
     E_GRAPH_TYPE_MISMATCH
     E_NETWORK
     E_LICENSE_NOT_ACCEPTED
+    E_ENGINE_UNAVAILABLE
   }
   JdError --> ErrorCode
 ```
