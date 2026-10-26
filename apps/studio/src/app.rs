@@ -83,6 +83,8 @@ enum Msg {
     Log(String, Level),
     /// Baked maps for a layer (`terrain.textures`, decoded on the worker) and the bake's time.
     Maps(String, Result<crate::viewport::Maps, String>, u64),
+    /// The colour layer's preview (`name`, then the preview or the error).
+    Color(String, Result<jd_terrain::preview::Preview, String>),
     /// The `lakes` depth layer's preview, for the terrain preview of this layer.
     Lakes(String, Result<Option<jd_terrain::preview::Preview>, String>),
     /// The wind sea for a wind (`ocean.waves`).
@@ -192,6 +194,9 @@ pub struct StudioApp {
     scatter: ScatterLook,
     scatter_points: Option<Vec<[f32; 5]>>,
     scatter_model: String,
+    /// The toolbar's colour layer (the desktop's `colorLayer`): drawn on the terrain instead of
+    /// the height ramp.
+    color_layer: Option<String>,
 }
 
 /// The look's scatter settings as the panel edits them (number fields as typed).
@@ -294,6 +299,7 @@ impl StudioApp {
             scatter: ScatterLook::of(&Value::Null),
             scatter_points: None,
             scatter_model: String::new(),
+            color_layer: None,
         };
         // The desktop bakes the sky on mount, project or not.
         app.fetch_sky(SunLook::of(&Value::Null));
@@ -540,6 +546,17 @@ impl StudioApp {
                         }
                     }
                 }
+                Msg::Color(name, pv) => {
+                    self.reads = self.reads.saturating_sub(1);
+                    // Another colour chosen (or none) while fetching: stale.
+                    if self.color_layer.as_deref() != Some(name.as_str()) {
+                        continue;
+                    }
+                    match pv {
+                        Ok(pv) => self.viewport.set_overlay(Some((pv, name == "heat"))),
+                        Err(e) => self.log(format!("layer_preview (colour): {e}"), Level::Error),
+                    }
+                }
                 Msg::Lakes(layer, lakes) => {
                     self.reads = self.reads.saturating_sub(1);
                     if self.layer.as_deref() != Some(layer.as_str()) {
@@ -748,6 +765,7 @@ impl StudioApp {
                         self.fetch_maps();
                         self.fetch_horizon();
                         self.fetch_lakes(lod);
+                        self.fetch_color(lod);
                         self.preview = Some((
                             lod,
                             bytes as f64 / 1_048_576.0,
@@ -912,6 +930,39 @@ impl StudioApp {
                 (None, None) => Ok(None),
             };
             let _ = tx.send(Msg::Lakes(layer, pv));
+            ctx.request_repaint();
+        });
+    }
+
+    /// The desktop's `setColorLayer`: the overlay goes until the new layer's preview arrives.
+    pub fn set_color_layer(&mut self, name: Option<String>) {
+        self.color_layer = name;
+        self.viewport.set_overlay(None);
+        let lod = self.preview.map_or(0, |(lod, ..)| lod);
+        self.fetch_color(lod);
+    }
+
+    /// The desktop's `refreshColor`: the colour layer's preview at the terrain's LOD, dropped when
+    /// the layer is no longer published.
+    fn fetch_color(&mut self, lod: u32) {
+        let Some(name) = self.color_layer.clone() else {
+            return self.viewport.set_overlay(None);
+        };
+        if !self.layers.contains(&name) {
+            self.color_layer = None;
+            return self.viewport.set_overlay(None);
+        }
+        let request = Self::request("terrain.preview", json!({ "layer": name, "lod": lod }));
+        let (server, tx, ctx) = (self.server.clone(), self.tx.clone(), self.ctx.clone());
+        self.reads += 1;
+        std::thread::spawn(move || {
+            let r = server.invoke(request);
+            let pv = match (&r.result, &r.error) {
+                (Some(v), _) => decode_preview(v).map(|(p, _)| p),
+                (None, Some(e)) => Err(format!("{} {}", e.code.as_str(), e.message)),
+                (None, None) => Err("no result".into()),
+            };
+            let _ = tx.send(Msg::Color(name, pv));
             ctx.request_repaint();
         });
     }
@@ -1751,7 +1802,7 @@ impl StudioApp {
                 }
                 // The readout takes what the toolbar and the layer picker leave, truncated with an
                 // ellipsis rather than running under the toolbar.
-                let picker = if self.layers.len() > 1 { 200.0 } else { 0.0 };
+                let picker = if self.layers.len() > 1 { 400.0 } else { 0.0 };
                 let room = (ui.available_width() - picker).max(0.0);
                 let info = self.viewport_info();
                 ui.allocate_ui(egui::vec2(room, ui.available_height()), |ui| {
@@ -1763,6 +1814,31 @@ impl StudioApp {
                     });
                 });
                 if self.layers.len() > 1 {
+                    // Right to left: the colour picker, then the layer picker.
+                    let mut colour = self.color_layer.clone();
+                    egui::ComboBox::from_id_salt("color-pick")
+                        .selected_text(
+                            RichText::new(colour.as_deref().unwrap_or("height ramp")).size(12.0),
+                        )
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut colour, None, "height ramp");
+                            for l in &self.layers {
+                                ui.selectable_value(&mut colour, Some(l.clone()), l);
+                            }
+                        })
+                        .response
+                        .on_hover_text("Colour the terrain by another layer (masks and class maps) instead of the height ramp")
+                        .widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::accesskit::Role::ComboBox,
+                                true,
+                                "colour",
+                            )
+                        });
+                    ui.label(RichText::new("colour").size(12.0).color(color::FG2));
+                    if colour != self.color_layer {
+                        self.set_color_layer(colour);
+                    }
                     let mut selected = self.layer.clone();
                     egui::ComboBox::from_id_salt("layer-pick")
                         .selected_text(
@@ -1807,6 +1883,13 @@ impl StudioApp {
             s += &format!(" · fog {} %", (fog * 100.0).round());
         }
         s += &format!(" · sun {}°/{}°", number(&json!(el)), number(&json!(az)));
+        if let Some(name) = self
+            .color_layer
+            .as_ref()
+            .filter(|_| self.viewport.overlay_on())
+        {
+            s += &format!(" · colour {name}");
+        }
         if self.viewport.instance_count() > 0 {
             s += &format!(
                 " · {} instances",

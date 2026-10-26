@@ -1032,6 +1032,74 @@ fn rock() -> Vec<([f32; 3], [f32; 3])> {
         .collect()
 }
 
+/// The desktop's `overlayColor` (linear RGB): class maps (integers 0..32) a golden-angle palette,
+/// a lava `heat` layer basalt → red → yellow, any other layer the dark → accent mask gradient.
+/// `u`, `v` 0..1 across the overlay, which may be another size than the height preview.
+fn overlay_color(o: &Preview, u: f32, v: f32, heat: bool) -> [f32; 3] {
+    let x = ((u * (o.width - 1) as f32).round() as u32).min(o.width - 1);
+    let y = ((v * (o.height - 1) as f32).round() as u32).min(o.height - 1);
+    let q = o.data.get((y * o.width + x) as usize).copied().unwrap_or(0);
+    let value = o.min + f32::from(q) / 65535.0 * (o.max - o.min);
+    let classes = o.max <= 32.0 && o.min >= 0.0 && o.max.fract() == 0.0 && o.min.fract() == 0.0;
+    if classes {
+        let id = value.round();
+        if id <= 0.0 {
+            [0.12, 0.12, 0.14]
+        } else {
+            hsl(((id - 1.0) * 0.618_034).rem_euclid(1.0), 0.55, 0.45)
+        }
+    } else if heat {
+        let t = value.clamp(0.0, 1.0);
+        if t <= 0.0 {
+            [0.12, 0.11, 0.11]
+        } else if t < 0.5 {
+            [0.35 + 1.3 * t, 0.05 + 0.3 * t, 0.03]
+        } else {
+            [1.0, 0.2 + 1.4 * (t - 0.5), 0.05 + 0.6 * (t - 0.5)]
+        }
+    } else {
+        let t = if o.max > o.min {
+            (value - o.min) / (o.max - o.min)
+        } else {
+            0.0
+        };
+        [0.1 + 0.15 * t, 0.12 + 0.6 * t, 0.16 + 0.75 * t]
+    }
+}
+
+/// three's `Color.setHSL` (into the working space, so linear as given).
+fn hsl(h: f32, s: f32, l: f32) -> [f32; 3] {
+    let p = if l <= 0.5 {
+        l * (1.0 + s)
+    } else {
+        l + s - l * s
+    };
+    let q = 2.0 * l - p;
+    // three's hue2rgb(p, q, t), called as hue2rgb(q, p, …).
+    let hue = |a: f32, b: f32, mut t: f32| {
+        if t < 0.0 {
+            t += 1.0;
+        }
+        if t > 1.0 {
+            t -= 1.0;
+        }
+        if t < 1.0 / 6.0 {
+            a + (b - a) * 6.0 * t
+        } else if t < 0.5 {
+            b
+        } else if t < 2.0 / 3.0 {
+            a + (b - a) * 6.0 * (2.0 / 3.0 - t)
+        } else {
+            a
+        }
+    };
+    [
+        hue(q, p, h + 1.0 / 3.0),
+        hue(q, p, h),
+        hue(q, p, h - 1.0 / 3.0),
+    ]
+}
+
 fn grid_mesh(pv: &Preview, extent_m: [f32; 2]) -> (Vec<Vertex>, Vec<u32>) {
     let (w, h) = (pv.width.max(2), pv.height.max(2));
     let q =
@@ -1215,6 +1283,8 @@ pub struct Viewport {
     pub frame: bool,
     sun_deg: [f32; 2],
     fog: f32,
+    /// A colour layer on the terrain (its preview, lava heat ramp).
+    overlay: Option<(Preview, bool)>,
     post: Post,
     maps_px: Option<[u32; 2]>,
     emissive: bool,
@@ -1261,6 +1331,7 @@ impl Default for Viewport {
             frame: true,
             sun_deg: [140.0, 35.0],
             fog: 0.0,
+            overlay: None,
             post: Post::default(),
             maps_px: None,
             emissive: false,
@@ -1294,7 +1365,19 @@ impl Viewport {
     pub fn set_terrain(&mut self, pv: &Preview, extent_m: [f32; 2]) {
         self.shown = Some((pv.clone(), extent_m));
         let (w, h) = (pv.width.max(2), pv.height.max(2));
-        let (vertices, indices) = grid_mesh(pv, extent_m);
+        let (mut vertices, indices) = grid_mesh(pv, extent_m);
+        // A colour layer replaces the ramp (and the slope rock) on the terrain's vertices.
+        if let Some((o, heat)) = &self.overlay {
+            for (k, v) in vertices.iter_mut().enumerate() {
+                let (x, y) = (k as u32 % w, k as u32 / w);
+                v.color = overlay_color(
+                    o,
+                    x as f32 / (w - 1) as f32,
+                    y as f32 / (h - 1) as f32,
+                    *heat,
+                );
+            }
+        }
         let refit = self.info.as_ref().is_none_or(|i| i.extent_m != extent_m);
         self.info = Some(TerrainInfo {
             size: [pv.width, pv.height],
@@ -1315,6 +1398,20 @@ impl Viewport {
         self.rebuild_sea();
         self.rebuild_lakes();
         self.rebuild_rain();
+    }
+
+    /// Colour the terrain by another layer's preview (`heat`: the lava ramp) instead of the height
+    /// ramp and the maps; `None`: back to them.
+    pub fn set_overlay(&mut self, overlay: Option<(Preview, bool)>) {
+        self.overlay = overlay;
+        if let Some((pv, extent)) = self.shown.clone() {
+            self.set_terrain(&pv, extent);
+        }
+    }
+
+    /// A colour layer is shown.
+    pub fn overlay_on(&self) -> bool {
+        self.overlay.is_some()
     }
 
     /// Draw the world as a framed block or not (the viewport's Frame button).
@@ -1580,7 +1677,8 @@ impl Viewport {
 
     /// The baked maps' size while they shade the terrain.
     pub fn maps_px(&self) -> Option<[u32; 2]> {
-        self.maps_px
+        // Shading only without a colour overlay (the desktop's readout drops `pbr` then).
+        self.maps_px.filter(|_| self.overlay.is_none())
     }
 
     /// The sky preview's size while it is on the dome.
@@ -1908,7 +2006,8 @@ impl Viewport {
             fog_color: w(hex(0xb9c7d9)),
             fog: [fog[0], fog[1], 0.0, 0.0],
             flags: [
-                f32::from(u8::from(self.maps_px.is_some())),
+                // A colour overlay wins over the maps, as the desktop's `maps && !overlay`.
+                f32::from(u8::from(self.maps_px.is_some() && self.overlay.is_none())),
                 f32::from(u8::from(self.emissive)),
                 f32::from(u8::from(self.sky_px.is_some())),
                 cam.size * 40.0,

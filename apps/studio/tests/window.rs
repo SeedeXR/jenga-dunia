@@ -524,6 +524,53 @@ fn thousands(n: usize) -> String {
     out
 }
 
+#[test]
+fn the_colour_picker_draws_a_layer_on_the_terrain_and_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = engine(dir.path());
+    // A second published layer: snow beside the height.
+    for (op, params) in [
+        (
+            "graph.add_simulation",
+            json!({ "which": "snow", "max_height_m": 600.0 }),
+        ),
+        ("graph.evaluate", json!({ "lod": 0 })),
+    ] {
+        let r = server.invoke(Request::new(op, params));
+        assert!(r.error.is_none(), "{op}: {:?}", r.error);
+    }
+    let mut h = window(server);
+    settle(&mut h, |a| {
+        a.viewport.maps_px().is_some() && a.layers().iter().any(|l| l == "snow")
+    });
+    let (_, before) = covered(&mut h);
+    let colour = || eframe::egui::accesskit::Role::ComboBox;
+    h.get_by_role_and_label(colour(), "colour").click();
+    h.run();
+    h.get_by_label("snow").click();
+    h.run();
+    settle(&mut h, |a| a.viewport.overlay_on());
+    let readout = h.state().viewport_readout();
+    assert!(readout.contains(" · colour snow"), "{readout}");
+    // The overlay wins over the maps, as the desktop's readout shows.
+    assert!(!readout.contains(" · pbr"), "{readout}");
+    let (_, after) = covered(&mut h);
+    let changed = before.iter().zip(&after).filter(|(a, b)| a != b).count();
+    assert!(
+        changed * 4 > before.len(),
+        "only {changed} of {} pixels changed",
+        before.len()
+    );
+    // Back to the height ramp: no overlay, the maps shade again.
+    h.get_by_role_and_label(colour(), "colour").click();
+    h.run();
+    h.get_by_label("height ramp").click();
+    h.run();
+    assert!(!h.state().viewport.overlay_on());
+    assert!(h.state().viewport.maps_px().is_some());
+    assert!(!h.state().viewport_readout().contains(" · colour"));
+}
+
 /// `JD_STUDIO_CAPTURE=<png> cargo test -p jd-studio --test window -- --ignored capture`: the
 /// window rendered offscreen (no screen capture involved) on the project the desktop's
 /// `e2e/parity-capture.spec.ts` builds — same world, seed and starter graph — at the same

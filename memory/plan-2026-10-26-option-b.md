@@ -158,5 +158,10 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   (preview + map re-bake per slider step) → Tag::Look logs only; a map bake landing after PBR
   off re-applied the maps → dropped; the columns' overlay scroll bar covered the right-aligned
   controls once a column scrolled → the right padding moved inside the scroll area
-  (look::scroll_card). Next: Caves (+ x-ray), Actions, Simulation layers, Materials, Noise,
-  Export; then the left column (Real world, Reference image, Layers, Settings).
+  (look::scroll_card).
+- P3 colour overlays: the toolbar's `colour` picker beside `layer` (height ramp or any published
+  layer); its preview at the terrain's LOD recolours the mesh with the desktop's overlayColor
+  (class maps 0..32 → golden-angle HSL palette, `heat` → lava ramp, else the mask gradient), the
+  maps off while it is on (readout `colour X`, no `pbr`); dropped when the layer is no longer
+  published. Next: Caves (+ x-ray, Footprint = colour cave_plan), Actions, Simulation layers,
+  Materials, Noise, Export; then the left column (Real world, Reference image, Layers, Settings).
