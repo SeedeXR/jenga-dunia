@@ -260,3 +260,12 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   `project-opened` re-read of Studio's opens evaluated again — replaced by `followProject`.
   Verified with the packaged app: open, second open, quit (see docs/user/desktop-app.md).
   Open: retiring the WebView viewport waits for the owner (it removes the Editor's own view).
+  Open (flake, 2026-10-27): `e2e/paint.spec.ts` failed once inside a full gate run (instance count
+  stayed 925 after the density stroke; 30 s poll). Not reproduced in 5 full suites + 12 parallel
+  repeats; trace lost (overwritten by reruns — next time copy `test-results/` first). Ruled out:
+  overlapping live evaluations publishing stale layers (jd-core refuses: `W_STALE_GRAPH` on a
+  revision change) and a non-graph write making the stroke's evaluation stale (only graph.* /
+  set_settings bump the revision). Unchecked: the stroke's evaluation dropped by the desktop's
+  `graphGen` check with no follow-up evaluation, and `placeScatter` racing `adopt`.
+  Studio's chains each run on their own thread, so its evaluations can overlap too (harmless for
+  the same reason, but wasted work under fast strokes).

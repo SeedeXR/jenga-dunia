@@ -2,7 +2,7 @@
 
 Open-source (MIT), commercially usable procedural world generation and environmental simulation — Rust core, Tauri desktop app, CLI and MCP server sharing one engine.
 
-**Version `0.0.1`** (single source of truth: [`VERSION`](VERSION), mirrored into Cargo, npm and Tauri manifests and checked by `scripts/check-version.mjs`). **Status: Phase 2 in progress** — Rust core with project format, journaled operations, `jd` CLI and `jd-mcp` MCP server; noise terrain, EXR/PNG16/RAW export; procedural node graph with incremental evaluation; native Tauri desktop app (WebGPU viewport, node editor). Tested unit/property, CLI-driven, MCP-driven and UI-driven. See [`docs/user/`](docs/user/README.md).
+**Version `0.0.1`** (single source of truth: [`VERSION`](VERSION), mirrored into Cargo, npm and Tauri manifests and checked by `scripts/check-version.mjs`). **Status: Phase 2 in progress** — Rust core with project format, journaled operations, `jd` CLI and `jd-mcp` MCP server; noise terrain, EXR/PNG16/RAW export; procedural node graph with incremental evaluation; the desktop app: Studio (egui + wgpu: the engine, 3-D viewport and panels) hosting the Tauri Editor (node graph) over a local socket (ADR-0017), packaged by `scripts/package.sh`. Tested unit/property, CLI-driven, MCP-driven and UI-driven. See [`docs/user/`](docs/user/README.md).
 
 **One edition.** Like Blender, Jenga Dunia has no Community/Professional split: every feature — automation, tiled builds, full resolution, CLI and MCP — is in every build, for everyone, commercially usable under MIT ([ADR-0013](docs/adr/0013-single-edition.md)).
 

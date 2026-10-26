@@ -30,6 +30,15 @@ Status: first working build. One window, native macOS title bar, dark theme (Hos
 
 ## Run from source
 
+Studio and the Editor (ADR-0017, what the bundle runs):
+
+```sh
+cd apps/desktop && pnpm install && pnpm dev    # the Editor's UI (a debug jd-app loads it from Vite)
+cargo build -p jd-app && cargo run -p jd-studio -- ~/Worlds/Hills.jdproj   # project optional
+```
+
+Studio starts the Editor from `jd-app` next to it (or `--editor <path>` / `JD_EDITOR`; `--no-editor` for Studio alone). The single-window app:
+
 ```sh
 cargo build -p jd-mcp            # not needed by the app; used by the UI end-to-end tests
 cd apps/desktop && pnpm install && pnpm tauri dev
