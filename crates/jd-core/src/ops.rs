@@ -6543,7 +6543,9 @@ mod tests {
         };
         ok(
             "project.create",
-            serde_json::json!({ "path": dir.path().join("w.jdproj"), "name": "W" }),
+            // A small world: the test evaluates snow, lava and two caves at the end, and shares a
+            // 2-core CI runner with this binary's other tests (a slow job there waits ≤ 60 s).
+            serde_json::json!({ "path": dir.path().join("w.jdproj"), "name": "W", "world": { "resolution_px": [64, 64], "extent_m": [640.0, 640.0], "tile_size": 64, "halo": 4, "origin": [0, 0], "seed": 42 } }),
         );
         let graph = || ok("graph.list", serde_json::json!({}));
         let node_of = |g: &Value, kind: &str| {
