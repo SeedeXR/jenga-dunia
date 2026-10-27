@@ -897,6 +897,8 @@ fn the_viewport_icons_stay_apart_on_a_narrow_window() {
         .build_eframe(move |cc| StudioApp::new(cc, server, Options::default()));
     settle(&mut h, |a| a.viewport.info().is_some());
     let vp = h.state().viewport.rect();
+    // The side panels gave way to their minimums before the viewport (292 + 272 px left it 336).
+    assert!(vp.width() > 420.0, "the viewport was squeezed: {vp:?}");
     let chips: Vec<eframe::egui::Rect> = [
         "Fit: back to the home view",
         "Fullscreen viewport (Esc leaves)",

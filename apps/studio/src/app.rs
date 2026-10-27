@@ -6260,13 +6260,16 @@ impl eframe::App for StudioApp {
                     }))
                     .show(ui, |ui| self.log_card(ui));
             }
+            // On a narrow window the side panels give way before the viewport (plan P6 spec 1):
+            // each may take half of what is left after 520 px for the view, down to its minimum.
+            let room = ((ui.max_rect().width() - 520.0) / 2.0).max(0.0);
             if self.collapsed[1] {
                 self.collapsed_strip(ui, 1);
             } else {
                 egui::Panel::right("panel-right")
                     .resizable(true)
                     .default_size(292.0)
-                    .size_range(232.0..=572.0)
+                    .size_range(232.0..=room.clamp(232.0, 572.0))
                     .frame(bg.inner_margin(Margin {
                         left: 4,
                         right: 8,
@@ -6304,7 +6307,7 @@ impl eframe::App for StudioApp {
                 egui::Panel::left("panel-left")
                     .resizable(true)
                     .default_size(272.0)
-                    .size_range(212.0..=532.0)
+                    .size_range(212.0..=room.clamp(212.0, 532.0))
                     .frame(bg.inner_margin(Margin {
                         left: 8,
                         right: 4,
