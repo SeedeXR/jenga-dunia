@@ -376,8 +376,8 @@ function Inner() {
         <div className="absolute top-2 left-2 flex items-center gap-1">
           <select className="rounded border border-jd-line bg-jd-bg-2 px-1 py-0.5 text-xs" value={newKind} onChange={(e) => setNewKind(e.target.value)} data-testid="graph-kind">
             {s.graphKinds.map((k) => (
-              <option key={k.kind} value={k.kind}>
-                {k.kind}
+              <option key={k.kind} value={k.kind} title={k.kind}>
+                {k.kind.split(".").slice(1).join(".").replace(/@\d+$/, "")}
               </option>
             ))}
           </select>
