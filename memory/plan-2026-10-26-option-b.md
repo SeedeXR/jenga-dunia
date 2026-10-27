@@ -312,6 +312,12 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   weight 255 vs 0 changes > 10 % of the viewport (mutation: blend off → 0 pixels, fails). A first
   render test compared before / after the re-bake and passed with the blend off — the bake itself
   changes the pixels — so it was replaced.
+  Closed (slice 2e): G6 the protocol's `raise { role }` — Studio's Graph button (enabled while the
+  Editor runs) emits it, the Editor unminimises, shows and focuses its window. Verified on macOS:
+  Editor minimised (System Events AXMinimized), Studio's button clicked through accessibility
+  (found by its accessible label), AXMinimized → false. G9 one `select_node` path (layer stack,
+  Sculpt's strokes node, the cave line — now clickable, the selected cave's box in the accent)
+  announces `selection` to the Editor; caves window test (mutation-checked).
   Open (flake, 2026-10-27): `e2e/paint.spec.ts` failed once inside a full gate run (instance count
   stayed 925 after the density stroke; 30 s poll). Not reproduced in 5 full suites + 12 parallel
   repeats; trace lost (overwritten by reruns — next time copy `test-results/` first). Ruled out:

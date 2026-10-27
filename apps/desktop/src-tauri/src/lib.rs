@@ -132,6 +132,17 @@ fn connect_engine(
     let (ev_handle, ev_quitting) = (handle.clone(), quitting.clone());
     let on_event = Box::new(move |topic: &str, data: &serde_json::Value| {
         let Some(app) = ev_handle.get() else { return };
+        // Studio's Graph button while this window runs: unminimise, show and focus it.
+        if topic == "raise" && data["role"] == "editor" {
+            if let Some(w) = app.webview_windows().into_values().next() {
+                let _ = w.unminimize();
+                let _ = w.show();
+                if let Err(e) = w.set_focus() {
+                    tracing::warn!(error = %e, "could not bring the editor to the front");
+                }
+            }
+            return;
+        }
         if topic == "shutdown" {
             ev_quitting.store(true, Ordering::SeqCst);
             tracing::info!(reason = %data["reason"], "Studio is shutting down; closing the editor");

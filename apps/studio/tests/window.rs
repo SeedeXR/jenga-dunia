@@ -803,7 +803,9 @@ fn the_colour_picker_draws_a_layer_on_the_terrain_and_back() {
 #[test]
 fn the_caves_section_adds_shows_x_rays_maps_and_exports_a_cave() {
     let dir = tempfile::tempdir().unwrap();
-    let mut h = window(engine(dir.path()));
+    let server = engine(dir.path());
+    let probe = server.clone();
+    let mut h = window(server);
     settle(&mut h, |a| a.viewport.info().is_some());
     // Add cave (karst, the first kind): the node goes in, the graph evaluates, the cave is meshed.
     h.get_by_label("Add cave").scroll_to_me();
@@ -821,6 +823,26 @@ fn the_caves_section_adds_shows_x_rays_maps_and_exports_a_cave() {
     h.get(egui_kittest::kittest::by().label_contains("Karst (limestone) · "))
         .scroll_to_me();
     h.get(egui_kittest::kittest::by().label_contains(" km · "));
+    // A click on the line selects the cave node (the Editor's inspector follows).
+    h.get(egui_kittest::kittest::by().label_contains(" km · "))
+        .click();
+    h.run();
+    let picked = h
+        .state()
+        .selected_node()
+        .map(str::to_owned)
+        .expect("a node selected");
+    let graph = probe
+        .invoke(Request::new("graph.list", json!({})))
+        .result
+        .unwrap();
+    let kind = graph["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["id"] == picked.as_str())
+        .map(|n| n["kind"].as_str().unwrap_or_default().to_owned());
+    assert!(kind.is_some_and(|k| k.starts_with("jd.cave")), "{picked}");
     // Place: a click on the terrain adds an entrance there (the ground under the pointer).
     let probe_entrances = |h: &Harness<'static, StudioApp>| h.state().cave_entrances(0);
     let before = probe_entrances(&h);

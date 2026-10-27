@@ -1376,7 +1376,7 @@ impl StudioApp {
                 self.log_response(&r);
                 if let Some(id) = r.result.as_ref().and_then(|v| v["id"].as_str()) {
                     self.sculpt_node = Some(id.to_owned());
-                    self.selected_node = Some(id.to_owned());
+                    self.select_node(id.to_owned());
                     self.drawing = Some(Drawing::Sculpt);
                 }
                 self.refresh();
@@ -3277,12 +3277,7 @@ impl StudioApp {
         }
         self.stack.closed = closed;
         if let Some(id) = select {
-            // The Editor's inspector follows over the protocol's `selection` event.
-            self.server.emit(
-                "selection",
-                json!({ "nodes": [id], "source": "gui-studio" }),
-            );
-            self.selected_node = Some(id);
+            self.select_node(id);
         }
         if let Some((op, params)) = act {
             let removed = (op == "graph.unsplice")
@@ -4128,6 +4123,7 @@ impl StudioApp {
         let busy = self.busy > 0;
         let mut toggle_place: Option<String> = None;
         let mut action: Option<(&str, Value)> = None;
+        let mut select: Option<String> = None;
         for (ci, node) in self.cave_nodes().iter().enumerate() {
             let id = node["id"].as_str().unwrap_or_default().to_owned();
             let kind = node["params"]["kind"].as_str().unwrap_or("karst");
@@ -4144,8 +4140,14 @@ impl StudioApp {
                         .collect()
                 })
                 .unwrap_or_default();
+            // `border-jd-accent/40` on the selected cave, `border-white/5` otherwise.
+            let edge = if self.selected_node.as_deref() == Some(id.as_str()) {
+                color::ACCENT.gamma_multiply(0.4)
+            } else {
+                egui::Color32::from_white_alpha(13)
+            };
             egui::Frame::new()
-                .stroke(Stroke::new(1.0, egui::Color32::from_white_alpha(13)))
+                .stroke(Stroke::new(1.0, edge))
                 .corner_radius(6.0)
                 .inner_margin(Margin::same(6))
                 .show(ui, |ui| {
@@ -4192,12 +4194,18 @@ impl StudioApp {
                                 toggle_place = Some(id.clone());
                             }
                             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                                ui.add(
-                                    egui::Label::new(
-                                        RichText::new(format!("{label} · {line}")).size(11.0).color(color::FG0),
+                                let summary = ui
+                                    .add(
+                                        egui::Label::new(
+                                            RichText::new(format!("{label} · {line}")).size(11.0).color(color::FG0),
+                                        )
+                                        .wrap()
+                                        .sense(egui::Sense::click()),
                                     )
-                                    .wrap(),
-                                );
+                                    .on_hover_text("Select the cave node: the inspector edits kind, seed, size, reach, cover, levels, sea level, speleothems and roughness");
+                                if summary.clicked() {
+                                    select = Some(id.clone());
+                                }
                             });
                         });
                     });
@@ -4239,6 +4247,9 @@ impl StudioApp {
                     }
                 });
             ui.add_space(8.0);
+        }
+        if let Some(id) = select {
+            self.select_node(id);
         }
         if let Some(id) = toggle_place {
             if self.drawing == Some(Drawing::Cave(id.clone())) {
@@ -5369,23 +5380,20 @@ impl StudioApp {
         }
         look::toolbar_separator(ui);
         // Studio's own addition: the Editor (node graph) window's state.
-        let (tip, running) = match self.editor.as_ref().map(|e| &e.status) {
+        let tip = match self.editor.as_ref().map(|e| &e.status) {
             Some(editor::Status::Running(pid)) => {
-                (format!("Node editor running (process {pid})"), true)
+                format!("Node editor running (process {pid}) — click to bring it to the front")
             }
-            Some(editor::Status::Closed) => ("Open the node editor".into(), false),
+            Some(editor::Status::Closed) => "Open the node editor".into(),
             Some(editor::Status::GaveUp(m) | editor::Status::Failed(m)) => {
-                (format!("{m} — click to open it again"), false)
+                format!("{m} — click to open it again")
             }
-            None => (
-                self.editor_error.clone().map_or_else(
-                    || "Open the node editor".into(),
-                    |e| format!("{e} — click to retry"),
-                ),
-                false,
+            None => self.editor_error.clone().map_or_else(
+                || "Open the node editor".into(),
+                |e| format!("{e} — click to retry"),
             ),
         };
-        if look::icon_button(ui, "workflow", &tip, !running).clicked() {
+        if look::icon_button(ui, "workflow", &tip, true).clicked() {
             self.open_editor();
         }
     }
@@ -5447,6 +5455,15 @@ impl StudioApp {
                     }
                 });
             });
+    }
+
+    /// Select a node here and in the Editor (its inspector follows the protocol's `selection`).
+    fn select_node(&mut self, id: String) {
+        self.server.emit(
+            "selection",
+            json!({ "nodes": [id], "source": "gui-studio" }),
+        );
+        self.selected_node = Some(id);
     }
 
     /// Whether a toolbar / shortcut / menu command can run now (the toolbar's enabled states).
@@ -5613,7 +5630,8 @@ impl StudioApp {
     fn open_editor(&mut self) {
         match &mut self.editor {
             Some(e) if !matches!(e.status, editor::Status::Running(_)) => e.reopen(),
-            Some(_) => {}
+            // Running: bring its window to the front (the protocol's `raise`).
+            Some(_) => self.server.emit("raise", json!({ "role": "editor" })),
             None => match editor::locate(None) {
                 Ok(path) => self.start_editor(path),
                 Err(msg) => {
