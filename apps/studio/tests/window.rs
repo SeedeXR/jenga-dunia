@@ -2328,6 +2328,43 @@ fn sculpt_paints_strokes_and_transforms_and_the_road_lays_a_spline() {
     assert!(h.state().viewport.tool.is_none(), "one drag, one road");
 }
 
+/// On a world over 512² a live edit evaluates at a coarser LOD, published as `height#lod1`: the
+/// viewport shows that evaluation, not the full-resolution layer from before the edit.
+#[test]
+fn a_live_edit_on_a_large_world_shows_the_preview_it_evaluated() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = Server::bind(Registry::with_builtins(), Context::default()).expect("bind");
+    let world = json!({ "resolution_px": [1024, 1024], "extent_m": [2048.0, 2048.0], "tile_size": 512, "halo": 0, "origin": [0.0, 0.0], "seed": 7 });
+    for (op, params) in [
+        (
+            "project.create",
+            json!({ "path": dir.path().join("Big.jdproj"), "name": "Big", "world": world }),
+        ),
+        ("graph.evaluate", json!({ "lod": 0 })),
+    ] {
+        let r = server.invoke(Request::new(op, params));
+        assert!(r.error.is_none(), "{op}: {:?}", r.error);
+    }
+    let mut h = window(Arc::new(server));
+    settle(&mut h, |a| a.viewport.info().is_some());
+    assert_eq!(h.state().layer(), Some("height"));
+    h.get_by_label("Sculpt: adds a stroke node before the output and paints with the brush")
+        .click();
+    h.run_steps(1);
+    settle(&mut h, |a| a.viewport.tool.is_some());
+    let r = h.state().viewport.rect();
+    drag_on(
+        &mut h,
+        r.center() - eframe::egui::vec2(40.0, 0.0),
+        r.center() + eframe::egui::vec2(40.0, 0.0),
+    );
+    settle(&mut h, |a| a.layer() == Some("height#lod1"));
+    // Generate (a full evaluation) brings the full-resolution layer back.
+    h.key_press_modifiers(eframe::egui::Modifiers::COMMAND, eframe::egui::Key::G);
+    h.run_steps(1);
+    settle(&mut h, |a| a.layer() == Some("height"));
+}
+
 /// e2e/sculpt.spec.ts, alphas.spec.ts and sculptlayer.spec.ts in Studio: the stroke's strength,
 /// alpha and hardness, one undo step per stroke, Shift + wheel strength, the right button
 /// painting nothing, lower = negative strength, the south half of the screen, height scale 0.

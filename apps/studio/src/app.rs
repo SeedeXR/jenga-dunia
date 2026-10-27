@@ -178,6 +178,9 @@ pub struct StudioApp {
     graph: Value,
     layers: Vec<String>,
     layer: Option<String>,
+    /// The layers the last evaluation published (a live preview's `height#lod1`): the shown
+    /// layer follows them, as the desktop adopted each evaluation's layer.
+    evaluated: Vec<String>,
     /// The 3-D view.
     pub viewport: Viewport,
     log: VecDeque<LogLine>,
@@ -799,6 +802,7 @@ impl StudioApp {
             graph: Value::Null,
             layers: Vec::new(),
             layer: None,
+            evaluated: Vec::new(),
             viewport: Viewport::default(),
             log: VecDeque::new(),
             busy: 0,
@@ -1102,6 +1106,7 @@ impl StudioApp {
                             && let Some(report) = &r.result
                         {
                             self.adapt_lod(report);
+                            self.evaluated = published(report);
                         }
                         // A node spliced in (the layer strip, an action, a road) is selected, so
                         // the inspectors show it (the desktop's spliceBefore callers).
@@ -1131,6 +1136,9 @@ impl StudioApp {
                 Msg::Event { topic, data } => {
                     if topic == "busy" {
                         self.engine_busy = data["running"] == true;
+                    }
+                    if topic == "evaluated" {
+                        self.evaluated = published(&data["report"]);
                     }
                     // The Editor's selection (a node clicked in the graph) highlights here.
                     if topic == "selection" && data["source"] != "gui-studio" {
@@ -1360,12 +1368,21 @@ impl StudioApp {
                             .filter_map(|n| n.as_str().map(str::to_owned))
                             .collect()
                     });
+                // The shown layer as the last evaluation published it (`height` after a full
+                // one, `height#lod1` after a live preview), else as it was, else the default.
+                let base = |l: &str| l.split('#').next().unwrap_or(l).to_owned();
+                let adopted = self.layer.as_deref().and_then(|cur| {
+                    self.evaluated
+                        .iter()
+                        .find(|l| base(l) == base(cur) && self.layers.contains(l))
+                        .cloned()
+                });
                 let keep = self
                     .layer
                     .as_ref()
                     .filter(|l| self.layers.contains(l))
                     .cloned();
-                self.layer = keep.or_else(|| default_layer(&self.layers));
+                self.layer = adopted.or(keep).or_else(|| default_layer(&self.layers));
                 match self.layer.clone() {
                     Some(layer) => self.invoke(
                         Tag::Stats(layer.clone()),
@@ -6069,6 +6086,14 @@ fn thousands(n: u64) -> String {
         out.push(c);
     }
     out
+}
+
+/// The layer names an evaluation report published (its `layers` keys).
+fn published(report: &Value) -> Vec<String> {
+    report["layers"]
+        .as_object()
+        .map(|m| m.keys().cloned().collect())
+        .unwrap_or_default()
 }
 
 /// `height` when published, else the first `height#lod…`, else the first layer.
