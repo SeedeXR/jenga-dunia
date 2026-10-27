@@ -1256,7 +1256,9 @@ fn the_camera_row_keys_records_and_plays_a_flythrough() {
     assert_eq!(h.state().viewport.camera, home);
     // Record the default 48 frames: every one written, the camera back where it was.
     h.get_by_label("Record").click();
-    let until = Instant::now() + Duration::from_secs(120);
+    // 48 rendered frames: on the Windows runner's software rasteriser (WARP), sharing two cores
+    // with the other window tests, this took over 120 s.
+    let until = Instant::now() + Duration::from_secs(300);
     while !h
         .state()
         .log_lines()
