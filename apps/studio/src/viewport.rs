@@ -2226,10 +2226,13 @@ impl Viewport {
         slice.map_async(wgpu::MapMode::Read, move |r| {
             let _ = tx.send(r);
         });
+        // A still or a flythrough frame can wait: on a software rasteriser under load (WARP on the
+        // Windows runner, CI 2026-10-27) the first frame's copy outlasted a 5 s wait and the
+        // flythrough failed, though the work was only slow.
         rs.device
             .poll(wgpu::PollType::Wait {
                 submission_index: Some(index),
-                timeout: Some(std::time::Duration::from_secs(5)),
+                timeout: Some(std::time::Duration::from_secs(60)),
             })
             .ok()?;
         rx.recv().ok()?.ok()?;
