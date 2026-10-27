@@ -17,6 +17,7 @@ use serde_json::{Value, json};
 
 use crate::editor::{self, Editor};
 use crate::look;
+use crate::menu::Command;
 use crate::theme::{self, color};
 use crate::viewport::Camera;
 use crate::viewport::Viewport;
@@ -851,6 +852,7 @@ impl StudioApp {
             app.start_editor(path.clone());
         }
         crate::documents::wake(&cc.egui_ctx);
+        crate::menu::wake(&cc.egui_ctx);
         match options.project {
             Some(p) => app.open_project(p.display().to_string()),
             None => app.refresh(),
@@ -5295,83 +5297,33 @@ impl StudioApp {
         ui.painter()
             .vline(x, y - 9.0..=y + 9.0, Stroke::new(1.0, color::LINE));
         ui.spacing_mut().item_spacing.x = 2.0;
-        let (has_project, idle) = (self.project.is_some(), self.busy == 0);
-        let undo = self.graph["undo_depth"].as_u64().unwrap_or(0) > 0;
-        let redo = self.graph["redo_depth"].as_u64().unwrap_or(0) > 0;
-        if look::icon_button(ui, "file-plus", "New project… (⌘N)", idle).clicked()
-            && let Some(p) = rfd::FileDialog::new()
-                .set_title("New Jenga Dunia project")
-                .set_file_name(format!("{}.jdproj", self.name_input.trim()))
-                .save_file()
-        {
-            let mut p = p.display().to_string();
-            if !p.ends_with(".jdproj") {
-                p.push_str(".jdproj"); // a project is a directory
+        let mut button = |ui: &mut egui::Ui, icon, tip, c| {
+            if look::icon_button(ui, icon, tip, self.can_run(c)).clicked() {
+                self.run(c);
             }
-            self.path_input = p.clone();
-            self.new_project(p);
-        }
-        if look::icon_button(ui, "folder-open", "Open project… (⌘O)", idle).clicked()
-            && let Some(p) = rfd::FileDialog::new()
-                .set_title("Open Jenga Dunia project")
-                .pick_folder()
-        {
-            self.open_project(p.display().to_string());
-        }
-        if look::icon_button(ui, "save", "Save (⌘S)", has_project && idle).clicked() {
-            self.invoke(Tag::User, "project.save", json!({}));
-        }
-        if look::icon_button(
+        };
+        button(ui, "file-plus", "New project… (⌘N)", Command::New);
+        button(ui, "folder-open", "Open project… (⌘O)", Command::Open);
+        button(ui, "save", "Save (⌘S)", Command::Save);
+        button(
             ui,
             "file-input",
             "Import a DEM, heightmap or FBX into assets/ (⌘I)",
-            has_project && idle,
-        )
-        .clicked()
-            && let Some(p) = pick_asset()
-        {
-            self.import_input = p.clone();
-            self.import_asset(p);
-        }
-        if look::icon_button(
+            Command::Import,
+        );
+        button(
             ui,
             "download",
             "Export the heightmap… (⌘E)",
-            self.layer.is_some() && idle,
-        )
-        .clicked()
-        {
-            self.pick_export_path();
-        }
+            Command::Export,
+        );
         look::toolbar_separator(ui);
-        if look::icon_button(
-            ui,
-            "undo-2",
-            "Undo graph edit (⌥⌘Z)",
-            has_project && undo && idle,
-        )
-        .clicked()
-        {
-            self.invoke(Tag::User, "graph.undo", json!({}));
-        }
-        if look::icon_button(
-            ui,
-            "redo-2",
-            "Redo graph edit (⇧⌥⌘Z)",
-            has_project && redo && idle,
-        )
-        .clicked()
-        {
-            self.invoke(Tag::User, "graph.redo", json!({}));
-        }
+        button(ui, "undo-2", "Undo graph edit (⌥⌘Z)", Command::UndoGraph);
+        button(ui, "redo-2", "Redo graph edit (⇧⌥⌘Z)", Command::RedoGraph);
         look::toolbar_separator(ui);
-        if look::icon_button(ui, "wand-2", "Generate terrain (⌘G)", has_project && idle).clicked()
-        {
-            self.generate();
-        }
-        if look::icon_button(ui, "play", "Evaluate the graph", has_project && idle).clicked() {
-            self.invoke(Tag::User, "graph.evaluate", json!({ "lod": 0 }));
-        }
+        button(ui, "wand-2", "Generate terrain (⌘G)", Command::Generate);
+        button(ui, "play", "Evaluate the graph (⌘R)", Command::Evaluate);
+        let (has_project, idle) = (self.project.is_some(), self.busy == 0);
         look::toolbar_separator(ui);
         if look::icon_button(
             ui,
@@ -5406,6 +5358,59 @@ impl StudioApp {
         };
         if look::icon_button(ui, "workflow", &tip, !running).clicked() {
             self.open_editor();
+        }
+    }
+
+    /// Whether a toolbar / shortcut / menu command can run now (the toolbar's enabled states).
+    pub fn can_run(&self, c: Command) -> bool {
+        let (project, idle) = (self.project.is_some(), self.busy == 0);
+        let depth = |k: &str| self.graph[k].as_u64().unwrap_or(0) > 0;
+        idle && match c {
+            Command::New | Command::Open => true,
+            Command::Save | Command::Import | Command::Generate | Command::Evaluate => project,
+            Command::Export => self.layer.is_some(),
+            Command::UndoGraph => project && depth("undo_depth"),
+            Command::RedoGraph => project && depth("redo_depth"),
+        }
+    }
+
+    /// Run a toolbar / shortcut / menu command (the Editor's menu handler, App.tsx).
+    pub fn run(&mut self, c: Command) {
+        match c {
+            Command::New => {
+                if let Some(p) = rfd::FileDialog::new()
+                    .set_title("New Jenga Dunia project")
+                    .set_file_name(format!("{}.jdproj", self.name_input.trim()))
+                    .save_file()
+                {
+                    let mut p = p.display().to_string();
+                    if !p.ends_with(".jdproj") {
+                        p.push_str(".jdproj"); // a project is a directory
+                    }
+                    self.path_input = p.clone();
+                    self.new_project(p);
+                }
+            }
+            Command::Open => {
+                if let Some(p) = rfd::FileDialog::new()
+                    .set_title("Open Jenga Dunia project")
+                    .pick_folder()
+                {
+                    self.open_project(p.display().to_string());
+                }
+            }
+            Command::Save => self.invoke(Tag::User, "project.save", json!({})),
+            Command::Import => {
+                if let Some(p) = pick_asset() {
+                    self.import_input = p.clone();
+                    self.import_asset(p);
+                }
+            }
+            Command::Export => self.pick_export_path(),
+            Command::UndoGraph => self.invoke(Tag::User, "graph.undo", json!({})),
+            Command::RedoGraph => self.invoke(Tag::User, "graph.redo", json!({})),
+            Command::Generate => self.generate(),
+            Command::Evaluate => self.invoke(Tag::User, "graph.evaluate", json!({ "lod": 0 })),
         }
     }
 
@@ -5903,6 +5908,21 @@ impl eframe::App for StudioApp {
                 self.set_fullscreen(ui.ctx(), false);
             }
             self.cancel_jobs();
+        }
+        // The shortcuts (egui, every platform) and the macOS menu bar's choices (whose keys the
+        // menu takes first, so one press runs once).
+        let mut commands = crate::menu::take();
+        ui.input_mut(|i| {
+            for (c, keys) in crate::menu::shortcuts() {
+                if i.consume_shortcut(&keys) {
+                    commands.push(c);
+                }
+            }
+        });
+        for c in commands {
+            if self.can_run(c) {
+                self.run(c);
+            }
         }
         let bg = egui::Frame::new().fill(color::BG0);
         if !self.fullscreen {

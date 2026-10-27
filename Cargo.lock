@@ -3462,6 +3462,7 @@ dependencies = [
  "jd-terrain",
  "jd-types",
  "jiff",
+ "muda",
  "rfd",
  "serde_json",
  "tempfile",

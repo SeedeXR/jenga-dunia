@@ -7,6 +7,7 @@ pub mod documents;
 pub mod editor;
 pub mod i18n;
 pub mod look;
+pub mod menu;
 pub mod post;
 pub mod theme;
 pub mod viewport;

@@ -496,7 +496,7 @@ export default function App() {
               ["tb-redo", Redo2, "Redo graph edit (⇧⌥⌘Z)", () => void s.redoGraph(), !s.project || !s.graph.redo_depth],
               null,
               ["tb-generate", Wand2, "Generate terrain (⌘G)", () => void s.generate(), !s.project],
-              ["tb-evaluate", Play, "Evaluate the graph", () => void s.evaluateGraph(), !s.project],
+              ["tb-evaluate", Play, "Evaluate the graph (⌘R)", () => void s.evaluateGraph(), !s.project],
               null,
               ["tb-still", Camera, "Save the viewport as a still (exports/stills/)", () => void s.saveStill(), !s.project || !s.viewport],
               ["tb-fullscreen", Maximize2, "Fullscreen viewport (Esc leaves)", () => {

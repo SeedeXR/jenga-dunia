@@ -201,6 +201,33 @@ fn tasks_and_diagnostics_work_before_a_project_is_open() {
 }
 
 #[test]
+fn the_editors_shortcuts_run_the_toolbar_commands() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window(engine(dir.path()));
+    settle(&mut h, |a| a.viewport.info().is_some());
+    let logged =
+        |h: &Harness<'static, StudioApp>, t: &str| h.state().log_lines().any(|l| l.text == t);
+    assert!(!logged(&h, "project.save: ok"));
+    h.key_press_modifiers(eframe::egui::Modifiers::COMMAND, eframe::egui::Key::S);
+    settle(&mut h, |a| {
+        a.log_lines().any(|l| l.text == "project.save: ok")
+    });
+    // ⌘R evaluates the graph, as the toolbar's Evaluate.
+    let before = h
+        .state()
+        .log_lines()
+        .filter(|l| l.text == "graph.evaluate: ok")
+        .count();
+    h.key_press_modifiers(eframe::egui::Modifiers::COMMAND, eframe::egui::Key::R);
+    settle(&mut h, |a| {
+        a.log_lines()
+            .filter(|l| l.text == "graph.evaluate: ok")
+            .count()
+            > before
+    });
+}
+
+#[test]
 fn a_write_from_the_editor_refreshes_the_window() {
     let dir = tempfile::tempdir().unwrap();
     let server = engine(dir.path());

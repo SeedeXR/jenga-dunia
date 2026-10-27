@@ -83,6 +83,8 @@ fn main() -> ExitCode {
                     tracing::info!(adapter = %name, "terrain kernels share the window's GPU");
                 }
             }
+            // The menu bar needs the window's NSApp (and the main thread, which a test lacks).
+            jd_studio::menu::install();
             Ok(Box::new(jd_studio::StudioApp::new(cc, server, options)))
         }),
     );

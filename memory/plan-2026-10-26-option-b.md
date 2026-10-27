@@ -286,6 +286,16 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   test). The audit's "Tasks shows the Editor's jobs" was beyond the desktop (its Tasks polls only
   around its own ops) — needed now that two windows share one engine. The protocol doc listed a
   `job` event that was never sent; replaced by `busy`.
+  Closed (slice 2b): G1 — `menu.rs`: one command table (the Editor's ids, labels, accelerators);
+  the toolbar, the keys (egui consume_shortcut, every platform; Redo tried before Undo since egui
+  lets ⇧ through) and the macOS menu bar (muda 0.20, already in the lock via Tauri; installed from
+  main.rs on the main thread) all call `StudioApp::run`, gated by `can_run` (the toolbar's enabled
+  states). The Edit menu leaves the system's copy / paste items out: their selectors would go to
+  winit's view and could swallow egui's own ⌘C / ⌘V. Verified on macOS 27 with System Events:
+  menu bar "File, Edit, Terrain, Window"; File ▸ Save ran project.save; Terrain ▸ Evaluate Graph
+  started the 4096² evaluation. Window test: ⌘S saves, ⌘R evaluates.
+  ponytail: no Windows / Linux menu bar (muda's needs `unsafe init_for_hwnd` / a GTK window); the
+  keys work there and the Editor window keeps its menus.
   Open (flake, 2026-10-27): `e2e/paint.spec.ts` failed once inside a full gate run (instance count
   stayed 925 after the density stroke; 30 s poll). Not reproduced in 5 full suites + 12 parallel
   repeats; trace lost (overwritten by reruns — next time copy `test-results/` first). Ruled out:
