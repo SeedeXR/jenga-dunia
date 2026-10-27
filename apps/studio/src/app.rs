@@ -230,6 +230,9 @@ pub struct StudioApp {
     /// bar being dragged (applied on release), the shown layer's `terrain.stats`, and the last
     /// `terrain.measure`.
     noise: NoisePanel,
+    /// The noise node's params the Noise section last adopted (JSON), so it follows edits made
+    /// elsewhere — the Editor's inspector, undo, an opened project — and Generate never reverts them.
+    synced_noise: String,
     noise_drag: NoiseDrag,
     /// The Export section's fields (session-only, as the desktop's).
     export: ExportPanel,
@@ -336,6 +339,28 @@ const NOISE_PRESETS: [NoisePreset; 4] = [
 ];
 
 impl NoisePanel {
+    /// The panel as the noise node's params say (the desktop's `syncNoise`): a plain value of the
+    /// default's type is taken, anything else — a timeline-keyed value — falls back to the default.
+    fn of(params: &Value) -> Self {
+        let d = Self::default();
+        let text = |k: &str, d: String| params[k].as_str().map_or(d, str::to_owned);
+        let num = |k: &str, d: String| params[k].as_f64().map_or(d, |_| number(&params[k]));
+        let range = params["height_range_m"]
+            .as_array()
+            .filter(|r| r.len() == 2 && r.iter().all(Value::is_number));
+        Self {
+            kind: text("kind", d.kind),
+            fractal: text("fractal", d.fractal),
+            seed: num("seed", d.seed),
+            feature_size_m: num("feature_size_m", d.feature_size_m),
+            octaves: num("octaves", d.octaves),
+            lacunarity: num("lacunarity", d.lacunarity),
+            gain: num("gain", d.gain),
+            height_min: range.map_or(d.height_min, |r| number(&r[0])),
+            height_max: range.map_or(d.height_max, |r| number(&r[1])),
+        }
+    }
+
     fn apply(
         &mut self,
         (_, fractal, feature, octaves, gain, range): (&str, &str, f64, u32, f64, [f64; 2]),
@@ -809,6 +834,7 @@ impl StudioApp {
             pending_color: None,
             materials: Vec::new(),
             noise: NoisePanel::default(),
+            synced_noise: String::new(),
             noise_drag: NoiseDrag::default(),
             export: ExportPanel::default(),
             geo: GeoPanel::default(),
@@ -1053,7 +1079,21 @@ impl StudioApp {
                 Msg::Chain(responses) => {
                     self.busy = self.busy.saturating_sub(1);
                     for r in &responses {
-                        self.log_response(r);
+                        // A chain's evaluation is the live preview of an edit: a half-wired graph
+                        // is normal while editing, so say what is missing without an error entry
+                        // (the desktop's liveEvaluate).
+                        match &r.error {
+                            Some(e)
+                                if r.op == "graph.evaluate"
+                                    && e.code == jd_types::ErrorCode::E_GRAPH_MISSING_INPUT =>
+                            {
+                                self.log(
+                                    format!("live preview waiting: {}", e.message),
+                                    Level::Info,
+                                );
+                            }
+                            _ => self.log_response(r),
+                        }
                         if r.op == "graph.evaluate"
                             && let Some(report) = &r.result
                         {
@@ -1300,6 +1340,7 @@ impl StudioApp {
                 if !failed {
                     self.graph = r.result.unwrap_or_default();
                     self.update_sea();
+                    self.sync_noise();
                 }
             }
             Tag::Layers => {
@@ -1792,6 +1833,18 @@ impl StudioApp {
     }
 
     /// The graph's noise node, if any (the Noise section's Strength and octave bars edit it).
+    /// The desktop's `syncNoise`: when the graph's noise node changed, the Noise section adopts it.
+    fn sync_noise(&mut self) {
+        let Some(node) = self.noise_node() else {
+            return;
+        };
+        let params = node["params"].to_string();
+        if params != self.synced_noise {
+            self.noise = NoisePanel::of(&node["params"]);
+            self.synced_noise = params;
+        }
+    }
+
     fn noise_node(&self) -> Option<Value> {
         self.graph["nodes"]
             .as_array()?

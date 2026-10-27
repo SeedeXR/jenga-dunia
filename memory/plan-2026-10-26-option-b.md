@@ -357,6 +357,17 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   Batch 6: the sea from its node (sea 0 → 250 m, waves 9.8 m / 380 m at 20 m/s, water maps
   export), the shoreline readout and the ruler's max = the layer's, lakes from a fill node; grid
   Scale (factor 0) / Rotate / Align ops in order; the push brush's grab op.
+  Batch 7: the reference clip (place, time, sun; Use sun → a north-east morning sun); an opened
+  project's saved look in the panels; the strip's cone a removable shape layer (the generator
+  not); a half-wired graph's live preview waiting without an error; Paint density's clamped
+  strokes node on the mask, the brush armed. Fixes found by the port: (1) Studio's Noise section
+  did not mirror the noise node — an Editor edit (seed 9) stayed 0 in the panel, and Generate
+  wrote it back over the edit; now `sync_noise` adopts the node's params when they change (the
+  desktop's syncNoise); (2) a chained (live) evaluation of a half-wired graph logged a red error;
+  now "live preview waiting: …" as info, as the desktop's liveEvaluate.
+  For the retirement (c): the Editor's own log panel goes with its panels — it still needs a
+  place to say what its live evaluations wait on and what failed (a status line in the graph
+  window), designed with S3.
   Open (flake, 2026-10-27): `e2e/paint.spec.ts` failed once inside a full gate run (instance count
   stayed 925 after the density stroke; 30 s poll). Not reproduced in 5 full suites + 12 parallel
   repeats; trace lost (overwritten by reruns — next time copy `test-results/` first). Ruled out:

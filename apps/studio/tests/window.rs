@@ -717,6 +717,217 @@ fn the_sea_follows_its_node_and_lakes_show_their_water() {
     assert!(r.contains(" · lakes "), "{r}");
 }
 
+/// e2e/look.spec.ts: a project's saved look (sun, scatter, materials) is what the panels show
+/// when it is opened.
+#[test]
+fn an_opened_project_shows_its_saved_look() {
+    use eframe::egui::accesskit::Role;
+    use egui_kittest::kittest::by;
+    let dir = tempfile::tempdir().unwrap();
+    let server = engine(dir.path());
+    for (op, params) in [
+        (
+            "project.set_look",
+            json!({
+                "materials": [{ "mask": null, "albedo": [0.5, 0.4, 0.3], "roughness": 0.9 }],
+                "sun": { "azimuth_deg": 200.0, "elevation_deg": 35.0 },
+                "scatter": { "mask": "height", "spacing_m": 25.0, "seed": 3 }
+            }),
+        ),
+        ("project.save", json!({})),
+        ("project.close", json!({})),
+        (
+            "project.open",
+            json!({ "path": dir.path().join("Kit.jdproj") }),
+        ),
+    ] {
+        let r = server.invoke(Request::new(op, params));
+        assert!(r.error.is_none(), "{op}: {:?}", r.error);
+    }
+    let mut h = window(server);
+    settle(&mut h, |a| a.viewport.info().is_some());
+    h.get(by().role(Role::Slider).label("Azimuth 200°"));
+    assert_eq!(
+        h.get_by_role_and_label(Role::TextInput, "Spacing (m)")
+            .value()
+            .as_deref(),
+        Some("25")
+    );
+    h.get_by_label("Remove material 1");
+}
+
+/// e2e/tree.spec.ts: the layer strip's cone is a shape layer in the stack, removable, while the
+/// generator under it is not.
+#[test]
+fn a_cone_from_the_strip_is_a_removable_shape_layer() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window(engine(dir.path()));
+    settle(&mut h, |a| a.viewport.info().is_some());
+    h.get_by_label("Shape: a cone at the world's centre (jd.shape.primitive)")
+        .click();
+    h.run_steps(1);
+    settle(&mut h, |a| {
+        a.log_lines()
+            .any(|l| l.text.starts_with("graph.splice: ok"))
+    });
+    let enabled = |h: &Harness<'static, StudioApp>, label: &str| {
+        !format!("{:?}", h.get_by_label(label)).contains("disabled: true")
+    };
+    assert!(
+        enabled(&h, "Remove shape.primitive"),
+        "the cone can be removed"
+    );
+    assert!(!enabled(&h, "Remove Noise"), "the generator cannot");
+    tap(
+        &mut h,
+        Some(eframe::egui::accesskit::Role::Button),
+        "Remove shape.primitive",
+    );
+    let until = Instant::now() + Duration::from_secs(30);
+    while h.query_by_label("Remove shape.primitive").is_some() {
+        assert!(
+            Instant::now() < until,
+            "{:?}",
+            h.state()
+                .log_lines()
+                .map(|l| l.text.clone())
+                .collect::<Vec<_>>()
+        );
+        h.step();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// e2e/graph.spec.ts: the Noise section mirrors the noise node, so an edit made in the Editor
+/// shows here and Generate does not revert it.
+#[test]
+fn the_noise_section_follows_the_editors_edit_and_generate_keeps_it() {
+    use eframe::egui::accesskit::Role;
+    use egui_kittest::kittest::by;
+    let dir = tempfile::tempdir().unwrap();
+    let server = engine(dir.path());
+    let probe = server.clone();
+    let mut h = window(server);
+    settle(&mut h, |a| a.viewport.info().is_some());
+    let noise = || {
+        let g = probe
+            .invoke(Request::new("graph.list", json!({})))
+            .result
+            .unwrap();
+        g["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|n| n["kind"] == "jd.noise.fbm@1")
+            .cloned()
+            .unwrap()
+    };
+    let r = probe.invoke(Request::new(
+        "graph.set_param",
+        json!({ "id": noise()["id"], "key": "seed", "value": 9 }),
+    ));
+    assert!(r.error.is_none(), "{:?}", r.error);
+    settle(&mut h, |_| true);
+    let seed = |h: &Harness<'static, StudioApp>| {
+        h.get_all(by().role(Role::TextInput).label("Seed"))
+            .last()
+            .unwrap()
+            .value()
+            .unwrap_or_default()
+    };
+    // The Noise section is far down the right column: scroll to it.
+    h.get_all(by().role(Role::TextInput).label("Seed"))
+        .last()
+        .unwrap()
+        .scroll_to_me();
+    h.run();
+    assert_eq!(seed(&h), "9", "the Noise section shows the Editor's seed");
+    h.key_press_modifiers(eframe::egui::Modifiers::COMMAND, eframe::egui::Key::G);
+    h.run_steps(1);
+    settle(&mut h, |a| {
+        a.log_lines()
+            .any(|l| l.text.starts_with("graph.evaluate: ok"))
+    });
+    assert_eq!(
+        noise()["params"]["seed"],
+        9,
+        "Generate kept the Editor's edit"
+    );
+}
+
+/// e2e/graph.spec.ts: an unwired node pauses the live preview with an explanation, not an error.
+#[test]
+fn a_half_wired_graph_pauses_the_live_preview_without_an_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = engine(dir.path());
+    let probe = server.clone();
+    let mut h = window(server);
+    settle(&mut h, |a| a.viewport.info().is_some());
+    // The Editor adds a blur node and has not wired it yet.
+    let r = probe.invoke(Request::new(
+        "graph.add_node",
+        json!({ "kind": "jd.filter.blur@1", "params": {} }),
+    ));
+    assert!(r.error.is_none(), "{:?}", r.error);
+    settle(&mut h, |_| true);
+    // An edit here (a terrace from the strip) evaluates the preview, which waits on the blur.
+    h.get_by_label("Filter: terraces (jd.filter.terrace)")
+        .click();
+    h.run_steps(1);
+    settle(&mut h, |a| {
+        a.log_lines()
+            .any(|l| l.text.starts_with("live preview waiting: input `in`"))
+    });
+    assert!(
+        !h.state()
+            .log_lines()
+            .any(|l| l.text.starts_with("graph.evaluate: E_")),
+        "{:?}",
+        h.state()
+            .log_lines()
+            .map(|l| l.text.clone())
+            .collect::<Vec<_>>()
+    );
+}
+
+/// e2e/paint.spec.ts: Paint density puts a 0..1 clamped strokes node in front of the mask's output
+/// and arms the brush.
+#[test]
+fn paint_density_arms_a_clamped_brush_on_the_mask() {
+    use eframe::egui::accesskit::Role;
+    let dir = tempfile::tempdir().unwrap();
+    let server = engine(dir.path());
+    let probe = server.clone();
+    let mut h = window(server);
+    settle(&mut h, |a| a.viewport.info().is_some());
+    let r = probe.invoke(Request::new(
+        "graph.add_simulation",
+        json!({ "which": "snow" }),
+    ));
+    assert!(r.error.is_none(), "{:?}", r.error);
+    let r = probe.invoke(Request::new("graph.evaluate", json!({ "lod": 0 })));
+    assert!(r.error.is_none(), "{:?}", r.error);
+    settle(&mut h, |a| a.layers().iter().any(|l| l == "snow"));
+    tap(&mut h, Some(Role::ComboBox), "Mask");
+    h.run();
+    h.get_by_label("snow").click();
+    h.run();
+    tap(&mut h, Some(Role::Button), "Paint density");
+    settle(&mut h, |a| a.viewport.tool.is_some());
+    let g = probe
+        .invoke(Request::new("graph.list", json!({})))
+        .result
+        .unwrap();
+    let strokes = g["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["kind"] == "jd.sculpt.strokes@1")
+        .cloned()
+        .expect("a strokes node");
+    assert_eq!(strokes["params"]["clamp"], json!([0.0, 1.0]), "{strokes}");
+}
+
 #[test]
 fn a_write_from_the_editor_refreshes_the_window() {
     let dir = tempfile::tempdir().unwrap();
@@ -1796,6 +2007,74 @@ fn the_reference_section_reads_an_image() {
     });
     h.get_by_label("no GPS");
     h.get_by_label("needs place and time");
+    // A clip that states where and when it was shot: the place, the time and the sun; Use sun
+    // puts the viewport's sun there (e2e/reference.spec.ts — the Namib, a June morning).
+    let clip = dir.path().join("dunes.mp4");
+    std::fs::write(&clip, namib_clip()).unwrap();
+    fill(&mut h, "Reference file", &clip.display().to_string());
+    h.get_by_label("Read").click();
+    h.run_steps(1);
+    settle(&mut h, |a| {
+        a.log_lines()
+            .filter(|l| l.text.starts_with("media.metadata: ok"))
+            .count()
+            == 2
+    });
+    use egui_kittest::kittest::by;
+    h.get(by().label_contains("2026-06-21T10:00:00Z"));
+    h.get(by().label_contains("-24.7500, 15.3500"));
+    h.get(by().label_contains("° from north, "));
+    // The reference's Use sun (left column); the HDRI row has one too, on the right.
+    h.get_all(by().label("Use sun"))
+        .min_by(|a, b| a.rect().left().total_cmp(&b.rect().left()))
+        .unwrap()
+        .click();
+    h.run();
+    let degrees = |h: &Harness<'static, StudioApp>, name: &str| -> f64 {
+        let n = h.get(
+            by().role(eframe::egui::accesskit::Role::Slider)
+                .label_contains(name),
+        );
+        let label = format!("{n:?}");
+        let start = label.find(name).unwrap() + name.len();
+        label[start..]
+            .split('°')
+            .next()
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap()
+    };
+    let (az, el) = (degrees(&h, "Azimuth "), degrees(&h, "Elevation "));
+    assert!(
+        az > 0.0 && az < 90.0,
+        "a north-eastern morning sun in the southern winter: {az}"
+    );
+    assert!(el > 20.0 && el < 60.0, "{el}");
+}
+
+/// The reference spec's clip: an MP4 that states only where (Android `©xyz`) and when (`mvhd`,
+/// 2026-06-21T10:00:00Z) it was shot.
+fn namib_clip() -> Vec<u8> {
+    let bx = |ty: &[u8], payload: &[u8]| {
+        let mut b = ((payload.len() + 8) as u32).to_be_bytes().to_vec();
+        b.extend_from_slice(ty);
+        b.extend_from_slice(payload);
+        b
+    };
+    let created: u32 = 3_864_880_800; // seconds since 1904
+    let mut mvhd = vec![0u8; 4];
+    for v in [created, created, 1000, 5000] {
+        mvhd.extend_from_slice(&v.to_be_bytes());
+    }
+    mvhd.extend_from_slice(&[0u8; 80]);
+    let mut xyz = vec![0u8, 18, 0x15, 0xc7];
+    xyz.extend_from_slice(b"-24.7500+015.3500/");
+    let mut moov = bx(b"mvhd", &mvhd);
+    moov.extend(bx(b"udta", &bx(b"\xa9xyz", &xyz)));
+    let mut out = bx(b"ftyp", b"isom\0\0\0\0isom");
+    out.extend(bx(b"moov", &moov));
+    out
 }
 
 #[test]
