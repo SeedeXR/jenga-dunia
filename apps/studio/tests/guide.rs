@@ -24,8 +24,13 @@ const SIZE: [f32; 2] = [1440.0, 900.0];
 
 /// A guide world: 4096 m at 1024², seed 42, generated — the desktop guide's.
 fn world(dir: &std::path::Path) -> Arc<Server> {
+    world_of(dir, 4096.0, 1024)
+}
+
+/// A generated world of `extent` metres at `res`² (the slow simulations run on smaller grids).
+fn world_of(dir: &std::path::Path, extent: f64, res: u32) -> Arc<Server> {
     let server = Server::bind(Registry::with_builtins(), Context::default()).expect("bind");
-    let world = json!({ "resolution_px": [1024, 1024], "extent_m": [4096.0, 4096.0], "tile_size": 512, "halo": 4, "origin": [0, 0], "seed": 42 });
+    let world = json!({ "resolution_px": [res, res], "extent_m": [extent, extent], "tile_size": 512, "halo": 4, "origin": [0, 0], "seed": 42 });
     for (op, params) in [
         (
             "project.create",
@@ -473,4 +478,296 @@ fn guide_layers_and_project() {
         "desktop-import",
         &[Callout("Import", ""), Callout("Show the log", "")],
     );
+}
+
+/// Move the camera: `radius` as a share of the world, `phi` from straight up.
+fn frame(h: &mut Harness<'static, StudioApp>, radius: f32, phi: f32) {
+    let mut cam = h.state().viewport.camera;
+    (cam.radius, cam.phi) = (radius * cam.size, phi);
+    h.state_mut().viewport.set_camera(cam);
+    h.run_steps(8);
+}
+
+#[test]
+#[ignore = "writes the user guide's figures (JD_GUIDE_OUT)"]
+fn guide_tools() {
+    use eframe::egui::vec2;
+    let dir = tempfile::tempdir().unwrap();
+    let server = world(dir.path());
+    let probe = server.clone();
+    let mut h = studio(server);
+    ready(&mut h);
+
+    // Horizon: the skirt around the world, seen from low down.
+    h.get(by().label_contains("Horizon:")).click();
+    h.run_steps(1);
+    settle(&mut h, |a| a.viewport_readout().contains("horizon"));
+    frame(&mut h, 1.6, 1.42);
+    settle(&mut h, |_| true);
+    shot(&mut h, "desktop-horizon", &[Callout("Horizon:", "")]);
+    h.get(by().label_contains("Horizon:")).click();
+    h.get_by_label("Fit: back to the home view").click();
+    h.run_steps(8);
+
+    // Sculpt: the brush armed, one raise stroke across the middle.
+    h.get_by_label("Sculpt: adds a stroke node before the output and paints with the brush")
+        .click();
+    h.run_steps(1);
+    settle(&mut h, |a| a.viewport.tool.is_some());
+    let r = h.state().viewport.rect();
+    drag_on(
+        &mut h,
+        r.center() - vec2(120.0, 20.0),
+        r.center() + vec2(120.0, 20.0),
+    );
+    settle(&mut h, |a| {
+        a.log_lines()
+            .any(|l| l.text.starts_with("graph.evaluate: ok"))
+    });
+    show(&mut h, "Brush mode");
+    shot(
+        &mut h,
+        "tutorial-04-sculpt",
+        &[Callout("Sculpting:", ""), Callout("Brush mode", "")],
+    );
+    h.get_by_label("Sculpting: drag on the terrain to paint a stroke (click to stop)")
+        .click();
+    h.run_steps(2);
+
+    // Road: one drag lays the spline that flattens its bed, widened to 40 m to read at this scale.
+    frame(&mut h, 0.7, 0.95);
+    h.get(by().label_contains("Road:")).click();
+    h.run();
+    let r = h.state().viewport.rect();
+    drag_on(
+        &mut h,
+        r.center() - vec2(260.0, -60.0),
+        r.center() + vec2(240.0, -40.0),
+    );
+    settle(&mut h, |a| a.selected_node().is_some());
+    let road = node(&probe, "jd.terrain.spline@1");
+    ok(
+        &probe,
+        "graph.set_param",
+        json!({ "id": road, "key": "width_m", "value": 40.0 }),
+    );
+    ok(&probe, "graph.evaluate", json!({ "lod": 0 }));
+    settle(&mut h, |_| true);
+    shot(&mut h, "desktop-road", &[Callout("Road:", "")]);
+    h.get_by_label("Fit: back to the home view").click();
+    h.run_steps(8);
+
+    // Grid: a block of cells of the 16 × 16 grid levelled to 600 m, above the 0..500 m noise.
+    h.get(by().label_contains("Grid tool:")).click();
+    h.run();
+    choose(&mut h, "Cells per side", "16");
+    let r = h.state().viewport.rect();
+    for dy in [-40.0, 0.0, 40.0] {
+        drag_on(
+            &mut h,
+            r.center() + vec2(-50.0, dy),
+            r.center() + vec2(50.0, dy),
+        );
+    }
+    h.run();
+    fill(&mut h, "Height (m)", "600");
+    h.get_by_label("Set height").click();
+    h.run_steps(1);
+    settle(&mut h, |_| {
+        ok(&probe, "graph.list", json!({}))["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|n| {
+                n["kind"] == "jd.sculpt.strokes@1"
+                    && n["params"]["strokes"]
+                        .as_array()
+                        .is_some_and(|s| s.iter().any(|s| s["shape"] == "square"))
+            })
+    });
+    ok(&probe, "graph.evaluate", json!({ "lod": 0 }));
+    let max = ok(&probe, "terrain.stats", json!({ "layer": "height" }))["stats"]["max"].clone();
+    assert!(max.as_f64().is_some_and(|m| m > 599.0), "max {max}");
+    settle(&mut h, |_| true);
+    shot(
+        &mut h,
+        "desktop-grid",
+        &[Callout("Cells per side", ""), Callout("Set height", "")],
+    );
+}
+
+#[test]
+#[ignore = "writes the user guide's figures (JD_GUIDE_OUT)"]
+fn guide_layers_caves_and_materials() {
+    // A karst cave under the hills, the terrain x-rayed to show it.
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = studio(world_of(dir.path(), 2048.0, 512));
+    ready(&mut h);
+    show(&mut h, "Add cave");
+    h.get_by_label("Add cave").click();
+    h.run_steps(1);
+    settle(&mut h, |a| a.viewport.cave_triangles() > 0);
+    slider(&mut h, "X-ray", eframe::egui::Key::ArrowRight, 15);
+    show(&mut h, "Add cave");
+    shot(
+        &mut h,
+        "desktop-caves",
+        &[Callout("Add cave", ""), Callout("X-ray 75 %", "")],
+    );
+
+    // Simulation layers: snow, then lava from the summit, coloured by its heat.
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = studio(world_of(dir.path(), 2048.0, 256));
+    ready(&mut h);
+    for which in ["+ snow", "+ lava"] {
+        show(&mut h, which);
+        h.get_by_label(which).click();
+        h.run_steps(1);
+        settle(&mut h, |a| a.viewport.overlay_on());
+    }
+    settle(&mut h, |a| a.layers().iter().any(|l| l == "heat"));
+    choose(&mut h, "colour", "heat");
+    settle(&mut h, |a| a.viewport.overlay_on());
+    show(&mut h, "+ snow");
+    shot(
+        &mut h,
+        "desktop-simlayers",
+        &[Callout("+ snow", ""), Callout("colour", "")],
+    );
+
+    // Materials: a layer masked by the snow; then its detail tile at 4 m.
+    let dir = tempfile::tempdir().unwrap();
+    let server = world_of(dir.path(), 2048.0, 512);
+    let probe = server.clone();
+    let mut h = studio(server);
+    ready(&mut h);
+    show(&mut h, "+ snow");
+    h.get_by_label("+ snow").click();
+    h.run_steps(1);
+    settle(&mut h, |a| a.viewport.overlay_on());
+    choose(&mut h, "colour", "height ramp");
+    show(&mut h, "+ layer");
+    h.get_by_label("+ layer").click();
+    h.run_steps(1);
+    settle(&mut h, |a| {
+        a.log_lines()
+            .any(|l| l.text.contains("with 1 material layer"))
+    });
+    choose(&mut h, "Material 1 mask", "snow");
+    settle(&mut h, |_| {
+        ok(&probe, "project.info", json!({}))["look"]["materials"][0]["mask"] == "snow"
+    });
+    settle(&mut h, |_| true);
+    show(&mut h, "+ layer");
+    shot(
+        &mut h,
+        "desktop-materials",
+        &[Callout("Material 1 mask", ""), Callout("+ layer", "")],
+    );
+    show(&mut h, "Material 1 detail");
+    h.get_by_label("Material 1 detail").click();
+    h.run_steps(1);
+    settle(&mut h, |a| a.viewport.detail_tiles() == 1);
+    fill(&mut h, "Material 1 tile (m)", "4");
+    h.key_press(eframe::egui::Key::Tab);
+    h.run_steps(1);
+    settle(&mut h, |_| true);
+    frame(&mut h, 0.35, 1.1);
+    settle(&mut h, |_| true);
+    shot(
+        &mut h,
+        "desktop-materials-detail",
+        &[
+            Callout("Material 1 detail", ""),
+            Callout("Material 1 tile (m)", ""),
+        ],
+    );
+
+    // Timeline growth: a population placed on the height, grown to t = 1.
+    let dir = tempfile::tempdir().unwrap();
+    let server = world(dir.path());
+    let probe = server.clone();
+    let mut h = studio(server);
+    ready(&mut h);
+    choose(&mut h, "Mask", "height");
+    show(&mut h, "Grow with timeline");
+    h.get(by().role(Role::CheckBox).label("Grow with timeline"))
+        .click();
+    h.run();
+    h.get_by_label("Place").click();
+    h.run_steps(1);
+    settle(&mut h, |a| {
+        a.log_lines()
+            .any(|l| l.text.starts_with("terrain.scatter: ok"))
+    });
+    ok(&probe, "graph.set_time", json!({ "time": 1.0 }));
+    ok(&probe, "graph.evaluate", json!({ "lod": 0 }));
+    settle(&mut h, |a| a.viewport.instance_count() > 100);
+    show(&mut h, "Grow with timeline");
+    shot(
+        &mut h,
+        "desktop-timeline-growth",
+        &[Callout("Grow with timeline", ""), Callout("Place", "")],
+    );
+}
+
+#[test]
+#[ignore = "writes the user guide's figures (JD_GUIDE_OUT)"]
+fn guide_desert_and_network() {
+    // A desert plain (the panel's preset), dunes blown over it and sinkholes between them.
+    let dir = tempfile::tempdir().unwrap();
+    let server = world_of(dir.path(), 2048.0, 512);
+    let noise = node(&server, "jd.noise.fbm@1");
+    let height = node(&server, "jd.output.height@1");
+    for (key, value) in [
+        ("feature_size_m", json!(1200)),
+        ("octaves", json!(3)),
+        ("gain", json!(0.5)),
+        ("height_range_m", json!([0, 40])),
+        ("seed", json!(3)),
+    ] {
+        ok(
+            &server,
+            "graph.set_param",
+            json!({ "id": noise, "key": key, "value": value }),
+        );
+    }
+    let dunes = add(&server, "jd.erosion.aeolian@1", json!({ "iterations": 60 }));
+    let karst = add(
+        &server,
+        "jd.erosion.karst@1",
+        json!({ "density_per_km2": 6, "max_slope_deg": 15 }),
+    );
+    connect(&server, &noise, "out", &dunes, "in");
+    connect(&server, &dunes, "out", &karst, "in");
+    connect(&server, &karst, "out", &height, "in");
+    publish(&server, &karst, "sinkholes", "sinkholes");
+    ok(&server, "graph.evaluate", json!({ "lod": 0 }));
+    let mut h = studio(server);
+    ready(&mut h);
+    choose(&mut h, "colour", "sinkholes");
+    settle(&mut h, |a| a.viewport.overlay_on());
+    frame(&mut h, 0.5, 1.0);
+    settle(&mut h, |_| true);
+    shot(&mut h, "desktop-desert", &[Callout("colour", "")]);
+
+    // A drainage network grown first, the terrain made from it, its rivers as a layer.
+    let dir = tempfile::tempdir().unwrap();
+    let server = world_of(dir.path(), 6400.0, 512);
+    let noise = node(&server, "jd.noise.fbm@1");
+    let height = node(&server, "jd.output.height@1");
+    ok(&server, "graph.remove_node", json!({ "id": noise }));
+    let net = add(
+        &server,
+        "jd.hydrology.network@1",
+        json!({ "river_order": 4 }),
+    );
+    connect(&server, &net, "out", &height, "in");
+    publish(&server, &net, "rivers", "rivers");
+    ok(&server, "graph.evaluate", json!({ "lod": 0 }));
+    let mut h = studio(server);
+    ready(&mut h);
+    choose(&mut h, "colour", "rivers");
+    settle(&mut h, |a| a.viewport.overlay_on());
+    shot(&mut h, "desktop-network", &[Callout("colour", "")]);
 }
