@@ -112,7 +112,7 @@ function resolveProps(schema: unknown): Record<string, Prop> {
   return out;
 }
 
-/** Table editor for an array of flat objects: one row per element, blur applies, rows can be added and removed. */
+/** Editor for an array of flat objects: one block of fields per element, blur applies, elements can be added and removed. */
 function StructuredEditor({ columns, rows, testId, onChange }: { columns: Record<string, ItemProp>; rows: Record<string, unknown>[]; testId: string; onChange: (rows: Record<string, unknown>[]) => void }) {
   const fmt = (v: unknown, c: ItemProp): string => (v === null || v === undefined ? "" : c.kind === "range2" && Array.isArray(v) ? v.map((x) => String(Number(Number(x).toPrecision(7)))).join(",") : String(v));
   const parse = (raw: string, c: ItemProp): unknown => {
@@ -131,38 +131,29 @@ function StructuredEditor({ columns, rows, testId, onChange }: { columns: Record
   };
   const blank = (): Record<string, unknown> => Object.fromEntries(Object.entries(columns).map(([k, c]) => [k, c.nullable ? null : c.kind === "string" ? "" : c.kind === "boolean" ? false : c.kind === "range2" ? [0, 1] : 0]));
   return (
-    <div className="w-full overflow-x-auto" data-testid={testId}>
+    <div className="w-full" data-testid={testId}>
       {rows.length === 0 && <div className="text-jd-fg-2">none (defaults apply)</div>}
-      {rows.length > 0 && (
-        <table className="w-full border-collapse text-[11px]">
-          <thead>
-            <tr>
-              {Object.keys(columns).map((k) => (
-                <th key={k} className="pr-1 text-left font-normal text-jd-fg-2" title={columns[k]?.description}>
-                  {k}
-                </th>
-              ))}
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, i) => (
-              <tr key={i} data-testid={`${testId}-row-${i}`}>
-                {Object.entries(columns).map(([k, c]) => (
-                  <td key={k} className="pr-1">
-                    <input className="w-full min-w-12 rounded border border-jd-line bg-jd-bg-2 px-1 text-xs" defaultValue={fmt(row[k], c)} placeholder={c.kind === "range2" ? "min,max" : ""} onBlur={(e) => { if (e.target.value !== fmt(row[k], c)) set(i, k, e.target.value, c); }} data-testid={`${testId}-${i}-${k}`} />
-                  </td>
-                ))}
-                <td>
-                  <button className="text-jd-error" title="Remove row" onClick={() => onChange(rows.filter((_, j) => j !== i))} data-testid={`${testId}-remove-${i}`}>
-                    <Trash2 size={11} />
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      {/* One block per record, its fields stacked as the inspector's own (a table's five columns
+          overflowed the inspector's width). */}
+      {rows.map((row, i) => (
+        <div key={i} className="mb-1 rounded border border-jd-line px-1.5 py-1" data-testid={`${testId}-row-${i}`}>
+          <div className="flex items-center justify-between text-jd-fg-2">
+            <span>
+              {i + 1}
+              {typeof row.name === "string" && row.name ? ` · ${row.name}` : ""}
+            </span>
+            <button className="text-jd-error" title="Remove row" onClick={() => onChange(rows.filter((_, j) => j !== i))} data-testid={`${testId}-remove-${i}`}>
+              <Trash2 size={11} />
+            </button>
+          </div>
+          {Object.entries(columns).map(([k, c]) => (
+            <label key={k} className="flex items-center justify-between gap-2 py-0.5" title={c.description}>
+              <span className="text-jd-fg-1">{k}</span>
+              <input className="w-28 rounded border border-jd-line bg-jd-bg-2 px-1 text-xs" defaultValue={fmt(row[k], c)} placeholder={c.kind === "range2" ? "min,max" : ""} onBlur={(e) => { if (e.target.value !== fmt(row[k], c)) set(i, k, e.target.value, c); }} data-testid={`${testId}-${i}-${k}`} />
+            </label>
+          ))}
+        </div>
+      ))}
       <button className="btn mt-1 px-1.5 py-0" onClick={() => onChange([...rows, blank()])} data-testid={`${testId}-add`}>
         <Plus size={11} /> row
       </button>
