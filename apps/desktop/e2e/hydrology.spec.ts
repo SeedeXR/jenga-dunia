@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, evaluateAndWait, fitView, installBridge, logCount, selectNode, wire, createProject, coreOp, layerStats } from "./bridge";
+import { connectCore, evaluateAndWait, fitView, installBridge, logCount, selectNode, wire, createProject, coreOp, layerStats, figure } from "./bridge";
 
 const NOISE = "01JDGRAPH000000000000N01SE"; // starter graph ids (jd_graph::nodes)
 const HEIGHT = "01JDGRAPH0000000000HE1GHT0";
@@ -49,7 +49,7 @@ test.describe("hydrology nodes against the real core", () => {
     await method.selectOption("dinf");
     await expect(page.getByTestId("log")).toContainText("graph.set_param: ok");
     await expect(rivers).toContainText("method=dinf");
-    await page.screenshot({ path: testInfo.outputPath("hydrology-inspector.png") }); // tutorial image source
+    await figure(page, testInfo, "desktop-rivers-method", [method, rivers]);
 
     // Wire noise → rivers (in) and rivers.out → height output, replacing the starter edge, then evaluate.
     await wire(page, noise, rivers, "out", "in"); // the rivers node also has a `drains` input

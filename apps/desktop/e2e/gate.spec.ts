@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, evaluateAndWait, installBridge, logCount, selectNode, wire, createProject, coreOp } from "./bridge";
+import { connectCore, evaluateAndWait, installBridge, logCount, selectNode, wire, createProject, coreOp, figure } from "./bridge";
 
 const HEIGHT = "01JDGRAPH0000000000HE1GHT0";
 
@@ -56,7 +56,7 @@ test.describe("gate pattern against the real core", () => {
     await expect.poll(() => logCount(page, "graph.evaluate: ok"), { timeout: 30_000 }).toBeGreaterThan(before);
     // Published: the core lists the layer (Studio's layer and colour pickers show it).
     await expect.poll(async () => ((await coreOp(core, "terrain.layers")) as { layers: string[] }).layers).toContain("fine");
-    await page.screenshot({ path: testInfo.outputPath("gate.png") }); // tutorial image source
+    await figure(page, testInfo, "desktop-gate", [layer, only, fine]);
     expect(errors, "no uncaught page errors").toEqual([]);
     await core.close();
   });

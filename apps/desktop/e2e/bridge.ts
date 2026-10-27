@@ -3,8 +3,8 @@
 // and agents use. Only the transport differs from the Tauri shell.
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { expect, type Locator, type Page } from "@playwright/test";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { expect, type Locator, type Page, type TestInfo } from "@playwright/test";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -190,4 +190,28 @@ export async function evaluateAndWait(page: Page, button: "generate" | "graph-ev
   // graph's Evaluate gives the same terrain.
   await page.getByTestId(button === "generate" ? "graph-evaluate" : button).click();
   await expect.poll(() => logCount(page, EVALUATED), { timeout }).toBeGreaterThan(before);
+}
+
+/** A user-guide figure (as Studio's `tests/guide.rs`): with `JD_GUIDE_OUT=<dir>` the page goes to
+ *  `<dir>/raw/<name>.png` and `<dir>/<name>.annot.json` numbers a box on each target for
+ *  `scripts/annotate.mjs`; without it the screenshot lands in the test's output as before. */
+export async function figure(page: Page, testInfo: TestInfo, name: string, targets: Locator[] = []): Promise<void> {
+  const out = process.env.JD_GUIDE_OUT;
+  if (!out) {
+    await page.screenshot({ path: testInfo.outputPath(`${name}.png`) });
+    return;
+  }
+  mkdirSync(path.join(out, "raw"), { recursive: true });
+  const raw = path.join(out, "raw", `${name}.png`);
+  await page.mouse.move(1, 1); // no hover state in the figure
+  await page.screenshot({ path: raw });
+  const annotations = [];
+  for (const [i, target] of targets.entries()) {
+    const b = await target.boundingBox();
+    if (!b) throw new Error(`${name}: callout ${i + 1} is not laid out`);
+    const [x, y, w, h] = [b.x - 4, b.y - 4, b.width + 8, b.height + 8].map(Math.round) as [number, number, number, number];
+    // The badge off the box's top-left corner, or inside the image at an edge (guide.rs's rule).
+    annotations.push({ type: "box", x, y, w, h, label: String(i + 1), lx: x < 36 ? x + w + 18 : x - 18, ly: y < 36 ? y + h / 2 : y - 18 });
+  }
+  writeFileSync(path.join(out, `${name}.annot.json`), JSON.stringify({ src: raw, out: path.join(out, `${name}.png`), annotations }, null, 2));
 }

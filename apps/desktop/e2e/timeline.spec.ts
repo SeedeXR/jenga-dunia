@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, evaluateAndWait, fitView, installBridge, logCount, selectNode, wire, createProject, layerStats } from "./bridge";
+import { connectCore, evaluateAndWait, fitView, installBridge, logCount, selectNode, wire, createProject, layerStats, figure } from "./bridge";
 
 const NOISE = "01JDGRAPH000000000000N01SE"; // starter graph ids (jd_graph::nodes)
 const HEIGHT = "01JDGRAPH0000000000HE1GHT0";
@@ -65,7 +65,7 @@ test.describe("timeline against the real core", () => {
     await expect(page.getByTestId("graph-time-value")).toHaveText("1.00");
     await expect(page.getByTestId("log")).toContainText("graph.set_time: ok");
     await expect.poll(hash, { timeout: 30_000 }).not.toBe(hashAt0);
-    await page.screenshot({ path: testInfo.outputPath("timeline.png") }); // tutorial image source
+    await figure(page, testInfo, "desktop-timeline", [thermal, page.getByTestId("graph-time")]);
     // Undo takes the time back to 0 (journaled like any edit).
     await page.getByTestId("graph-undo").click();
     await expect(page.getByTestId("graph-time-value")).toHaveText("0.00");

@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, evaluateAndWait, installBridge, createProject, coreOp } from "./bridge";
+import { connectCore, evaluateAndWait, installBridge, createProject, coreOp, figure } from "./bridge";
 
 const NOISE = "01JDGRAPH000000000000N01SE"; // starter graph ids (jd_graph::nodes)
 
@@ -101,6 +101,8 @@ test.describe("node graph editor against the real core", () => {
     // Delete key on the selected blur node removes it and its edge through graph.remove_node.
     await blur.click();
     await expect(blur).toHaveClass(/selected/); // the key goes to the selected node; under load the click lands late
+    // The guide's figure: the kinds list and Add, Evaluate, the wired blur node, its inspector.
+    await figure(page, testInfo, "tutorial-03-graph", [page.getByTestId("graph-kind"), page.getByTestId("graph-evaluate"), blur, page.getByTestId("graph-inspector")]);
     await blur.press("Delete");
     await expect(panel.locator(".react-flow__node")).toHaveCount(2);
     await expect(panel.locator(".react-flow__edge")).toHaveCount(1);
@@ -122,7 +124,6 @@ test.describe("node graph editor against the real core", () => {
       .map((l) => (JSON.parse(l) as { op: string }).op);
     expect(ops).toEqual(["graph.set_param", "graph.add_node", "graph.connect", "graph.move_node", "graph.remove_node", "graph.restore", "graph.restore"]);
 
-    await page.screenshot({ path: testInfo.outputPath("graph-editor.png") });
     expect(errors, "no uncaught page errors").toEqual([]);
     await core.close();
   });

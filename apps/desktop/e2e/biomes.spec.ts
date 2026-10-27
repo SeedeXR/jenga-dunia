@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, evaluateAndWait, installBridge, wire, createProject, coreOp } from "./bridge";
+import { connectCore, evaluateAndWait, installBridge, wire, createProject, coreOp, figure } from "./bridge";
 
 const NOISE = "01JDGRAPH000000000000N01SE";
 const HEIGHT = "01JDGRAPH0000000000HE1GHT0";
@@ -45,7 +45,7 @@ test.describe("biome rules editor against the real core", () => {
     await slope.fill("0.6,2");
     await slope.blur();
     await expect(node).toContainText("rules=");
-    await page.screenshot({ path: testInfo.outputPath("biome-rules.png") }); // tutorial image source
+    await figure(page, testInfo, "desktop-biome-rules", [inspector.getByTestId("param-rules-row-0"), inspector.getByTestId("param-rules-add")]);
     // An inverted range is refused by the core before anything is journaled; the table keeps the last good value.
     const height = inspector.getByTestId("param-rules-0-height_m");
     await height.fill("900,100");
