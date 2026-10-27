@@ -240,6 +240,9 @@ pub struct StudioApp {
     /// section's environment, cache GC and bench results.
     jobs: Vec<Value>,
     jobs_polled: Option<Instant>,
+    /// The engine runs some window's operation (the server's `busy` event): the Editor's
+    /// evaluations show in Tasks and the header, and Esc cancels them, as Studio's own do.
+    engine_busy: bool,
     diag: [Option<Value>; 3],
     /// The Layers section: the node kinds (`graph.kinds`), its add / search / collapsed state, and
     /// the node selected by a row (sent to the Editor as `selection`).
@@ -813,6 +816,7 @@ impl StudioApp {
             preview_target_ms: "0".into(),
             jobs: Vec::new(),
             jobs_polled: None,
+            engine_busy: false,
             diag: [None, None, None],
             reference_path: String::new(),
             reference: None,
@@ -1066,6 +1070,9 @@ impl StudioApp {
                     self.refresh();
                 }
                 Msg::Event { topic, data } => {
+                    if topic == "busy" {
+                        self.engine_busy = data["running"] == true;
+                    }
                     // The Editor's selection (a node clicked in the graph) highlights here.
                     if topic == "selection" && data["source"] != "gui-studio" {
                         self.selected_node = data["nodes"][0].as_str().map(str::to_owned);
@@ -2814,6 +2821,45 @@ impl StudioApp {
         }
     }
 
+    /// Cancel every running job not already cancelling (Esc, the header's Cancel).
+    fn cancel_jobs(&mut self) {
+        for j in self.jobs.clone() {
+            if j["cancelling"] != true {
+                self.invoke(Tag::Export, "jobs.cancel", json!({ "id": j["id"] }));
+            }
+        }
+    }
+
+    /// The header's job line (right to left): the first job's op, node n / N and kind, seconds,
+    /// Cancel and "Esc to abort"; "working…" while an op runs without a job (the desktop's).
+    fn job_progress(&mut self, ui: &mut egui::Ui) {
+        let Some(j) = self.jobs.first().cloned() else {
+            if self.busy > 0 || self.engine_busy {
+                ui.label(RichText::new("working…").size(12.0).color(color::ACCENT));
+            }
+            return;
+        };
+        ui.label(RichText::new("Esc to abort").size(12.0).color(color::FG2));
+        let cancelling = j["cancelling"] == true;
+        if look::button(
+            ui,
+            None,
+            if cancelling {
+                "cancelling…"
+            } else {
+                "Cancel"
+            },
+            false,
+            !cancelling,
+        )
+        .on_hover_text("Cancel the running job (Esc)")
+        .clicked()
+        {
+            self.invoke(Tag::Export, "jobs.cancel", json!({ "id": j["id"] }));
+        }
+        ui.label(RichText::new(job_line(&j)).size(12.0).color(color::ACCENT));
+    }
+
     /// The left column's Diagnostics section: Environment, Cache GC, Bench 256², and their lines.
     fn diagnostics_card(&mut self, ui: &mut egui::Ui) {
         look::section(ui, "Diagnostics");
@@ -4380,9 +4426,9 @@ impl StudioApp {
     /// Fire the debounced look write and sky bake when due.
     fn tick(&mut self, ctx: &egui::Context) {
         let now = Instant::now();
-        // Tasks: poll the engine's jobs every 250 ms while a button's op runs (the desktop's
-        // pollers around `run`); clear them when nothing does.
-        if self.busy > 0 {
+        // Tasks: poll the engine's jobs every 250 ms while an op runs, Studio's (the desktop's
+        // pollers around `run`) or another window's; clear them when nothing does.
+        if self.busy > 0 || self.engine_busy {
             if self
                 .jobs_polled
                 .is_none_or(|t| now.duration_since(t).as_millis() >= 250)
@@ -5099,9 +5145,7 @@ impl StudioApp {
             ui.label(RichText::new(readout).size(12.0).color(color::FG2));
             self.toolbar(ui, frame);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if self.busy > 0 {
-                    ui.label(RichText::new("working…").size(12.0).color(color::ACCENT));
-                }
+                self.job_progress(ui);
                 // The readout takes what the toolbar and the layer picker leave, truncated with an
                 // ellipsis rather than running under the toolbar.
                 let picker = if self.layers.len() > 1 { 400.0 } else { 0.0 };
@@ -5584,9 +5628,19 @@ impl StudioApp {
                 self.invoke(Tag::User, "project.save", json!({}));
             }
         });
-        let Some(p) = self.project.clone() else {
-            return;
-        };
+        if let Some(p) = self.project.clone() {
+            self.project_rest(ui, &p);
+        }
+        ui.add_space(12.0);
+        self.tasks_card(ui);
+        ui.add_space(12.0);
+        self.diagnostics_card(ui);
+    }
+
+    /// The left column below New / Open / Save, with a project open: Import, Real world, its id,
+    /// and the Reference image, Layers and Settings sections.
+    fn project_rest(&mut self, ui: &mut egui::Ui, p: &Value) {
+        let idle = self.busy == 0;
         look::field(ui, "Import", |ui| {
             if look::button(ui, Some("folder-search"), "", false, idle)
                 .on_hover_text("Browse…")
@@ -5641,10 +5695,6 @@ impl StudioApp {
         self.layers_card(ui);
         ui.add_space(12.0);
         self.settings_card(ui);
-        ui.add_space(12.0);
-        self.tasks_card(ui);
-        ui.add_space(12.0);
-        self.diagnostics_card(ui);
     }
 
     fn log_card(&mut self, ui: &mut egui::Ui) {
@@ -5846,8 +5896,13 @@ impl eframe::App for StudioApp {
         self.drain();
         self.tick(ui.ctx());
         self.fly_tick(ui.ctx());
-        if self.fullscreen && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.set_fullscreen(ui.ctx(), false);
+        // Esc leaves fullscreen and aborts whatever runs (the desktop's); inside a text field it
+        // only leaves the field.
+        if ui.input(|i| i.key_pressed(egui::Key::Escape)) && ui.memory(|m| m.focused().is_none()) {
+            if self.fullscreen {
+                self.set_fullscreen(ui.ctx(), false);
+            }
+            self.cancel_jobs();
         }
         let bg = egui::Frame::new().fill(color::BG0);
         if !self.fullscreen {
@@ -5980,6 +6035,7 @@ impl eframe::App for StudioApp {
                     sculpting: self.drawing.is_some(),
                     road: self.drawing == Some(Drawing::Road),
                     grid: self.grid.on,
+                    cave: matches!(self.drawing, Some(Drawing::Cave(_))),
                 };
                 if let Some(action) = crate::chrome::show(ui, self.viewport.rect(), &st) {
                     self.chrome_action(action, ui.ctx(), frame);
@@ -5996,6 +6052,23 @@ impl eframe::App for StudioApp {
 }
 
 /// The LOD that keeps a world's live preview ≤ 512² (⌈log₂(res / 512)⌉).
+/// The desktop's header job text: `graph.evaluate · node 2/5 fbm · 0.7 s`.
+fn job_line(j: &Value) -> String {
+    let total = j["total"].as_u64().unwrap_or(0);
+    let mut t = j["op"].as_str().unwrap_or_default().to_owned();
+    if total > 0 {
+        let kind = j["current"].as_str().unwrap_or_default();
+        let kind = kind.split('@').next().unwrap_or_default();
+        let kind = kind.rsplit('.').next().unwrap_or_default();
+        let n = (j["done"].as_u64().unwrap_or(0) + 1).min(total);
+        t += &format!(" · node {n}/{total} {kind}");
+    }
+    t + &format!(
+        " · {:.1} s",
+        j["elapsed_ms"].as_f64().unwrap_or(0.0) / 1000.0
+    )
+}
+
 fn preview_lod_of(world: &Value) -> u32 {
     let r = &world["resolution_px"];
     let res = r[0]
@@ -6022,6 +6095,18 @@ fn adapt_lod_bias(bias: u32, ms: f64, target: f64) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_header_job_line_reads_like_the_desktop() {
+        let j = json!({ "op": "graph.evaluate", "total": 2, "done": 0, "current": "jd.noise.fbm@1", "elapsed_ms": 700 });
+        assert_eq!(job_line(&j), "graph.evaluate · node 1/2 fbm · 0.7 s");
+        let j = json!({ "op": "graph.evaluate", "total": 2, "done": 2, "current": "", "elapsed_ms": 1260 });
+        assert_eq!(job_line(&j), "graph.evaluate · node 2/2  · 1.3 s");
+        assert_eq!(
+            job_line(&json!({ "op": "x", "elapsed_ms": 0 })),
+            "x · 0.0 s"
+        );
+    }
 
     #[test]
     fn the_live_target_moves_the_preview_lod_like_the_desktop() {

@@ -143,6 +143,8 @@ pub struct State {
     pub road: bool,
     /// The grid tool is on.
     pub grid: bool,
+    /// The next click places a cave entrance.
+    pub cave: bool,
 }
 
 /// `fill-jd-bg-1/80` and friends: a token at an opacity.
@@ -187,7 +189,7 @@ pub fn show(ui: &mut Ui, rect: Rect, st: &State) -> Option<Action> {
     if let Some(range) = st.range_m {
         ruler(ui, rect, range, st.sea_m);
     }
-    hints(ui, rect);
+    hints(ui, rect, st);
     // Top left (`top-2 left-2 gap-1`): fit, still, fullscreen, frame.
     let mut x = rect.left() + 8.0;
     for (icon, tip, enabled, act, on) in [
@@ -495,9 +497,44 @@ fn ruler(ui: &Ui, rect: Rect, [lo, hi]: [f32; 2], sea_m: Option<f32>) {
     );
 }
 
+/// The desktop's `HINTS` for the armed tool (its `mode`).
+fn hint_rows(st: &State) -> &'static [(&'static str, &'static str)] {
+    if st.road {
+        &[
+            ("Left drag", "lay the road"),
+            ("Right drag", "orbit"),
+            ("Drawing road…", "cancel"),
+        ]
+    } else if st.cave {
+        &[
+            ("Click", "place a cave entrance"),
+            ("Right drag", "orbit"),
+            ("Placing…", "stop"),
+        ]
+    } else if st.sculpting {
+        &[
+            ("Left drag", "stroke"),
+            ("Right drag", "orbit"),
+            ("Ctrl + wheel", "radius"),
+            ("Shift + wheel", "strength"),
+            ("Sculpting…", "back to orbit"),
+        ]
+    } else if st.grid {
+        &[
+            ("Click", "toggle a cell"),
+            ("Left drag", "add cells"),
+            ("Alt + drag", "remove cells"),
+            ("Right drag", "orbit"),
+            ("Grid panel", "level / raise / lower"),
+        ]
+    } else {
+        &[("Drag", "orbit"), ("Wheel", "zoom")]
+    }
+}
+
 /// The hints (`bottom-2`, centred): key on the left, what it does on the right.
-fn hints(ui: &Ui, rect: Rect) {
-    let rows = [("Drag", "orbit"), ("Wheel", "zoom")];
+fn hints(ui: &Ui, rect: Rect, st: &State) {
+    let rows = hint_rows(st);
     let font = FontId::proportional(10.0);
     let lay = |t: &str, c| ui.fonts_mut(|f| f.layout_no_wrap(t.into(), font.clone(), c));
     let keys: Vec<_> = rows.iter().map(|(k, _)| lay(k, color::FG1)).collect();
@@ -522,6 +559,44 @@ fn hints(ui: &Ui, rect: Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_hints_follow_the_armed_tool_like_the_desktop() {
+        let st = |sculpting, road, grid, cave| State {
+            heading: 0.0,
+            distance_m: 0.0,
+            range_m: None,
+            sea_m: None,
+            frame: false,
+            horizon: false,
+            enabled: true,
+            can_still: true,
+            sculpting,
+            road,
+            grid,
+            cave,
+        };
+        assert_eq!(
+            hint_rows(&st(false, false, false, false))[0],
+            ("Drag", "orbit")
+        );
+        assert_eq!(
+            hint_rows(&st(true, false, false, false))[0],
+            ("Left drag", "stroke")
+        );
+        assert_eq!(
+            hint_rows(&st(true, true, false, false))[0],
+            ("Left drag", "lay the road")
+        );
+        assert_eq!(
+            hint_rows(&st(true, false, false, true))[0],
+            ("Click", "place a cave entrance")
+        );
+        assert_eq!(
+            hint_rows(&st(false, false, true, false))[0],
+            ("Click", "toggle a cell")
+        );
+    }
 
     #[test]
     fn ruler_steps_and_labels_print_like_the_desktop() {

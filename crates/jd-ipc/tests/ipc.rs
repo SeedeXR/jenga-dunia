@@ -271,6 +271,31 @@ fn project_writes_and_emitted_events_reach_every_client() {
 }
 
 #[test]
+fn busy_flips_once_per_stretch_of_work_and_ignores_job_polls() {
+    let s = server();
+    let (c, ev, _) = client(&s, |_| {});
+    let busy = || -> Vec<Value> {
+        ev.lock()
+            .unwrap()
+            .iter()
+            .filter(|(t, _)| t == "busy")
+            .map(|(_, d)| d["running"].clone())
+            .collect()
+    };
+    c.call(Request::new("graph.evaluate", json!({ "lod": 1 })))
+        .expect("graph.evaluate");
+    let until = Instant::now() + Duration::from_secs(5);
+    while busy().len() < 2 && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(busy(), vec![json!(true), json!(false)]);
+    // Polling the jobs is not work: no flip.
+    let _ = c.call(Request::new("jobs.list", json!({})));
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(busy().len(), 2);
+}
+
+#[test]
 fn shutdown_tells_clients_and_fails_later_calls() {
     let s = server();
     let (c, ev, lost) = client(&s, |_| {});

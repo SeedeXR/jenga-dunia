@@ -2417,8 +2417,9 @@ impl Viewport {
         }
     }
 
-    /// The desktop's controls: either button drags orbit (0.005 rad per point), the wheel zooms
-    /// (radius × (1 + Δ · 0.001) within 0.02–20 × the world's size).
+    /// The desktop's controls: any button drags orbit (0.005 rad per point; the primary one only
+    /// with no tool armed), the wheel and pinch zoom (radius × (1 + Δ · 0.001) within 0.02–20 ×
+    /// the world's size).
     fn handle_input(&mut self, ui: &egui::Ui, resp: &egui::Response) {
         // The grid tool: a click toggles a cell, a drag adds every cell it crosses (Alt: removes).
         if self.grid.is_some() && self.tool.is_none() {
@@ -2485,7 +2486,9 @@ impl Viewport {
         }
         let d = resp.drag_delta();
         let orbit_primary = resp.dragged_by(PointerButton::Primary) && self.tool.is_none();
-        if (orbit_primary || resp.dragged_by(PointerButton::Secondary)) && d != egui::Vec2::ZERO {
+        let orbit_other =
+            resp.dragged_by(PointerButton::Secondary) || resp.dragged_by(PointerButton::Middle);
+        if (orbit_primary || orbit_other) && d != egui::Vec2::ZERO {
             self.camera.theta -= d.x * 0.005;
             self.camera.phi = (self.camera.phi - d.y * 0.005).clamp(0.15, 1.5);
             self.dirty = true;
@@ -2511,12 +2514,13 @@ impl Viewport {
             }
         }
         if resp.hovered() {
-            // egui's scroll delta is the browser's `deltaY` with the sign flipped.
-            let scroll = ui.input(|i| i.smooth_scroll_delta.y);
-            if scroll != 0.0 {
+            // egui's scroll delta is the browser's `deltaY` with the sign flipped; a pinch and
+            // Ctrl / ⌘ + wheel arrive as a zoom factor instead (the desktop zooms on both).
+            let (scroll, zoom) = ui.input(|i| (i.smooth_scroll_delta.y, i.zoom_delta()));
+            if scroll != 0.0 || zoom != 1.0 {
                 let size = self.camera.size;
-                self.camera.radius =
-                    (self.camera.radius * (1.0 - scroll * 0.001)).clamp(size * 0.02, size * 20.0);
+                self.camera.radius = (self.camera.radius * (1.0 - scroll * 0.001) / zoom)
+                    .clamp(size * 0.02, size * 20.0);
                 self.dirty = true;
             }
         }

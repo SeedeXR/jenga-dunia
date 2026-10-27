@@ -189,6 +189,18 @@ fn the_window_shows_the_project_renders_its_terrain_and_orbits() {
 }
 
 #[test]
+fn tasks_and_diagnostics_work_before_a_project_is_open() {
+    let server = Server::bind(Registry::with_builtins(), Context::default()).expect("bind");
+    let mut h = window(Arc::new(server));
+    h.run();
+    // The desktop's Tasks and Diagnostics sit outside its project block; the project's own
+    // sections (Import, Settings) wait for one.
+    h.get_by_label("no running jobs");
+    h.get_by_label("Environment");
+    assert!(h.query_by_label("Settings").is_none());
+}
+
+#[test]
 fn a_write_from_the_editor_refreshes_the_window() {
     let dir = tempfile::tempdir().unwrap();
     let server = engine(dir.path());

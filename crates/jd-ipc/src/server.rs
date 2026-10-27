@@ -32,6 +32,8 @@ struct Shared {
     local: Mutex<Option<LocalHook>>,
     next_peer: AtomicU64,
     stopping: AtomicBool,
+    /// Operations running for any window (`jobs.*` aside), for the `busy` event.
+    running: Mutex<usize>,
 }
 
 type LocalHook = Arc<dyn Fn(&str, &Value) + Send + Sync>;
@@ -76,6 +78,7 @@ impl Server {
             local: Mutex::new(None),
             next_peer: AtomicU64::new(1),
             stopping: AtomicBool::new(false),
+            running: Mutex::new(0),
         });
         let sh = shared.clone();
         let accept = std::thread::Builder::new()
@@ -211,9 +214,18 @@ impl Shared {
         let op = request.op.clone();
         let client = request.client.as_ref().map(|c| c.kind.clone());
         let scope = self.registry.get(&op).map(|o| o.scope);
+        // `jobs.*` follow the running work; counting them would make polling look like work.
+        let tracked = !op.starts_with("jobs.");
+        if tracked {
+            self.running(true);
+        }
+        // Panics are caught inside (an E_INTERNAL response), so the count always comes back down.
         let response = self.registry.invoke(&self.ctx, request);
-        // ponytail: detached jobs (`accepted`) change the project later; their `job` events land
-        // with the Studio window (P2).
+        if tracked {
+            self.running(false);
+        }
+        // ponytail: detached jobs (`accepted`) change the project later without an event of their
+        // own; their progress is `jobs.list`, polled while `busy`.
         // `project.open` / `project.close` only read, but they change which project is open.
         let changes = matches!(
             scope,
@@ -234,6 +246,18 @@ impl Shared {
             );
         }
         response
+    }
+
+    /// `busy { running }` when any operation starts while none ran, and when the last ends: a
+    /// window can then show (and cancel, `jobs.cancel`) work another window started. Sent under
+    /// the count's lock so two flips cannot arrive out of order.
+    fn running(&self, start: bool) {
+        let mut n = self.running.lock().unwrap_or_else(PoisonError::into_inner);
+        let was = *n > 0;
+        *n = if start { *n + 1 } else { n.saturating_sub(1) };
+        if was != (*n > 0) {
+            self.emit("busy", json!({ "running": *n > 0 }));
+        }
     }
 
     fn emit(&self, topic: &str, data: Value) {

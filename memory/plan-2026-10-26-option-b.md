@@ -24,6 +24,7 @@ full gates, a commit, push, hosted CI.
 | P3 | Viewport parity: PBR maps, sky (Preetham / HDRI), sea + lakes + waves, overlays (masks, heat), scatter instances, caves + x-ray + entrance markers, framed block + shoreline, horizon skirt, fog / rain / post, compass / ruler / hints, sculpt brush (raycast strokes, cursor), grid tool, road drawing, cave entrance placing, stills + flythrough | todo | kittest per feature; pixel checks against today's three.js captures |
 | P4 | Panels to egui: inspector (param editing), Project, Reference image, Real world, Settings (language, LODs, cache), Tasks, Diagnostics, Brush, Grid, Sun, Scatter, Caves, Actions, Simulation layers, Materials, Noise, Export; selection sync node ↔ viewport; shortcuts + menus (muda) | todo | kittest per panel; Editor e2e against Studio |
 | P5 | Switch: Studio + Editor the default; packaging (cargo-packager: icons, `.jdproj`, bundle); retire the WebView viewport; docs, tutorials, captures, acceptance | todo | full suite on the new default; acceptance 19/19 |
+| P6 | Design pass (owner, 2026-10-27: "a clean well designed ui like zed is or figma is"): the floating panels kept (polished), status bar + log dock, sections and controls, neutral palette, the floating viewport icons kept in place but polished (states, tooltips, responsive); both UIs together. Spec: `docs/research/research-log/2026-10-27-zed-figma-ui.md` | in progress | parity captures before / after; e2e + kittest green |
 
 ## Parity matrix (today's single-process app → where it goes)
 
@@ -259,7 +260,32 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   not evaluate (the desktop's do) — now chained with a preview evaluation; (5) the Editor's
   `project-opened` re-read of Studio's opens evaluated again — replaced by `followProject`.
   Verified with the packaged app: open, second open, quit (see docs/user/desktop-app.md).
-  Open: retiring the WebView viewport waits for the owner (it removes the Editor's own view).
+  Retiring the WebView viewport — owner, 2026-10-27: "I want a powerful 3dview from egui and it's
+  panels ui and ux shouldn't [be compromised]". Approved: the Editor keeps the graph and layer
+  stack; Studio is the only 3-D view and panel set. Before deleting: a capability-by-capability
+  audit desktop → Studio, every gap closed in Studio first. Then the design pass (P6) covers
+  Studio and the graph window only.
+- P5 slice 2 — closing the gaps the audit found (desktop → Studio, 2026-10-27; ~90 % already
+  matched). Each closed in Studio, tested, before the WebView viewport goes:
+  G1 shortcuts (⌘N/O/S/G/R/E/I, ⌥⌘Z, ⇧⌥⌘Z, ⌘W) and the native menu bar — the tooltips promise them;
+  G2 Esc cancels jobs, header job progress (op · node n/N · s, Cancel), Tasks shows every job
+     (Editor's, MCP's) and without a project;
+  G3 material detail tiles drawn in the viewport (the Materials "detail" has no visible effect);
+  G4 side panels collapse to a strip; G5 panel sizes and window size / position remembered;
+  G6 the Graph chip brings a running Editor to the front;
+  G7 viewport hints per tool (sculpt, grid, road, cave entrance);
+  G8 pinch / ⌘ + wheel zoom with no tool armed, middle drag orbits;
+  G9 selection reaches the Editor (cave summary click, Sculpt start);
+  G10 Diagnostics without a project; G11 number fields step with the arrow keys;
+  G12 a crash report for Studio (panic hook → log + diag).
+  Closed (slice 2a): G7 hints per tool (chrome::hint_rows, unit-tested); G8 pinch / ⌘ + wheel
+  zoom and middle-drag orbit; G2 the server's `busy { running }` event (flips under a lock, jobs.*
+  not counted; ipc test mutation-checked) → Studio polls jobs.list while any window works, the
+  header's job line (op · node n/N kind · s, Cancel, Esc to abort; job_line unit-tested), Esc
+  cancels every job outside text fields; G10 Tasks and Diagnostics without a project (window
+  test). The audit's "Tasks shows the Editor's jobs" was beyond the desktop (its Tasks polls only
+  around its own ops) — needed now that two windows share one engine. The protocol doc listed a
+  `job` event that was never sent; replaced by `busy`.
   Open (flake, 2026-10-27): `e2e/paint.spec.ts` failed once inside a full gate run (instance count
   stayed 925 after the density stroke; 30 s poll). Not reproduced in 5 full suites + 12 parallel
   repeats; trace lost (overwritten by reruns — next time copy `test-results/` first). Ruled out:
