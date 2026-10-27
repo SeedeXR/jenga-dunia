@@ -337,6 +337,12 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
       TerrainView, sea / camera / previewLod tests and DELETE specs removed; CI and pre-push run
       the remaining specs;
   (d) docs (desktop-app.md's spec references), the figures in the design pass (S4).
+  Progress (a): engine — crates/jd-core/tests/desktop_flows.rs (the 7). Studio — sculpt / alphas /
+  sculptlayer (one test); grid (right drag keeps the selection, Set height → max exactly 700,
+  Raise 25 → 725, ⌥⌘Z back to 700, half-cell radius); jobs (header line, Cancel → E_CANCELLED,
+  Esc aborts the next); caves (an entrance's ×, Show caves off); road (one splice, the node
+  selected). Found while porting: Studio did not select a spliced node (the desktop's
+  spliceBefore callers do — road, actions, the layer strip): now selected in the chain reply.
   Open (flake, 2026-10-27): `e2e/paint.spec.ts` failed once inside a full gate run (instance count
   stayed 925 after the density stroke; 30 s poll). Not reproduced in 5 full suites + 12 parallel
   repeats; trace lost (overwritten by reruns — next time copy `test-results/` first). Ruled out:

@@ -1059,6 +1059,13 @@ impl StudioApp {
                         {
                             self.adapt_lod(report);
                         }
+                        // A node spliced in (the layer strip, an action, a road) is selected, so
+                        // the inspectors show it (the desktop's spliceBefore callers).
+                        if r.op == "graph.splice"
+                            && let Some(id) = r.result.as_ref().and_then(|v| v["id"].as_str())
+                        {
+                            self.select_node(id.to_owned());
+                        }
                         // A tunnel just added: its portals are placed by clicking the terrain.
                         if r.op == "graph.add_cave"
                             && std::mem::take(&mut self.tunnel_pending)

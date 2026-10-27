@@ -339,6 +339,51 @@ fn number_fields_step_with_the_arrow_keys() {
     assert_eq!(spacing(&h).as_deref(), Some("31"));
 }
 
+/// e2e/jobs.spec.ts in Studio: a long evaluation shows in the header with Cancel, which stops
+/// it with E_CANCELLED; Esc (outside a text field) aborts the next one too.
+#[test]
+fn a_running_job_shows_in_the_header_and_cancel_or_esc_stops_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = engine(dir.path());
+    let probe = server.clone();
+    let mut h = window(server);
+    settle(&mut h, |a| a.viewport.info().is_some());
+    // A very long hydraulic run in front of the output (the node's maximum iterations).
+    let r = probe.invoke(Request::new(
+        "graph.splice",
+        json!({ "layer": "height", "kind": "jd.erosion.hydraulic@1", "params": { "iterations": 2000 } }),
+    ));
+    assert!(r.error.is_none(), "{:?}", r.error);
+    settle(&mut h, |_| true);
+    let cancelled = |a: &StudioApp| {
+        a.log_lines()
+            .filter(|l| l.text.contains("E_CANCELLED"))
+            .count()
+    };
+    let running = |h: &mut Harness<'static, StudioApp>| {
+        let until = Instant::now() + Duration::from_secs(30);
+        while h.query_by_label("Esc to abort").is_none() {
+            assert!(Instant::now() < until, "no job in the header");
+            h.step();
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    };
+    h.key_press_modifiers(eframe::egui::Modifiers::COMMAND, eframe::egui::Key::R);
+    running(&mut h);
+    h.get(egui_kittest::kittest::by().label_contains("graph.evaluate · node "));
+    h.get_all_by_label("Cancel").next().unwrap().click();
+    settle(&mut h, |a| cancelled(a) == 1);
+    assert!(
+        h.query_by_label("Esc to abort").is_none(),
+        "the job line stays after the cancel"
+    );
+    // Esc aborts the next one.
+    h.key_press_modifiers(eframe::egui::Modifiers::COMMAND, eframe::egui::Key::R);
+    running(&mut h);
+    h.key_press(eframe::egui::Key::Escape);
+    settle(&mut h, |a| cancelled(a) == 2);
+}
+
 #[test]
 fn a_write_from_the_editor_refreshes_the_window() {
     let dir = tempfile::tempdir().unwrap();
@@ -943,6 +988,26 @@ fn the_caves_section_adds_shows_x_rays_maps_and_exports_a_cave() {
             .any(|l| l.text.starts_with("caves.export: ok"))
     });
     assert!(dir.path().join("Kit.jdproj/exports/cave_1.glb").exists());
+    // An entrance's × takes it out of the node (e2e/caves.spec.ts).
+    let n = h.state().cave_entrances(0).len();
+    tap(
+        &mut h,
+        Some(eframe::egui::accesskit::Role::Button),
+        &format!("Remove entrance {n} of cave 1"),
+    );
+    settle(&mut h, |a| a.cave_entrances(0).len() == n - 1);
+    // Show caves off: the walls leave the viewport and its readout.
+    tap(
+        &mut h,
+        Some(eframe::egui::accesskit::Role::CheckBox),
+        "Show caves",
+    );
+    settle(&mut h, |a| a.viewport.cave_triangles() == 0);
+    assert!(
+        !h.state().viewport_readout().contains(" · caves "),
+        "{}",
+        h.state().viewport_readout()
+    );
 }
 
 #[test]
@@ -1602,6 +1667,15 @@ fn sculpt_paints_strokes_and_transforms_and_the_road_lays_a_spline() {
     settle(&mut h, |_| node("jd.terrain.spline@1").is_some());
     let road = node("jd.terrain.spline@1").unwrap();
     assert_eq!(road["params"]["width_m"], 12.0);
+    // Spliced in once and selected, so the inspector shows it (e2e/road.spec.ts).
+    settle(&mut h, |a| a.selected_node() == road["id"].as_str());
+    assert_eq!(
+        h.state()
+            .log_lines()
+            .filter(|l| l.text.starts_with("graph.splice: ok"))
+            .count(),
+        1
+    );
     assert!(h.state().viewport.tool.is_none(), "one drag, one road");
 }
 
@@ -1865,6 +1939,25 @@ fn the_grid_tool_selects_cells_and_levels_raises_and_transforms_them() {
     drag_on(&mut h, c, c);
     h.run();
     assert_eq!(h.state().grid_selection().len(), n - 1);
+    // The right button orbits without touching the selection (e2e/grid.spec.ts).
+    right_drag(
+        &mut h,
+        r.center() - eframe::egui::vec2(0.0, 40.0),
+        r.center() + eframe::egui::vec2(80.0, -20.0),
+    );
+    assert_eq!(h.state().grid_selection().len(), n - 1);
+    // The full-resolution maximum after evaluating the graph as it stands.
+    let max = || {
+        let r = probe.invoke(Request::new("graph.evaluate", json!({ "lod": 0 })));
+        assert!(r.error.is_none(), "{:?}", r.error);
+        probe
+            .invoke(Request::new("terrain.stats", json!({ "layer": "height" })))
+            .result
+            .unwrap()["stats"]["max"]
+            .as_f64()
+            .unwrap()
+    };
+    fill(&mut h, "Height (m)", "700");
     // Set height: one flatten stroke over the selected cells; Raise: one more.
     let button = eframe::egui::accesskit::Role::Button;
     tap(&mut h, Some(button), "Set height");
@@ -1881,6 +1974,20 @@ fn the_grid_tool_selects_cells_and_levels_raises_and_transforms_them() {
         (Some("flatten"), Some("square"))
     );
     assert_eq!(stroke["points"].as_array().unwrap().len(), n - 1);
+    // Square hard stamps of half a cell, levelled to the height: above the 100..600 m noise, the
+    // terrain's maximum is exactly it.
+    assert_eq!(
+        (stroke["target_m"].as_f64(), stroke["amount"].as_f64()),
+        (Some(700.0), Some(1.0)),
+        "{stroke}"
+    );
+    assert_eq!(
+        stroke["radius_m"].as_f64(),
+        Some(2048.0 / 32.0 / 2.0),
+        "{stroke}"
+    );
+    assert!((max() - 700.0).abs() < 1e-3);
+    fill(&mut h, "Step (m)", "25");
     tap(&mut h, Some(button), "Raise");
     settle(&mut h, |_| {
         node("jd.sculpt.strokes@1").is_some_and(|s| {
@@ -1889,6 +1996,26 @@ fn the_grid_tool_selects_cells_and_levels_raises_and_transforms_them() {
                 .is_some_and(|a| a.len() == 2)
         })
     });
+    let raised = node("jd.sculpt.strokes@1").unwrap()["params"]["strokes"][1].clone();
+    assert_eq!(
+        (raised["mode"].as_str(), raised["strength_m"].as_f64()),
+        (Some("raise"), Some(25.0)),
+        "{raised}"
+    );
+    assert!((max() - 725.0).abs() < 1e-3);
+    // Each grid operation is one undo step (⌥⌘Z): back to 700 m.
+    h.key_press_modifiers(
+        eframe::egui::Modifiers::COMMAND | eframe::egui::Modifiers::ALT,
+        eframe::egui::Key::Z,
+    );
+    settle(&mut h, |_| {
+        node("jd.sculpt.strokes@1").is_some_and(|s| {
+            s["params"]["strokes"]
+                .as_array()
+                .is_some_and(|a| a.len() == 1)
+        })
+    });
+    assert!((max() - 700.0).abs() < 1e-3);
     // Duplicate: the block copied one selection-width east, as a transforms op.
     tap(&mut h, Some(button), "Duplicate");
     settle(&mut h, |_| {
