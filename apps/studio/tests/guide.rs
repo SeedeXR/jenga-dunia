@@ -1152,7 +1152,8 @@ fn film_terrain_pbr_import() {
 fn film_hydrology() {
     let dir = tempfile::tempdir().unwrap();
     let server = world(dir.path());
-    // noise → rivers → height, the rivers mask published (built in the Editor; here, its ops).
+    // The graph as the Editor built it (its video: hydrology-editor.mp4): noise → rivers → height
+    // with the rivers mask published, and a murky, windy sea at 250 m.
     let rivers = ok(
         &server,
         "graph.splice",
@@ -1160,10 +1161,16 @@ fn film_hydrology() {
     )["id"]
         .clone();
     publish(&server, &rivers, "rivers", "rivers");
+    let sea = add(
+        &server,
+        "jd.hydrology.sea_level@1",
+        json!({ "level_m": 250.0, "visibility_m": 4.0, "tint": [0.12, 0.42, 0.36], "wind_speed_mps": 20.0 }),
+    );
+    connect(&server, &rivers, "out", &sea, "in");
     ok(&server, "graph.evaluate", json!({ "lod": 0 }));
-    let probe = server.clone();
     let mut h = filmed(server);
     ready(&mut h);
+    settle(&mut h, |a| a.viewport_readout().contains(" · waves "));
     let mut f = Film::new("hydrology");
     f.shoot(&mut h, 18);
     // Colour by the rivers mask, then back to the height ramp.
@@ -1177,44 +1184,17 @@ fn film_hydrology() {
     show(&mut h, "Place");
     f.click(&mut h, "Place");
     f.wait(&mut h, 72, |a| a.viewport.instance_count() > 0);
-    f.shoot(&mut h, 30);
-    // A sea at 250 m (the Editor adds the node), murky water, a gale; close in on the shore.
-    let sea = add(
-        &probe,
-        "jd.hydrology.sea_level@1",
-        json!({ "level_m": 250.0 }),
-    );
-    connect(&probe, &rivers, "out", &sea, "in");
-    f.wait(&mut h, 120, |a| {
-        a.viewport_readout().contains(" · sea 250 m")
-    });
     f.shoot(&mut h, 24);
-    for _ in 0..48 {
+    // Down to the shore: the murky water and the gale's surf.
+    for _ in 0..72 {
         let mut cam = h.state().viewport.camera;
         cam.radius *= 0.985;
-        cam.phi += 0.004;
+        cam.phi += 0.003;
+        cam.theta += 0.004;
         h.state_mut().viewport.set_camera(cam);
         f.shoot(&mut h, 1);
     }
-    for (key, value) in [
-        ("visibility_m", json!(4.0)),
-        ("tint", json!([0.12, 0.42, 0.36])),
-    ] {
-        ok(
-            &probe,
-            "graph.set_param",
-            json!({ "id": sea, "key": key, "value": value }),
-        );
-    }
-    f.wait(&mut h, 72, |_| true);
     f.shoot(&mut h, 36);
-    ok(
-        &probe,
-        "graph.set_param",
-        json!({ "id": sea, "key": "wind_speed_mps", "value": 20.0 }),
-    );
-    f.wait(&mut h, 72, |a| a.viewport_readout().contains(" · waves "));
-    f.shoot(&mut h, 48);
     f.finish();
 }
 
@@ -1223,36 +1203,40 @@ fn film_hydrology() {
 fn film_desert() {
     let dir = tempfile::tempdir().unwrap();
     let server = world_of(dir.path(), 2048.0, 512);
-    let probe = server.clone();
+    // The graph as the Editor built it (its video: desert-editor.mp4): noise → dunes → sinkholes
+    // → height, the pits published as `sinkholes`.
+    let noise = node(&server, "jd.noise.fbm@1");
+    let height = node(&server, "jd.output.height@1");
+    let dunes = add(&server, "jd.erosion.aeolian@1", json!({ "iterations": 60 }));
+    let karst = add(
+        &server,
+        "jd.erosion.karst@1",
+        json!({ "density_per_km2": 6, "max_slope_deg": 15 }),
+    );
+    connect(&server, &noise, "out", &dunes, "in");
+    connect(&server, &dunes, "out", &karst, "in");
+    connect(&server, &karst, "out", &height, "in");
+    publish(&server, &karst, "sinkholes", "sinkholes");
+    ok(&server, "graph.evaluate", json!({ "lod": 0 }));
     let mut h = filmed(server);
     ready(&mut h);
     let mut f = Film::new("desert");
     f.shoot(&mut h, 18);
-    // The Desert plain preset fills the noise; Generate makes the plain.
+    // The Desert plain preset fills the noise; Generate evaluates the graph on it: dunes, pits.
     f.choose(&mut h, "Noise preset", "Desert plain 0..40 m");
     f.shoot(&mut h, 12);
+    let bakes = |a: &StudioApp| {
+        a.log_lines()
+            .filter(|l| l.text.starts_with("terrain.textures: ok"))
+            .count()
+    };
+    let before = bakes(h.state());
     f.click(&mut h, "Generate terrain (⌘G)");
-    f.wait(&mut h, 96, |_| {
-        ok(&probe, "terrain.stats", json!({ "layer": "height" }))["stats"]["max"]
-            .as_f64()
-            .is_some_and(|m| m <= 40.01)
+    // The full evaluation and its maps (the dunes pile sand above the 40 m plain).
+    f.wait(&mut h, 120, |a| {
+        a.layer() == Some("height") && bakes(a) > before
     });
     f.shoot(&mut h, 24);
-    // Dunes and sinkholes (the Editor's nodes), the pits published and coloured.
-    let noise = node(&probe, "jd.noise.fbm@1");
-    let height = node(&probe, "jd.output.height@1");
-    let dunes = add(&probe, "jd.erosion.aeolian@1", json!({ "iterations": 60 }));
-    let karst = add(
-        &probe,
-        "jd.erosion.karst@1",
-        json!({ "density_per_km2": 6, "max_slope_deg": 15 }),
-    );
-    connect(&probe, &noise, "out", &dunes, "in");
-    connect(&probe, &dunes, "out", &karst, "in");
-    connect(&probe, &karst, "out", &height, "in");
-    publish(&probe, &karst, "sinkholes", "sinkholes");
-    ok(&probe, "graph.evaluate", json!({ "lod": 0 }));
-    f.wait(&mut h, 96, |a| a.layers().iter().any(|l| l == "sinkholes"));
     f.choose(&mut h, "colour", "sinkholes");
     f.wait(&mut h, 48, |a| a.viewport.overlay_on());
     for _ in 0..60 {
