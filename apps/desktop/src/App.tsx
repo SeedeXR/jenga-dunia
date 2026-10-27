@@ -184,8 +184,8 @@ export default function App() {
   const last = s.log[s.log.length - 1];
   const job = s.jobs[0];
   return (
-    <div className="grid h-full grid-rows-[36px_1fr_auto_24px] bg-jd-bg-0 text-jd-fg-0">
-      <header className="flex items-center gap-3 border-b border-jd-line bg-jd-bg-1 px-3">
+    <div className="flex h-full flex-col bg-jd-bg-0 text-jd-fg-0">
+      <header className="flex h-9 shrink-0 items-center gap-3 border-b border-jd-line bg-jd-bg-1 px-3">
         <img src="/jd-mark.svg" alt="Jenga Dunia" className="h-4 w-4" data-testid="brand-mark" />
         <span className="text-xs font-semibold tracking-wide">Jenga Dunia</span>
         <span className="text-xs text-jd-fg-2" data-testid="app-version">
@@ -208,7 +208,7 @@ export default function App() {
       </header>
 
       {s.project ? (
-        <div className="grid min-h-0 grid-cols-[260px_1fr]">
+        <div className="grid min-h-0 flex-1 grid-cols-[260px_1fr]">
           <aside className="overflow-y-auto border-r border-jd-line bg-jd-bg-1 p-3" data-testid="panel-layers">
             <LayerStack />
           </aside>
@@ -217,12 +217,12 @@ export default function App() {
           </main>
         </div>
       ) : (
-        <div className="flex items-center justify-center text-sm text-jd-fg-2" data-testid="no-project">
+        <div className="flex flex-1 items-center justify-center text-sm text-jd-fg-2" data-testid="no-project">
           Create or open a project in Studio — the graph appears here.
         </div>
       )}
 
-      <section className={`overflow-y-auto border-t border-jd-line bg-jd-bg-1 px-3 py-2 font-mono text-xs ${logOpen ? "h-40" : "hidden"}`} data-testid="log">
+      <section className={`shrink-0 overflow-y-auto border-t border-jd-line bg-jd-bg-1 px-3 py-2 font-mono text-xs ${logOpen ? "h-40" : "hidden"}`} data-testid="log">
         {s.log.length === 0 && <span className="text-jd-fg-2">Operations and warnings appear here.</span>}
         {s.log.map((e) => (
           <div key={e.seq} data-seq={e.seq} className={e.level === "error" ? "text-jd-error" : e.level === "warn" ? "text-jd-warn" : "text-jd-fg-1"}>
@@ -231,7 +231,7 @@ export default function App() {
         ))}
       </section>
 
-      <footer className="flex items-center gap-2 border-t border-jd-line bg-jd-bg-1 px-3 text-xs" data-testid="status-bar">
+      <footer className="flex h-6 shrink-0 items-center gap-2 border-t border-jd-line bg-jd-bg-1 px-3 text-xs" data-testid="status-bar">
         <button className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => setLogOpen((v) => !v)} title={logOpen ? "Hide the log" : "Show the log"} aria-expanded={logOpen} data-testid="toggle-log">
           {logOpen ? <ChevronDown size={12} /> : <ChevronUp size={12} />}
           <span className={`truncate ${last?.level === "error" ? "text-jd-error" : last?.level === "warn" ? "text-jd-warn" : "text-jd-fg-2"}`} data-testid="status-line">
