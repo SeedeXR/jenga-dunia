@@ -324,6 +324,19 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   `diag.crash_report` (engine ops report their own; the hook skips other threads, where the
   engine may hold locks); tests/crash.rs: one report for `main`, none for a worker.
   All twelve audit gaps closed. Next: retire the WebView viewport and panels (P5).
+- P5 slice 3 — retiring the WebView viewport and panels. Map: memory/p5-retire-map-2026-10-27.md
+  (every e2e spec → KEEP / DELETE / MIXED, Studio coverage, the gaps; then which gaps engine tests
+  already cover). Order, so no coverage is lost:
+  (a) port the gaps: 7 engine behaviours with no test → jd-core tests (look ↔ scene.json and
+      reopen; add_simulation debris / sand; sculpt_target {layer, clamp}; project.cache_gc;
+      project.write_export confinement; settings / CRS through save → reopen; scatter follow_time);
+      UI-only gaps → Studio window tests (sculpt / alphas / sculptlayer done: one test);
+  (b) KEEP / MIXED specs re-based on core setup (`project.create` before goto, as
+      parity-capture did), log checks → core reads; bridge.ts `wire` / `evaluateAndWait` too;
+  (c) App.tsx down to the graph + layer stack (+ engine events, menu handler, crash reporter),
+      TerrainView, sea / camera / previewLod tests and DELETE specs removed; CI and pre-push run
+      the remaining specs;
+  (d) docs (desktop-app.md's spec references), the figures in the design pass (S4).
   Open (flake, 2026-10-27): `e2e/paint.spec.ts` failed once inside a full gate run (instance count
   stayed 925 after the density stroke; 30 s poll). Not reproduced in 5 full suites + 12 parallel
   repeats; trace lost (overwritten by reruns — next time copy `test-results/` first). Ruled out:

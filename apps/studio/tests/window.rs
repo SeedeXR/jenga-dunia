@@ -1605,6 +1605,225 @@ fn sculpt_paints_strokes_and_transforms_and_the_road_lays_a_spline() {
     assert!(h.state().viewport.tool.is_none(), "one drag, one road");
 }
 
+/// Select a text field's contents and type over them (the desktop specs' `fill`).
+fn fill(h: &mut Harness<'static, StudioApp>, label: &str, text: &str) {
+    use eframe::egui::accesskit::Role;
+    h.get_by_role_and_label(Role::TextInput, label)
+        .scroll_to_me();
+    h.run();
+    h.get_by_role_and_label(Role::TextInput, label).focus();
+    h.run();
+    h.key_press_modifiers(eframe::egui::Modifiers::COMMAND, eframe::egui::Key::A);
+    h.get_by_role_and_label(Role::TextInput, label)
+        .type_text(text);
+    h.run();
+}
+
+/// A drag with the secondary button (the desktop's right-button orbit).
+fn right_drag(h: &mut Harness<'static, StudioApp>, a: eframe::egui::Pos2, b: eframe::egui::Pos2) {
+    let button = |pos, pressed| eframe::egui::Event::PointerButton {
+        pos,
+        button: eframe::egui::PointerButton::Secondary,
+        pressed,
+        modifiers: Default::default(),
+    };
+    h.hover_at(a);
+    h.run_steps(1);
+    h.event(button(a, true));
+    h.run_steps(1);
+    for k in 1..=5 {
+        h.hover_at(a + (b - a) * (k as f32 / 5.0));
+        h.run_steps(1);
+    }
+    h.event(button(b, false));
+    h.run_steps(1);
+}
+
+/// e2e/sculpt.spec.ts, alphas.spec.ts and sculptlayer.spec.ts in Studio: the stroke's strength,
+/// alpha and hardness, one undo step per stroke, Shift + wheel strength, the right button
+/// painting nothing, lower = negative strength, the south half of the screen, height scale 0.
+#[test]
+fn the_brush_records_its_settings_undoes_and_its_layer_scales_like_the_desktop() {
+    use eframe::egui::accesskit::Role;
+    let dir = tempfile::tempdir().unwrap();
+    let server = engine(dir.path());
+    let probe = server.clone();
+    let mut h = window(server);
+    settle(&mut h, |a| a.viewport.info().is_some());
+    let strokes = || -> Vec<Value> {
+        let g = probe
+            .invoke(Request::new("graph.list", json!({})))
+            .result
+            .unwrap();
+        g["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|n| n["kind"] == "jd.sculpt.strokes@1")
+            .and_then(|n| n["params"]["strokes"].as_array().cloned())
+            .unwrap_or_default()
+    };
+    // The shown layer's maximum (a live preview publishes `height#lod<N>`), as the desktop's
+    // layer-stats readout.
+    // The full-resolution height's mean after evaluating the graph as it stands (the preview
+    // the window shows is a coarser LOD, so its stats are not comparable with the start's).
+    let mean = || {
+        let r = probe.invoke(Request::new("graph.evaluate", json!({ "lod": 0 })));
+        assert!(r.error.is_none(), "{:?}", r.error);
+        probe
+            .invoke(Request::new("terrain.stats", json!({ "layer": "height" })))
+            .result
+            .unwrap()["stats"]["mean"]
+            .as_f64()
+            .unwrap()
+    };
+    let base_mean = mean();
+    h.get_by_label("Sculpt: adds a stroke node before the output and paints with the brush")
+        .click();
+    h.run_steps(1);
+    settle(&mut h, |a| a.viewport.tool.is_some());
+    fill(&mut h, "Strength (m)", "120");
+    h.get_by_role_and_label(
+        Role::RadioButton,
+        "Crater: a raised rim round a sunken bowl",
+    )
+    .click();
+    h.run();
+    let r = h.state().viewport.rect();
+    let (a, b) = (
+        r.center() - eframe::egui::vec2(60.0, 0.0),
+        r.center() + eframe::egui::vec2(60.0, 0.0),
+    );
+    drag_on(&mut h, a, b);
+    settle(&mut h, |_| strokes().len() == 1);
+    let s = &strokes()[0];
+    assert_eq!(
+        (s["strength_m"].as_f64(), s["alpha"].as_str()),
+        (Some(120.0), Some("crater")),
+        "{s}"
+    );
+    for p in s["points"].as_array().unwrap() {
+        let (u, v) = (p[0].as_f64().unwrap(), p[1].as_f64().unwrap());
+        assert!(
+            (0.0..=2048.0).contains(&u) && (0.0..=2048.0).contains(&v),
+            "{p}"
+        );
+    }
+    // The stroke changes the terrain.
+    assert!(
+        (mean() - base_mean).abs() > 0.01,
+        "the stroke changed nothing"
+    );
+    // Each stroke is one undo step (⌥⌘Z).
+    h.key_press_modifiers(
+        eframe::egui::Modifiers::COMMAND | eframe::egui::Modifiers::ALT,
+        eframe::egui::Key::Z,
+    );
+    settle(&mut h, |_| strokes().is_empty());
+    // Shift + wheel over the brush lowers its strength; the right button orbits, painting nothing.
+    h.hover_at(r.center());
+    // Shift held across frames (the window reads the input's modifiers, not the event's).
+    h.event(eframe::egui::Event::ModifiersChanged(
+        eframe::egui::Modifiers::SHIFT,
+    ));
+    h.run_steps(1);
+    h.event(eframe::egui::Event::MouseWheel {
+        unit: eframe::egui::MouseWheelUnit::Point,
+        delta: eframe::egui::vec2(0.0, -120.0),
+        phase: eframe::egui::TouchPhase::Move,
+        source: eframe::egui::MouseWheelSource::Unknown,
+        modifiers: eframe::egui::Modifiers::SHIFT,
+    });
+    h.run_steps(3);
+    h.event(eframe::egui::Event::ModifiersChanged(
+        eframe::egui::Modifiers::NONE,
+    ));
+    h.run_steps(1);
+    let strength: f64 = h
+        .get_by_role_and_label(Role::TextInput, "Strength (m)")
+        .value()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!(strength < 120.0, "{strength}");
+    right_drag(&mut h, a, b + eframe::egui::vec2(0.0, 10.0));
+    h.run_steps(3);
+    assert!(strokes().is_empty(), "the right button painted");
+    // Lower: a negative strength; the hardness travels with the stroke; the lower half of the
+    // screen is the south of the world (small v).
+    h.get_by_role_and_label(Role::ComboBox, "Brush mode")
+        .click();
+    h.run();
+    h.get_by_label("lower").click();
+    h.run();
+    fill(&mut h, "Strength (m)", "30");
+    h.get(
+        egui_kittest::kittest::by()
+            .role(Role::Slider)
+            .label_contains("Hardness "),
+    )
+    .focus();
+    h.run();
+    for _ in 0..10 {
+        h.key_press(eframe::egui::Key::ArrowRight);
+    }
+    h.run();
+    let low = eframe::egui::vec2(0.0, r.height() * 0.28);
+    drag_on(
+        &mut h,
+        r.center() - eframe::egui::vec2(40.0, 0.0) + low,
+        r.center() + eframe::egui::vec2(40.0, 0.0) + low,
+    );
+    settle(&mut h, |_| strokes().len() == 1);
+    let s = &strokes()[0];
+    assert_eq!(
+        (
+            s["mode"].as_str(),
+            s["strength_m"].as_f64(),
+            s["hardness"].as_f64()
+        ),
+        (Some("raise"), Some(-30.0), Some(0.5)),
+        "{s}"
+    );
+    for p in s["points"].as_array().unwrap() {
+        assert!(p[1].as_f64().unwrap() < 1024.0, "south half: {p}");
+    }
+    // The layer's Height scale 0 hides what its strokes did (sculptlayer.spec.ts).
+    h.get_by_role_and_label(Role::ComboBox, "Brush mode")
+        .click();
+    h.run();
+    h.get_by_label("raise").click();
+    h.run();
+    fill(&mut h, "Strength (m)", "400");
+    drag_on(&mut h, a, b);
+    settle(&mut h, |_| strokes().len() == 2);
+    assert!(
+        (mean() - base_mean).abs() > 0.5,
+        "the 400 m stroke changed nothing"
+    );
+    h.get(egui_kittest::kittest::by().label_contains("area: whole terrain"));
+    fill(&mut h, "Height scale", "0");
+    h.key_press(eframe::egui::Key::Tab);
+    h.run_steps(1);
+    let scale = || -> Option<f64> {
+        let g = probe
+            .invoke(Request::new("graph.list", json!({})))
+            .result
+            .unwrap();
+        g["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|n| n["kind"] == "jd.sculpt.strokes@1")?["params"]["height_scale"]
+            .as_f64()
+    };
+    settle(&mut h, |_| scale() == Some(0.0));
+    assert!(
+        (mean() - base_mean).abs() < 0.01,
+        "height scale 0 still shows the strokes"
+    );
+}
+
 #[test]
 fn the_grid_tool_selects_cells_and_levels_raises_and_transforms_them() {
     let dir = tempfile::tempdir().unwrap();
