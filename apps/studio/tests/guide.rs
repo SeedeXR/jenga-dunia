@@ -771,3 +771,27 @@ fn guide_desert_and_network() {
     settle(&mut h, |a| a.viewport.overlay_on());
     shot(&mut h, "desktop-network", &[Callout("colour", "")]);
 }
+
+#[test]
+#[ignore = "writes the user guide's figures (JD_GUIDE_OUT); fetches public Terrarium tiles"]
+fn guide_real_world() {
+    // The panel's default point: Nairobi, 2 km around, from AWS Terrain Tiles.
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = studio(world_of(dir.path(), 2048.0, 512));
+    ready(&mut h);
+    h.get_by_label("Fetch the DEM").click();
+    h.run_steps(1);
+    settle(&mut h, |a| {
+        a.log_lines()
+            .any(|l| l.text.starts_with("graph.evaluate: ok") || l.text.contains(": E_"))
+    });
+    let errors: Vec<_> = h
+        .state()
+        .log_lines()
+        .filter(|l| l.text.contains(": E_"))
+        .map(|l| l.text.clone())
+        .collect();
+    assert!(errors.is_empty(), "{errors:?}");
+    settle(&mut h, |_| true);
+    shot(&mut h, "desktop-geo", &[Callout("Fetch the DEM", "")]);
+}
