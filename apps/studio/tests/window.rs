@@ -605,6 +605,118 @@ fn the_sky_readouts_follow_their_sliders_and_heightmaps_go_out_and_back() {
     );
 }
 
+/// e2e/hydrology.spec.ts and lakes.spec.ts in Studio, the graph edited as the Editor would: a
+/// sea-level node puts a sea at its level, its wind raises the waves the readout reports, the water
+/// maps export; a fill node published as `lakes` shows standing water.
+#[test]
+fn the_sea_follows_its_node_and_lakes_show_their_water() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = engine(dir.path());
+    let probe = server.clone();
+    let mut h = window(server);
+    settle(&mut h, |a| a.viewport.info().is_some());
+    let ok = |op: &str, params: Value| {
+        let r = probe.invoke(Request::new(op, params));
+        assert!(r.error.is_none(), "{op}: {:?}", r.error);
+        r.result.unwrap_or(Value::Null)
+    };
+    let readout = |h: &Harness<'static, StudioApp>| h.state().viewport_readout();
+    let sea = ok(
+        "graph.add_node",
+        json!({ "kind": "jd.hydrology.sea_level@1", "params": {} }),
+    )["id"]
+        .clone();
+    settle(&mut h, |a| a.viewport_readout().contains(" · sea 0 m"));
+    ok(
+        "graph.set_param",
+        json!({ "id": sea, "key": "level_m", "value": 250.0 }),
+    );
+    settle(&mut h, |a| a.viewport_readout().contains(" · sea 250 m"));
+    // The shoreline is drawn where the sea meets the ground (e2e/chrome.spec.ts), and the ruler
+    // spans the shown layer's heights.
+    assert!(readout(&h).contains(" · shore "), "{}", readout(&h));
+    let layer = h.state().layer().unwrap().to_owned();
+    let max = ok("terrain.stats", json!({ "layer": layer }))["stats"]["max"]
+        .as_f64()
+        .unwrap();
+    let range = h.state().viewport.info().unwrap().range_m;
+    assert!(
+        (f64::from(range[1]) - max).abs() < 0.5,
+        "ruler {range:?}, layer max {max}"
+    );
+    // A 20 m/s gale with unlimited fetch: a 9.8 m / 380 m Pierson–Moskowitz sea.
+    ok(
+        "graph.set_param",
+        json!({ "id": sea, "key": "wind_speed_mps", "value": 20.0 }),
+    );
+    settle(&mut h, |a| {
+        a.viewport_readout().contains(" · waves 9.8 m / 380 m")
+    });
+    h.get_by_label("Export water maps").scroll_to_me();
+    // The waves animate, so the window never settles: step through the scroll's animation.
+    h.run_steps(30);
+    h.get_by_label("Export water maps").click();
+    h.run_steps(1);
+    let until = Instant::now() + Duration::from_secs(60);
+    while !h
+        .state()
+        .log_lines()
+        .any(|l| l.text.starts_with("ocean.bake: ok"))
+    {
+        assert!(
+            Instant::now() < until,
+            "no ocean.bake: {:?}",
+            h.state()
+                .log_lines()
+                .map(|l| l.text.clone())
+                .collect::<Vec<_>>()
+        );
+        h.step();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        dir.path()
+            .join("Kit.jdproj/exports/water/wave_normal.png")
+            .exists()
+    );
+    // Lakes: noise → fill → an output publishing `lakes`, evaluated.
+    let g = ok("graph.list", json!({}));
+    let noise = g["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["kind"] == "jd.noise.fbm@1")
+        .unwrap()["id"]
+        .clone();
+    let fill = ok(
+        "graph.add_node",
+        json!({ "kind": "jd.hydrology.fill@1", "params": {} }),
+    )["id"]
+        .clone();
+    let out = ok(
+        "graph.add_node",
+        json!({ "kind": "jd.output.height@1", "params": { "layer": "lakes" } }),
+    )["id"]
+        .clone();
+    // The sea node needs its terrain too, or the graph does not evaluate.
+    ok(
+        "graph.connect",
+        json!({ "from": noise, "from_port": "out", "to": sea, "to_port": "in" }),
+    );
+    ok(
+        "graph.connect",
+        json!({ "from": noise, "from_port": "out", "to": fill, "to_port": "in" }),
+    );
+    ok(
+        "graph.connect",
+        json!({ "from": fill, "from_port": "lakes", "to": out, "to_port": "in" }),
+    );
+    ok("graph.evaluate", json!({ "lod": 0 }));
+    settle(&mut h, |a| a.viewport_readout().contains(" cells"));
+    let r = readout(&h);
+    assert!(r.contains(" · lakes "), "{r}");
+}
+
 #[test]
 fn a_write_from_the_editor_refreshes_the_window() {
     let dir = tempfile::tempdir().unwrap();
@@ -2167,6 +2279,48 @@ fn the_brush_records_its_settings_undoes_and_its_layer_scales_like_the_desktop()
         (mean() - base_mean).abs() < 0.01,
         "height scale 0 still shows the strokes"
     );
+    // Push: one drag is a grab op whose vector is the drag (e2e/transforms.spec.ts). The column
+    // scrolled down to the layer settings: back up to the brush's mode.
+    h.get_by_role_and_label(Role::TextInput, "Strength (m)")
+        .scroll_to_me();
+    h.run();
+    h.get_by_role_and_label(Role::ComboBox, "Brush mode")
+        .scroll_to_me();
+    h.run();
+    h.get_by_role_and_label(Role::ComboBox, "Brush mode")
+        .click();
+    h.run();
+    // The eighth of nine modes: scrolled into the popup's view first.
+    h.get_by_label("push / pull").scroll_to_me();
+    h.run();
+    h.get_by_label("push / pull").click();
+    h.run();
+    h.get(egui_kittest::kittest::by().label_contains("(grab)"));
+    drag_on(
+        &mut h,
+        r.center(),
+        r.center() + eframe::egui::vec2(60.0, 0.0),
+    );
+    let push = || -> Option<Value> {
+        let g = probe
+            .invoke(Request::new("graph.list", json!({})))
+            .result
+            .unwrap();
+        g["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|n| n["kind"] == "jd.sculpt.transforms@1")?["params"]["ops"]
+            .as_array()?
+            .last()
+            .cloned()
+    };
+    settle(&mut h, |_| push().is_some_and(|o| o["kind"] == "push"));
+    let op = push().unwrap();
+    assert!(
+        op["vector_m"][0].as_f64().unwrap() > 0.0,
+        "a drag to the east: {op}"
+    );
 }
 
 #[test]
@@ -2296,6 +2450,22 @@ fn the_grid_tool_selects_cells_and_levels_raises_and_transforms_them() {
     let op = node("jd.sculpt.transforms@1").unwrap()["params"]["ops"][0].clone();
     assert_eq!(op["kind"], "duplicate");
     assert!(op["vector_m"][0].as_f64().unwrap() > 0.0, "{op}");
+    // Scale (factor 0 flattens the block's relief), Rotate and Align: one op each, in order, all
+    // in the one transforms node (e2e/transforms.spec.ts).
+    fill(&mut h, "Factor", "0");
+    for b in ["Scale", "Rotate", "Align"] {
+        tap(&mut h, Some(button), b);
+        settle(&mut h, |_| true);
+    }
+    let ops = node("jd.sculpt.transforms@1").unwrap()["params"]["ops"].clone();
+    let kinds: Vec<_> = ops
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|o| o["kind"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(kinds, ["duplicate", "scale", "rotate", "align"], "{ops}");
+    assert_eq!(ops[1]["factor"], 0.0, "{ops}");
     tap(&mut h, Some(button), "Clear");
     h.run();
     assert!(h.state().grid_selection().is_empty());

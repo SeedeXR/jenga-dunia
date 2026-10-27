@@ -354,6 +354,9 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   Studio's sliders (widgets::Range, VBar) lost the keyboard focus after one ← / ↓ step — egui
   moves the focus with the arrows unless the focused widget claims them (its own Slider does);
   both now set a focus-lock filter for the arrows.
+  Batch 6: the sea from its node (sea 0 → 250 m, waves 9.8 m / 380 m at 20 m/s, water maps
+  export), the shoreline readout and the ruler's max = the layer's, lakes from a fill node; grid
+  Scale (factor 0) / Rotate / Align ops in order; the push brush's grab op.
   Open (flake, 2026-10-27): `e2e/paint.spec.ts` failed once inside a full gate run (instance count
   stayed 925 after the density stroke; 30 s poll). Not reproduced in 5 full suites + 12 parallel
   repeats; trace lost (overwritten by reruns — next time copy `test-results/` first). Ruled out:
