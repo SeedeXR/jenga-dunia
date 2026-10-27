@@ -256,6 +256,13 @@ describe("App", () => {
     ]);
     const stroke = calls.find((c) => (c.args as { request?: { op: string; params: { key?: string } } }).request?.op === "graph.append_param" && (c.args as { request: { params: { key?: string } } }).request.params.key === "strokes");
     expect(stroke).toMatchObject({ args: { request: { params: { value: { points: [[10, 20], [30, 40]], radius_m: 150, mode: "flatten", amount: 0.5 } } } } });
+    // Another node selected (a transform stroke selects its transforms node): strokes still go
+    // to the strokes node Sculpt chose, as in Studio.
+    useStore.getState().setSelectedNode("01N");
+    calls.length = 0;
+    await useStore.getState().addStroke([[50, 60]]);
+    const next = calls.find((c) => (c.args as { request?: { op: string } }).request?.op === "graph.append_param");
+    expect(next).toMatchObject({ args: { request: { params: { id: "01SCULPT00000000000000000A", key: "strokes" } } } });
   });
 
   it("connected to Studio: its graph edits reload the graph, selections cross both ways", async () => {

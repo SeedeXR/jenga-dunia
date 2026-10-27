@@ -269,3 +269,7 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   `graphGen` check with no follow-up evaluation, and `placeScatter` racing `adopt`.
   Studio's chains each run on their own thread, so its evaluations can overlap too (harmless for
   the same reason, but wasted work under fast strokes).
+- Desktop ↔ Studio brush parity: after a transform stroke the desktop selected the transforms
+  node and its sculpt strokes silently stopped (they followed the selection only). It now
+  remembers the strokes node Sculpt / Paint density chose (`sculptNode`, Studio's `sculpt_node`):
+  the brush paints into the selected strokes node, else that one; the selection still moves.

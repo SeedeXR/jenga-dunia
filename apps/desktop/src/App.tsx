@@ -5,7 +5,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import GraphPanel from "./graph/GraphPanel";
 import LayerStack from "./graph/LayerStack";
 import TerrainView, { type ViewportInfo } from "./viewport/TerrainView";
-import { type Brush as BrushTool, type CaveKindName, type EvalReport, type NoiseSettings, useStore } from "./state";
+import { type Brush as BrushTool, brushNode, type CaveKindName, type EvalReport, type NoiseSettings, useStore } from "./state";
 import type { FractalKind, HeightmapFormat, NoiseKind } from "./lib/ops.gen";
 import type { Preview } from "./lib/api";
 import { LANGS, type Lang, translate } from "./lib/i18n";
@@ -271,7 +271,7 @@ export default function App() {
   const [showGraph, setShowGraph] = useState(true);
   const onInfo = useCallback((i: ViewportInfo) => setVp(i), []);
   const pathInput = useRef<HTMLInputElement>(null);
-  const sculptNode = s.graph.nodes.find((n) => n.id === s.selectedNode && n.kind.startsWith("jd.sculpt.strokes@"));
+  const sculptNode = brushNode(s);
   // The viewport draws the sea where the graph's sea-level node puts it (only over the height layer).
   const seaNode = s.graph.nodes.find((n) => n.kind.startsWith("jd.hydrology.sea_level@"));
   const noiseNode = s.graph.nodes.find((n) => n.kind.startsWith("jd.noise."));

@@ -123,6 +123,13 @@ export type JobInfo = JobInfoGen;
 
 export type EvalReport = GraphEvaluateResult;
 
+/** The strokes node the brush paints into: the selected one, else the one Sculpt / Paint density
+ *  chose (Studio's `sculpt_node`). */
+export const brushNode = (s: { graph: { nodes: NodeView[] }; selectedNode: string | null; sculptNode: string | null }) => {
+  const strokes = (id: string | null) => s.graph.nodes.find((n) => n.id === id && n.kind.startsWith("jd.sculpt.strokes@"));
+  return strokes(s.selectedNode) ?? strokes(s.sculptNode);
+};
+
 function readPreviewMaxPx(): number {
   try {
     const v = Number(localStorage.getItem("jd.previewMaxPx") ?? 1024);
@@ -184,6 +191,9 @@ interface State {
   /** Node selected in the graph editor (also the sculpt target when it is a sculpt node). */
   selectedNode: string | null;
   setSelectedNode: (id: string | null) => void;
+  /** The strokes node Sculpt / Paint density chose: the brush paints into it whenever the
+   *  selection is not a strokes node (a transform stroke selects its transforms node). */
+  sculptNode: string | null;
   /** Sculpt mode: viewport drags paint strokes into the selected sculpt node. */
   sculpting: boolean;
   setSculpting: (on: boolean) => void;
@@ -785,6 +795,7 @@ export const useStore = create<State>((set, get) => {
       await op("jobs.cancel", { id }).catch((e) => logFailure("jobs.cancel", e));
     },
     selectedNode: null,
+    sculptNode: null,
     setSelectedNode: (id) => {
       if (get().selectedNode === id) return;
       set({ selectedNode: id });
@@ -992,7 +1003,7 @@ export const useStore = create<State>((set, get) => {
     setBrush: (patch) => set((s) => ({ brush: { ...s.brush, ...patch } })),
     startSculpting: async () => {
       const id = await strokesNodeFor("height", null);
-      if (id) set((s) => ({ selectedNode: id, sculpting: true, grid: { ...s.grid, on: false } }));
+      if (id) set((s) => ({ selectedNode: id, sculptNode: id, sculpting: true, grid: { ...s.grid, on: false } }));
     },
     addSimulation: async (which) => {
       // The core places the node (in front of the height, or beside it for snow), publishes its
@@ -1014,7 +1025,7 @@ export const useStore = create<State>((set, get) => {
       const mask = get().scatter.mask;
       if (!mask) return;
       const id = await strokesNodeFor(mask, [0, 1]);
-      if (id) set((s) => ({ selectedNode: id, sculpting: true, brush: { ...s.brush, mode: "raise", strength_m: 0.5 } }));
+      if (id) set((s) => ({ selectedNode: id, sculptNode: id, sculpting: true, brush: { ...s.brush, mode: "raise", strength_m: 0.5 } }));
     },
     drawing: null,
     roadWidthM: 12,
@@ -1126,8 +1137,8 @@ export const useStore = create<State>((set, get) => {
         });
         return;
       }
-      const { selectedNode, graph, brush } = get();
-      const node = graph.nodes.find((n) => n.id === selectedNode && n.kind.startsWith("jd.sculpt.strokes@"));
+      const { brush } = get();
+      const node = brushNode(get());
       if (!node || points.length === 0) return;
       // One journal entry per stroke (graph.append_param), not the whole array each time.
       const lower = brush.mode === "lower";
