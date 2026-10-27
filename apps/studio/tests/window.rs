@@ -2350,6 +2350,44 @@ fn sculpt_paints_strokes_and_transforms_and_the_road_lays_a_spline() {
     assert!(h.state().viewport.tool.is_none(), "one drag, one road");
 }
 
+/// The viewport tools' single-letter keys (each named in its chip's tooltip): B frames, F fits,
+/// S arms and disarms the brush; typed into a field, the letter is text, not a tool.
+#[test]
+fn the_viewport_tools_answer_their_keys_but_not_while_typing() {
+    use eframe::egui::Key;
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window(engine(dir.path()));
+    settle(&mut h, |a| a.viewport.info().is_some());
+    let framed = h.state().viewport.frame;
+    h.key_press(Key::B);
+    h.run();
+    assert_ne!(h.state().viewport.frame, framed, "B toggles the frame");
+    let home = h.state().viewport.camera;
+    let mut cam = home;
+    cam.theta += 1.0;
+    h.state_mut().viewport.set_camera(cam);
+    h.key_press(Key::F);
+    h.run();
+    assert_eq!(h.state().viewport.camera, home, "F fits the home view");
+    h.key_press(Key::S);
+    h.run_steps(1);
+    settle(&mut h, |a| a.viewport.tool.is_some());
+    h.key_press(Key::S);
+    h.run();
+    assert!(
+        h.state().viewport.tool.is_none(),
+        "S again disarms the brush"
+    );
+    // In a text field the letter is typed, and no tool arms.
+    fill(&mut h, "Name", "S");
+    h.key_press(Key::S);
+    h.run_steps(2);
+    assert!(
+        h.state().viewport.tool.is_none(),
+        "typing S armed the brush"
+    );
+}
+
 /// A terrain far above sea level (a DEM of the Kenyan highlands: 1.7 km up on a 2 km world) is in
 /// view: the camera orbits sea level held inside its heights, not the origin, where the home view's
 /// eye sat under it.

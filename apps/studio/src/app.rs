@@ -6398,7 +6398,9 @@ impl eframe::App for StudioApp {
                     grid: self.grid.on,
                     cave: matches!(self.drawing, Some(Drawing::Cave(_))),
                 };
-                if let Some(action) = crate::chrome::show(ui, self.viewport.rect(), &st) {
+                if let Some(action) = crate::chrome::show(ui, self.viewport.rect(), &st)
+                    .or_else(|| crate::chrome::key_action(ui.ctx(), &st))
+                {
                     self.chrome_action(action, ui.ctx(), frame);
                 }
             });

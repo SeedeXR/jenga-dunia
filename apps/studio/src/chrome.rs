@@ -36,6 +36,49 @@ pub enum Action {
     Grid,
 }
 
+/// The viewport tools' keys (Blender's single letters): they act when no field has the keyboard
+/// and no modifier is held, so typing never triggers them; each chip's tooltip names its key.
+pub const KEYS: [(Action, eframe::egui::Key, &str); 9] = {
+    use eframe::egui::Key;
+    [
+        (Action::Fit, Key::F, "F"),
+        (Action::Still, Key::P, "P"),
+        (Action::Fullscreen, Key::M, "M"),
+        (Action::Frame, Key::B, "B"),
+        (Action::Graph, Key::E, "E"),
+        (Action::Horizon, Key::H, "H"),
+        (Action::Sculpt, Key::S, "S"),
+        (Action::Road, Key::R, "R"),
+        (Action::Grid, Key::G, "G"),
+    ]
+};
+
+/// `action`'s key, for its tooltip.
+fn key_of(action: Action) -> Option<&'static str> {
+    KEYS.iter().find(|k| k.0 == action).map(|k| k.2)
+}
+
+/// Whether `action`'s chip is enabled (its key acts only then).
+fn enabled(action: Action, st: &State) -> bool {
+    match action {
+        Action::Fit | Action::Fullscreen | Action::Frame | Action::Graph => true,
+        Action::Still => st.can_still,
+        _ => st.enabled,
+    }
+}
+
+/// The tool whose key was pressed this frame (consumed), if its chip is enabled.
+pub fn key_action(ctx: &eframe::egui::Context, st: &State) -> Option<Action> {
+    if ctx.memory(|m| m.focused().is_some()) {
+        return None;
+    }
+    ctx.input_mut(|i| {
+        KEYS.iter().find_map(|&(a, key, _)| {
+            (enabled(a, st) && i.consume_key(eframe::egui::Modifiers::NONE, key)).then_some(a)
+        })
+    })
+}
+
 /// What a layer-strip button adds (the core's workflow ops, shared with the desktop).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Add {
@@ -223,7 +266,7 @@ pub fn show(ui: &mut Ui, rect: Rect, st: &State) -> Option<Action> {
         ),
     ] {
         let r = Rect::from_min_size(pos2(x, rect.top() + 8.0), vec2(28.0, 24.0));
-        if chip(ui, r, icon, None, tip, enabled, on).clicked() {
+        if chip(ui, r, icon, None, tip, key_of(act), enabled, on).clicked() {
             action = Some(act);
         }
         x += 32.0;
@@ -311,7 +354,7 @@ pub fn show(ui: &mut Ui, rect: Rect, st: &State) -> Option<Action> {
             Some(Action::Grid) => st.grid,
             _ => false,
         };
-        if chip(ui, r, icon, label, tip, enabled, on).clicked() {
+        if chip(ui, r, icon, label, tip, act.and_then(key_of), enabled, on).clicked() {
             action = act;
         }
     }
@@ -347,13 +390,17 @@ pub fn show(ui: &mut Ui, rect: Rect, st: &State) -> Option<Action> {
     action
 }
 
-/// A `.btn px-1.5` (icon) or `.btn` (icon and label) placed at `r`; `on` is filled primary.
+/// A `.btn px-1.5` (icon) or `.btn` (icon and label) placed at `r`; `on` is filled primary. The
+/// tooltip names the chip's key under its text (Zed's keybinding hint); the accessible label is
+/// the text alone.
+#[allow(clippy::too_many_arguments)] // ponytail: one call site per row of chips; a struct adds nothing
 fn chip(
     ui: &mut Ui,
     r: Rect,
     icon: &str,
     label: Option<&str>,
     tip: &str,
+    key: Option<&str>,
     enabled: bool,
     on: bool,
 ) -> egui::Response {
@@ -374,7 +421,16 @@ fn chip(
         resp.widget_info(|| {
             egui::WidgetInfo::labeled(egui::accesskit::Role::Button, enabled, &tip_owned)
         });
-        resp.on_hover_text(tip)
+        resp.on_hover_ui(|ui| {
+            ui.label(tip);
+            if let Some(k) = key {
+                ui.label(
+                    RichText::new(format!("Key {k}"))
+                        .size(11.0)
+                        .color(color::FG2),
+                );
+            }
+        })
     })
     .inner
 }
