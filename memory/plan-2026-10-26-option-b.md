@@ -391,8 +391,12 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   36 px); sections set apart by a hairline after the first, 12 px headings; buttons and fields
   filled without borders, 4 px corners; the floating cards keep their place with a 10 px radius
   and a quieter shadow (the Editor's CSS the same). Window test for the status bar.
-  Next in S1: the floating icons' states / tooltips with shortcuts / narrow-viewport behaviour,
-  then the Editor's graph window (S3).
+  S1 second part: the floating viewport icons keep their places; an armed tool (Sculpt, Road,
+  Grid, Horizon, Frame) gets a soft accent fill under its accent label; on a narrow viewport the
+  labelled chips drop to icons and stack from the right edge before they reach the top-left four;
+  the layer rail's cells shrink (27 → 18 px) on a short viewport. Window test at 900 × 560:
+  chips inside the viewport, none overlapping, icon-sized; the rail inside (mutation-checked:
+  without the compact layout the chips overlap). Next: the Editor's graph window (S3).
   Open (flake, 2026-10-27): `e2e/paint.spec.ts` failed once inside a full gate run (instance count
   stayed 925 after the density stroke; 30 s poll). Not reproduced in 5 full suites + 12 parallel
   repeats; trace lost (overwritten by reruns — next time copy `test-results/` first). Ruled out:

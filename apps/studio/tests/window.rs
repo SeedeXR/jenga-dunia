@@ -958,6 +958,56 @@ fn the_status_bar_carries_the_last_line_and_opens_the_log() {
     h.get(egui_kittest::kittest::by().label_contains(&last));
 }
 
+/// The floating viewport icons on a narrow window (plan P6): the labelled chips drop to icons and
+/// nothing overlaps; the layer rail stays inside the viewport.
+#[test]
+fn the_viewport_icons_stay_apart_on_a_narrow_window() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = engine(dir.path());
+    let mut h = Harness::builder()
+        .with_size([900.0, 560.0])
+        .with_max_steps(64)
+        .wgpu()
+        .with_context_setup(jd_studio::theme::install)
+        .build_eframe(move |cc| StudioApp::new(cc, server, Options::default()));
+    settle(&mut h, |a| a.viewport.info().is_some());
+    let vp = h.state().viewport.rect();
+    let chips: Vec<eframe::egui::Rect> = [
+        "Fit: back to the home view",
+        "Fullscreen viewport (Esc leaves)",
+        "Frame: draw the world as a block with side walls and a rim",
+        "Grid tool: select cells of the world and set their height, World Creator style",
+        "Horizon: continue the noise beyond the world's border as a coarse skirt (same seed, so it matches at the edge; erosion is not continued)",
+        "Road: the next drag on the terrain becomes a spline node that flattens a road bed along it",
+        "Sculpt: adds a stroke node before the output and paints with the brush",
+        "Show the node graph (the Editor window)",
+    ]
+    .iter()
+    // The header's toolbar has a fullscreen button too: take the one over the viewport.
+    .map(|t| {
+        h.get_all(egui_kittest::kittest::by().label(t))
+            .map(|n| n.rect())
+            .find(|r| r.top() > vp.top())
+            .unwrap_or_else(|| panic!("no chip {t}"))
+    })
+    .collect();
+    for (i, a) in chips.iter().enumerate() {
+        assert!(
+            vp.contains_rect(*a),
+            "chip {i} leaves the viewport: {a:?} in {vp:?}"
+        );
+        for b in &chips[i + 1..] {
+            assert!(!a.intersects(*b), "chips overlap: {a:?} {b:?}");
+        }
+    }
+    // Icons only: the labelled chips are as narrow as the icon ones.
+    assert!(chips[3..].iter().all(|r| r.width() <= 30.0), "{chips:?}");
+    let rail = h
+        .get_by_label("Filter: terraces (jd.filter.terrace)")
+        .rect();
+    assert!(vp.contains_rect(rail), "{rail:?} in {vp:?}");
+}
+
 #[test]
 fn a_write_from_the_editor_refreshes_the_window() {
     let dir = tempfile::tempdir().unwrap();

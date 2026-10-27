@@ -256,6 +256,10 @@ pub fn show(ui: &mut Ui, rect: Rect, st: &State) -> Option<Action> {
             "Road: the next drag on the terrain becomes a spline node that flattens a road bed along it",
         )
     };
+    // Narrow viewports: when the labelled chips would run into the top-left four (8 + 4 × 32 px),
+    // they drop their labels and stack from the right edge (the order stays).
+    let compact = rect.right() - 376.0 - 70.0 < rect.left() + 8.0 + 4.0 * 32.0 + 8.0;
+    let mut stacked = rect.right() - 8.0;
     for (right, icon, label, tip, act) in [
         (
             8.0,
@@ -281,16 +285,24 @@ pub fn show(ui: &mut Ui, rect: Rect, st: &State) -> Option<Action> {
         ),
         (376.0, "grid-3x-3", "Grid", grid_tip, Some(Action::Grid)),
     ] {
-        let w =
-            26.0 + ui.fonts_mut(|f| {
-                f.layout_no_wrap(label.into(), FontId::proportional(12.0), Color32::WHITE)
-                    .size()
-                    .x
-            }) + 8.0;
-        let r = Rect::from_min_size(
-            pos2(rect.right() - right - w, rect.top() + 8.0),
-            vec2(w, 24.0),
-        );
+        let (r, label) = if compact {
+            stacked -= 28.0;
+            let r = Rect::from_min_size(pos2(stacked, rect.top() + 8.0), vec2(28.0, 24.0));
+            stacked -= 4.0;
+            (r, None)
+        } else {
+            let w =
+                26.0 + ui.fonts_mut(|f| {
+                    f.layout_no_wrap(label.into(), FontId::proportional(12.0), Color32::WHITE)
+                        .size()
+                        .x
+                }) + 8.0;
+            let r = Rect::from_min_size(
+                pos2(rect.right() - right - w, rect.top() + 8.0),
+                vec2(w, 24.0),
+            );
+            (r, Some(label))
+        };
         let enabled = act.is_some() && (act == Some(Action::Graph) || st.enabled);
         let on = match act {
             Some(Action::Horizon) => st.horizon,
@@ -299,22 +311,28 @@ pub fn show(ui: &mut Ui, rect: Rect, st: &State) -> Option<Action> {
             Some(Action::Grid) => st.grid,
             _ => false,
         };
-        if chip(ui, r, icon, Some(label), tip, enabled, on).clicked() {
+        if chip(ui, r, icon, label, tip, enabled, on).clicked() {
             action = act;
         }
     }
-    // The layer strip: a card at the right edge, vertically centred, accent icons.
+    // The layer strip: a card at the right edge, vertically centred, accent icons; on a short
+    // viewport its cells shrink (down to 18 px) to stay between the chips and the hints.
     let n = STRIP.len() as f32;
-    let h = n * 27.0 + (n - 1.0) * 2.0 + 8.0;
+    let room = rect.height() - 2.0 * 44.0;
+    let cell = ((room - 8.0 + 2.0) / n - 2.0).clamp(18.0, 27.0);
+    let h = n * cell + (n - 1.0) * 2.0 + 8.0;
     let strip = Rect::from_min_size(
-        pos2(rect.right() - 8.0 - 35.0, rect.center().y - h / 2.0),
-        vec2(35.0, h),
+        pos2(rect.right() - 8.0 - (cell + 8.0), rect.center().y - h / 2.0),
+        vec2(cell + 8.0, h),
     );
     ui.painter().add(look::card().inner_margin(0).paint(strip));
     for (k, (_, icon, tip, _)) in STRIP.iter().enumerate() {
         let r = Rect::from_min_size(
-            pos2(strip.left() + 4.0, strip.top() + 4.0 + k as f32 * 29.0),
-            vec2(27.0, 27.0),
+            pos2(
+                strip.left() + 4.0,
+                strip.top() + 4.0 + k as f32 * (cell + 2.0),
+            ),
+            vec2(cell, cell),
         );
         let enabled = st.enabled;
         let resp = ui
@@ -347,6 +365,12 @@ fn chip(
         let b = match label {
             Some(l) => egui::Button::image_and_text(image, RichText::new(l).size(12.0).color(fg)),
             None => egui::Button::image(image),
+        };
+        // An armed tool reads as on: a soft accent fill under the accent text (Figma's active tool).
+        let b = if on {
+            b.fill(color::ACCENT.gamma_multiply(0.18))
+        } else {
+            b
         };
         let resp = ui.add_enabled(enabled, b.min_size(r.size()));
         let tip_owned = tip.to_owned();
