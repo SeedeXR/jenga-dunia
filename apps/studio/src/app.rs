@@ -2090,7 +2090,7 @@ impl StudioApp {
         });
         ui.add_space(8.0);
         let can = self.project.is_some() && self.busy == 0;
-        let generate = look::wide_primary(ui, "mountain", "Generate", can).clicked();
+        let generate = look::wide_primary(ui, "", "Generate", can).clicked();
         if generate {
             self.generate();
         }

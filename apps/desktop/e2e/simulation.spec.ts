@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, evaluateAndWait, fitView, installBridge, logCount, selectNode, wire } from "./bridge";
+import { connectCore, evaluateAndWait, fitView, installBridge, logCount, selectNode, wire, createProject } from "./bridge";
 
 const NOISE = "01JDGRAPH000000000000N01SE"; // starter graph ids (jd_graph::nodes)
 const HEIGHT = "01JDGRAPH0000000000HE1GHT0";
@@ -23,14 +23,10 @@ test.describe("debris and lava simulations against the real core", () => {
     await installBridge(page, core);
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(String(e)));
+    await createProject(core, path.join(ws, "Volcano.jdproj"), 2048, 128); // Studio's New (the Editor has no project panel)
     await page.goto("/");
-    await page.getByTestId("project-path").fill(path.join(ws, "Volcano.jdproj"));
-    await page.getByLabel("Extent (m)").fill("2048");
-    await page.getByLabel("Resolution (px)").fill("128");
-    await page.getByTestId("new-project").click();
     await expect(page.locator("header")).toContainText("World — 128²");
     await evaluateAndWait(page, "generate");
-    await expect(page.getByTestId("layer-stats")).toBeVisible();
 
     const panel = page.getByTestId("graph-panel");
     const noise = panel.locator(`.react-flow__node[data-id="${NOISE}"]`);
@@ -89,9 +85,6 @@ test.describe("debris and lava simulations against the real core", () => {
     // The core agrees: lava erupted at the summit and is still molten at the end of the eruption.
     const stats = (await core.callTool({ name: "terrain.stats", arguments: { layer: "heat" } })).structuredContent as { result: { stats: { max: number } } };
     expect(stats.result.stats.max).toBeGreaterThan(0.5);
-    await page.getByTestId("color-pick").selectOption("heat");
-    await expect(page.getByTestId("viewport-info")).toContainText("colour heat");
-    await page.waitForTimeout(400);
     await page.screenshot({ path: testInfo.outputPath("simulation.png") }); // tutorial image source
     expect(errors, "no uncaught page errors").toEqual([]);
     await core.close();

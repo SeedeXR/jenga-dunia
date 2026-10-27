@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, evaluateAndWait, installBridge, logCount } from "./bridge";
+import { connectCore, evaluateAndWait, installBridge, logCount, createProject, coreOp } from "./bridge";
 
 /** The layer stack against the real core: the chain feeding the height output as rows, "+" splices
  *  a node, the eye bypasses it, the arrows re-order it, the bin removes it and closes the gap. */
@@ -20,14 +20,10 @@ test.describe("layer stack against the real core", () => {
     await installBridge(page, core);
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(String(e)));
+    await createProject(core, path.join(ws, "Stack.jdproj"), 1024, 128); // Studio's New (the Editor has no project panel)
     await page.goto("/");
-    await page.getByTestId("project-path").fill(path.join(ws, "Stack.jdproj"));
-    await page.getByLabel("Extent (m)").fill("1024");
-    await page.getByLabel("Resolution (px)").fill("128");
-    await page.getByTestId("new-project").click();
     await expect(page.locator("header")).toContainText("World — 128²");
     await evaluateAndWait(page, "generate");
-    await expect(page.getByTestId("layer-stats")).toBeVisible();
     const chain = page.getByTestId("layer-chain").locator("li");
     await expect(chain).toHaveCount(1); // the noise alone feeds the output
     await expect(chain.first()).toContainText("shape");
@@ -72,8 +68,9 @@ test.describe("layer stack against the real core", () => {
     expect(v2.result.edges.find((e) => e.to.node === terrace.id && e.to.port === "in")?.from.node).toBe(v2.result.nodes.find((n) => n.kind === "jd.noise.fbm@1")!.id);
     await evaluateAndWait(page, "graph-evaluate");
     await expect.poll(() => logCount(page, "graph.evaluate: ok"), { timeout: 60_000 }).toBeGreaterThan(evaluated);
-    // A side branch (snow) appears under the chain, not in it.
-    await page.getByTestId("sim-snow").click();
+    // A side branch (snow, from Studio's Snow button) appears under the chain, not in it.
+    await coreOp(core, "graph.add_simulation", { which: "snow" });
+    await page.reload();
     await expect(page.getByTestId("layer-others").locator("[data-testid^='layer-row-']")).toHaveCount(1);
     await expect(chain).toHaveCount(2);
     await page.waitForTimeout(300);

@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, evaluateAndWait, installBridge, logCount, selectNode, wire } from "./bridge";
+import { connectCore, evaluateAndWait, installBridge, logCount, selectNode, wire, createProject, coreOp } from "./bridge";
 
 const HEIGHT = "01JDGRAPH0000000000HE1GHT0";
 
@@ -20,11 +20,8 @@ test.describe("gate pattern against the real core", () => {
     await installBridge(page, core);
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(String(e)));
+    await createProject(core, path.join(ws, "Gate.jdproj"), 2560, 256); // Studio's New (the Editor has no project panel)
     await page.goto("/");
-    await page.getByTestId("project-path").fill(path.join(ws, "Gate.jdproj"));
-    await page.getByLabel("Extent (m)").fill("2560");
-    await page.getByLabel("Resolution (px)").fill("256");
-    await page.getByTestId("new-project").click();
     await expect(page.locator("header")).toContainText("World — 256²");
     const panel = page.getByTestId("graph-panel");
     const inspector = page.getByTestId("graph-inspector");
@@ -57,8 +54,8 @@ test.describe("gate pattern against the real core", () => {
     const before = await logCount(page, "graph.evaluate: ok");
     await evaluateAndWait(page, "graph-evaluate");
     await expect.poll(() => logCount(page, "graph.evaluate: ok"), { timeout: 30_000 }).toBeGreaterThan(before);
-    await expect(page.getByTestId("layer-pick")).toBeVisible();
-    await expect(page.getByTestId("layer-pick").locator("option", { hasText: "fine" })).toHaveCount(1);
+    // Published: the core lists the layer (Studio's layer and colour pickers show it).
+    await expect.poll(async () => ((await coreOp(core, "terrain.layers")) as { layers: string[] }).layers).toContain("fine");
     await page.screenshot({ path: testInfo.outputPath("gate.png") }); // tutorial image source
     expect(errors, "no uncaught page errors").toEqual([]);
     await core.close();

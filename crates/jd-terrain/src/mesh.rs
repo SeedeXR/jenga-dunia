@@ -118,7 +118,7 @@ fn grid_topology(gw: u32, gh: u32) -> MeshTopology {
 }
 
 /// Hypsometric ramp (normalised height → RGB): lowland green → ochre → bare rock → snow.
-/// Same stops as the viewport (`apps/desktop/src/viewport/TerrainView.tsx`).
+/// Same stops as the viewport (`apps/studio/src/viewport.rs`, `STOPS`).
 const STOPS: [(f32, [f32; 3]); 5] = [
     (0.0, [0.16, 0.3, 0.2]),
     (0.25, [0.36, 0.48, 0.24]),

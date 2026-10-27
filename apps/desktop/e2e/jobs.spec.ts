@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, installBridge } from "./bridge";
+import { connectCore, installBridge, createProject, coreOp } from "./bridge";
 
 test.describe("jobs against the real core", () => {
   let ws: string;
@@ -16,12 +16,10 @@ test.describe("jobs against the real core", () => {
   test("a long evaluation shows progress in the header and can be cancelled", async ({ page }) => {
     const core = await connectCore(ws);
     await installBridge(page, core);
+    await createProject(core, path.join(ws, "Jobs.jdproj"), 1024, 256); // Studio's New (the Editor has no project panel)
     await page.goto("/");
-    await page.getByTestId("project-path").fill(path.join(ws, "Jobs.jdproj"));
-    await page.getByLabel("Extent (m)").fill("1024");
-    await page.getByLabel("Resolution (px)").fill("256");
-    await page.getByTestId("new-project").click();
-    await expect(page.getByTestId("viewport-info")).toContainText(/ [1-9][\d,]* tris/);
+    // The project's first live preview has run: `height` is published.
+    await expect.poll(async () => ((await coreOp(core, "terrain.layers")) as { layers: string[] }).layers, { timeout: 30_000 }).toContain("height");
     // Turn live preview off, then wire a very long hydraulic run in front of the output.
     await page.getByTestId("graph-live").click();
     await page.getByTestId("graph-kind").selectOption("jd.erosion.hydraulic@1");

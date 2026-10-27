@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, evaluateAndWait, fitView, installBridge, logCount, selectNode, wire } from "./bridge";
+import { connectCore, evaluateAndWait, fitView, installBridge, logCount, selectNode, wire, createProject, coreOp, layerStats } from "./bridge";
 
 const NOISE = "01JDGRAPH000000000000N01SE"; // starter graph ids (jd_graph::nodes)
 const HEIGHT = "01JDGRAPH0000000000HE1GHT0";
@@ -25,11 +25,8 @@ test.describe("hydrology nodes against the real core", () => {
     await installBridge(page, core);
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(String(e)));
+    await createProject(core, path.join(ws, "Hydro.jdproj"), 1280, 128); // Studio's New (the Editor has no project panel)
     await page.goto("/?autosave=2000"); // the project default is 120 s; the test waits for the save
-    await page.getByTestId("project-path").fill(path.join(ws, "Hydro.jdproj"));
-    await page.getByLabel("Extent (m)").fill("1280");
-    await page.getByLabel("Resolution (px)").fill("128");
-    await page.getByTestId("new-project").click();
     await expect(page.locator("header")).toContainText("World — 128²");
 
     const panel = page.getByTestId("graph-panel");
@@ -63,8 +60,6 @@ test.describe("hydrology nodes against the real core", () => {
     const evaluatedBefore1 = await logCount(page, "graph.evaluate: ok");
     await evaluateAndWait(page, "graph-evaluate");
     await expect.poll(() => logCount(page, "graph.evaluate: ok")).toBeGreaterThan(evaluatedBefore1);
-    await expect(page.getByTestId("layer-stats")).toBeVisible();
-    await expect(page.getByTestId("viewport-info")).toContainText(/ [1-9][\d,]* tris/);
 
     // A second output publishes the rivers mask; the header can then colour the terrain by it.
     await page.getByTestId("graph-kind").selectOption("jd.output.height@1");
@@ -80,26 +75,8 @@ test.describe("hydrology nodes against the real core", () => {
     const evaluatedBefore2 = await logCount(page, "graph.evaluate: ok");
     await evaluateAndWait(page, "graph-evaluate");
     await expect.poll(() => logCount(page, "graph.evaluate: ok")).toBeGreaterThan(evaluatedBefore2);
-    await expect(page.getByTestId("layer-pick")).toBeVisible();
-    await page.getByTestId("color-pick").selectOption("rivers");
-    await expect(page.getByTestId("viewport-info")).toContainText("colour rivers");
-    await page.screenshot({ path: testInfo.outputPath("hydrology-colour.png") }); // tutorial image source
-    await page.getByTestId("color-pick").selectOption("");
-    await expect(page.getByTestId("viewport-info")).not.toContainText("colour rivers");
-
-    // Scatter: instances placed from the rivers mask are drawn in the viewport; Export writes a GLB.
-    await page.getByTestId("scatter-mask").selectOption("rivers");
-    await page.getByTestId("scatter-spacing").fill("20");
-    await page.getByTestId("scatter-place").click();
-    await expect(page.getByTestId("log")).toContainText("terrain.scatter: ok");
-    await expect(page.getByTestId("scatter-count")).toHaveText(/^[1-9][\d,]* instances$/);
-    await expect(page.getByTestId("viewport-info")).toContainText(/ [1-9][\d,]* instances/);
-    // Zoom the orbit camera in (two wheel steps ≈ half the distance) so the cones read in the capture.
-    await page.getByTestId("viewport").hover();
-    for (let i = 0; i < 2; i++) await page.mouse.wheel(0, -300);
-    await page.screenshot({ path: testInfo.outputPath("hydrology-scatter.png") }); // tutorial image source
-    await page.getByTestId("scatter-export").click();
-    await expect.poll(() => existsSync(path.join(ws, "Hydro.jdproj", "exports", "rivers.glb"))).toBe(true);
+    // Published: Studio can colour the terrain by it and scatter from it.
+    await expect.poll(async () => ((await coreOp(core, "terrain.layers")) as { layers: string[] }).layers).toContain("rivers");
 
     // Sea level is in the kinds list too, with its two outputs.
     await page.getByTestId("graph-kind").selectOption("jd.hydrology.sea_level@1");
@@ -108,13 +85,11 @@ test.describe("hydrology nodes against the real core", () => {
     await expect(sea.locator('.react-flow__handle.source[data-handleid="ocean"]')).toBeAttached();
     await expect(sea.locator('.react-flow__handle.source[data-handleid="depth"]')).toBeAttached();
     await selectNode(sea);
-    // The viewport draws a sea plane at the node's level; editing level_m moves it.
-    await expect(page.getByTestId("viewport-info")).toContainText("sea 0 m");
+    // Editing level_m moves Studio's sea (its window test checks the plane).
     const level = inspector.locator("label", { hasText: "level_m" }).locator("input");
     await level.fill("250");
     await level.blur();
-    await expect(page.getByTestId("log")).toContainText("graph.set_param: ok");
-    await expect(page.getByTestId("viewport-info")).toContainText("sea 250 m");
+    await expect(sea).toContainText("level_m=250");
     // Water clarity is a node parameter: a murky 4 m visibility is journaled like any other edit.
     const visibility = inspector.locator("label", { hasText: "visibility_m" }).locator("input");
     await expect(visibility).toHaveAttribute("placeholder", "15");
@@ -122,23 +97,12 @@ test.describe("hydrology nodes against the real core", () => {
     await visibility.blur();
     await expect(page.getByTestId("log")).toContainText("graph.set_param: ok");
     await expect(sea).toContainText("visibility_m=4");
-    // The wind raises the sea: a 20 m/s gale with unlimited fetch is a 9.8 m / 380 m Pierson–Moskowitz
-    // sea (`ocean.waves`), which the viewport animates and reports.
+    // The wind raises the sea (Studio animates and reports the 9.8 m / 380 m sea of a 20 m/s gale).
     const wind = inspector.locator("label", { hasText: "wind_speed_mps" }).locator("input");
     await expect(wind).toHaveAttribute("placeholder", "8");
     await wind.fill("20");
     await wind.blur();
     await expect(sea).toContainText("wind_speed_mps=20");
-    await expect(page.getByTestId("viewport-info")).toContainText("waves 9.8 m / 380 m");
-    // The same sea bakes to textures: depth, colour, foam and a tileable wave normal map.
-    await page.getByTestId("water-export").click();
-    await expect.poll(() => existsSync(path.join(ws, "Hydro.jdproj", "exports", "water", "wave_normal.png"))).toBe(true);
-    await expect(page.getByTestId("log")).toContainText("ocean.bake: ok");
-    // Back out to the overview (undo the two zoom steps above) so the whole shoreline is in frame.
-    await page.getByTestId("viewport").hover();
-    for (let i = 0; i < 2; i++) await page.mouse.wheel(0, 300);
-    await page.screenshot({ path: testInfo.outputPath("hydrology-sea.png") }); // tutorial image source
-
     // Seabed: classify the floor under the 250 m sea (sand / rock / mud / reef) and colour by it.
     // The sea-level node has only driven the viewport so far: wire it, or the evaluation refuses
     // (E_GRAPH_MISSING_INPUT) and nothing new is published.
@@ -171,13 +135,12 @@ test.describe("hydrology nodes against the real core", () => {
     const evaluated = await logCount(page, "graph.evaluate: ok");
     await evaluateAndWait(page, "graph-evaluate");
     await expect.poll(() => logCount(page, "graph.evaluate: ok")).toBeGreaterThan(evaluated);
-    await page.getByTestId("color-pick").selectOption("seabed");
-    await expect(page.getByTestId("viewport-info")).toContainText("colour seabed");
+    await expect.poll(async () => ((await coreOp(core, "terrain.layers")) as { layers: string[] }).layers).toContain("seabed");
     // Drain the sea plane (the seabed node keeps its own 250 m level) so the classified floor is visible.
     await selectNode(sea);
     await level.fill("0");
     await level.blur();
-    await expect(page.getByTestId("viewport-info")).toContainText("sea 0 m");
+    await expect(sea).toContainText("level_m=0");
     await page.screenshot({ path: testInfo.outputPath("hydrology-seabed.png") }); // tutorial image source
 
     // Bathymetry: sediment fills the sand and mud hollows of that floor (rock and reef keep their
@@ -207,18 +170,15 @@ test.describe("hydrology nodes against the real core", () => {
     const evaluated2 = await logCount(page, "graph.evaluate: ok");
     await evaluateAndWait(page, "graph-evaluate");
     await expect.poll(() => logCount(page, "graph.evaluate: ok")).toBeGreaterThan(evaluated2);
-    await page.getByTestId("layer-pick").selectOption("floor");
-    await expect(page.getByTestId("layer-stats")).toContainText("230.1 m", { timeout: 20_000 }); // mean rose from 229.4 m: hollows filled (the stats wait behind a live-preview evaluate on a loaded machine)
+    // The mean rose from 229.4 m: the hollows filled.
+    await expect.poll(async () => Math.round((await layerStats(core, "floor")).mean * 10) / 10, { timeout: 20_000 }).toBe(230.1);
     await page.screenshot({ path: testInfo.outputPath("hydrology-bathymetry.png") }); // tutorial image source
-    await page.getByTestId("layer-pick").selectOption("height");
-    await page.getByTestId("color-pick").selectOption("");
 
     // Autosave (interval overridden to 2 s here): after the last edit the project is saved — journal truncated, documents current.
     await expect(page.getByTestId("log")).toContainText("project.save: ok", { timeout: 10_000 });
-    await expect(page.getByTestId("project-journal")).toHaveText("0");
-    await expect(page.getByTestId("project-dirty")).toHaveText("false");
+    await expect.poll(async () => { const p = (await coreOp(core, "project.info")) as { dirty: boolean; pending_journal: number }; return [p.dirty, p.pending_journal]; }, { timeout: 10_000 }).toEqual([false, 0]);
     // Poll the files: "project.save: ok" / dirty=false may come from an earlier autosave (the
-    // scatter steps above take longer than the 2 s interval), so wait for the save that holds
+    // steps above take longer than the 2 s interval), so wait for the save that holds
     // the level_m edit and leaves the journal empty.
     const savedLevel = () => {
       const saved = JSON.parse(readFileSync(path.join(ws, "Hydro.jdproj", "graph.json"), "utf8")) as { nodes: Record<string, { kind: string; params?: { level_m?: number } }> };

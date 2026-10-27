@@ -1,5 +1,5 @@
-//! UI languages, as the desktop's (`apps/desktop/src/lib/i18n.ts`): English is the source;
-//! Kiswahili and French come from the desktop's `i18n.json`, embedded here, keyed by the English
+//! UI languages: English is the source;
+//! Kiswahili and French come from `assets/i18n.json`, embedded here, keyed by the English
 //! text so a missing translation falls back to English. The language lives in the egui context
 //! (each window and test harness its own); the section titles and the Language label follow it.
 
@@ -16,7 +16,7 @@ type Dict = HashMap<String, HashMap<String, String>>;
 fn dict() -> &'static Dict {
     static DICT: OnceLock<Dict> = OnceLock::new();
     DICT.get_or_init(|| {
-        serde_json::from_str(include_str!("../../desktop/src/lib/i18n.json")).unwrap_or_default()
+        serde_json::from_str(include_str!("../assets/i18n.json")).unwrap_or_default()
     })
 }
 

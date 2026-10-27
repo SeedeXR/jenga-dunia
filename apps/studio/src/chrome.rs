@@ -53,7 +53,7 @@ pub enum Add {
 pub const STRIP: [(&str, &str, &str, Add); 11] = [
     (
         "strip-cone",
-        "mountain",
+        "cone",
         "Shape: a cone at the world's centre (jd.shape.primitive)",
         Add::Splice("jd.shape.primitive@1"),
     ),

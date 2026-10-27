@@ -189,7 +189,7 @@ pub fn icon(name: &str) -> ImageSource<'static> {
         "route",
         "grid-3x-3",
         "horizon",
-        "mountain",
+        "cone",
         "layers",
         "blend",
         "thermometer",
@@ -364,16 +364,26 @@ pub fn wide_button(
             egui::FontId::proportional(12.0),
             fg.gamma_multiply(alpha),
         );
-        let w = 14.0 + 6.0 + galley.size().x;
-        let left = rect.center().x - w / 2.0;
-        egui::Image::new(icon(icon_name))
-            .tint(fg.gamma_multiply(alpha))
-            .paint_at(
-                ui,
-                egui::Rect::from_center_size(pos2(left + 7.0, rect.center().y), vec2(14.0, 14.0)),
-            );
+        // No icon (an empty name): the word alone, centred.
+        let iconw = if icon_name.is_empty() {
+            0.0
+        } else {
+            14.0 + 6.0
+        };
+        let left = rect.center().x - (iconw + galley.size().x) / 2.0;
+        if !icon_name.is_empty() {
+            egui::Image::new(icon(icon_name))
+                .tint(fg.gamma_multiply(alpha))
+                .paint_at(
+                    ui,
+                    egui::Rect::from_center_size(
+                        pos2(left + 7.0, rect.center().y),
+                        vec2(14.0, 14.0),
+                    ),
+                );
+        }
         ui.painter().galley(
-            pos2(left + 20.0, rect.center().y - galley.size().y / 2.0),
+            pos2(left + iconw, rect.center().y - galley.size().y / 2.0),
             galley,
             fg,
         );

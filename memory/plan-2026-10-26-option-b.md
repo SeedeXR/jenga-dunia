@@ -368,6 +368,22 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   For the retirement (c): the Editor's own log panel goes with its panels — it still needs a
   place to say what its live evaluations wait on and what failed (a status line in the graph
   window), designed with S3.
+  (b)+(c) done (2026-10-27): the WebView viewport and panels retired. The Editor (App.tsx) is the
+  layer stack beside the graph (+ inspector), a header (brand, project, job line with Cancel and
+  Esc), a status bar with the last log line and a closed log dock; it keeps the engine events,
+  the menu handler, the crash reporter and Esc. state.ts pruned to the graph / project / live
+  evaluation / jobs / log (1 400 → ~370 lines: no previews, maps, sky, scatter, caves, sculpt,
+  grid, flythrough). Removed: TerrainView.tsx, camera.ts, previewLod.ts, i18n.ts (+ tests; Studio
+  owns i18n.json now: apps/studio/assets/i18n.json), api.ts's preview / texture / sky / HDRI
+  helpers, 23 Playwright specs (covered by Studio window tests and jd-core desktop_flows) and
+  tileServer.ts. The 15 kept specs create their project through the core (`createProject`), read
+  layers / stats through it (`coreOp`, `layerStats`), and do Studio's side of a workflow (a
+  simulation layer, a cone, painted density) through the core + reload. App.test.tsx: the
+  Editor-level tests (menus, noise mirror, Studio sync, status bar / log).
+  Found: the layer stack's + offers kinds that need params (jd.shape.primitive: "missing field
+  `shape`") — follow-up for S3. scripts/studio-icons.mjs now reads Studio's icon list (it read the
+  desktop's App.tsx imports). Owner, same day: no mountain icon — Generate is the word alone, the
+  strip's cone button draws lucide `cone`.
   Open (flake, 2026-10-27): `e2e/paint.spec.ts` failed once inside a full gate run (instance count
   stayed 925 after the density stroke; 30 s poll). Not reproduced in 5 full suites + 12 parallel
   repeats; trace lost (overwritten by reruns — next time copy `test-results/` first). Ruled out:

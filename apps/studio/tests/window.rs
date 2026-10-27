@@ -827,7 +827,6 @@ fn the_noise_section_follows_the_editors_edit_and_generate_keeps_it() {
         json!({ "id": noise()["id"], "key": "seed", "value": 9 }),
     ));
     assert!(r.error.is_none(), "{:?}", r.error);
-    settle(&mut h, |_| true);
     let seed = |h: &Harness<'static, StudioApp>| {
         h.get_all(by().role(Role::TextInput).label("Seed"))
             .last()
@@ -841,7 +840,18 @@ fn the_noise_section_follows_the_editors_edit_and_generate_keeps_it() {
         .unwrap()
         .scroll_to_me();
     h.run();
-    assert_eq!(seed(&h), "9", "the Noise section shows the Editor's seed");
+    // The edit reaches Studio as an event, then a graph re-read: wait for it (a single settle can
+    // return before the re-read has started, as under the parallel gate run).
+    let until = Instant::now() + Duration::from_secs(20);
+    while seed(&h) != "9" {
+        assert!(
+            Instant::now() < until,
+            "the Noise section shows the Editor's seed: {}",
+            seed(&h)
+        );
+        h.step();
+        std::thread::sleep(Duration::from_millis(20));
+    }
     h.key_press_modifiers(eframe::egui::Modifiers::COMMAND, eframe::egui::Key::G);
     h.run_steps(1);
     settle(&mut h, |a| {
@@ -2751,9 +2761,8 @@ fn the_grid_tool_selects_cells_and_levels_raises_and_transforms_them() {
 }
 
 /// `JD_STUDIO_CAPTURE=<png> cargo test -p jd-studio --test window -- --ignored capture`: the
-/// window rendered offscreen (no screen capture involved) on the project the desktop's
-/// `e2e/parity-capture.spec.ts` builds — same world, seed and starter graph — at the same
-/// 1440 × 900, for side-by-side parity checks and the user guide.
+/// window rendered offscreen (no screen capture involved) on a fixed project — 4096 m, 1024²,
+/// seed 42, the starter graph — at 1440 × 900, for the user guide and visual checks.
 #[test]
 #[ignore = "writes a parity / documentation image"]
 fn capture_for_docs() {
@@ -2793,7 +2802,7 @@ fn capture_for_docs() {
         let out = out.replace(".png", "-horizon.png");
         render(&mut h).save(&out).expect("save png");
     }
-    // Scatter (JD_STUDIO_SCATTER=1), as the desktop's JD_PARITY_SCATTER: `<capture>-scatter.png`.
+    // Scatter (JD_STUDIO_SCATTER=1): `<capture>-scatter.png`.
     if std::env::var_os("JD_STUDIO_SCATTER").is_some() {
         let mask = || eframe::egui::accesskit::Role::ComboBox;
         h.get_by_role_and_label(mask(), "Mask").scroll_to_me();
@@ -2810,7 +2819,7 @@ fn capture_for_docs() {
         let out = out.replace(".png", "-scatter.png");
         render(&mut h).save(&out).expect("save png");
     }
-    // A cave (JD_STUDIO_CAVE=1), as the desktop's JD_PARITY_CAVE: `<capture>-cave.png`.
+    // A cave (JD_STUDIO_CAVE=1): `<capture>-cave.png`.
     if std::env::var_os("JD_STUDIO_CAVE").is_some() {
         h.get_by_label("Add cave").scroll_to_me();
         h.run();
@@ -2827,7 +2836,7 @@ fn capture_for_docs() {
         let out = out.replace(".png", "-cave.png");
         render(&mut h).save(&out).expect("save png");
     }
-    // The Noise section (JD_STUDIO_NOISE=1), as the desktop's JD_PARITY_NOISE: `<capture>-noise.png`.
+    // The Noise section (JD_STUDIO_NOISE=1): `<capture>-noise.png`.
     if std::env::var_os("JD_STUDIO_NOISE").is_some() {
         h.get_by_role_and_label(eframe::egui::accesskit::Role::Slider, "octave 1 strength")
             .scroll_to_me();
@@ -2835,7 +2844,7 @@ fn capture_for_docs() {
         let out = out.replace(".png", "-noise.png");
         render(&mut h).save(&out).expect("save png");
     }
-    // The post effects (JD_STUDIO_POST=1), as the desktop's JD_PARITY_POST: `<capture>-post.png`.
+    // The post effects (JD_STUDIO_POST=1): `<capture>-post.png`.
     if std::env::var_os("JD_STUDIO_POST").is_some() {
         h.state_mut().viewport.set_post(jd_studio::post::Post {
             exposure: 1.5,

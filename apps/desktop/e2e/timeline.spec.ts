@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, evaluateAndWait, fitView, installBridge, logCount, selectNode, wire } from "./bridge";
+import { connectCore, evaluateAndWait, fitView, installBridge, logCount, selectNode, wire, createProject, layerStats } from "./bridge";
 
 const NOISE = "01JDGRAPH000000000000N01SE"; // starter graph ids (jd_graph::nodes)
 const HEIGHT = "01JDGRAPH0000000000HE1GHT0";
@@ -23,11 +23,8 @@ test.describe("timeline against the real core", () => {
     await installBridge(page, core);
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(String(e)));
+    await createProject(core, path.join(ws, "Time.jdproj"), 1280, 128); // Studio's New (the Editor has no project panel)
     await page.goto("/");
-    await page.getByTestId("project-path").fill(path.join(ws, "Time.jdproj"));
-    await page.getByLabel("Extent (m)").fill("1280");
-    await page.getByLabel("Resolution (px)").fill("128");
-    await page.getByTestId("new-project").click();
     await expect(page.locator("header")).toContainText("World — 128²");
     await expect(page.getByTestId("graph-time")).toBeEnabled();
     await expect(page.getByTestId("graph-time-value")).toHaveText("0.00");
@@ -53,8 +50,8 @@ test.describe("timeline against the real core", () => {
     const evaluated = await logCount(page, "graph.evaluate: ok");
     await evaluateAndWait(page, "graph-evaluate");
     await expect.poll(() => logCount(page, "graph.evaluate: ok")).toBeGreaterThan(evaluated);
-    const stats = page.getByTestId("layer-stats");
-    const hashAt0 = (await stats.textContent())?.match(/hash([0-9a-f]+)/)?.[1];
+    const hash = async () => (await layerStats(core, "height")).hash;
+    const hashAt0 = await hash();
     expect(hashAt0).toBeTruthy();
 
     // Scrub to t = 1: one journaled set_time (the drag coalesces), the live preview re-evaluates
@@ -67,36 +64,10 @@ test.describe("timeline against the real core", () => {
     });
     await expect(page.getByTestId("graph-time-value")).toHaveText("1.00");
     await expect(page.getByTestId("log")).toContainText("graph.set_time: ok");
-    await expect.poll(async () => (await stats.textContent())?.match(/hash([0-9a-f]+)/)?.[1], { timeout: 30_000 }).not.toBe(hashAt0);
+    await expect.poll(hash, { timeout: 30_000 }).not.toBe(hashAt0);
     await page.screenshot({ path: testInfo.outputPath("timeline.png") }); // tutorial image source
     // Undo takes the time back to 0 (journaled like any edit).
     await page.getByTestId("graph-undo").click();
-    await expect(page.getByTestId("graph-time-value")).toHaveText("0.00");
-    // Ecosystem growth: scatter follows the timeline — nobody is born at t = 0, the population is in by t = 1.
-    await page.getByTestId("scatter-mask").selectOption("height");
-    await page.getByTestId("scatter-spacing").fill("40");
-    await page.getByTestId("scatter-grow").check();
-    await page.getByTestId("scatter-place").click();
-    await expect(page.getByTestId("log")).toContainText("terrain.scatter: ok");
-    await expect(page.getByTestId("scatter-count")).toHaveText("0 instances");
-    await page.getByTestId("graph-time").evaluate((el) => {
-      const input = el as HTMLInputElement;
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-      setter?.call(input, "1");
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    await expect(page.getByTestId("graph-time-value")).toHaveText("1.00");
-    await expect.poll(async () => Number((await page.getByTestId("scatter-count").textContent())?.replace(/\D/g, "") ?? 0), { timeout: 30_000 }).toBeGreaterThan(100);
-    await page.screenshot({ path: testInfo.outputPath("timeline-growth.png") }); // tutorial image source
-    await page.getByTestId("graph-undo").click();
-    await expect(page.getByTestId("graph-time-value")).toHaveText("0.00");
-    // Export frames: four heightmaps from t = 0 to 1 through timeline.export, the project's time untouched.
-    const frames = page.getByTestId("frames-count");
-    await frames.fill("4");
-    await page.getByTestId("frames-export").click();
-    await expect(page.getByTestId("log")).toContainText("timeline.export: ok", { timeout: 60_000 });
-    const frameDir = path.join(ws, "Time.jdproj", "exports", "frames");
-    expect(readdirSync(frameDir).filter((f) => f.endsWith(".png")).sort()).toEqual(["height_0000.png", "height_0001.png", "height_0002.png", "height_0003.png"]);
     await expect(page.getByTestId("graph-time-value")).toHaveText("0.00");
     expect(errors).toEqual([]);
   });

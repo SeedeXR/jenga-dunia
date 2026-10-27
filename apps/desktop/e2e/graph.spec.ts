@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, evaluateAndWait, installBridge } from "./bridge";
+import { connectCore, evaluateAndWait, installBridge, createProject, coreOp } from "./bridge";
 
 const NOISE = "01JDGRAPH000000000000N01SE"; // starter graph ids (jd_graph::nodes)
 
@@ -20,12 +20,9 @@ test.describe("node graph editor against the real core", () => {
     await installBridge(page, core);
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(String(e)));
-    await page.goto("/?autosave=0"); // this test reads the journal; autosave would truncate it
     const proj = path.join(ws, "Graph.jdproj");
-    await page.getByTestId("project-path").fill(proj);
-    await page.getByLabel("Extent (m)").fill("1024");
-    await page.getByLabel("Resolution (px)").fill("128"); // small: CI software GL re-renders on every live preview
-    await page.getByTestId("new-project").click();
+    await createProject(core, proj, 1024, 128); // Studio's New (the Editor has no project panel)
+    await page.goto("/?autosave=0"); // this test reads the journal; autosave would truncate it
     await expect(page.locator("header")).toContainText("World — 128²");
 
     // The starter graph (noise → height) is drawn from graph.json.
@@ -58,10 +55,9 @@ test.describe("node graph editor against the real core", () => {
     await expect(page.getByTestId("node-thumb-canvas")).toHaveAttribute("data-ready", "1", { timeout: 20_000 });
     await page.mouse.move(5, 5);
     await expect(page.getByTestId("node-thumb")).toHaveCount(0);
-    // The Noise panel mirrors the node, so Generate will not revert this edit.
-    await expect(page.getByTestId("seed")).toHaveValue("9");
-    // Live preview: the edit re-evaluates the (complete) starter graph without pressing Evaluate.
-    await expect(page.getByTestId("viewport-info")).toContainText(/ [1-9][\d,]* tris/);
+    // Live preview: the edit re-evaluates the (complete) starter graph without pressing Evaluate —
+    // the fresh project's `height` is published (Studio draws it).
+    await expect.poll(async () => ((await coreOp(core, "terrain.layers")) as { layers: string[] }).layers, { timeout: 30_000 }).toContain("height");
 
     // Add a blur node from the kinds list (graph.kinds drives the dropdown).
     await page.getByTestId("graph-kind").selectOption("jd.filter.blur@1");
@@ -96,10 +92,8 @@ test.describe("node graph editor against the real core", () => {
     await page.mouse.up();
     await expect(page.getByTestId("log")).toContainText("graph.move_node: ok");
 
-    // Evaluate publishes the output layer and refreshes stats + viewport.
+    // Evaluate publishes the output layer.
     await evaluateAndWait(page, "graph-evaluate");
-    await expect(page.getByTestId("layer-stats")).toBeVisible();
-    await expect(page.getByTestId("viewport-info")).toContainText(/ [1-9][\d,]* tris/);
     // The live preview may have shown those already: wait for the explicit evaluation itself, since
     // Undo / Redo are disabled while it runs (busy) and a click on a disabled button is lost.
     await expect(page.getByTestId("log")).toContainText("graph.evaluate: ok");

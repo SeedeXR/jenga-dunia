@@ -88,6 +88,28 @@ export async function installBridge(page: Page, core: Client): Promise<void> {
   });
 }
 
+/** A project the core creates at `p` before the page loads (Studio's New); the Editor adopts it on
+ *  mount. The desktop's defaults: name World, tile 512, halo 4, seed 42. Returns its path. */
+export async function createProject(core: Client, p: string, extentM: number, resolutionPx: number): Promise<string> {
+  const world = { extent_m: [extentM, extentM], resolution_px: [resolutionPx, resolutionPx], tile_size: 512, halo: 4, origin: [0, 0], seed: 42 };
+  const env = (await core.callTool({ name: "project.create", arguments: { path: p, name: "World", world } })).structuredContent as Envelope;
+  if (env.status !== "ok") throw new Error(`project.create: ${JSON.stringify(env.error)}`);
+  return p;
+}
+
+/** A core op from the test (Studio's side of a workflow, or a read the Editor no longer shows). */
+export async function coreOp(core: Client, op: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+  const env = (await core.callTool({ name: op, arguments: params })).structuredContent as Envelope;
+  if (env.status !== "ok" || !env.result) throw new Error(`${op}: ${JSON.stringify(env.error)}`);
+  return env.result;
+}
+
+/** A layer's stats (min, max, mean) and content hash from the core: the panel the Editor dropped. */
+export async function layerStats(core: Client, layer = "height"): Promise<{ min: number; max: number; mean: number; hash: string }> {
+  const r = (await coreOp(core, "terrain.stats", { layer })) as { stats: { min: number; max: number; mean: number }; content_hash: string };
+  return { ...r.stats, hash: r.content_hash };
+}
+
 /** Drag a connection in the React Flow graph from `from`'s source handle to `to`'s target handle. */
 export async function wire(page: Page, from: Locator, to: Locator, fromHandle = "out", toHandle?: string): Promise<void> {
   const src = from.locator(`.react-flow__handle.source[data-handleid="${fromHandle}"]`);
@@ -164,6 +186,8 @@ const EVALUATED = /graph\.evaluate: ok|terrain\.generate: ok/;
  */
 export async function evaluateAndWait(page: Page, button: "generate" | "graph-evaluate", timeout = 120_000): Promise<void> {
   const before = await logCount(page, EVALUATED);
-  await page.getByTestId(button).click();
+  // The Editor has no Generate button (Studio's Noise section has it): for the starter graph the
+  // graph's Evaluate gives the same terrain.
+  await page.getByTestId(button === "generate" ? "graph-evaluate" : button).click();
   await expect.poll(() => logCount(page, EVALUATED), { timeout }).toBeGreaterThan(before);
 }

@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, evaluateAndWait, installBridge, logCount } from "./bridge";
+import { connectCore, coreOp, createProject, evaluateAndWait, installBridge, layerStats, selectNode } from "./bridge";
 
 /** One-click simulation layers against the real core: Snow beside the height output, Lava, Debris and
  *  Sand in front of it; masks published as layers, materials added, the viewport coloured by them. */
@@ -21,65 +21,58 @@ test.describe("simulation layers against the real core", () => {
     await installBridge(page, core);
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(String(e)));
+    await createProject(core, path.join(ws, "Sim.jdproj"), 2048, 128); // Studio's New (the Editor has no project panel)
     await page.goto("/");
-    await page.getByTestId("project-path").fill(path.join(ws, "Sim.jdproj"));
-    await page.getByLabel("Extent (m)").fill("2048");
-    await page.getByLabel("Resolution (px)").fill("128");
-    await page.getByTestId("new-project").click();
     await expect(page.locator("header")).toContainText("World — 128²");
     await evaluateAndWait(page, "generate");
-    await expect(page.getByTestId("layer-stats")).toBeVisible();
     const panel = page.getByTestId("graph-panel");
+    // Studio's simulation buttons add the layers (graph.add_simulation); the Editor re-reads the graph.
+    const add = async (which: string) => {
+      await coreOp(core, "graph.add_simulation", { which });
+      await page.reload();
+      await expect(page.locator("header")).toContainText("World — 128²");
+    };
 
-    // Snow: a snowpack node fed by the noise, its cover published as `snow`, a snow material, colour by it.
-    await page.getByTestId("sim-snow").click();
-    await expect(panel.locator(".react-flow__node", { hasText: "jd.climate.snowpack@1" })).toBeVisible();
+    // Snow: a snowpack node fed by the noise, its cover published as `snow`.
+    await add("snow");
+    const snowpack = panel.locator(".react-flow__node", { hasText: "jd.climate.snowpack@1" });
+    await expect(snowpack).toBeVisible();
     await expect(panel.locator(".react-flow__node")).toHaveCount(4);
     await expect(panel.locator(".react-flow__edge")).toHaveCount(3);
     await evaluateAndWait(page, "graph-evaluate");
-    await expect(page.getByTestId("viewport-info")).toContainText("colour snow", { timeout: 60_000 });
-    await expect(page.getByTestId("material-mask-0")).toHaveValue("snow", { timeout: 30_000 });
-    const snow = (await core.callTool({ name: "terrain.stats", arguments: { layer: "snow" } })).structuredContent as { result: { stats: { max: number; mean: number } } };
-    expect(snow.result.stats.max).toBeGreaterThan(0.5);
-    expect(snow.result.stats.mean).toBeLessThan(0.9); // a snow line inside the world, not a white-out
+    const snow = await layerStats(core, "snow");
+    expect(snow.max).toBeGreaterThan(0.5);
+    expect(snow.mean).toBeLessThan(0.9); // a snow line inside the world, not a white-out
 
-    // The snowpack node is selected: a per-node preset applies its values as ordinary edits.
+    // A per-node preset applies its values as ordinary edits.
+    await selectNode(snowpack);
     await page.getByTestId("node-preset").selectOption("spring thaw");
-    await expect(panel.locator(".react-flow__node", { hasText: "jd.climate.snowpack@1" })).toContainText("temperature_c=6", { timeout: 15_000 });
+    await expect(snowpack).toContainText("temperature_c=6", { timeout: 15_000 });
 
-    // Lava: spliced in front of the height output; heat and lava published; a basalt material.
-    await page.getByTestId("sim-lava").click();
+    // Lava: spliced in front of the height output, heat and lava published, every output wired.
+    await add("lava");
     await expect(panel.locator(".react-flow__node", { hasText: "jd.volcanic.lava@1" })).toBeVisible();
     await expect(panel.locator(".react-flow__node")).toHaveCount(7);
-    await expect(panel.locator(".react-flow__edge")).toHaveCount(6); // every output wired before evaluating
-    const evaluated = await logCount(page, "graph.evaluate: ok");
+    await expect(panel.locator(".react-flow__edge")).toHaveCount(6);
     await evaluateAndWait(page, "graph-evaluate");
-    await expect.poll(() => logCount(page, "graph.evaluate: ok"), { timeout: 120_000 }).toBeGreaterThan(evaluated);
-    // The material row's mask option exists once the evaluation has published the layer.
-    await expect(page.getByTestId("material-mask-1")).toHaveValue("lava", { timeout: 30_000 });
-    // The molten part is an emissive layer on the heat mask; the bake carries an emissive map.
-    await expect(page.getByTestId("material-mask-2")).toHaveValue("heat");
-    await expect(page.getByTestId("material-emissive-2")).toHaveValue("#ff590d");
-    const tx = (await core.callTool({ name: "terrain.textures", arguments: { layer: "height", max_px: 128, materials: [{ mask: "heat", albedo: [1, 0.45, 0.1], roughness: 0.7, emissive: [1, 0.35, 0.05] }] } })).structuredContent as { result: { emissive_png_base64?: string } };
-    expect(tx.result.emissive_png_base64?.length ?? 0).toBeGreaterThan(100);
-    await expect(page.getByTestId("viewport-info")).toContainText("colour heat", { timeout: 30_000 });
-    const heat = (await core.callTool({ name: "terrain.stats", arguments: { layer: "heat" } })).structuredContent as { result: { stats: { max: number } } };
-    expect(heat.result.stats.max).toBeGreaterThan(0.5);
-    await page.waitForTimeout(400);
+    expect((await layerStats(core, "heat")).max).toBeGreaterThan(0.5);
+    // The molten part glows: a bake with the heat mask carries an emissive map.
+    const tx = (await coreOp(core, "terrain.textures", { layer: "height", max_px: 128, materials: [{ mask: "heat", albedo: [1, 0.45, 0.1], roughness: 0.7, emissive: [1, 0.35, 0.05] }] })) as { emissive_png_base64?: string };
+    expect(tx.emissive_png_base64?.length ?? 0).toBeGreaterThan(100);
     await page.screenshot({ path: testInfo.outputPath("simlayers.png") }); // tutorial image source
 
     // Debris and Sand: each one node in front of the output (debris also publishes its mask).
-    await page.getByTestId("sim-debris").click();
+    await add("debris");
     await expect(panel.locator(".react-flow__node", { hasText: "jd.erosion.debris@1" })).toBeVisible();
     await expect(panel.locator(".react-flow__node")).toHaveCount(9);
-    await page.getByTestId("sim-sand").click();
+    await add("sand");
     await expect(panel.locator(".react-flow__node", { hasText: "jd.erosion.aeolian@1" })).toBeVisible();
     await expect(panel.locator(".react-flow__node")).toHaveCount(10);
     // The chain still ends at the height output: noise → … → aeolian → height.
-    const view = (await core.callTool({ name: "graph.list", arguments: {} })).structuredContent as { result: { nodes: { id: string; kind: string }[]; edges: { from: { node: string }; to: { node: string; port: string } }[] } };
-    const height = view.result.nodes.find((n) => n.kind.startsWith("jd.output.height@"))!;
-    const feed = view.result.edges.find((e) => e.to.node === height.id && e.to.port === "in")!;
-    expect(view.result.nodes.find((n) => n.id === feed.from.node)?.kind).toBe("jd.erosion.aeolian@1");
+    const view = (await coreOp(core, "graph.list")) as { nodes: { id: string; kind: string }[]; edges: { from: { node: string }; to: { node: string; port: string } }[] };
+    const height = view.nodes.find((n) => n.kind.startsWith("jd.output.height@"))!;
+    const feed = view.edges.find((e) => e.to.node === height.id && e.to.port === "in")!;
+    expect(view.nodes.find((n) => n.id === feed.from.node)?.kind).toBe("jd.erosion.aeolian@1");
     expect(errors, "no uncaught page errors").toEqual([]);
     await core.close();
   });

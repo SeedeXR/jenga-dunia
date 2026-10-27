@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, evaluateAndWait, installBridge, logCount, wire } from "./bridge";
+import { connectCore, evaluateAndWait, installBridge, wire, createProject, coreOp } from "./bridge";
 
 const NOISE = "01JDGRAPH000000000000N01SE";
 const HEIGHT = "01JDGRAPH0000000000HE1GHT0";
@@ -21,12 +21,9 @@ test.describe("biome rules editor against the real core", () => {
     await installBridge(page, core);
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(String(e)));
-    await page.goto("/?autosave=0");
     const proj = path.join(ws, "Biomes.jdproj");
-    await page.getByTestId("project-path").fill(proj);
-    await page.getByLabel("Extent (m)").fill("1024");
-    await page.getByLabel("Resolution (px)").fill("128");
-    await page.getByTestId("new-project").click();
+    await createProject(core, proj, 1024, 128); // Studio's New (the Editor has no project panel)
+    await page.goto("/?autosave=0");
     await expect(page.locator("header")).toContainText("World — 128²");
 
     await page.getByTestId("graph-kind").selectOption("jd.biome.classify@1");
@@ -89,19 +86,9 @@ test.describe("biome rules editor against the real core", () => {
     await layerInput.blur();
     await wire(page, snow, out2, "snow");
     await evaluateAndWait(page, "graph-evaluate");
-    await expect(page.getByTestId("layer-pick")).toBeVisible();
-    await page.getByTestId("color-pick").selectOption("snow");
-    await expect(page.getByTestId("viewport-info")).toContainText("colour snow");
+    // Published: the core lists `snow` (Studio colours by it and its Materials section masks with it).
+    await expect.poll(async () => ((await coreOp(core, "terrain.layers")) as { layers: string[] }).layers).toContain("snow");
     await page.screenshot({ path: testInfo.outputPath("biomes-snow.png") }); // tutorial image source
-
-    // Materials: a white layer weighted by the snow mask re-bakes the viewport's PBR maps.
-    const baked = await logCount(page, "terrain.textures: ok");
-    await page.getByTestId("material-add").click();
-    await page.getByTestId("material-mask-0").selectOption("snow");
-    await page.getByTestId("material-color-0").fill("#f4f6fa");
-    await expect.poll(() => logCount(page, "terrain.textures: ok"), { timeout: 30_000 }).toBeGreaterThan(baked);
-    await page.getByTestId("color-pick").selectOption("");
-    await page.screenshot({ path: testInfo.outputPath("materials.png") }); // tutorial image source
     expect(errors, "no uncaught page errors").toEqual([]);
     await core.close();
   });

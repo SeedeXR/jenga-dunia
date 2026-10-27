@@ -1,5 +1,5 @@
-// UI-driven test: the real App component with the Tauri IPC mocked at the `invoke` boundary.
-// The viewport is replaced (jsdom has no WebGPU/WebGL); everything else is the shipped UI.
+// UI-driven test: the real App component (the Editor: graph + layer stack, ADR-0017) with the
+// Tauri IPC mocked at the `invoke` boundary.
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -10,15 +10,6 @@ let noiseNodeParams: Record<string, unknown> = {};
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(async (cmd: string, args: { request?: { op: string; params: Record<string, unknown> } }) => {
     calls.push({ cmd, args });
-    if (cmd === "layer_preview") {
-      const buf = new ArrayBuffer(16 + 4 * 2);
-      const v = new DataView(buf);
-      v.setUint32(0, 2, true);
-      v.setUint32(4, 2, true);
-      v.setFloat32(8, 0, true);
-      v.setFloat32(12, 100, true);
-      return buf;
-    }
     const req = args.request;
     if (!req) throw new Error("unexpected command");
     const base = { op: req.op, schema_version: 1, request_id: "01TEST" };
@@ -42,7 +33,7 @@ vi.mock("@tauri-apps/api/core", () => ({
       case "project.info":
         return { ...base, status: "error", error: { code: "E_INPUT_INVALID", message: "no project is open" } };
       case "project.create":
-        if (req.params.path === "/bad") {
+        if (String(req.params.path).startsWith("/bad")) {
           return { ...base, status: "error", error: { code: "E_INPUT_INVALID", message: "target directory exists and is not empty", next: "Choose an empty or new directory." } };
         }
         return {
@@ -104,10 +95,6 @@ vi.mock("./graph/GraphPanel", () => {
   return { default: GraphPanelMock };
 });
 
-vi.mock("./viewport/TerrainView", () => ({
-  default: ({ preview }: { preview: { width: number } | null }) => <div data-testid="viewport">{preview ? `preview ${preview.width}` : "no preview"}</div>,
-}));
-
 import App from "./App";
 import { useStore } from "./state";
 
@@ -119,150 +106,71 @@ describe("App", () => {
     dialog.open = null;
     dialog.save = null;
     // The store is module-global; reset the mirrored state between tests.
-    useStore.setState({ project: null, layer: null, preview: null, previewStats: null, log: [], busy: false, graph: { nodes: [], edges: [] }, graphKinds: [], lastEval: null, live: true, selectedNode: null, sculpting: false, jobs: [] });
+    useStore.setState({ project: null, layer: null, log: [], busy: false, graph: { nodes: [], edges: [] }, graphKinds: [], lastEval: null, live: true, selectedNode: null, jobs: [] });
+  });
+  const opsCalled = () => calls.map((c) => (c.args as { request?: { op: string } }).request?.op).filter(Boolean);
+  const menu = (payload: string) => menuListeners.forEach((cb) => cb({ payload }));
+  // File ▸ New with the native save dialog answering `path` (Studio's Project section has the fields).
+  const create = async (path: string) => {
+    render(<App />);
+    await waitFor(() => expect(menuListeners.length).toBeGreaterThan(0));
+    dialog.save = path;
+    menu("new");
+  };
+
+  it("without a project it points to Studio; File ▸ New opens one with the graph and the layer stack", async () => {
+    render(<App />);
+    expect(screen.getByTestId("no-project")).toHaveTextContent("Studio");
+    await waitFor(() => expect(menuListeners.length).toBeGreaterThan(0));
+    dialog.save = "/tmp/Hills";
+    menu("new");
+    await waitFor(() => expect(screen.getByTestId("project-title")).toHaveTextContent("World — 2048² · 4096 m"));
+    const made = calls.find((c) => (c.args as { request?: { op: string } }).request?.op === "project.create");
+    expect(made).toMatchObject({ args: { request: { params: { path: "/tmp/Hills.jdproj" } } } }); // a project is a directory
+    await waitFor(() => expect(screen.getByTestId("graph-panel")).toHaveTextContent("jd.noise.fbm@1"));
+    expect(screen.getByTestId("panel-layers")).toBeInTheDocument();
   });
 
-  it("creates a project, generates terrain, shows stats and preview, exports with a loss warning", async () => {
-    render(<App />);
-    expect(screen.getByTestId("app-version")).toHaveTextContent(/^v\d+\.\d+\.\d+$/);
-    expect(screen.getByTestId("generate")).toBeDisabled();
-    fireEvent.change(screen.getByTestId("project-path"), { target: { value: "/tmp/Hills.jdproj" } });
-    fireEvent.click(screen.getByTestId("new-project"));
-    await waitFor(() => expect(screen.getByText(/Hills\.jdproj|World — 2048²/)).toBeInTheDocument());
-    const create = calls.find((c) => (c.args as { request?: { op: string } }).request?.op === "project.create");
-    expect(create).toMatchObject({ cmd: "op", args: { request: { op: "project.create", schema_version: 1, params: { path: "/tmp/Hills.jdproj", name: "World" } } } });
-
-    fireEvent.change(screen.getByTestId("seed"), { target: { value: "7" } });
-    fireEvent.click(screen.getByTestId("generate"));
-    await waitFor(() => expect(screen.getByTestId("layer-stats")).toBeInTheDocument());
-    // Generate edits the graph's noise node (every differing setting, journaled) and evaluates the graph.
-    const seedEdit = calls.find((c) => {
-      const r = (c.args as { request?: { op: string; params: { key?: string } } }).request;
-      return r?.op === "graph.set_param" && r.params.key === "seed";
-    });
-    expect(seedEdit).toMatchObject({ args: { request: { params: { id: "01N", key: "seed", value: 7 } } } });
-    expect(calls.some((c) => (c.args as { request?: { op: string; params: { lod?: number } } }).request?.op === "graph.evaluate")).toBe(true);
-    expect(calls.some((c) => (c.args as { request?: { op: string } }).request?.op === "terrain.generate")).toBe(false);
-    expect(screen.getByTestId("layer-stats")).toHaveTextContent("1.5 / 498.2 m");
-    expect(screen.getByTestId("viewport")).toHaveTextContent("preview 2");
-    expect(calls.some((c) => c.cmd === "layer_preview")).toBe(true);
-
-    fireEvent.change(screen.getByTestId("export-path"), { target: { value: "h.png" } });
-    fireEvent.click(screen.getByTestId("export"));
-    await waitFor(() => expect(screen.getByTestId("log")).toHaveTextContent("W_EXPORT_LOSS"));
-    const exp = calls.find((c) => (c.args as { request?: { op: string } }).request?.op === "terrain.export_heightmap");
-    expect(exp).toMatchObject({ args: { request: { params: { path: "h.png", format: "png16" } } } });
-  });
-
-  it("native menu events trigger the same operations as the buttons", async () => {
-    render(<App />);
-    fireEvent.change(screen.getByTestId("project-path"), { target: { value: "/tmp/Menu.jdproj" } });
-    fireEvent.click(screen.getByTestId("new-project"));
-    await waitFor(() => expect(screen.getByText(/World — 2048²/)).toBeInTheDocument());
-    expect(menuListeners.length).toBeGreaterThan(0);
-    menuListeners.forEach((cb) => cb({ payload: "generate" }));
-    await waitFor(() => expect(screen.getByTestId("layer-stats")).toBeInTheDocument());
+  it("native menu events run the operations: generate, export, open, evaluate, undo", async () => {
+    await create("/tmp/Menu.jdproj");
+    await waitFor(() => expect(screen.getByTestId("project-title")).toHaveTextContent("World"));
+    menu("generate");
+    await waitFor(() => expect(opsCalled()).toContain("graph.evaluate"));
+    await waitFor(() => expect(useStore.getState().layer).toBe("height"));
     // File → Export… asks the native save dialog, then exports to the chosen path.
     dialog.save = "/tmp/out/hills.png";
-    menuListeners.forEach((cb) => cb({ payload: "export" }));
-    await waitFor(() => expect(screen.getByTestId("log")).toHaveTextContent("terrain.export_heightmap"));
+    menu("export");
+    await waitFor(() => expect(screen.getByTestId("log")).toHaveTextContent("W_EXPORT_LOSS"));
     const exp = calls.find((c) => (c.args as { request?: { op: string } }).request?.op === "terrain.export_heightmap");
     expect(exp).toMatchObject({ args: { request: { params: { path: "/tmp/out/hills.png", format: "png16" } } } });
     // File → Open… picks a directory and opens it; a cancelled dialog does nothing.
     dialog.open = "/tmp/Other.jdproj";
-    menuListeners.forEach((cb) => cb({ payload: "open" }));
+    menu("open");
     await waitFor(() => expect(calls.some((c) => (c.args as { request?: { op: string; params: { path?: string } } }).request?.params?.path === "/tmp/Other.jdproj")).toBe(true));
-    // Let the open sequence (kinds, list, stats, preview, textures…) finish before counting, or a
-    // slow runner's trailing calls land inside the window and look like the cancelled dialog's.
-    const settle = async () => {
-      let n = -1;
-      while (n !== calls.length) {
-        n = calls.length;
-        await new Promise((r) => setTimeout(r, 40));
-      }
-    };
-    await settle();
-    // What a cancelled dialog must not do is open a project: count project.open calls, not
-    // every call — stats/preview/texture fetches of the previous open may still trickle in
-    // on a slow runner (seen twice on CI).
-    const opens = () => calls.filter((c) => (c.args as { request?: { op: string } }).request?.op === "project.open").length;
+    const opens = () => opsCalled().filter((o) => o === "project.open").length;
     const before = opens();
     dialog.open = null;
-    menuListeners.forEach((cb) => cb({ payload: "open" }));
+    menu("open");
     await new Promise((r) => setTimeout(r, 40));
     expect(opens()).toBe(before);
-    menuListeners.forEach((cb) => cb({ payload: "evaluate" }));
+    menu("evaluate");
     await waitFor(() => expect(screen.getByTestId("log")).toHaveTextContent("graph.evaluate"));
-    menuListeners.forEach((cb) => cb({ payload: "undo-graph" }));
+    menu("undo-graph");
     await waitFor(() => expect(screen.getByTestId("log")).toHaveTextContent("graph.undo"));
   });
 
-  it("loads the project graph and evaluating it refreshes stats and preview", async () => {
-    render(<App />);
-    fireEvent.change(screen.getByTestId("project-path"), { target: { value: "/tmp/G.jdproj" } });
-    fireEvent.click(screen.getByTestId("new-project"));
-    await waitFor(() => expect(screen.getByTestId("graph-panel")).toHaveTextContent("jd.noise.fbm@1"));
-    fireEvent.click(screen.getByTestId("graph-evaluate"));
-    await waitFor(() => expect(screen.getByTestId("layer-stats")).toBeInTheDocument());
-    const ops = calls.map((c) => (c.args as { request?: { op: string } }).request?.op).filter(Boolean);
-    expect(ops).toEqual(expect.arrayContaining(["graph.kinds", "graph.list", "graph.evaluate", "terrain.stats"]));
-    // Two published layers → a picker appears; choosing "water" fetches that layer's stats and preview.
-    const pick = screen.getByTestId("layer-pick") as HTMLSelectElement;
-    expect(Array.from(pick.options).map((o) => o.value)).toEqual(["height", "water"]);
-    fireEvent.change(pick, { target: { value: "water" } });
-    await waitFor(() => expect(screen.getByTestId("layer-stats")).toHaveTextContent("def"));
-    const waterStats = calls.filter((c) => (c.args as { request?: { op: string; params: { layer?: string } } }).request?.op === "terrain.stats" && (c.args as { request: { params: { layer?: string } } }).request.params.layer === "water");
-    expect(waterStats.length).toBeGreaterThan(0);
-    expect(screen.getByTestId("viewport")).toHaveTextContent("preview 2");
-  });
-
-  it("the Noise panel mirrors the graph's noise node, so Generate never reverts an edit made in the graph", async () => {
+  it("the noise settings mirror the graph's noise node, so Generate never reverts an edit made in the graph", async () => {
     noiseNodeParams = { seed: 5, feature_size_m: 900, height_range_m: [0, 160], octaves: { keys: [[0, 3], [1, 6]] } };
-    render(<App />);
-    fireEvent.change(screen.getByTestId("project-path"), { target: { value: "/tmp/N.jdproj" } });
-    fireEvent.click(screen.getByTestId("new-project"));
+    await create("/tmp/N.jdproj");
     await waitFor(() => expect(screen.getByTestId("graph-panel")).toHaveTextContent("jd.noise.fbm@1"));
-    // The panel shows the node's values; a keyed (timeline) octaves stays at the panel default.
-    expect(screen.getByTestId("seed")).toHaveValue(5);
-    expect(screen.getByLabelText("Feature size (m)")).toHaveValue(900);
-    expect(screen.getByLabelText("Octaves")).toHaveValue(6);
-    fireEvent.click(screen.getByTestId("generate"));
-    await waitFor(() => expect(screen.getByTestId("layer-stats")).toBeInTheDocument());
-    // Generate wrote only what the panel changed relative to the node — nothing for the mirrored keys.
+    expect(useStore.getState().noise).toMatchObject({ seed: 5, feature_size_m: 900, height_range_m: [0, 160], octaves: 6 });
+    menu("generate");
+    await waitFor(() => expect(opsCalled()).toContain("graph.evaluate"));
+    // Generate wrote only what differs from the node — nothing for the mirrored keys.
     const written = calls.map((c) => (c.args as { request?: { op: string; params: { key?: string } } }).request).filter((r) => r?.op === "graph.set_param").map((r) => r?.params.key);
     expect(written).not.toContain("seed");
     expect(written).not.toContain("height_range_m");
     expect(written).not.toContain("feature_size_m");
-  });
-
-  it("Sculpt wires a stroke node in front of the output and enters sculpt mode", async () => {
-    render(<App />);
-    fireEvent.change(screen.getByTestId("project-path"), { target: { value: "/tmp/S.jdproj" } });
-    fireEvent.click(screen.getByTestId("new-project"));
-    await waitFor(() => expect(screen.getByTestId("graph-panel")).toHaveTextContent("jd.noise.fbm@1"));
-    fireEvent.click(screen.getByTestId("sculpt-toggle"));
-    await waitFor(() => expect(screen.getByTestId("sculpt-toggle")).toHaveTextContent("Sculpting"));
-    // One core call finds or puts the strokes node between the noise and the height output.
-    const target = calls.find((c) => (c.args as { request?: { op: string } }).request?.op === "graph.sculpt_target");
-    expect(target).toMatchObject({ args: { request: { params: { layer: "height", kind: "strokes" } } } });
-    expect(screen.getByTestId("brush-strength")).toBeInTheDocument();
-    // Mode select swaps strength for amount, and strokes carry mode + amount to the core.
-    fireEvent.change(screen.getByTestId("brush-mode"), { target: { value: "flatten" } });
-    expect(screen.getByTestId("brush-amount")).toBeInTheDocument();
-    expect(screen.queryByTestId("brush-strength")).toBeNull();
-    await useStore.getState().addStroke([
-      [10, 20],
-      [30, 40],
-    ]);
-    const stroke = calls.find((c) => (c.args as { request?: { op: string; params: { key?: string } } }).request?.op === "graph.append_param" && (c.args as { request: { params: { key?: string } } }).request.params.key === "strokes");
-    expect(stroke).toMatchObject({ args: { request: { params: { value: { points: [[10, 20], [30, 40]], radius_m: 150, mode: "flatten", amount: 0.5 } } } } });
-    // Another node selected (a transform stroke selects its transforms node): strokes still go
-    // to the strokes node Sculpt chose, as in Studio.
-    useStore.getState().setSelectedNode("01N");
-    calls.length = 0;
-    await useStore.getState().addStroke([[50, 60]]);
-    const next = calls.find((c) => (c.args as { request?: { op: string } }).request?.op === "graph.append_param");
-    expect(next).toMatchObject({ args: { request: { params: { id: "01SCULPT00000000000000000A", key: "strokes" } } } });
   });
 
   it("connected to Studio: its graph edits reload the graph, selections cross both ways", async () => {
@@ -275,51 +183,40 @@ describe("App", () => {
     expect(useStore.getState().selectedNode).toBe("01SCULPT00000000000000000A");
     // The Editor's own selection goes out as ui.select.
     useStore.getState().setSelectedNode("01NOISE");
-    await waitFor(() => expect(calls.some((c) => (c.args as { request?: { op: string; params: { nodes: string[] } } }).request?.op === "ui.select")).toBe(true));
+    await waitFor(() => expect(opsCalled()).toContain("ui.select"));
     // A graph edit by Studio reloads the graph; the Editor's own is already applied. (A project
     // is open, so live evaluation is armed: its first evaluation runs before the edit.)
-    fireEvent.change(screen.getByTestId("project-path"), { target: { value: "/tmp/Sync.jdproj" } });
-    fireEvent.click(screen.getByTestId("new-project"));
-    await waitFor(() => expect(calls.some((c) => (c.args as { request?: { op: string } }).request?.op === "graph.evaluate")).toBe(true));
+    dialog.save = "/tmp/Sync.jdproj";
+    menu("new");
+    await waitFor(() => expect(opsCalled()).toContain("graph.evaluate"));
     calls.length = 0;
     emit("project_changed", { op: "graph.splice", client: "gui-studio" });
-    await waitFor(() => expect(calls.some((c) => (c.args as { request?: { op: string } }).request?.op === "graph.list")).toBe(true));
+    await waitFor(() => expect(opsCalled()).toContain("graph.list"));
     // … without evaluating it again: Studio evaluates its own edits (its report arrives below).
     await new Promise((r) => setTimeout(r, 250));
-    expect(calls.some((c) => (c.args as { request?: { op: string } }).request?.op === "graph.evaluate")).toBe(false);
+    expect(opsCalled()).not.toContain("graph.evaluate");
     calls.length = 0;
     emit("project_changed", { op: "graph.splice", client: "gui-editor" });
     await new Promise((r) => setTimeout(r, 20));
-    expect(calls.some((c) => (c.args as { request?: { op: string } }).request?.op === "graph.list")).toBe(false);
+    expect(opsCalled()).not.toContain("graph.list");
     // A project Studio opened opens here, without a second evaluation.
     calls.length = 0;
     emit("project_changed", { op: "project.open", client: "gui-studio" });
-    await waitFor(() => expect(calls.some((c) => (c.args as { request?: { op: string } }).request?.op === "project.info")).toBe(true));
+    await waitFor(() => expect(opsCalled()).toContain("project.info"));
     await new Promise((r) => setTimeout(r, 250));
-    expect(calls.some((c) => (c.args as { request?: { op: string } }).request?.op === "graph.evaluate")).toBe(false);
-    // An evaluation Studio ran shows here: its first layer's stats.
+    expect(opsCalled()).not.toContain("graph.evaluate");
+    // An evaluation Studio ran is adopted here: its layers become the Editor's.
     emit("evaluated", { report: { lod: 1, duration_ms: 5, nodes: [], layers: { height: {} } }, client: "gui-studio" });
-    await waitFor(() => expect(calls.some((c) => (c.args as { request?: { op: string; params: { layer?: string } } }).request?.op === "terrain.stats")).toBe(true));
+    await waitFor(() => expect(useStore.getState().layer).toBe("height"));
   });
 
-  it("a world preset fills resolution and extent (Unreal 2049²)", async () => {
-    render(<App />);
-    fireEvent.change(screen.getByTestId("world-preset"), { target: { value: "Unity / Unreal 2049² · 8 km" } });
-    expect(screen.getByLabelText("Resolution (px)")).toHaveValue(2049);
-    expect(screen.getByLabelText("Extent (m)")).toHaveValue(8192);
-    fireEvent.change(screen.getByTestId("project-path"), { target: { value: "/tmp/U.jdproj" } });
-    fireEvent.click(screen.getByTestId("new-project"));
-    await waitFor(() => expect(calls.some((c) => (c.args as { request?: { op: string } }).request?.op === "project.create")).toBe(true));
-    const create = calls.find((c) => (c.args as { request?: { op: string } }).request?.op === "project.create");
-    expect(create).toMatchObject({ args: { request: { params: { world: { resolution_px: [2049, 2049], extent_m: [8192, 8192] } } } } });
-  });
-
-  it("surfaces core errors with code and next step in the log", async () => {
-    render(<App />);
-    fireEvent.change(screen.getByTestId("project-path"), { target: { value: "/bad" } });
-    fireEvent.click(screen.getByTestId("new-project"));
-    await waitFor(() => expect(screen.getByTestId("log")).toHaveTextContent("E_INPUT_INVALID"));
+  it("surfaces core errors with code and next step in the status bar and the log", async () => {
+    await create("/bad.jdproj");
+    await waitFor(() => expect(screen.getByTestId("status-line")).toHaveTextContent("E_INPUT_INVALID"));
     expect(screen.getByTestId("log")).toHaveTextContent("Choose an empty or new directory.");
-    expect(screen.getByTestId("generate")).toBeDisabled();
+    // The log opens from the status bar.
+    expect(screen.getByTestId("log")).toHaveClass("hidden");
+    fireEvent.click(screen.getByTestId("toggle-log"));
+    expect(screen.getByTestId("log")).not.toHaveClass("hidden");
   });
 });

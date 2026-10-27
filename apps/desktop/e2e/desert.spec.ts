@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, evaluateAndWait, fitView, installBridge, logCount, selectNode, wire } from "./bridge";
+import { connectCore, evaluateAndWait, fitView, installBridge, logCount, selectNode, wire, createProject, coreOp, layerStats } from "./bridge";
 
 const NOISE = "01JDGRAPH000000000000N01SE"; // starter graph ids (jd_graph::nodes)
 const HEIGHT = "01JDGRAPH0000000000HE1GHT0";
@@ -23,21 +23,20 @@ test.describe("desert landscapes against the real core", () => {
     await installBridge(page, core);
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(String(e)));
+    await createProject(core, path.join(ws, "Desert.jdproj"), 2048, 128); // Studio's New (the Editor has no project panel)
     await page.goto("/");
-    await page.getByTestId("project-path").fill(path.join(ws, "Desert.jdproj"));
-    await page.getByLabel("Extent (m)").fill("2048");
-    await page.getByLabel("Resolution (px)").fill("128");
-    await page.getByTestId("new-project").click();
     await expect(page.locator("header")).toContainText("World — 128²");
 
-    // A desert plain: the preset sets broad features, few octaves, 0..40 m of relief.
-    await page.getByTestId("noise-preset").selectOption("Desert plain 0..40 m");
-    await expect(page.getByLabel("Feature size (m)")).toHaveValue("1200");
-    await expect(page.getByLabel("Octaves")).toHaveValue("3");
-    await page.getByTestId("seed").fill("3");
-    await evaluateAndWait(page, "generate");
-    await expect(page.getByTestId("layer-stats")).toBeVisible();
-    await expect(page.getByTestId("layer-stats")).toContainText("37.4 m"); // 0..40 m asked; the starter graph (0..500 m) must not overwrite it
+    // A desert plain (Studio's Desert plain preset + Generate): broad features, few octaves, 0..40 m.
+    for (const [key, value] of Object.entries({ feature_size_m: 1200, octaves: 3, gain: 0.5, height_range_m: [0, 40], seed: 3 })) {
+      await coreOp(core, "graph.set_param", { id: NOISE, key, value });
+    }
+    await page.reload();
+    await expect(page.locator("header")).toContainText("World — 128²");
+    await evaluateAndWait(page, "graph-evaluate");
+    const plain = await layerStats(core, "height");
+    expect(plain.max).toBeGreaterThan(30);
+    expect(plain.max).toBeLessThanOrEqual(40); // 0..40 m asked; the starter graph (0..500 m) must not overwrite it
 
     const panel = page.getByTestId("graph-panel");
     const noise = panel.locator(`.react-flow__node[data-id="${NOISE}"]`);
@@ -91,16 +90,10 @@ test.describe("desert landscapes against the real core", () => {
     const evaluated = await logCount(page, "graph.evaluate: ok");
     await evaluateAndWait(page, "graph-evaluate");
     await expect.poll(() => logCount(page, "graph.evaluate: ok"), { timeout: 60_000 }).toBeGreaterThan(evaluated);
-    // The sinkhole floors are a mask: colour the dunes by it and read its share from the stats.
-    await page.getByTestId("color-pick").selectOption("sinkholes");
-    await expect(page.getByTestId("viewport-info")).toContainText("colour sinkholes");
-    await page.getByTestId("layer-pick").selectOption("sinkholes");
-    await expect(page.getByTestId("layer-stats")).toContainText("/ 1.0 m", { timeout: 20_000 }); // max 1: pit floors exist (the mean rounds to 0.0 at one decimal)
-    await page.getByTestId("layer-pick").selectOption("height");
-    await expect(page.getByTestId("layer-stats")).not.toContainText("/ 1.0 m", { timeout: 20_000 }); // the height layer's stats again
-    // Closer in, so the dune ripples and the pits read in the capture.
-    await page.getByTestId("viewport").hover();
-    for (let i = 0; i < 3; i++) await page.mouse.wheel(0, -300);
+    // The sinkhole floors are a mask: pit floors exist (max 1), a small share of the world.
+    const pits = await layerStats(core, "sinkholes");
+    expect(pits.max).toBe(1);
+    expect(pits.mean).toBeLessThan(0.5);
     await page.screenshot({ path: testInfo.outputPath("desert.png") }); // tutorial image source
     expect(errors).toEqual([]);
   });

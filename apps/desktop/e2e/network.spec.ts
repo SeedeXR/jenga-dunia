@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, evaluateAndWait, installBridge, selectNode, wire } from "./bridge";
+import { connectCore, evaluateAndWait, installBridge, selectNode, wire, createProject, coreOp } from "./bridge";
 
 const NOISE = "01JDGRAPH000000000000N01SE"; // starter graph ids (jd_graph::nodes)
 const HEIGHT = "01JDGRAPH0000000000HE1GHT0";
@@ -21,11 +21,8 @@ test.describe("hydrology-first node against the real core", () => {
     await installBridge(page, core);
     const errors: string[] = [];
     page.on("pageerror", (e) => errors.push(String(e)));
+    await createProject(core, path.join(ws, "Net.jdproj"), 6400, 128); // Studio's New (the Editor has no project panel)
     await page.goto("/");
-    await page.getByTestId("project-path").fill(path.join(ws, "Net.jdproj"));
-    await page.getByLabel("Extent (m)").fill("6400");
-    await page.getByLabel("Resolution (px)").fill("128");
-    await page.getByTestId("new-project").click();
     await expect(page.locator("header")).toContainText("World — 128²");
 
     const panel = page.getByTestId("graph-panel");
@@ -58,9 +55,8 @@ test.describe("hydrology-first node against the real core", () => {
     await wire(page, net, out, "rivers");
     await evaluateAndWait(page, "graph-evaluate");
     await expect(page.getByTestId("log")).toContainText("graph.evaluate: ok", { timeout: 30_000 });
-    await expect(page.getByTestId("layer-pick")).toBeVisible();
-    await page.getByTestId("color-pick").selectOption("rivers");
-    await expect(page.getByTestId("viewport-info")).toContainText("colour rivers");
+    // Published: the core lists the layer (Studio's layer and colour pickers show it).
+    await expect.poll(async () => ((await coreOp(core, "terrain.layers")) as { layers: string[] }).layers).toContain("rivers");
     await page.screenshot({ path: testInfo.outputPath("network.png") }); // tutorial image source
     expect(errors, "no uncaught page errors").toEqual([]);
     await core.close();
