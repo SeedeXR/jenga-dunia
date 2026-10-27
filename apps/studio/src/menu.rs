@@ -212,6 +212,7 @@ fn window_menu(menu: &muda::Menu) {
     }
 }
 
+/// No menu bar outside macOS (see the module notes); the keys work everywhere.
 #[cfg(not(target_os = "macos"))]
 pub fn install() {}
 
