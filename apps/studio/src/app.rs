@@ -3029,19 +3029,7 @@ impl StudioApp {
         let idle = self.busy == 0;
         let has_project = self.project.is_some();
         // `+`: kinds with an `in` input and an `out` output.
-        let kinds: Vec<String> = self
-            .kinds
-            .iter()
-            .filter(|k| {
-                let has = |side: &str, name: &str| {
-                    k[side]
-                        .as_array()
-                        .is_some_and(|p| p.iter().any(|p| p["name"] == name))
-                };
-                has("inputs", "in") && has("outputs", "out")
-            })
-            .filter_map(|k| k["kind"].as_str().map(str::to_owned))
-            .collect();
+        let kinds = stack_kinds(&self.kinds);
         let mut act: Option<(&str, Value)> = None;
         // Right to left: `+` first, then the kind picker takes exactly what is left (a width asked
         // beyond it would widen the panel a little more every frame).
@@ -6342,6 +6330,27 @@ fn fetch_lod(longest: u32, max_px: u32) -> u32 {
         .trailing_zeros()
 }
 
+/// The kinds the layer stack's `+` offers: chain nodes (`in` → `out`) that need no settings to be
+/// added — the ones with required parameters (a shape, an action, a pattern's kind…) have their
+/// own tools, and spliced bare the engine would refuse them.
+fn stack_kinds(kinds: &[Value]) -> Vec<String> {
+    kinds
+        .iter()
+        .filter(|k| {
+            let has = |side: &str, name: &str| {
+                k[side]
+                    .as_array()
+                    .is_some_and(|p| p.iter().any(|p| p["name"] == name))
+            };
+            let ready = k["param_schema"]["required"]
+                .as_array()
+                .is_none_or(Vec::is_empty);
+            has("inputs", "in") && has("outputs", "out") && ready
+        })
+        .filter_map(|k| k["kind"].as_str().map(str::to_owned))
+        .collect()
+}
+
 fn preview_lod_of(world: &Value) -> u32 {
     let r = &world["resolution_px"];
     let res = r[0]
@@ -6378,6 +6387,17 @@ mod tests {
         assert_eq!(fetch_lod(256, 1024), 0);
         assert_eq!(fetch_lod(3000, 1024), 2);
         assert_eq!(fetch_lod(4096, 1024), 2);
+    }
+
+    #[test]
+    fn the_stack_offers_chain_kinds_that_need_no_settings() {
+        let port = |n: &str| json!({ "name": n });
+        let kinds = [
+            json!({ "kind": "jd.filter.terrace@1", "inputs": [port("in")], "outputs": [port("out")], "param_schema": {} }),
+            json!({ "kind": "jd.shape.primitive@1", "inputs": [port("in")], "outputs": [port("out")], "param_schema": { "required": ["shape"] } }),
+            json!({ "kind": "jd.noise.fbm@1", "inputs": [], "outputs": [port("out")], "param_schema": {} }),
+        ];
+        assert_eq!(stack_kinds(&kinds), ["jd.filter.terrace@1"]);
     }
 
     #[test]

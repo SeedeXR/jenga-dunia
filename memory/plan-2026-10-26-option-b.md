@@ -397,6 +397,11 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   the layer rail's cells shrink (27 → 18 px) on a short viewport. Window test at 900 × 560:
   chips inside the viewport, none overlapping, icon-sized; the rail inside (mutation-checked:
   without the compact layout the chips overlap). Next: the Editor's graph window (S3).
+  S3 first part: the Editor is a flex column (a closed log left an empty grid row under the status
+  bar); the graph's Add menu names kinds short (filter.blur), as the layer stack does. The stack's
+  `+` (both UIs) offers only chain kinds without required parameters — action, inflate, curve,
+  pattern, polygon, primitive and stamp were offered and refused ("missing field `shape`"); they
+  have their own tools (Actions, the strip, roads) or the graph's Add + inspector.
   Open (flake, 2026-10-27): `e2e/paint.spec.ts` failed once inside a full gate run (instance count
   stayed 925 after the density stroke; 30 s poll). Not reproduced in 5 full suites + 12 parallel
   repeats; trace lost (overwritten by reruns — next time copy `test-results/` first). Ruled out:
