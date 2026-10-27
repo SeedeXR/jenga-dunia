@@ -3660,6 +3660,23 @@ mod tests {
         let (deep, a1) = water_colour(60.0, &sea);
         assert!(shallow[0] > deep[0] && a1 > a0, "{shallow:?} {deep:?}");
         assert!((deep[1] - 0.35).abs() < 0.05, "{deep:?}");
+        // Clarity: at 10 m crystal water (30 m visibility) still shows the sand in green (red is
+        // gone within metres), a murky estuary (3 m) is its silt tint and more opaque (the
+        // desktop's sea.test.ts).
+        let clear = Sea {
+            visibility_m: 30.0,
+            ..sea.clone()
+        };
+        let murky = Sea {
+            visibility_m: 3.0,
+            tint: [0.35, 0.3, 0.15],
+            ..sea.clone()
+        };
+        let ((c, ca), (m, ma)) = (water_colour(10.0, &clear), water_colour(10.0, &murky));
+        assert!(
+            c[1] > 0.4 && (m[0] - 0.35).abs() < 0.05 && ma > ca,
+            "{c:?} {m:?}"
+        );
         // A ramp from 10 m (west) to 20 m (east): water over the west half, land over the east.
         let data: Vec<u16> = (0..5 * 3)
             .map(|i| ((i % 5) as f32 / 4.0 * 65535.0) as u16)

@@ -1,9 +1,0 @@
-{
-  "src": "/tmp/jd-scratch/desktop-materials-detail-raw.png",
-  "out": "desktop-materials-detail.png",
-  "annotations": [
-    { "type": "circle", "cx": 1419, "cy": 404, "r": 20, "label": "1", "text": "1  detail: a seamless grain tile for this layer", "tx": 300, "ty": 330 },
-    { "type": "circle", "cx": 1214, "cy": 431, "r": 32, "label": "2", "text": "2  metres per repeat (4 m here)", "tx": 300, "ty": 354 },
-    { "type": "circle", "cx": 560, "cy": 200, "r": 44, "label": "3", "text": "3  the tile repeats across the slopes, blended by the layer's mask", "tx": 300, "ty": 378 }
-  ]
-}
