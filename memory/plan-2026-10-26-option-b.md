@@ -411,6 +411,17 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   `graphGen` check with no follow-up evaluation, and `placeScatter` racing `adopt`.
   Studio's chains each run on their own thread, so its evaluations can overlap too (harmless for
   the same reason, but wasted work under fast strokes).
+  S4 (2026-10-27): the guide's figures come from Studio. `apps/studio/tests/guide.rs` (ignored;
+  `JD_GUIDE_OUT=<dir>`) drives 33 scenes offscreen at 1440×900 and writes raw PNGs plus
+  annotate.mjs specs whose numbered boxes sit on the controls they name; desktop-app.md's
+  captions follow the numbers. Reviewing the renders found: the armed chip's translucent tint
+  unreadable over the sky (now filled primary, white text); kittest's synthetic cursor in every
+  render (`with_render_cursor(false)`); and a real bug — on worlds over 512² a live edit evaluates
+  at LOD 1+, published as `height#lod1`, and Studio kept showing `height`, so sculpt / grid /
+  Editor edits did not show until a full Generate (fixed: Studio follows the layers each
+  evaluation published; window test, mutation-checked). Still the earlier app: the Editor's
+  graph figures (tutorial-03-graph, rivers-method, biome-rules, gate, timeline — from Playwright),
+  desktop-geo (needs a tile server), the menus and the videos.
 - Desktop ↔ Studio brush parity: after a transform stroke the desktop selected the transforms
   node and its sculpt strokes silently stopped (they followed the selection only). It now
   remembers the strokes node Sculpt / Paint density chose (`sculptNode`, Studio's `sculpt_node`):
