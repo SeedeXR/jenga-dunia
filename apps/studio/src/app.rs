@@ -1342,11 +1342,7 @@ impl StudioApp {
                     return self.refresh_done();
                 };
                 let longest = size[0].as_u64().max(size[1].as_u64()).unwrap_or(1) as u32;
-                let lod = longest
-                    .div_ceil(self.preview_max_px)
-                    .max(1)
-                    .next_power_of_two()
-                    .trailing_zeros();
+                let lod = fetch_lod(longest, self.preview_max_px);
                 let extent = self
                     .project
                     .as_ref()
@@ -6213,6 +6209,16 @@ fn job_line(j: &Value) -> String {
     )
 }
 
+/// The desktop's preview fetch LOD: the shown layer at ≤ `max_px` on its longest side
+/// (Settings ▸ Preview detail), ⌈log2(longest ÷ max_px)⌉.
+fn fetch_lod(longest: u32, max_px: u32) -> u32 {
+    longest
+        .div_ceil(max_px)
+        .max(1)
+        .next_power_of_two()
+        .trailing_zeros()
+}
+
 fn preview_lod_of(world: &Value) -> u32 {
     let r = &world["resolution_px"];
     let res = r[0]
@@ -6239,6 +6245,17 @@ fn adapt_lod_bias(bias: u32, ms: f64, target: f64) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_detail_picks_the_fetch_lod_like_the_desktop() {
+        // A 2048² world: lod 1 (1024²) by default, lod 0 at 2048² (high).
+        assert_eq!(fetch_lod(2048, 1024), 1);
+        assert_eq!(fetch_lod(2048, 2048), 0);
+        assert_eq!(fetch_lod(1024, 1024), 0);
+        assert_eq!(fetch_lod(256, 1024), 0);
+        assert_eq!(fetch_lod(3000, 1024), 2);
+        assert_eq!(fetch_lod(4096, 1024), 2);
+    }
 
     #[test]
     fn the_header_job_line_reads_like_the_desktop() {

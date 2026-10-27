@@ -343,6 +343,12 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   Esc aborts the next); caves (an entrance's ×, Show caves off); road (one splice, the node
   selected). Found while porting: Studio did not select a spliced node (the desktop's
   spliceBefore callers do — road, actions, the layer strip): now selected in the chain reply.
+  Batches 3–4: preview detail → fetch LOD (`fetch_lod`, unit test); settings defaults and an
+  out-of-range cache refused with the field back to 2048; Still → exports/stills/*.png; the
+  detail tile 8 m default, 4 m re-bakes; the Desert plain preset (1200 m, 3 octaves, Generate
+  keeps 0..40 m); diagnostics lines (cpus / GB, blobs · limit 2048 MB, S1 256² … thermal×50);
+  scatter growing with the timeline (0 at t = 0, > 100 at t = 1 after the Editor's set_time +
+  evaluate).
   Open (flake, 2026-10-27): `e2e/paint.spec.ts` failed once inside a full gate run (instance count
   stayed 925 after the density stroke; 30 s poll). Not reproduced in 5 full suites + 12 parallel
   repeats; trace lost (overwritten by reruns — next time copy `test-results/` first). Ruled out:

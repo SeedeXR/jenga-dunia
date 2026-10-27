@@ -385,6 +385,149 @@ fn a_running_job_shows_in_the_header_and_cancel_or_esc_stops_it() {
 }
 
 #[test]
+fn the_still_button_writes_the_viewport_under_exports() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window(engine(dir.path()));
+    settle(&mut h, |a| a.viewport.info().is_some());
+    h.get_by_label("Save the viewport as a still (exports/stills/)")
+        .click();
+    h.run_steps(1);
+    settle(&mut h, |a| {
+        a.log_lines().any(|l| l.text.starts_with("still: "))
+    });
+    let stills = dir.path().join("Kit.jdproj/exports/stills");
+    let pngs: Vec<_> = std::fs::read_dir(&stills)
+        .expect("exports/stills")
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "png"))
+        .collect();
+    assert_eq!(pngs.len(), 1, "{pngs:?}");
+    let png = std::fs::read(&pngs[0]).unwrap();
+    assert!(
+        png.len() > 1024 && png.starts_with(b"\x89PNG"),
+        "{} bytes",
+        png.len()
+    );
+}
+
+/// e2e/desert.spec.ts: the Desert plain preset fills the Noise section, and Generate keeps its
+/// 0..40 m (the starter graph's range must not override it).
+#[test]
+fn the_desert_plain_preset_fills_the_noise_and_generate_keeps_its_range() {
+    use eframe::egui::accesskit::Role;
+    let dir = tempfile::tempdir().unwrap();
+    let server = engine(dir.path());
+    let probe = server.clone();
+    let mut h = window(server);
+    settle(&mut h, |a| a.viewport.info().is_some());
+    tap(&mut h, Some(Role::ComboBox), "Noise preset");
+    h.run();
+    h.get_by_label("Desert plain 0..40 m").click();
+    h.run();
+    let field = |h: &Harness<'static, StudioApp>, label: &str| {
+        h.get_by_role_and_label(Role::TextInput, label)
+            .value()
+            .unwrap_or_default()
+    };
+    assert_eq!(field(&h, "Feature size (m)"), "1200");
+    assert_eq!(field(&h, "Octaves"), "3");
+    // The Noise section's seed (Scatter has one too, higher up the column).
+    let seed = || {
+        egui_kittest::kittest::by()
+            .role(Role::TextInput)
+            .label("Seed")
+    };
+    h.get_all(seed()).last().unwrap().scroll_to_me();
+    h.run();
+    h.get_all(seed()).last().unwrap().focus();
+    h.run();
+    h.key_press_modifiers(eframe::egui::Modifiers::COMMAND, eframe::egui::Key::A);
+    h.get_all(seed()).last().unwrap().type_text("3");
+    h.run();
+    h.key_press_modifiers(eframe::egui::Modifiers::COMMAND, eframe::egui::Key::G);
+    h.run_steps(1);
+    settle(&mut h, |a| {
+        a.log_lines()
+            .any(|l| l.text.starts_with("graph.evaluate: ok"))
+    });
+    settle(&mut h, |_| true);
+    let layer = h.state().layer().unwrap().to_owned();
+    let stats = probe
+        .invoke(Request::new("terrain.stats", json!({ "layer": layer })))
+        .result
+        .unwrap()["stats"]
+        .clone();
+    let (lo, hi) = (
+        stats["min"].as_f64().unwrap(),
+        stats["max"].as_f64().unwrap(),
+    );
+    assert!(lo >= -0.01 && hi <= 40.01 && hi > 10.0, "{lo}..{hi} m");
+}
+
+/// e2e/diagnostics.spec.ts: the environment line, the cache GC report under the project's limit,
+/// and the bench's stages.
+#[test]
+fn diagnostics_report_the_environment_the_cache_and_the_bench() {
+    use egui_kittest::kittest::by;
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window(engine(dir.path()));
+    settle(&mut h, |a| a.viewport.info().is_some());
+    for (button, op) in [
+        ("Environment", "diag.env: ok"),
+        ("Cache GC", "project.cache_gc: ok"),
+        ("Bench 256²", "diag.bench: ok"),
+    ] {
+        h.get_by_label(button).scroll_to_me();
+        h.run();
+        h.get_by_label(button).click();
+        h.run_steps(1);
+        settle(&mut h, |a| a.log_lines().any(|l| l.text.starts_with(op)));
+    }
+    h.run();
+    h.get(by().label_contains(" cpus · "));
+    h.get(by().label_contains(" blobs · "));
+    h.get(by().label_contains("limit 2048 MB"));
+    h.get(by().label_contains("S1 256² "));
+    h.get(by().label_contains("thermal×50"));
+}
+
+/// e2e/timeline.spec.ts: with Grow with timeline the population follows the project's time —
+/// nobody at t = 0, more than a hundred by t = 1.
+#[test]
+fn scatter_grows_with_the_timeline() {
+    use eframe::egui::accesskit::Role;
+    let dir = tempfile::tempdir().unwrap();
+    let server = engine(dir.path());
+    let probe = server.clone();
+    let mut h = window(server);
+    settle(&mut h, |a| a.viewport.info().is_some());
+    tap(&mut h, Some(Role::ComboBox), "Mask");
+    h.run();
+    h.get_by_label("height").click();
+    h.run();
+    tap(&mut h, Some(Role::CheckBox), "Grow with timeline");
+    h.get_by_label("Place").scroll_to_me();
+    h.run();
+    h.get_by_label("Place").click();
+    h.run_steps(1);
+    settle(&mut h, |a| {
+        a.log_lines()
+            .any(|l| l.text.starts_with("terrain.scatter: ok"))
+    });
+    assert_eq!(h.state().viewport.instance_count(), 0, "born at t = 0");
+    // The Editor moves the timeline and evaluates (its live preview): Studio re-places.
+    for (op, params) in [
+        ("graph.set_time", json!({ "time": 1.0 })),
+        ("graph.evaluate", json!({ "lod": 0 })),
+    ] {
+        let r = probe.invoke(Request::new(op, params));
+        assert!(r.error.is_none(), "{op}: {:?}", r.error);
+    }
+    settle(&mut h, |a| a.viewport.instance_count() > 100);
+}
+
+#[test]
 fn a_write_from_the_editor_refreshes_the_window() {
     let dir = tempfile::tempdir().unwrap();
     let server = engine(dir.path());
@@ -1122,6 +1265,34 @@ fn the_materials_section_edits_the_stack_and_rebakes_the_maps() {
     h.get_by_label("Material 1 detail").click();
     h.run_steps(1);
     settle(&mut h, |a| a.viewport.detail_tiles() == 1);
+    // Its tile: 8 m by default; 4 m re-bakes (e2e/materials-detail.spec.ts).
+    let tile = "Material 1 tile (m)";
+    assert_eq!(
+        h.get_by_role_and_label(eframe::egui::accesskit::Role::TextInput, tile)
+            .value()
+            .as_deref(),
+        Some("8")
+    );
+    let bakes = |a: &StudioApp| {
+        a.log_lines()
+            .filter(|l| l.text.starts_with("terrain.textures: ok"))
+            .count()
+    };
+    let before = bakes(h.state());
+    fill(&mut h, tile, "4");
+    h.key_press(eframe::egui::Key::Tab);
+    h.run_steps(1);
+    settle(&mut h, |a| bakes(a) > before);
+    let until = Instant::now() + Duration::from_secs(20);
+    while look()[0]["detail"]["tile_m"] != 4.0 {
+        assert!(
+            Instant::now() < until,
+            "the tile was not written: {}",
+            look()
+        );
+        h.step();
+        std::thread::sleep(Duration::from_millis(20));
+    }
     // Remove it: the stack is empty again.
     h.get_by_label("Remove material 1").scroll_to_me();
     h.run();
@@ -1452,6 +1623,28 @@ fn settings_commit_on_leaving_language_tasks_and_diagnostics() {
             .clone()
     };
     let before = settings()["autosave_interval_s"].as_u64().unwrap();
+    let field = |h: &Harness<'static, StudioApp>, label: &str| {
+        h.get_by_role_and_label(eframe::egui::accesskit::Role::TextInput, label)
+            .value()
+            .unwrap_or_default()
+    };
+    for (label, value) in [
+        ("Autosave (s)", "120"),
+        ("Cache limit (MB)", "2048"),
+        ("Memory budget (GB)", "4"),
+    ] {
+        assert_eq!(field(&h, label), value, "{label}");
+    }
+    // Out of range: the engine refuses, the log says why, the field shows the value again.
+    fill(&mut h, "Cache limit (MB)", "8");
+    h.key_press(eframe::egui::Key::Tab);
+    h.run_steps(1);
+    settle(&mut h, |a| {
+        a.log_lines()
+            .any(|l| l.text.starts_with("project.set_settings: E_INPUT_INVALID"))
+    });
+    h.run();
+    assert_eq!(field(&h, "Cache limit (MB)"), "2048");
     // Autosave: typed, then committed when the field is left (the desktop's onBlur).
     h.get_by_role_and_label(eframe::egui::accesskit::Role::TextInput, "Autosave (s)")
         .scroll_to_me();
