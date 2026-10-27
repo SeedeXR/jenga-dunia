@@ -1,0 +1,476 @@
+//! The user guide's figures, rendered from Studio offscreen (plan P6, S4):
+//! `JD_GUIDE_OUT=<dir> cargo test -p jd-studio --test guide -- --ignored --test-threads 1` writes
+//! `<dir>/raw/<name>.png` and `<dir>/<name>.annot.json` per figure, then
+//! `node apps/desktop/scripts/annotate.mjs <dir>/*.annot.json` draws the callouts into
+//! `<dir>/<name>.png`. The callouts are placed on the controls they name (their accessible label),
+//! so a layout change moves them with it.
+#![allow(clippy::unwrap_used, clippy::expect_used, missing_docs)]
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use eframe::egui::{Rect, accesskit::Role};
+use egui_kittest::Harness;
+use egui_kittest::kittest::{Queryable, by};
+use jd_core::{Context, Registry, Request};
+use jd_ipc::Server;
+use jd_studio::{Options, StudioApp};
+use serde_json::{Value, json};
+
+mod common;
+use common::*;
+
+const SIZE: [f32; 2] = [1440.0, 900.0];
+
+/// A guide world: 4096 m at 1024², seed 42, generated — the desktop guide's.
+fn world(dir: &std::path::Path) -> Arc<Server> {
+    let server = Server::bind(Registry::with_builtins(), Context::default()).expect("bind");
+    let world = json!({ "resolution_px": [1024, 1024], "extent_m": [4096.0, 4096.0], "tile_size": 512, "halo": 4, "origin": [0, 0], "seed": 42 });
+    for (op, params) in [
+        (
+            "project.create",
+            json!({ "path": dir.join("Hills.jdproj"), "name": "Hills", "world": world }),
+        ),
+        ("graph.evaluate", json!({ "lod": 0 })),
+    ] {
+        let r = server.invoke(Request::new(op, params));
+        assert!(r.error.is_none(), "{op}: {:?}", r.error);
+    }
+    Arc::new(server)
+}
+
+fn studio(server: Arc<Server>) -> Harness<'static, StudioApp> {
+    Harness::builder()
+        .with_size(SIZE)
+        .with_max_steps(64)
+        .with_render_cursor(false)
+        .wgpu()
+        .with_context_setup(jd_studio::theme::install)
+        .build_eframe(move |cc| StudioApp::new(cc, server, Options::default()))
+}
+
+/// Settle on a shown terrain with its maps and sky.
+fn ready(h: &mut Harness<'static, StudioApp>) {
+    settle(h, |a| {
+        a.viewport.info().is_some()
+            && a.viewport.maps_px().is_some()
+            && a.viewport.sky_px().is_some()
+    });
+    h.run_steps(4);
+}
+
+/// A callout: the control (its accessible label, or a part of it) and the caption.
+struct Callout(&'static str, &'static str);
+
+/// Render the window as `name` with numbered callouts on the controls they name.
+fn shot(h: &mut Harness<'static, StudioApp>, name: &str, callouts: &[Callout]) {
+    let out = PathBuf::from(std::env::var("JD_GUIDE_OUT").expect("JD_GUIDE_OUT=<dir>"));
+    std::fs::create_dir_all(out.join("raw")).unwrap();
+    // Nothing running (no "working…" in the header), and a few frames for the camera and fades.
+    settle(h, |_| true);
+    h.run_steps(4);
+    let img = render(h);
+    let ppp = img.width() as f32 / SIZE[0];
+    let raw = out.join("raw").join(format!("{name}.png"));
+    img.save(&raw).unwrap();
+    // The largest match: a field over its own label ("Path" names both).
+    let rect = |label: &str| -> Rect {
+        let exact: Vec<Rect> = h.query_all(by().label(label)).map(|n| n.rect()).collect();
+        let all = if exact.is_empty() {
+            h.query_all(by().label_contains(label))
+                .map(|n| n.rect())
+                .collect()
+        } else {
+            exact
+        };
+        all.into_iter()
+            .max_by(|a, b| a.area().total_cmp(&b.area()))
+            .unwrap_or_else(|| panic!("{name}: no control labelled {label:?}"))
+    };
+    let annotations: Vec<Value> = callouts
+        .iter()
+        .enumerate()
+        .map(|(i, Callout(label, _what))| {
+            let r = rect(label).expand(4.0);
+            let [x, y, w, hgt] = [r.left(), r.top(), r.width(), r.height()].map(|v| (v * ppp).round());
+            // The badge sits off the box's top-left corner, or inside the image when that corner is
+            // at an edge. The callout's meaning is in the guide's numbered list, not on the image.
+            let lx = if x < 36.0 { x + w + 18.0 } else { x - 18.0 };
+            let ly = if y < 36.0 { y + hgt / 2.0 } else { y - 18.0 };
+            json!({ "type": "box", "x": x, "y": y, "w": w, "h": hgt, "label": (i + 1).to_string(), "lx": lx, "ly": ly })
+        })
+
+        .collect();
+    let spec =
+        json!({ "src": raw, "out": out.join(format!("{name}.png")), "annotations": annotations });
+    std::fs::write(
+        out.join(format!("{name}.annot.json")),
+        serde_json::to_vec_pretty(&spec).unwrap(),
+    )
+    .unwrap();
+}
+
+/// Scroll a column to a control and let the scroll settle.
+fn show(h: &mut Harness<'static, StudioApp>, label: &str) {
+    h.query_all(by().label(label))
+        .next()
+        .unwrap_or_else(|| panic!("no {label}"))
+        .scroll_to_me();
+    h.run_steps(8);
+}
+
+fn slider(h: &mut Harness<'static, StudioApp>, label: &str, key: eframe::egui::Key, n: usize) {
+    h.get(by().role(Role::Slider).label_contains(label))
+        .scroll_to_me();
+    h.run_steps(4);
+    h.get(by().role(Role::Slider).label_contains(label)).focus();
+    h.run();
+    for _ in 0..n {
+        h.key_press(key);
+        h.run();
+    }
+}
+
+#[test]
+#[ignore = "writes the user guide's figures (JD_GUIDE_OUT)"]
+fn guide_basics() {
+    // Empty: no project yet.
+    let empty =
+        Arc::new(Server::bind(Registry::with_builtins(), Context::default()).expect("bind"));
+    let mut h = studio(empty);
+    h.run_steps(8);
+    shot(&mut h, "desktop-empty", &[]);
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = studio(world(dir.path()));
+    ready(&mut h);
+    shot(&mut h, "desktop-generated", &[]);
+    shot(
+        &mut h,
+        "tutorial-01-create-project",
+        &[
+            Callout("Path", "the project's folder (a .jdproj directory)"),
+            Callout("New", "create it with the world below"),
+            Callout("Generate terrain (⌘G)", "generate"),
+            Callout("Show the log", "what ran, and the log behind it"),
+        ],
+    );
+    show(&mut h, "Export heightmap");
+    shot(
+        &mut h,
+        "tutorial-02-generated",
+        &[
+            Callout("viewport: wgpu", "the viewport readout"),
+            Callout("Measure landform", "the shown layer's statistics"),
+            Callout("Export heightmap", "export"),
+        ],
+    );
+
+    // Settings, scrolled into view in the project column.
+    show(&mut h, "Language");
+    shot(
+        &mut h,
+        "desktop-settings",
+        &[Callout(
+            "Autosave (s)",
+            "project settings, committed on leaving a field",
+        )],
+    );
+    show(&mut h, "Project");
+
+    // The project column collapsed to a strip: the viewport takes its room.
+    h.get_by_label("Collapse the project panel to the edge")
+        .click();
+    h.run_steps(8);
+    shot(
+        &mut h,
+        "desktop-docking",
+        &[Callout("Show the project panel", "bring the panel back")],
+    );
+    h.get_by_label("Show the project panel").click();
+    h.run_steps(8);
+
+    // A low, warm sun.
+    slider(&mut h, "Elevation", eframe::egui::Key::ArrowLeft, 23);
+    settle(&mut h, |a| a.viewport.sky_px().is_some());
+    h.run_steps(8);
+    shot(
+        &mut h,
+        "desktop-sun",
+        &[Callout(
+            "Elevation 12°",
+            "the sun's height; azimuth above it",
+        )],
+    );
+
+    // The physical sky: orbit down to the horizon.
+    let mut cam = h.state().viewport.camera;
+    cam.phi = 1.42;
+    h.state_mut().viewport.set_camera(cam);
+    h.run_steps(8);
+    shot(
+        &mut h,
+        "desktop-sky-dome",
+        &[Callout("Turbidity", "haze of the physical sky")],
+    );
+
+    // Textured (PBR), back at the home view and a midday sun.
+    h.get_by_label("Fit: back to the home view").click();
+    slider(&mut h, "Elevation", eframe::egui::Key::ArrowRight, 23);
+    settle(&mut h, |a| a.viewport.maps_px().is_some());
+    h.run_steps(8);
+    shot(
+        &mut h,
+        "desktop-pbr",
+        &[Callout(
+            "Textured (PBR)",
+            "baked albedo, normal and roughness maps",
+        )],
+    );
+}
+
+/// An engine op that must succeed; its result.
+fn ok(server: &Server, op: &str, params: Value) -> Value {
+    let r = server.invoke(Request::new(op, params));
+    assert!(r.error.is_none(), "{op}: {:?}", r.error);
+    r.result.unwrap_or(Value::Null)
+}
+
+/// The first node of `kind` (its id).
+fn node(server: &Server, kind: &str) -> Value {
+    let g = ok(server, "graph.list", json!({}));
+    g["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["kind"] == kind)
+        .unwrap()["id"]
+        .clone()
+}
+
+fn add(server: &Server, kind: &str, params: Value) -> Value {
+    ok(
+        server,
+        "graph.add_node",
+        json!({ "kind": kind, "params": params }),
+    )["id"]
+        .clone()
+}
+
+fn connect(server: &Server, from: &Value, port: &str, to: &Value, to_port: &str) {
+    ok(
+        server,
+        "graph.connect",
+        json!({ "from": from, "from_port": port, "to": to, "to_port": to_port }),
+    );
+}
+
+/// Publish `from.port` as `layer` (a second output node).
+fn publish(server: &Server, from: &Value, port: &str, layer: &str) {
+    let out = add(server, "jd.output.height@1", json!({ "layer": layer }));
+    connect(server, from, port, &out, "in");
+}
+
+/// Pick `option` in the combo box labelled `combo`.
+fn choose(h: &mut Harness<'static, StudioApp>, combo: &str, option: &str) {
+    h.get(by().role(Role::ComboBox).label(combo)).scroll_to_me();
+    h.run_steps(4);
+    h.get(by().role(Role::ComboBox).label(combo)).click();
+    h.run();
+    h.get_all(by().label(option)).last().unwrap().click();
+    h.run_steps(2);
+}
+
+#[test]
+#[ignore = "writes the user guide's figures (JD_GUIDE_OUT)"]
+fn guide_hydrology() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = world(dir.path());
+    // noise → rivers → height; the rivers mask and a wetness index as their own layers.
+    let rivers = ok(
+        &server,
+        "graph.splice",
+        json!({ "layer": "height", "kind": "jd.hydrology.rivers@1", "params": {} }),
+    )["id"]
+        .clone();
+    publish(&server, &rivers, "rivers", "rivers");
+    let wet = add(&server, "jd.hydrology.wetness@1", json!({}));
+    connect(&server, &rivers, "out", &wet, "in");
+    publish(&server, &wet, "out", "wetness");
+    ok(&server, "graph.evaluate", json!({ "lod": 0 }));
+    let probe = server.clone();
+    let mut h = studio(server);
+    ready(&mut h);
+    shot(&mut h, "desktop-rivers", &[Callout("layer", "")]);
+    choose(&mut h, "colour", "rivers");
+    settle(&mut h, |a| a.viewport.overlay_on());
+    shot(&mut h, "desktop-colour-by-layer", &[Callout("colour", "")]);
+    choose(&mut h, "colour", "height ramp");
+    // Scatter along the rivers.
+    choose(&mut h, "Mask", "rivers");
+    fill(&mut h, "Spacing (m)", "20");
+    show(&mut h, "Place");
+    h.get_by_label("Place").click();
+    settle(&mut h, |a| a.viewport.instance_count() > 0);
+    shot(
+        &mut h,
+        "desktop-scatter",
+        &[Callout("Mask", ""), Callout("Place", "")],
+    );
+    // Paint density on the wetness mask: the brush armed on a clamped strokes node.
+    choose(&mut h, "Mask", "wetness");
+    show(&mut h, "Paint density");
+    h.get_by_label("Paint density").click();
+    settle(&mut h, |a| a.viewport.tool.is_some());
+    // The brush panel opened above the Scatter section: scroll its button back into view.
+    show(&mut h, "Paint density");
+    shot(
+        &mut h,
+        "desktop-paint-density",
+        &[Callout("Paint density", ""), Callout("Sculpting:", "")],
+    );
+    h.get_by_label("Sculpting: drag on the terrain to paint a stroke (click to stop)")
+        .click();
+    h.run_steps(2);
+
+    // A sea at 250 m on the carved terrain; then murky water; then a gale.
+    let sea = add(
+        &probe,
+        "jd.hydrology.sea_level@1",
+        json!({ "level_m": 250.0 }),
+    );
+    connect(&probe, &rivers, "out", &sea, "in");
+    settle(&mut h, |a| a.viewport_readout().contains(" · sea 250 m"));
+    shot(
+        &mut h,
+        "desktop-sea-level",
+        &[Callout("viewport: wgpu", "")],
+    );
+    ok(
+        &probe,
+        "graph.set_param",
+        json!({ "id": sea, "key": "visibility_m", "value": 4.0 }),
+    );
+    ok(
+        &probe,
+        "graph.set_param",
+        json!({ "id": sea, "key": "tint", "value": [0.12, 0.42, 0.36] }),
+    );
+    // Down to the shore, close enough to read the water's colour and the surf.
+    let mut cam = h.state().viewport.camera;
+    (cam.radius, cam.phi) = (0.4 * cam.size, 1.2);
+    h.state_mut().viewport.set_camera(cam);
+    settle(&mut h, |_| true);
+    shot(&mut h, "desktop-water-clarity", &[]);
+    ok(
+        &probe,
+        "graph.set_param",
+        json!({ "id": sea, "key": "wind_speed_mps", "value": 20.0 }),
+    );
+    settle(&mut h, |a| a.viewport_readout().contains(" · waves "));
+    shot(&mut h, "desktop-waves", &[Callout("viewport: wgpu", "")]);
+    h.get_by_label("Fit: back to the home view").click();
+
+    // The seabed under that sea, coloured by class; then the bathymetry's filled floor.
+    let seabed = add(&probe, "jd.biome.seabed@1", json!({ "level_m": 250.0 }));
+    connect(&probe, &rivers, "out", &seabed, "in");
+    publish(&probe, &seabed, "seabed", "seabed");
+    ok(
+        &probe,
+        "graph.set_param",
+        json!({ "id": sea, "key": "level_m", "value": 0.0 }),
+    );
+    ok(&probe, "graph.evaluate", json!({ "lod": 0 }));
+    settle(&mut h, |a| a.layers().iter().any(|l| l == "seabed"));
+    choose(&mut h, "colour", "seabed");
+    settle(&mut h, |a| a.viewport.overlay_on());
+    shot(&mut h, "desktop-seabed", &[Callout("colour", "")]);
+    let bathy = add(&probe, "jd.ocean.bathymetry@1", json!({ "level_m": 250.0 }));
+    connect(&probe, &rivers, "out", &bathy, "in");
+    connect(&probe, &seabed, "seabed", &bathy, "seabed");
+    publish(&probe, &bathy, "out", "floor");
+    ok(&probe, "graph.evaluate", json!({ "lod": 0 }));
+    settle(&mut h, |a| a.layers().iter().any(|l| l == "floor"));
+    choose(&mut h, "layer", "floor");
+    settle(&mut h, |a| a.layer() == Some("floor"));
+    shot(&mut h, "desktop-bathymetry", &[Callout("layer", "")]);
+}
+
+#[test]
+#[ignore = "writes the user guide's figures (JD_GUIDE_OUT)"]
+fn guide_layers_and_project() {
+    // Snow: a cover mask published beside the height, the terrain coloured by it.
+    let dir = tempfile::tempdir().unwrap();
+    let server = world(dir.path());
+    let noise = node(&server, "jd.noise.fbm@1");
+    let snow = add(&server, "jd.climate.snow@1", json!({}));
+    connect(&server, &noise, "out", &snow, "in");
+    publish(&server, &snow, "snow", "snow");
+    ok(&server, "graph.evaluate", json!({ "lod": 0 }));
+    let mut h = studio(server);
+    ready(&mut h);
+    choose(&mut h, "colour", "snow");
+    settle(&mut h, |a| a.viewport.overlay_on());
+    shot(&mut h, "desktop-snow", &[Callout("colour", "")]);
+
+    // The layer stack: a terrace on the noise, and the snowpack beside the output.
+    let dir = tempfile::tempdir().unwrap();
+    let server = world(dir.path());
+    ok(
+        &server,
+        "graph.splice",
+        json!({ "layer": "height", "kind": "jd.filter.terrace@1", "params": {} }),
+    );
+    ok(&server, "graph.add_simulation", json!({ "which": "snow" }));
+    ok(&server, "graph.evaluate", json!({ "lod": 0 }));
+    let mut h = studio(server);
+    ready(&mut h);
+    show(&mut h, "Search layers");
+    shot(
+        &mut h,
+        "desktop-stack",
+        &[
+            Callout("Layer kind", ""),
+            Callout("Remove filter.terrace", ""),
+        ],
+    );
+
+    // Tasks and diagnostics with their results.
+    show(&mut h, "Environment");
+    for (button, op) in [
+        ("Environment", "diag.env: ok"),
+        ("Cache GC", "project.cache_gc: ok"),
+        ("Bench 256²", "diag.bench: ok"),
+    ] {
+        h.get_by_label(button).click();
+        h.run_steps(1);
+        settle(&mut h, |a| a.log_lines().any(|l| l.text.starts_with(op)));
+    }
+    show(&mut h, "Bench 256²");
+    shot(
+        &mut h,
+        "desktop-diagnostics",
+        &[Callout("no running jobs", ""), Callout("Environment", "")],
+    );
+
+    // Import: an EXR export back as a heightmap node.
+    show(&mut h, "Export heightmap");
+    h.get_by_label("Export heightmap").click();
+    h.run_steps(1);
+    settle(&mut h, |_| true);
+    let exr = dir.path().join("Hills.jdproj/exports/height.exr");
+    fill(&mut h, "Import", &exr.display().to_string());
+    h.get_by_label("Import this file (⌘I opens a dialog)")
+        .click();
+    h.run_steps(1);
+    settle(&mut h, |a| {
+        a.log_lines()
+            .any(|l| l.text.starts_with("project.import_asset: ok"))
+    });
+    show(&mut h, "Project");
+    shot(
+        &mut h,
+        "desktop-import",
+        &[Callout("Import", ""), Callout("Show the log", "")],
+    );
+}

@@ -2,7 +2,7 @@
 // Deterministic and CI-friendly: an HTML/SVG overlay rasterised with the local Chrome via Playwright.
 // Usage: node scripts/annotate.mjs <spec.json> [...]   (spec: { src, out, width?, annotations: [...] })
 // Annotation shapes (coordinates in source-image pixels):
-//   { "type": "box",    "x", "y", "w", "h", "label": "1", "text": "..." }
+//   { "type": "box",    "x", "y", "w", "h", "label": "1", "text": "...", "lx"?, "ly"? }  (lx/ly: the badge's centre)
 //   { "type": "circle", "cx", "cy", "r", "label": "2", "text": "..." }
 //   { "type": "arrow",  "x1", "y1", "x2", "y2", "text": "..." }
 import { readFileSync, mkdirSync } from "node:fs";
@@ -19,7 +19,7 @@ function svgFor(spec, w, h) {
     const cap = (dx, dy) => (a.text ? text(a.tx ?? dx, a.ty ?? dy, a.text, a.anchor ?? "start") : "");
     if (a.type === "box") {
       parts.push(`<rect x="${a.x}" y="${a.y}" width="${a.w}" height="${a.h}" rx="6" fill="none" stroke="${RED}" stroke-width="4"/>`);
-      if (a.label) labels.push({ x: a.x - 18, y: a.y - 18, label: a.label });
+      if (a.label) labels.push({ x: a.lx ?? a.x - 18, y: a.ly ?? a.y - 18, label: a.label });
       parts.push(cap(a.x, a.y + a.h + 28));
     } else if (a.type === "circle") {
       parts.push(`<circle cx="${a.cx}" cy="${a.cy}" r="${a.r}" fill="none" stroke="${RED}" stroke-width="4"/>`);

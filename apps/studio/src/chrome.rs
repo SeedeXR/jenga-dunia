@@ -347,7 +347,7 @@ pub fn show(ui: &mut Ui, rect: Rect, st: &State) -> Option<Action> {
     action
 }
 
-/// A `.btn px-1.5` (icon) or `.btn` (icon and label) placed at `r`; `on` is `text-jd-accent`.
+/// A `.btn px-1.5` (icon) or `.btn` (icon and label) placed at `r`; `on` is filled primary.
 fn chip(
     ui: &mut Ui,
     r: Rect,
@@ -358,7 +358,7 @@ fn chip(
     on: bool,
 ) -> egui::Response {
     ui.scope_builder(egui::UiBuilder::new().max_rect(r), |ui| {
-        let fg = if on { color::ACCENT } else { color::FG0 };
+        let fg = color::FG0;
         let image = egui::Image::new(look::icon(icon))
             .fit_to_exact_size(vec2(14.0, 14.0))
             .tint(fg);
@@ -366,12 +366,9 @@ fn chip(
             Some(l) => egui::Button::image_and_text(image, RichText::new(l).size(12.0).color(fg)),
             None => egui::Button::image(image),
         };
-        // An armed tool reads as on: a soft accent fill under the accent text (Figma's active tool).
-        let b = if on {
-            b.fill(color::ACCENT.gamma_multiply(0.18))
-        } else {
-            b
-        };
+        // An armed tool reads as on: an opaque primary fill under white text (Figma's active
+        // tool); a translucent tint lost its text against the bright sky.
+        let b = if on { b.fill(color::PRIMARY) } else { b };
         let resp = ui.add_enabled(enabled, b.min_size(r.size()));
         let tip_owned = tip.to_owned();
         resp.widget_info(|| {
