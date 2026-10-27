@@ -249,7 +249,7 @@ export const PRESETS: Record<string, { name: string; params: Record<string, unkn
   ],
 };
 
-function Inner() {
+function Inner({ inspector }: { inspector: boolean }) {
   const s = useStore();
   const kindMap = useMemo(() => new Map(s.graphKinds.map((k) => [k.kind, { inputs: k.inputs.map((p) => p.name), outputs: k.outputs.map((p) => p.name) }])), [s.graphKinds]);
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode<JdNodeData>>([]);
@@ -332,7 +332,7 @@ function Inner() {
   const schemaProps = useMemo(() => resolveProps(selDef?.param_schema), [selDef]);
 
   return (
-    <div className="grid h-full grid-cols-[1fr_240px]" data-testid="graph-panel">
+    <div className={`grid h-full ${inspector ? "grid-cols-[1fr_240px]" : "grid-cols-1"}`} data-testid="graph-panel">
       <div className="relative">
         <ReactFlow
           nodes={nodes}
@@ -425,7 +425,7 @@ function Inner() {
           </label>
         </div>
       </div>
-      <aside className="overflow-y-auto border-l border-jd-line bg-jd-bg-1 p-2 text-xs" data-testid="graph-inspector">
+      <aside className={`overflow-y-auto border-l border-jd-line bg-jd-bg-1 p-2 text-xs ${inspector ? "" : "hidden"}`} data-testid="graph-inspector">
         {!sel && <div className="text-jd-fg-2">Select a node to edit its parameters. Drag from an output handle to an input to connect.</div>}
         {sel && (
           <>
@@ -509,10 +509,11 @@ function Inner() {
   );
 }
 
-export default function GraphPanel() {
+/** The graph and, unless `inspector` is false (its dock hidden), the selected node's inspector. */
+export default function GraphPanel({ inspector = true }: { inspector?: boolean }) {
   return (
     <ReactFlowProvider>
-      <Inner />
+      <Inner inspector={inspector} />
     </ReactFlowProvider>
   );
 }

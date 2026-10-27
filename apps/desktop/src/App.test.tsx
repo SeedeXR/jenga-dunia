@@ -81,10 +81,10 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 // React Flow needs layout APIs jsdom lacks; the panel is covered by the Playwright e2e.
 vi.mock("./graph/GraphPanel", () => {
-  function GraphPanelMock() {
+  function GraphPanelMock({ inspector = true }: { inspector?: boolean }) {
     const s = useStore();
     return (
-      <div data-testid="graph-panel">
+      <div data-testid="graph-panel" data-inspector={String(inspector)}>
         {s.graph.nodes.map((n) => n.kind).join(",")}
         <button data-testid="graph-evaluate" onClick={() => void s.evaluateGraph()}>
           eval
@@ -218,5 +218,24 @@ describe("App", () => {
     expect(screen.getByTestId("log")).toHaveClass("hidden");
     fireEvent.click(screen.getByTestId("toggle-log"));
     expect(screen.getByTestId("log")).not.toHaveClass("hidden");
+  });
+
+  it("the status bar's dock toggles hide and bring back the layer stack, the inspector and the log", async () => {
+    localStorage.removeItem("jd-docks");
+    await create("/tmp/Docks");
+    await waitFor(() => expect(screen.getByTestId("graph-panel")).toHaveTextContent("jd.noise.fbm@1"));
+    fireEvent.click(screen.getByTestId("dock-stack"));
+    expect(screen.queryByTestId("panel-layers")).toBeNull();
+    expect(screen.getByTestId("dock-stack")).toHaveAttribute("aria-label", "Layer stack: show");
+    fireEvent.click(screen.getByTestId("dock-inspector"));
+    expect(screen.getByTestId("graph-panel")).toHaveAttribute("data-inspector", "false");
+    expect(JSON.parse(localStorage.getItem("jd-docks") ?? "{}")).toEqual({ stack: false, inspector: false }); // remembered
+    fireEvent.click(screen.getByTestId("dock-stack"));
+    fireEvent.click(screen.getByTestId("dock-inspector"));
+    expect(screen.getByTestId("panel-layers")).toBeInTheDocument();
+    expect(screen.getByTestId("graph-panel")).toHaveAttribute("data-inspector", "true");
+    fireEvent.click(screen.getByTestId("dock-log"));
+    expect(screen.getByTestId("log")).not.toHaveClass("hidden");
+    localStorage.removeItem("jd-docks");
   });
 });

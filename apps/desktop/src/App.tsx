@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, PanelBottom, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import GraphPanel from "./graph/GraphPanel";
 import LayerStack from "./graph/LayerStack";
@@ -21,6 +21,24 @@ const NEW_PROJECT = { name: "World", extentM: 4096, resolutionPx: 2048 };
 export default function App() {
   const s = useStore();
   const [logOpen, setLogOpen] = useState(false);
+  // The side docks (Studio's collapsed panels): shown unless this viewer hid them last time.
+  const [docks, setDocks] = useState<{ stack: boolean; inspector: boolean }>(() => {
+    try {
+      return { stack: true, inspector: true, ...(JSON.parse(localStorage.getItem("jd-docks") ?? "{}") as object) };
+    } catch {
+      return { stack: true, inspector: true };
+    }
+  });
+  const toggleDock = (k: "stack" | "inspector") =>
+    setDocks((d) => {
+      const next = { ...d, [k]: !d[k] };
+      try {
+        localStorage.setItem("jd-docks", JSON.stringify(next));
+      } catch {
+        // a private window: the choice lasts this session
+      }
+      return next;
+    });
 
   // Native file dialogs (tauri-plugin-dialog) for the menu; outside Tauri (browser, tests) they reject.
   const pickProjectToOpen = useCallback(async () => {
@@ -208,12 +226,14 @@ export default function App() {
       </header>
 
       {s.project ? (
-        <div className="grid min-h-0 flex-1 grid-cols-[260px_1fr]">
-          <aside className="overflow-y-auto border-r border-jd-line bg-jd-bg-1 p-3" data-testid="panel-layers">
-            <LayerStack />
-          </aside>
+        <div className={`grid min-h-0 flex-1 ${docks.stack ? "grid-cols-[260px_1fr]" : "grid-cols-1"}`}>
+          {docks.stack && (
+            <aside className="overflow-y-auto border-r border-jd-line bg-jd-bg-1 p-3" data-testid="panel-layers">
+              <LayerStack />
+            </aside>
+          )}
           <main className="min-h-0 min-w-0" data-testid="panel-graph">
-            <GraphPanel />
+            <GraphPanel inspector={docks.inspector} />
           </main>
         </div>
       ) : (
@@ -238,6 +258,18 @@ export default function App() {
             {last ? last.text : "Ready"}
           </span>
         </button>
+        {/* The dock toggles (Zed's status bar, as Studio's): accent while the dock shows. */}
+        {(
+          [
+            ["stack", docks.stack ? "Layer stack: hide" : "Layer stack: show", docks.stack, docks.stack ? PanelLeftClose : PanelLeftOpen, () => toggleDock("stack")],
+            ["inspector", docks.inspector ? "Inspector: hide" : "Inspector: show", docks.inspector, docks.inspector ? PanelRightClose : PanelRightOpen, () => toggleDock("inspector")],
+            ["log", logOpen ? "Log panel: hide" : "Log panel: show", logOpen, PanelBottom, () => setLogOpen((v) => !v)],
+          ] as const
+        ).map(([k, tip, shown, Icon, toggle]) => (
+          <button key={k} className={`rounded p-0.5 hover:bg-jd-bg-3 ${shown ? "text-jd-accent" : "text-jd-fg-2 hover:text-jd-fg-0"}`} title={tip} aria-label={tip} aria-pressed={shown} onClick={toggle} data-testid={`dock-${k}`}>
+            <Icon size={13} />
+          </button>
+        ))}
       </footer>
     </div>
   );

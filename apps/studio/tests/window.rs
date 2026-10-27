@@ -861,6 +861,26 @@ fn the_status_bar_carries_the_last_line_and_opens_the_log() {
     h.get_by_label("Hide the log");
     // The log lists it now (its lines start with the local time).
     h.get(egui_kittest::kittest::by().label_contains(&last));
+    // The dock toggles at the bar's right end (Zed's): the log's reads hide now; the side panels
+    // fold to their strips and come back.
+    h.get_by_label("Log panel: hide").click();
+    h.run();
+    h.get_by_label("Show the log");
+    for (hide, strip, show) in [
+        (
+            "Project panel: hide",
+            "Show the project panel",
+            "Project panel: show",
+        ),
+        ("Inspector: hide", "Show the inspector", "Inspector: show"),
+    ] {
+        h.get_by_label(hide).click();
+        h.run();
+        h.get_by_label(strip);
+        h.get_by_label(show).click();
+        h.run();
+        assert!(h.query_by_label(strip).is_none(), "{show} brought it back");
+    }
 }
 
 /// The floating viewport icons on a narrow window (plan P6): the labelled chips drop to icons and

@@ -124,6 +124,15 @@ test.describe("node graph editor against the real core", () => {
       .map((l) => (JSON.parse(l) as { op: string }).op);
     expect(ops).toEqual(["graph.set_param", "graph.add_node", "graph.connect", "graph.move_node", "graph.remove_node", "graph.restore", "graph.restore"]);
 
+    // The status bar's dock toggles hide the inspector and the layer stack and bring them back.
+    await page.getByTestId("dock-inspector").click();
+    await expect(page.getByTestId("graph-inspector")).toBeHidden();
+    await page.getByTestId("dock-stack").click();
+    await expect(page.getByTestId("panel-layers")).toHaveCount(0);
+    await page.getByTestId("dock-inspector").click();
+    await page.getByTestId("dock-stack").click();
+    await expect(page.getByTestId("graph-inspector")).toBeVisible();
+    await expect(page.getByTestId("panel-layers")).toBeVisible();
     expect(errors, "no uncaught page errors").toEqual([]);
     await core.close();
   });

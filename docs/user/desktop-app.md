@@ -86,7 +86,7 @@ Logs: `~/Library/Logs/com.seedexr.jengadunia/jd-studio.log` (Studio and the engi
 
 Every project starts with a two-node graph (`Noise → Height`), the same `graph.json` the CLI and MCP server edit. The Editor window is that graph (Studio's **Graph** button brings it to the front).
 
-**Layout.** Studio's side panels resize by their inner edge and collapse to a 24 px strip with the button in their top corner (the strip's button brings them back); the window's position and size, the panel sizes and the collapsed panels come back on the next launch. The Editor's graph fills its window beside the layer stack. (Tests: Studio's `the_side_panels_collapse_to_a_strip_and_come_back`; window persistence checked by hand on macOS — move, resize, Quit, relaunch.)
+**Layout.** Studio's side panels resize by their inner edge and collapse to a 24 px strip with the button in their top corner (the strip's button brings them back); the window's position and size, the panel sizes and the collapsed panels come back on the next launch. The Editor's graph fills its window beside the layer stack. At the status bar's right end, as in Zed, sit the dock toggles — in Studio the project panel, the graph (it brings the Editor to the front), the inspector and the log; in the Editor the layer stack, the inspector and the log — each accent while its dock shows. (Tests: Studio's `the_side_panels_collapse_to_a_strip_and_come_back`; window persistence checked by hand on macOS — move, resize, Quit, relaunch.)
 
 ![The project panel collapsed to a strip on the left (its button, 1, brings it back); the viewport takes the room](images/desktop-docking.png)
 

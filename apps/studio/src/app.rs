@@ -5861,7 +5861,8 @@ impl StudioApp {
     }
 
     /// The status bar: the last log line (coloured by level; a click opens or closes the log) on
-    /// the left, the viewport readout on the right, truncated rather than overlapping.
+    /// the left; on the right the dock toggles (Zed's status bar: project panel, graph, inspector,
+    /// log — accent while shown) and the viewport readout, truncated rather than overlapping.
     fn status_bar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_centered(|ui| {
             let last = self.log.back();
@@ -5915,6 +5916,75 @@ impl StudioApp {
                 self.log_open = !self.log_open;
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                let docks = [
+                    (
+                        if self.log_open {
+                            "Log panel: hide"
+                        } else {
+                            "Log panel: show"
+                        },
+                        "panel-bottom",
+                        self.log_open,
+                    ),
+                    (
+                        if self.collapsed[1] {
+                            "Inspector: show"
+                        } else {
+                            "Inspector: hide"
+                        },
+                        if self.collapsed[1] {
+                            "panel-right-open"
+                        } else {
+                            "panel-right-close"
+                        },
+                        !self.collapsed[1],
+                    ),
+                    ("Graph: bring the Editor to the front", "workflow", false),
+                    (
+                        if self.collapsed[0] {
+                            "Project panel: show"
+                        } else {
+                            "Project panel: hide"
+                        },
+                        if self.collapsed[0] {
+                            "panel-left-open"
+                        } else {
+                            "panel-left-close"
+                        },
+                        !self.collapsed[0],
+                    ),
+                ];
+                for (k, (tip, icon, shown)) in docks.into_iter().enumerate() {
+                    let (rect, r) = ui.allocate_exact_size(vec2(20.0, 20.0), egui::Sense::click());
+                    if r.hovered() {
+                        ui.painter().rect_filled(rect, 4.0, color::BG3);
+                    }
+                    let tint = if shown {
+                        color::ACCENT
+                    } else if r.hovered() {
+                        color::FG0
+                    } else {
+                        color::FG2
+                    };
+                    egui::Image::new(look::icon(icon)).tint(tint).paint_at(
+                        ui,
+                        egui::Rect::from_center_size(rect.center(), vec2(13.0, 13.0)),
+                    );
+                    let r = r.on_hover_text(tip);
+                    r.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::accesskit::Role::Button, true, tip)
+                    });
+                    if r.clicked() {
+                        match k {
+                            0 => self.log_open = !self.log_open,
+                            1 => self.collapsed[1] = !self.collapsed[1],
+                            2 => self.open_editor(),
+                            _ => self.collapsed[0] = !self.collapsed[0],
+                        }
+                    }
+                }
+                ui.add_space(6.0);
                 ui.add(
                     egui::Label::new(
                         RichText::new(self.viewport_info())
