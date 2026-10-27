@@ -228,6 +228,29 @@ fn the_editors_shortcuts_run_the_toolbar_commands() {
 }
 
 #[test]
+fn the_side_panels_collapse_to_a_strip_and_come_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window(engine(dir.path()));
+    settle(&mut h, |a| a.viewport.info().is_some());
+    let wide = h.state().viewport.rect().width();
+    h.get_by_label("Collapse the project panel to the edge")
+        .click();
+    h.get_by_label("Collapse the inspector to the edge").click();
+    h.run();
+    assert!(
+        h.query_by_label("no running jobs").is_none(),
+        "the left panel is still open"
+    );
+    // The viewport takes the room the panels gave up.
+    assert!(h.state().viewport.rect().width() > wide + 400.0);
+    h.get_by_label("Show the project panel").click();
+    h.get_by_label("Show the inspector").click();
+    h.run();
+    h.get_by_label("no running jobs");
+    assert!((h.state().viewport.rect().width() - wide).abs() < 1.0);
+}
+
+#[test]
 fn a_write_from_the_editor_refreshes_the_window() {
     let dir = tempfile::tempdir().unwrap();
     let server = engine(dir.path());

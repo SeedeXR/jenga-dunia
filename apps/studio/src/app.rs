@@ -241,6 +241,8 @@ pub struct StudioApp {
     /// section's environment, cache GC and bench results.
     jobs: Vec<Value>,
     jobs_polled: Option<Instant>,
+    /// The side panels collapsed to a strip (left, right): the desktop's `jd.layout.dock`.
+    collapsed: [bool; 2],
     /// The engine runs some window's operation (the server's `busy` event): the Editor's
     /// evaluations show in Tasks and the header, and Esc cancels them, as Studio's own do.
     engine_busy: bool,
@@ -818,6 +820,7 @@ impl StudioApp {
             jobs: Vec::new(),
             jobs_polled: None,
             engine_busy: false,
+            collapsed: [false, false],
             diag: [None, None, None],
             reference_path: String::new(),
             reference: None,
@@ -838,6 +841,9 @@ impl StudioApp {
         if let Some(st) = cc.storage {
             if let Some(lang) = eframe::get_value::<String>(st, "jd.lang") {
                 crate::i18n::set(&cc.egui_ctx, &lang);
+            }
+            if let Some(c) = eframe::get_value::<[bool; 2]>(st, "jd.layout.dock") {
+                app.collapsed = c;
             }
             if let Some(px) = eframe::get_value::<u32>(st, "jd.previewMaxPx") {
                 app.preview_max_px = if px == 2048 { 2048 } else { PREVIEW_MAX_PX };
@@ -5361,6 +5367,65 @@ impl StudioApp {
         }
     }
 
+    /// The desktop's collapse button (`top-2 right-2` over the panel's card): panel 0 the left
+    /// (project), 1 the right (inspector).
+    fn collapse_button(&mut self, ui: &mut egui::Ui, side: usize) {
+        let r = ui.min_rect();
+        let at = egui::Rect::from_min_size(
+            egui::pos2(r.right() - 30.0, r.top() + 6.0),
+            vec2(24.0, 22.0),
+        );
+        let (icon, tip) = [
+            ("panel-left-close", "Collapse the project panel to the edge"),
+            ("panel-right-close", "Collapse the inspector to the edge"),
+        ][side];
+        let clicked = ui
+            .scope_builder(egui::UiBuilder::new().max_rect(at), |ui| {
+                look::icon_button(ui, icon, tip, true).clicked()
+            })
+            .inner;
+        if clicked {
+            self.collapsed[side] = true;
+        }
+    }
+
+    /// A collapsed side panel: a 24 px strip with the button that brings it back (the desktop's
+    /// `panel-left-collapsed`).
+    fn collapsed_strip(&mut self, ui: &mut egui::Ui, side: usize) {
+        let (id, icon, tip) = [
+            (
+                "panel-left-collapsed",
+                "panel-left-open",
+                "Show the project panel",
+            ),
+            (
+                "panel-right-collapsed",
+                "panel-right-open",
+                "Show the inspector",
+            ),
+        ][side];
+        let panel = if side == 0 {
+            egui::Panel::left(id)
+        } else {
+            egui::Panel::right(id)
+        };
+        panel
+            .exact_size(24.0)
+            .resizable(false)
+            .frame(
+                egui::Frame::new()
+                    .fill(color::BG1)
+                    .inner_margin(Margin::symmetric(0, 8)),
+            )
+            .show(ui, |ui| {
+                ui.vertical_centered(|ui| {
+                    if look::icon_button(ui, icon, tip, true).clicked() {
+                        self.collapsed[side] = false;
+                    }
+                });
+            });
+    }
+
     /// Whether a toolbar / shortcut / menu command can run now (the toolbar's enabled states).
     pub fn can_run(&self, c: Command) -> bool {
         let (project, idle) = (self.project.is_some(), self.busy == 0);
@@ -5889,12 +5954,13 @@ impl eframe::App for StudioApp {
         eframe::set_value(storage, "jd.lang", &crate::i18n::lang(&self.ctx));
         eframe::set_value(storage, "jd.previewMaxPx", &self.preview_max_px);
         eframe::set_value(storage, "jd.previewTargetMs", &self.preview_target_ms);
+        eframe::set_value(storage, "jd.layout.dock", &self.collapsed);
     }
 
-    /// Only the app settings above persist: panel sizes and scroll positions start fresh, as the
-    /// desktop's do.
+    /// Panel sizes come back on the next launch, as the desktop's (`jd.layout.<panel>`), with
+    /// egui's other memory (scroll positions, open sections).
     fn persist_egui_memory(&self) -> bool {
-        false
+        true
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
@@ -5944,52 +6010,62 @@ impl eframe::App for StudioApp {
                     bottom: 8,
                 }))
                 .show(ui, |ui| self.log_card(ui));
-            egui::Panel::right("panel-right")
-                .resizable(true)
-                .default_size(292.0)
-                .size_range(232.0..=572.0)
-                .frame(bg.inner_margin(Margin {
-                    left: 4,
-                    right: 8,
-                    top: 8,
-                    bottom: 8,
-                }))
-                .show(ui, |ui| {
-                    look::scroll_card(ui, "panel-right", |ui| {
-                        if self.drawing.is_some() {
-                            self.brush_card(ui);
-                        }
-                        if self.grid.on {
-                            self.grid_card(ui);
-                        }
-                        self.sun_card(ui, frame);
-                        ui.add_space(12.0);
-                        self.scatter_card(ui);
-                        ui.add_space(12.0);
-                        self.caves_card(ui);
-                        ui.add_space(12.0);
-                        self.actions_card(ui);
-                        ui.add_space(12.0);
-                        self.materials_card(ui);
-                        ui.add_space(12.0);
-                        self.noise_card(ui);
-                        ui.add_space(16.0);
-                        self.export_card(ui);
+            if self.collapsed[1] {
+                self.collapsed_strip(ui, 1);
+            } else {
+                egui::Panel::right("panel-right")
+                    .resizable(true)
+                    .default_size(292.0)
+                    .size_range(232.0..=572.0)
+                    .frame(bg.inner_margin(Margin {
+                        left: 4,
+                        right: 8,
+                        top: 8,
+                        bottom: 8,
+                    }))
+                    .show(ui, |ui| {
+                        look::scroll_card(ui, "panel-right", |ui| {
+                            if self.drawing.is_some() {
+                                self.brush_card(ui);
+                            }
+                            if self.grid.on {
+                                self.grid_card(ui);
+                            }
+                            self.sun_card(ui, frame);
+                            ui.add_space(12.0);
+                            self.scatter_card(ui);
+                            ui.add_space(12.0);
+                            self.caves_card(ui);
+                            ui.add_space(12.0);
+                            self.actions_card(ui);
+                            ui.add_space(12.0);
+                            self.materials_card(ui);
+                            ui.add_space(12.0);
+                            self.noise_card(ui);
+                            ui.add_space(16.0);
+                            self.export_card(ui);
+                        });
+                        self.collapse_button(ui, 1);
                     });
-                });
-            egui::Panel::left("panel-left")
-                .resizable(true)
-                .default_size(272.0)
-                .size_range(212.0..=532.0)
-                .frame(bg.inner_margin(Margin {
-                    left: 8,
-                    right: 4,
-                    top: 8,
-                    bottom: 8,
-                }))
-                .show(ui, |ui| {
-                    look::scroll_card(ui, "panel-left", |ui| self.project_card(ui));
-                });
+            }
+            if self.collapsed[0] {
+                self.collapsed_strip(ui, 0);
+            } else {
+                egui::Panel::left("panel-left")
+                    .resizable(true)
+                    .default_size(272.0)
+                    .size_range(212.0..=532.0)
+                    .frame(bg.inner_margin(Margin {
+                        left: 8,
+                        right: 4,
+                        top: 8,
+                        bottom: 8,
+                    }))
+                    .show(ui, |ui| {
+                        look::scroll_card(ui, "panel-left", |ui| self.project_card(ui));
+                        self.collapse_button(ui, 0);
+                    });
+            }
         }
         let margin = if self.fullscreen {
             Margin::ZERO

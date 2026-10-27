@@ -136,11 +136,11 @@ pub fn install() {
                 &sep(),
                 &PredefinedMenuItem::services(None),
                 &sep(),
-                &PredefinedMenuItem::hide(None),
+                &PredefinedMenuItem::hide(Some("Hide Jenga Dunia")),
                 &PredefinedMenuItem::hide_others(None),
                 &PredefinedMenuItem::show_all(None),
                 &sep(),
-                &PredefinedMenuItem::quit(None),
+                &PredefinedMenuItem::quit(Some("Quit Jenga Dunia")),
             ],
         )
         .ok()?;

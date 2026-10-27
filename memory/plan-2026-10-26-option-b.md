@@ -296,6 +296,13 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   started the 4096² evaluation. Window test: ⌘S saves, ⌘R evaluates.
   ponytail: no Windows / Linux menu bar (muda's needs `unsafe init_for_hwnd` / a GTK window); the
   keys work there and the Editor window keeps its menus.
+  Closed (slice 2c): G4 the side panels collapse to a 24 px strip and come back (the desktop's
+  buttons and tooltips; `jd.layout.dock` persisted; window test: the viewport gains the room);
+  G5 window position / size (eframe `persist_window`) and panel sizes (egui memory) come back on
+  the next launch — the comments saying the desktop does not were wrong (tauri-plugin-window-state,
+  `jd.layout.<panel>`). Verified on macOS: moved / resized, Quit Jenga Dunia, relaunch → same
+  bounds. The app menu's Hide / Quit read "jd-studio" (muda's default is the process name) — named
+  "Jenga Dunia".
   Open (flake, 2026-10-27): `e2e/paint.spec.ts` failed once inside a full gate run (instance count
   stayed 925 after the density stroke; 30 s poll). Not reproduced in 5 full suites + 12 parallel
   repeats; trace lost (overwritten by reruns — next time copy `test-results/` first). Ruled out:
