@@ -125,6 +125,11 @@ input[type="range"] {
   .btn {
     @apply inline-flex items-center gap-1 rounded bg-jd-bg-2 px-2 py-1 text-xs text-jd-fg-0 transition-colors hover:bg-jd-bg-3 focus-visible:outline-1 focus-visible:outline-jd-accent disabled:cursor-not-allowed disabled:opacity-40;
   }
+  /* Inputs and selects: filled, no border, 4 px corners, an accent ring on focus (plan P6 spec 5,
+     as Studio's text fields). */
+  .jd-field {
+    @apply rounded bg-jd-bg-2 px-1.5 py-0.5 text-xs text-jd-fg-0 outline-none placeholder:text-jd-fg-2 focus:ring-1 focus:ring-jd-accent;
+  }
   /* The main action of a group: filled blue (World Creator's "Fit to Terrain"). */
   .btn-primary {
     @apply bg-jd-primary text-white hover:bg-jd-primary hover:brightness-110;
@@ -141,4 +146,18 @@ input[type="range"] {
     content: "▾";
     @apply text-[10px] text-jd-fg-2;
   }
+}
+
+/* Graph ports: 9 px dots on a ring of the node's fill, accent while hovered or wiring (xyflow's
+   6 px dots were hard to hit). */
+.react-flow__handle {
+  width: 9px;
+  height: 9px;
+  background: var(--color-jd-fg-2);
+  border: 2px solid var(--color-jd-bg-2);
+}
+.react-flow__handle:hover,
+.react-flow__handle.connectingfrom,
+.react-flow__handle.connectingto {
+  background: var(--color-jd-accent);
 }

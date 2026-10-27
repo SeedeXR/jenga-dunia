@@ -102,7 +102,7 @@ test.describe("node graph editor against the real core", () => {
     await blur.click();
     await expect(blur).toHaveClass(/selected/); // the key goes to the selected node; under load the click lands late
     // The guide's figure: the kinds list and Add, Evaluate, the wired blur node, its inspector.
-    await figure(page, testInfo, "tutorial-03-graph", [page.getByTestId("graph-kind"), page.getByTestId("graph-evaluate"), blur, page.getByTestId("graph-inspector")]);
+    await figure(page, testInfo, "tutorial-03-graph", [page.getByTestId("graph-kind"), page.getByTestId("graph-evaluate"), blur, page.getByTestId("graph-inspector").locator("label").first()]);
     await blur.press("Delete");
     await expect(panel.locator(".react-flow__node")).toHaveCount(2);
     await expect(panel.locator(".react-flow__edge")).toHaveCount(1);

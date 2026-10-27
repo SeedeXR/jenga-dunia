@@ -99,7 +99,7 @@ export default function LayerStack() {
     <section data-testid="layer-stack">
       <h2 className="mt-4 mb-1 jd-section">Layers</h2>
       <div className="mb-1 flex gap-1">
-        <select className="min-w-0 flex-1 rounded border border-jd-line bg-jd-bg-2 px-1 text-xs text-jd-fg-0" value={kind} onChange={(e) => setKind(e.target.value)} title="Node kind to add on top of the stack (in front of the height output)" data-testid="layer-add-kind">
+        <select className="min-w-0 flex-1 jd-field" value={kind} onChange={(e) => setKind(e.target.value)} title="Node kind to add on top of the stack (in front of the height output)" data-testid="layer-add-kind">
           {s.graphKinds
             // Chain kinds that need no settings to be added (a shape, an action, a pattern's kind… have their own tools).
             .filter((k) => k.inputs.some((p) => p.name === "in") && k.outputs.some((p) => p.name === "out") && !((k.param_schema as { required?: string[] } | null)?.required?.length))

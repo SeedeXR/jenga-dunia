@@ -45,22 +45,34 @@ function parseKeys(raw: string, isNum: boolean): { keys: [number, unknown][] } |
   return keys.every(([t, v]) => Number.isFinite(t) && (!isNum || Number.isFinite(v as number))) ? { keys } : null;
 }
 
-function JdNode({ data }: NodeProps<FlowNode<JdNodeData>>) {
+/** A kind as the layer stack names it: `jd.filter.blur@1` → `filter.blur`. */
+const shortKind = (kind: string) => kind.split(".").slice(1).join(".").replace(/@\d+$/, "");
+
+function JdNode({ data, selected }: NodeProps<FlowNode<JdNodeData>>) {
   const summary = Object.entries(data.params)
     .slice(0, 3)
     .map(([k, v]) => `${k}=${Array.isArray(v) ? (v.some((x) => typeof x === "object" && x !== null) ? `${v.length} recorded` : v.join("…")) : keysOf(v) ? `⏱${keysOf(v)!.length} keys` : String(v)}`)
     .join(" · ");
   return (
-    <div className="min-w-40 overflow-hidden rounded-lg border border-white/5 bg-jd-bg-2 text-xs text-jd-fg-0 shadow-lg shadow-black/40">
-      <div className="border-b border-white/5 border-l-2 border-l-jd-primary bg-jd-bg-3/60 px-2 py-1 font-semibold">{data.label}</div>
+    <div className={`min-w-40 rounded-lg border ${selected ? "border-jd-accent" : "border-white/5"} bg-jd-bg-2 text-xs text-jd-fg-0 shadow-lg shadow-black/40`}>
+      <div className="rounded-tl-[3px] rounded-tr-lg border-b border-white/5 border-l-2 border-l-jd-primary bg-jd-bg-3/60 px-2 py-1 font-semibold">{data.label}</div>
       <div className="px-2 py-1 text-[11px] text-jd-fg-2">{data.kind}</div>
       {summary && <div className="truncate px-2 pb-1 text-[11px] text-jd-fg-1">{summary}</div>}
-      {data.inputs.map((p, i) => (
-        <Handle key={p} id={p} type="target" position={Position.Left} style={{ top: 28 + i * 14 }} title={p} />
-      ))}
-      {data.outputs.map((p, i) => (
-        <Handle key={p} id={p} type="source" position={Position.Right} style={{ top: 28 + i * 14 }} title={p} />
-      ))}
+      {/* One row per port pair, its handles on the row's edges; a side with several ports names
+          them (rivers: out, rivers, …), a lone `in` / `out` stays a bare handle. */}
+      <div className="pb-1">
+        {Array.from({ length: Math.max(data.inputs.length, data.outputs.length) }, (_, i) => {
+          const [inp, out] = [data.inputs[i], data.outputs[i]];
+          return (
+            <div key={i} className="relative flex h-4 items-center justify-between px-2 text-[10px] text-jd-fg-2">
+              <span>{inp && data.inputs.length > 1 ? inp : ""}</span>
+              <span>{out && data.outputs.length > 1 ? out : ""}</span>
+              {inp && <Handle id={inp} type="target" position={Position.Left} title={inp} />}
+              {out && <Handle id={out} type="source" position={Position.Right} title={out} />}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -149,7 +161,7 @@ function StructuredEditor({ columns, rows, testId, onChange }: { columns: Record
           {Object.entries(columns).map(([k, c]) => (
             <label key={k} className="flex items-center justify-between gap-2 py-0.5" title={c.description}>
               <span className="text-jd-fg-1">{k}</span>
-              <input className="w-28 rounded border border-jd-line bg-jd-bg-2 px-1 text-xs" defaultValue={fmt(row[k], c)} placeholder={c.kind === "range2" ? "min,max" : ""} onBlur={(e) => { if (e.target.value !== fmt(row[k], c)) set(i, k, e.target.value, c); }} data-testid={`${testId}-${i}-${k}`} />
+              <input className="w-28 jd-field" defaultValue={fmt(row[k], c)} placeholder={c.kind === "range2" ? "min,max" : ""} onBlur={(e) => { if (e.target.value !== fmt(row[k], c)) set(i, k, e.target.value, c); }} data-testid={`${testId}-${i}-${k}`} />
             </label>
           ))}
         </div>
@@ -365,10 +377,10 @@ function Inner() {
           </div>
         )}
         <div className="absolute top-2 left-2 flex items-center gap-1">
-          <select className="rounded border border-jd-line bg-jd-bg-2 px-1 py-0.5 text-xs" value={newKind} onChange={(e) => setNewKind(e.target.value)} data-testid="graph-kind">
+          <select className="jd-field" value={newKind} onChange={(e) => setNewKind(e.target.value)} data-testid="graph-kind">
             {s.graphKinds.map((k) => (
               <option key={k.kind} value={k.kind} title={k.kind}>
-                {k.kind.split(".").slice(1).join(".").replace(/@\d+$/, "")}
+                {shortKind(k.kind)}
               </option>
             ))}
           </select>
@@ -385,7 +397,7 @@ function Inner() {
             {s.live ? <Zap size={12} /> : <ZapOff size={12} />}
           </button>
           <select
-            className="rounded border border-jd-line bg-jd-bg-2 px-1 py-0.5 text-xs"
+            className="jd-field"
             title="Evaluate only this output and what feeds it (the gate pattern: erode a coarse chain at the preview lod, then read it back with jd.input.layer in the fine chain)"
             value={s.evalOutput ?? ""}
             onChange={(e) => s.setEvalOutput(e.target.value || null)}
@@ -417,13 +429,13 @@ function Inner() {
         {!sel && <div className="text-jd-fg-2">Select a node to edit its parameters. Drag from an output handle to an input to connect.</div>}
         {sel && (
           <>
-            <div className="mb-1 font-semibold">{sel.ui?.label ?? sel.kind}</div>
+            <div className="text-[12px] font-semibold text-jd-fg-0">{sel.ui?.label ?? shortKind(sel.kind)}</div>
             <div className="mb-2 font-mono text-[11px] text-jd-fg-2">{sel.kind}</div>
             {PRESETS[sel.kind] && (
-              <label className="mb-2 flex items-center justify-between gap-2" title="A named set of parameters for this kind; each value is one journaled edit">
+              <label className="flex min-h-7 items-center justify-between gap-2" title="A named set of parameters for this kind; each value is one journaled edit">
                 <span className="text-jd-fg-1">preset</span>
                 <select
-                  className="w-28 rounded border border-jd-line bg-jd-bg-2 px-1 text-xs"
+                  className="w-28 jd-field"
                   value=""
                   onChange={(e) => {
                     const pr = PRESETS[sel.kind]?.find((x) => x.name === e.target.value);
@@ -449,7 +461,7 @@ function Inner() {
               // f32 params arrive as f64 (0.55 → 0.550000011920929); show 7 significant digits.
               const show = (v: unknown): string => (Array.isArray(v) ? v.map(show).join(",") : typeof v === "number" ? String(Number(v.toPrecision(7))) : String(v));
               return (
-                <label key={key} className={`mb-1 flex gap-2 ${prop.structured && prop.items ? "flex-col items-stretch" : "items-center justify-between"}`} title={prop.description}>
+                <label key={key} className={`flex min-h-7 gap-2 ${prop.structured && prop.items ? "flex-col items-stretch py-1" : "items-center justify-between"}`} title={prop.description}>
                   <span className="text-jd-fg-1">{key}</span>
                   {prop.structured && prop.items ? (
                     <StructuredEditor
@@ -463,14 +475,14 @@ function Inner() {
                       {Array.isArray(current) ? `${current.length} ${prop.nested ? "points" : "recorded"}` : "none"}
                     </span>
                   ) : prop.enum ? (
-                    <select className="w-28 rounded border border-jd-line bg-jd-bg-2 px-1 text-xs" value={String(current ?? prop.default ?? prop.enum[0])} onChange={(e) => void s.setParam(sel.id, key, e.target.value)}>
+                    <select className="w-28 jd-field" value={String(current ?? prop.default ?? prop.enum[0])} onChange={(e) => void s.setParam(sel.id, key, e.target.value)}>
                       {prop.enum.map((v) => (
                         <option key={v}>{v}</option>
                       ))}
                     </select>
                   ) : (
                     <input
-                      className={`w-28 rounded border border-jd-line bg-jd-bg-2 px-1 text-right text-xs ${keysOf(current) ? "text-jd-accent" : ""}`}
+                      className={`w-28 jd-field text-right ${keysOf(current) ? "text-jd-accent" : ""}`}
                       defaultValue={current === undefined ? "" : keysOf(current) ? keysText(keysOf(current)!) : show(current)}
                       placeholder={prop.default === undefined ? "" : show(prop.default)}
                       title={`${prop.description ?? ""}\nKeyframes: t:v, t:v (0:1, 1:300) resolve at the timeline position`.trim()}
