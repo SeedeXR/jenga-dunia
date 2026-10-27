@@ -318,6 +318,12 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   (found by its accessible label), AXMinimized → false. G9 one `select_node` path (layer stack,
   Sculpt's strokes node, the cave line — now clickable, the selected cave's box in the accent)
   announces `selection` to the Editor; caves window test (mutation-checked).
+  Closed (slice 2f): G11 text fields holding a number step with ↑ / ↓ (Shift × 10) by their last
+  decimal place (`look::step_number`, unit + window test; ponytail: not each field's own `step`);
+  G12 `crash::install` — a panic on the window's (main) thread is logged and written by
+  `diag.crash_report` (engine ops report their own; the hook skips other threads, where the
+  engine may hold locks); tests/crash.rs: one report for `main`, none for a worker.
+  All twelve audit gaps closed. Next: retire the WebView viewport and panels (P5).
   Open (flake, 2026-10-27): `e2e/paint.spec.ts` failed once inside a full gate run (instance count
   stayed 925 after the density stroke; 30 s poll). Not reproduced in 5 full suites + 12 parallel
   repeats; trace lost (overwritten by reruns — next time copy `test-results/` first). Ruled out:

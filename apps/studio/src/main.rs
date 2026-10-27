@@ -69,6 +69,7 @@ fn main() -> ExitCode {
         editor,
         project: args.project,
     };
+    jd_studio::crash::install(server.clone());
     // A .jdproj opened from Finder reaches the window (macOS sends it as an Apple Event).
     jd_studio::documents::install();
     let result = eframe::run_native(

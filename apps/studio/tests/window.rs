@@ -316,6 +316,30 @@ fn detail_tiles_blend_over_the_maps_by_their_weights() {
 }
 
 #[test]
+fn number_fields_step_with_the_arrow_keys() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window(engine(dir.path()));
+    settle(&mut h, |a| a.viewport.info().is_some());
+    let spacing = |h: &Harness<'static, StudioApp>| {
+        h.get_by_role_and_label(eframe::egui::accesskit::Role::TextInput, "Spacing (m)")
+            .value()
+    };
+    assert_eq!(spacing(&h).as_deref(), Some("40"));
+    h.get_by_role_and_label(eframe::egui::accesskit::Role::TextInput, "Spacing (m)")
+        .scroll_to_me();
+    h.run();
+    h.get_by_role_and_label(eframe::egui::accesskit::Role::TextInput, "Spacing (m)")
+        .click();
+    h.run();
+    h.key_press(eframe::egui::Key::ArrowUp);
+    h.run();
+    assert_eq!(spacing(&h).as_deref(), Some("41"));
+    h.key_press_modifiers(eframe::egui::Modifiers::SHIFT, eframe::egui::Key::ArrowDown);
+    h.run();
+    assert_eq!(spacing(&h).as_deref(), Some("31"));
+}
+
+#[test]
 fn a_write_from_the_editor_refreshes_the_window() {
     let dir = tempfile::tempdir().unwrap();
     let server = engine(dir.path());

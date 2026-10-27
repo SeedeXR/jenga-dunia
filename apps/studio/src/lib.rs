@@ -3,6 +3,7 @@
 
 pub mod app;
 pub mod chrome;
+pub mod crash;
 pub mod documents;
 pub mod editor;
 pub mod i18n;

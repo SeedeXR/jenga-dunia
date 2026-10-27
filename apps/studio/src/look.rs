@@ -99,9 +99,39 @@ pub fn input(ui: &mut Ui, value: &mut String, width: f32, hint: &str, name: &str
             .font(egui::FontId::proportional(12.0))
             .hint_text(hint),
     );
+    let mut r = r;
+    // A number steps with ↑ / ↓ like the desktop's `type="number"` fields (Shift: × 10).
+    if r.has_focus() {
+        let (up, down, big) = ui.input(|i| {
+            (
+                i.key_pressed(egui::Key::ArrowUp),
+                i.key_pressed(egui::Key::ArrowDown),
+                i.modifiers.shift,
+            )
+        });
+        if (up || down)
+            && let Some(v) = step_number(value, up, big)
+        {
+            *value = v;
+            r.mark_changed();
+        }
+    }
     let name = name.to_owned();
     r.widget_info(|| WidgetInfo::labeled(Role::TextInput, true, &name));
     r
+}
+
+/// `value` stepped up or down by one unit of its last decimal place (× 10 when `big`), keeping
+/// its decimals; `None` when it is not a number.
+/// ponytail: the step follows the typed precision, not each desktop field's `step` attribute;
+/// pass the step in if a field needs another one.
+pub fn step_number(value: &str, up: bool, big: bool) -> Option<String> {
+    let t = value.trim();
+    let v: f64 = t.parse().ok()?;
+    let decimals = t.split_once('.').map_or(0, |(_, f)| f.len());
+    let step = 10f64.powi(-(decimals as i32)) * if big { 10.0 } else { 1.0 };
+    let n = if up { v + step } else { v - step };
+    Some(format!("{n:.decimals$}"))
 }
 
 /// An icon from `assets/icons/` (lucide, rendered by `scripts/studio-icons.mjs`).
@@ -384,6 +414,18 @@ pub fn commit_input(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn numbers_step_by_their_last_decimal_place() {
+        use super::step_number;
+        assert_eq!(step_number("40", true, false).as_deref(), Some("41"));
+        assert_eq!(step_number(" 40 ", false, true).as_deref(), Some("30"));
+        assert_eq!(step_number("0.5", true, false).as_deref(), Some("0.6"));
+        assert_eq!(step_number("0.05", false, false).as_deref(), Some("0.04"));
+        assert_eq!(step_number("-1.25", true, true).as_deref(), Some("-1.15"));
+        assert_eq!(step_number("sky.exr", true, false), None);
+        assert_eq!(step_number("", true, false), None);
+    }
+
     #[test]
     fn every_icon_file_is_registered() {
         // An icon missing from `icon`'s list falls back to the circle without a word (the brush
