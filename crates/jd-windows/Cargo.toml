@@ -1,0 +1,23 @@
+[package]
+name = "jd-windows"
+description = "Jenga Dunia's Win32 glue for Studio: puts the menu bar on Studio's window (muda's `init_for_hwnd`). A no-op elsewhere."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+muda = { version = "0.20", default-features = false }
+raw-window-handle = "0.6"
+
+# Attaching a menu to a window handle is `unsafe` in muda; like jd-macos this crate is a contained
+# exception to the workspace's `forbid`, so the lints are set here.
+[lints.rust]
+unsafe_code = "allow"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"

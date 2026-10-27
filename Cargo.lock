@@ -3461,6 +3461,7 @@ dependencies = [
  "jd-macos",
  "jd-terrain",
  "jd-types",
+ "jd-windows",
  "jiff",
  "muda",
  "rfd",
@@ -3513,6 +3514,14 @@ dependencies = [
  "image",
  "jd-types",
  "ort",
+]
+
+[[package]]
+name = "jd-windows"
+version = "0.0.1"
+dependencies = [
+ "muda",
+ "raw-window-handle",
 ]
 
 [[package]]

@@ -24,6 +24,7 @@ jd-media = { path = "crates/jd-media" }
 jd-fbxsdk = { path = "crates/jd-fbxsdk" }
 jd-ipc = { path = "crates/jd-ipc" }
 jd-macos = { path = "crates/jd-macos" }
+jd-windows = { path = "crates/jd-windows" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 schemars = { version = "1", features = ["preserve_order"] }

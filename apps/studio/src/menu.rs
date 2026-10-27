@@ -1,9 +1,9 @@
-//! The commands the toolbar, the keyboard and the macOS menu bar share, with the Editor's
-//! shortcuts (`build_menu` in apps/desktop/src-tauri). The keys work everywhere (egui); the menu
-//! bar is macOS's (muda, the Editor's menu library).
-//! ponytail: no Windows / Linux menu bar — muda's Windows one needs its `unsafe init_for_hwnd`
-//! (a contained crate, as jd-macos) and its Linux one a GTK window; add them when users ask (the
-//! Editor window keeps its own menus there).
+//! The commands the toolbar, the keyboard and the menu bar share, with the Editor's shortcuts
+//! (`build_menu` in apps/desktop/src-tauri). The keys work everywhere (egui); the menu bar is
+//! muda's (the Editor's menu library): the app's on macOS, the window's on Windows (attached by
+//! jd-windows, which holds the `unsafe` handle call).
+//! ponytail: no Linux menu bar — muda's needs a GTK window and winit's is not one; the keys work
+//! there and the Editor window keeps its own menus. An in-window menu is the upgrade if asked.
 
 use eframe::egui::{Key, KeyboardShortcut, Modifiers};
 use std::sync::{Mutex, OnceLock, PoisonError};
@@ -111,12 +111,46 @@ pub fn wake(ctx: &eframe::egui::Context) {
     let _ = WAKE.set(ctx.clone());
 }
 
-/// The macOS menu bar: the app menu, File, Edit (graph undo / redo — egui's text fields handle
-/// their own copy and paste keys, so the system's text items stay out), Terrain and Window.
-/// Call on the main thread once the window exists. A failure is logged; the keys still work.
-#[cfg(target_os = "macos")]
-pub fn install() {
-    use muda::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu, accelerator::Accelerator};
+/// The menu bar: File, Edit (graph undo / redo — egui's text fields handle their own copy and
+/// paste keys, so the system's text items stay out), Terrain and Window; macOS adds its app menu,
+/// Windows an Exit item and Help ▸ About. Call on the main thread once the window exists (from
+/// eframe's app creator). A failure is logged; the keys still work.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub fn install(cc: &eframe::CreationContext<'_>) {
+    use muda::MenuEvent;
+    let Some(menu) = build() else {
+        tracing::warn!("could not build the menu bar; the keyboard shortcuts still work");
+        return;
+    };
+    #[cfg(target_os = "macos")]
+    {
+        let _ = cc;
+        menu.init_for_nsapp();
+        window_menu(&menu);
+    }
+    #[cfg(target_os = "windows")]
+    if !jd_windows::attach_menu(&menu, cc) {
+        tracing::warn!(
+            "could not attach the menu bar to the window; the keyboard shortcuts still work"
+        );
+        return;
+    }
+    // The menu lives as long as the app.
+    std::mem::forget(menu);
+    MenuEvent::set_event_handler(Some(|e: MenuEvent| {
+        let Some(&(c, ..)) = TABLE.iter().find(|t| e.id == t.1) else {
+            return;
+        };
+        QUEUE.lock().unwrap_or_else(PoisonError::into_inner).push(c);
+        if let Some(ctx) = WAKE.get() {
+            ctx.request_repaint();
+        }
+    }));
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn build() -> Option<muda::Menu> {
+    use muda::{Menu, MenuItem, PredefinedMenuItem, Submenu, accelerator::Accelerator};
     let item = |c: Command| {
         let (_, id, label, keys) = TABLE.iter().find(|t| t.0 == c).copied()?;
         Some(MenuItem::with_id(
@@ -126,8 +160,42 @@ pub fn install() {
             keys.parse::<Accelerator>().ok(),
         ))
     };
-    let build = || -> Option<Menu> {
-        let sep = PredefinedMenuItem::separator;
+    let sep = PredefinedMenuItem::separator;
+    // macOS closes the window from File (Quit is in the app menu); Windows exits from File.
+    #[cfg(target_os = "macos")]
+    let last = PredefinedMenuItem::close_window(None);
+    #[cfg(target_os = "windows")]
+    let last = PredefinedMenuItem::quit(Some("Exit"));
+    let file = Submenu::with_items(
+        "File",
+        true,
+        &[
+            &item(Command::New)?,
+            &item(Command::Open)?,
+            &sep(),
+            &item(Command::Save)?,
+            &sep(),
+            &item(Command::Import)?,
+            &item(Command::Export)?,
+            &sep(),
+            &last,
+        ],
+    )
+    .ok()?;
+    let edit = Submenu::with_items(
+        "Edit",
+        true,
+        &[&item(Command::UndoGraph)?, &item(Command::RedoGraph)?],
+    )
+    .ok()?;
+    let terrain = Submenu::with_items(
+        "Terrain",
+        true,
+        &[&item(Command::Generate)?, &item(Command::Evaluate)?],
+    )
+    .ok()?;
+    #[cfg(target_os = "macos")]
+    {
         let app = Submenu::with_items(
             "Jenga Dunia",
             true,
@@ -144,34 +212,6 @@ pub fn install() {
             ],
         )
         .ok()?;
-        let file = Submenu::with_items(
-            "File",
-            true,
-            &[
-                &item(Command::New)?,
-                &item(Command::Open)?,
-                &sep(),
-                &item(Command::Save)?,
-                &sep(),
-                &item(Command::Import)?,
-                &item(Command::Export)?,
-                &sep(),
-                &PredefinedMenuItem::close_window(None),
-            ],
-        )
-        .ok()?;
-        let edit = Submenu::with_items(
-            "Edit",
-            true,
-            &[&item(Command::UndoGraph)?, &item(Command::RedoGraph)?],
-        )
-        .ok()?;
-        let terrain = Submenu::with_items(
-            "Terrain",
-            true,
-            &[&item(Command::Generate)?, &item(Command::Evaluate)?],
-        )
-        .ok()?;
         let window = Submenu::with_items(
             "Window",
             true,
@@ -184,24 +224,34 @@ pub fn install() {
         )
         .ok()?;
         Menu::with_items(&[&app, &file, &edit, &terrain, &window]).ok()
-    };
-    let Some(menu) = build() else {
-        tracing::warn!("could not build the menu bar; the keyboard shortcuts still work");
-        return;
-    };
-    menu.init_for_nsapp();
-    window_menu(&menu);
-    // The menu lives as long as the app.
-    std::mem::forget(menu);
-    MenuEvent::set_event_handler(Some(|e: MenuEvent| {
-        let Some(&(c, ..)) = TABLE.iter().find(|t| e.id == t.1) else {
-            return;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let window = Submenu::with_items(
+            "Window",
+            true,
+            &[
+                &PredefinedMenuItem::minimize(None),
+                &PredefinedMenuItem::maximize(None),
+            ],
+        )
+        .ok()?;
+        let about = muda::AboutMetadata {
+            name: Some("Jenga Dunia Studio".into()),
+            version: Some(env!("CARGO_PKG_VERSION").into()),
+            ..Default::default()
         };
-        QUEUE.lock().unwrap_or_else(PoisonError::into_inner).push(c);
-        if let Some(ctx) = WAKE.get() {
-            ctx.request_repaint();
-        }
-    }));
+        let help = Submenu::with_items(
+            "Help",
+            true,
+            &[&PredefinedMenuItem::about(
+                Some("About Jenga Dunia"),
+                Some(about),
+            )],
+        )
+        .ok()?;
+        Menu::with_items(&[&file, &edit, &terrain, &window, &help]).ok()
+    }
 }
 
 /// The Window menu lists the open windows (the system fills it in).
@@ -212,9 +262,9 @@ fn window_menu(menu: &muda::Menu) {
     }
 }
 
-/// No menu bar outside macOS (see the module notes); the keys work everywhere.
-#[cfg(not(target_os = "macos"))]
-pub fn install() {}
+/// No menu bar on Linux (see the module notes); the keys work everywhere.
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+pub fn install(_cc: &eframe::CreationContext<'_>) {}
 
 #[cfg(test)]
 mod tests {
@@ -240,7 +290,7 @@ mod tests {
         );
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     #[test]
     fn every_accelerator_parses_for_the_menu_bar() {
         for (_, id, _, keys) in TABLE {
