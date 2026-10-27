@@ -2,7 +2,8 @@
 # Package Jenga Dunia (ADR-0017 P5): Studio is the entry point, the Editor (jd-app) ships beside it.
 # Builds both release binaries (the Editor with its web UI embedded), then `cargo packager`
 # (config: [package.metadata.packager] in apps/studio/Cargo.toml). Output: target/release/
-# (macOS: "Jenga Dunia.app" and a .dmg). Extra arguments go to cargo packager, e.g. `-f app`.
+# (macOS: "Jenga Dunia.app" and a .dmg, both signed ad hoc — no Apple Developer account; see
+# scripts/install.sh). Extra arguments go to cargo packager, e.g. `-f app`.
 # Needs: pnpm, cargo-packager 0.11 (`cargo install cargo-packager --version 0.11.8 --locked`).
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -40,5 +41,9 @@ if [ "$(uname)" = Darwin ]; then
 </dict>
 </plist>
 PLIST
+  # Sealed ad hoc before cargo packager copies it in: the packager signs only the outer bundle
+  # (signing-identity "-" in apps/studio/Cargo.toml), and an unsealed nested app fails
+  # `codesign --verify --deep --strict` and reads as "damaged".
+  codesign --force --sign - --timestamp=none "target/release/Jenga Dunia Editor.app"
 fi
 cargo packager --release -p jd-studio "$@"

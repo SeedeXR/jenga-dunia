@@ -67,4 +67,8 @@ file-associations = [{ extensions = ["jdproj"], name = "Jenga Dunia Project", de
 
 [package.metadata.packager.macos]
 info-plist-path = "../desktop/src-tauri/Info.plist"
+# Ad hoc ("-"): sealed without an Apple Developer account (no Developer ID, no notarization). A
+# "Developer ID Application: …" identity here, plus APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID in
+# the environment, would sign and notarize instead.
+signing-identity = "-"
 embedded-apps = ["../../target/release/Jenga Dunia Editor.app"]
