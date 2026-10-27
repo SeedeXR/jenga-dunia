@@ -24,7 +24,7 @@ full gates, a commit, push, hosted CI.
 | P3 | Viewport parity: PBR maps, sky (Preetham / HDRI), sea + lakes + waves, overlays (masks, heat), scatter instances, caves + x-ray + entrance markers, framed block + shoreline, horizon skirt, fog / rain / post, compass / ruler / hints, sculpt brush (raycast strokes, cursor), grid tool, road drawing, cave entrance placing, stills + flythrough | todo | kittest per feature; pixel checks against today's three.js captures |
 | P4 | Panels to egui: inspector (param editing), Project, Reference image, Real world, Settings (language, LODs, cache), Tasks, Diagnostics, Brush, Grid, Sun, Scatter, Caves, Actions, Simulation layers, Materials, Noise, Export; selection sync node ↔ viewport; shortcuts + menus (muda) | todo | kittest per panel; Editor e2e against Studio |
 | P5 | Switch: Studio + Editor the default; packaging (cargo-packager: icons, `.jdproj`, bundle); retire the WebView viewport; docs, tutorials, captures, acceptance | todo | full suite on the new default; acceptance 19/19 |
-| P6 | Design pass (owner, 2026-10-27: "a clean well designed ui like zed is or figma is"): the floating panels kept (polished), status bar + log dock, sections and controls, neutral palette, the floating viewport icons kept in place but polished (states, tooltips, responsive); both UIs together. Spec: `docs/research/research-log/2026-10-27-zed-figma-ui.md` | in progress | parity captures before / after; e2e + kittest green |
+| P6 | Design pass (owner, 2026-10-27: "a clean well designed ui like zed is or figma is"): the floating panels kept (polished), status bar + log dock, sections and controls, neutral palette, the floating viewport icons kept in place but polished (states, tooltips, responsive); both UIs together. Spec: `docs/research/research-log/2026-10-27-zed-figma-ui.md` | done (2026-10-27) | parity captures before / after; e2e + kittest green |
 
 ## Parity matrix (today's single-process app → where it goes)
 
@@ -422,6 +422,20 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   evaluation published; window test, mutation-checked). Still the earlier app: the Editor's
   graph figures (tutorial-03-graph, rivers-method, biome-rules, gate, timeline — from Playwright),
   desktop-geo (needs a tile server), the menus and the videos.
+  Then: the Editor's five figures through `figure()` in e2e/bridge.ts (the record table overflowing
+  the inspector found and fixed: one block of fields per record); desktop-geo from Studio, fetching
+  public Terrarium tiles — which found the camera looking at y = 0 under a 1.7 km plateau (fixed:
+  the orbit holds sea level inside the terrain's heights); capture's 5 s readback wait failed the
+  flythrough on Windows WARP (now 60 s). Still the earlier app: the menus and the eight videos.
+- P6 S3 (2026-10-27): Editor nodes lay ports out in rows, named when a side has several (rivers'
+  second input `drains` had been an unnamed dot); 9 px handles no longer clipped; selection ring;
+  the inspector's title is the label / short kind; `.jd-field` (filled, borderless, accent focus)
+  for every input. Spec 2: dock toggles at the status bar's right end in both windows (Studio:
+  project panel, graph, inspector, log; Editor: layer stack, inspector, log — the Editor's docks
+  can hide now, remembered in localStorage). Spec 1: on a narrow window the side panels give way
+  to their minimums before the viewport. Spec 3: project name fg-0, world size fg-2.
+  P6 done. Follow-ups outside P6: a Windows / Linux menu bar for Studio (muda is macOS-only
+  here), re-recording the guide's videos, chip shortcuts if the viewport tools get any.
 - Desktop ↔ Studio brush parity: after a transform stroke the desktop selected the transforms
   node and its sculpt strokes silently stopped (they followed the selection only). It now
   remembers the strokes node Sculpt / Paint density chose (`sculptNode`, Studio's `sculpt_node`):
