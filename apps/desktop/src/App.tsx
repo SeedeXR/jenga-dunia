@@ -209,8 +209,14 @@ export default function App() {
         <span className="text-xs text-jd-fg-2" data-testid="app-version">
           v{__JD_VERSION__}
         </span>
-        <span className="text-xs text-jd-fg-1" data-testid="project-title">
-          {s.project ? `${s.project.name} — ${s.project.world.resolution_px[0]}² · ${s.project.world.extent_m[0]} m` : "no project"}
+        <span className="text-xs text-jd-fg-2" data-testid="project-title">
+          {s.project ? (
+            <>
+              <span className="text-jd-fg-0">{s.project.name}</span> — {s.project.world.resolution_px[0]}² · {s.project.world.extent_m[0]} m
+            </>
+          ) : (
+            "no project"
+          )}
         </span>
         {job && (
           <span className="ml-auto flex items-center gap-2 text-xs text-jd-accent" data-testid="job-progress">

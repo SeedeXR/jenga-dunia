@@ -5240,16 +5240,28 @@ impl StudioApp {
                     .size(12.0)
                     .color(color::FG2),
             );
-            let readout = match &self.project {
-                Some(p) => format!(
-                    "{} — {}² · {} m",
-                    p["name"].as_str().unwrap_or_default(),
-                    p["world"]["resolution_px"][0],
-                    number(&p["world"]["extent_m"][0])
+            // The project's name in the primary colour, its world size after it in the hint colour
+            // (plan P6 spec 3); one label, so it reads as one line.
+            let (name, size) = match &self.project {
+                Some(p) => (
+                    p["name"].as_str().unwrap_or_default().to_owned(),
+                    format!(
+                        " — {}² · {} m",
+                        p["world"]["resolution_px"][0],
+                        number(&p["world"]["extent_m"][0])
+                    ),
                 ),
-                None => "no project".into(),
+                None => (String::new(), "no project".into()),
             };
-            ui.label(RichText::new(readout).size(12.0).color(color::FG2));
+            let mut title = egui::text::LayoutJob::default();
+            for (text, c) in [(name, color::FG0), (size, color::FG2)] {
+                title.append(
+                    &text,
+                    0.0,
+                    egui::TextFormat::simple(egui::FontId::proportional(12.0), c),
+                );
+            }
+            ui.label(title);
             self.toolbar(ui, frame);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 self.job_progress(ui);
