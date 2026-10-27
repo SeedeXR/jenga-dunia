@@ -76,6 +76,22 @@ impl<'a> Range<'a> {
     }
 }
 
+/// Keep the arrow keys for the focused slider: egui otherwise moves the focus with them (to the
+/// next widget that way), so a slider stepped with ← lost the focus after one step (egui's own
+/// Slider does the same).
+fn claim_arrows(ui: &Ui, id: egui::Id) {
+    ui.memory_mut(|m| {
+        m.set_focus_lock_filter(
+            id,
+            egui::EventFilter {
+                horizontal_arrows: true,
+                vertical_arrows: true,
+                ..Default::default()
+            },
+        );
+    });
+}
+
 impl Widget for Range<'_> {
     fn ui(self, ui: &mut Ui) -> Response {
         let (rect, mut resp) =
@@ -101,6 +117,7 @@ impl Widget for Range<'_> {
             *self.value = self.snap(lo + t * span);
         }
         if resp.has_focus() {
+            claim_arrows(ui, resp.id);
             let step = if self.step > 0.0 {
                 self.step
             } else {
@@ -208,6 +225,7 @@ impl Widget for VBar<'_> {
             *self.value = snap(lo + t * span);
         }
         if resp.has_focus() {
+            claim_arrows(ui, resp.id);
             let (down, up) = ui.input(|i| {
                 (
                     i.key_pressed(Key::ArrowLeft) || i.key_pressed(Key::ArrowDown),

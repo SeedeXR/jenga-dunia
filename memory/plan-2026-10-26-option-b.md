@@ -349,6 +349,11 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   keeps 0..40 m); diagnostics lines (cpus / GB, blobs · limit 2048 MB, S1 256² … thermal×50);
   scatter growing with the timeline (0 at t = 0, > 100 at t = 1 after the Editor's set_time +
   evaluate).
+  Batch 5: the sun / sky / clouds / fog readouts follow their sliders; PNG export 16-bit with
+  W_EXPORT_LOSS; an EXR export back through Import as a heightmap node. Fix found by the port:
+  Studio's sliders (widgets::Range, VBar) lost the keyboard focus after one ← / ↓ step — egui
+  moves the focus with the arrows unless the focused widget claims them (its own Slider does);
+  both now set a focus-lock filter for the arrows.
   Open (flake, 2026-10-27): `e2e/paint.spec.ts` failed once inside a full gate run (instance count
   stayed 925 after the density stroke; 30 s poll). Not reproduced in 5 full suites + 12 parallel
   repeats; trace lost (overwritten by reruns — next time copy `test-results/` first). Ruled out:

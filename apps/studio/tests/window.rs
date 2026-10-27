@@ -527,6 +527,84 @@ fn scatter_grows_with_the_timeline() {
     settle(&mut h, |a| a.viewport.instance_count() > 100);
 }
 
+/// e2e/terrain.spec.ts in Studio: the sun, sky, clouds and fog readouts follow their sliders; a
+/// PNG export is 16-bit with W_EXPORT_LOSS; an EXR export comes back through Import as a
+/// heightmap node.
+#[test]
+fn the_sky_readouts_follow_their_sliders_and_heightmaps_go_out_and_back() {
+    use eframe::egui::accesskit::Role;
+    use egui_kittest::kittest::by;
+    let dir = tempfile::tempdir().unwrap();
+    let server = engine(dir.path());
+    let probe = server.clone();
+    let mut h = window(server);
+    settle(&mut h, |a| a.viewport.sky_px().is_some());
+    let readout = |h: &Harness<'static, StudioApp>| h.state().viewport_readout();
+    assert!(readout(&h).contains(" · sun 35°/140°"), "{}", readout(&h));
+    assert!(readout(&h).contains(" · sky 512×256"), "{}", readout(&h));
+    h.get(by().role(Role::Slider).label("Turbidity 3"));
+    // A slider stepped by its keys: Elevation 35° → 12°, Clouds → 60 %, Fog → 50 %.
+    let step = |h: &mut Harness<'static, StudioApp>, label: &str, key, n: usize| {
+        h.get(by().role(Role::Slider).label(label)).scroll_to_me();
+        h.run();
+        h.get(by().role(Role::Slider).label(label)).focus();
+        h.run();
+        for _ in 0..n {
+            h.key_press(key);
+            h.run();
+        }
+    };
+    step(&mut h, "Elevation 35°", eframe::egui::Key::ArrowLeft, 23);
+    assert!(readout(&h).contains(" · sun 12°/140°"), "{}", readout(&h));
+    step(&mut h, "Clouds 0 %", eframe::egui::Key::ArrowRight, 12);
+    settle(&mut h, |a| {
+        a.log_lines().any(|l| l.text.contains("clouds 60 %"))
+    });
+    step(&mut h, "Fog 0 %", eframe::egui::Key::ArrowRight, 10);
+    assert!(readout(&h).contains(" · fog 50 %"), "{}", readout(&h));
+    // PNG: 16-bit, with the precision warning in the log.
+    let export = |h: &mut Harness<'static, StudioApp>, file: &str| {
+        fill(h, "Export file", file);
+        h.get_by_label("Export heightmap").click();
+        h.run_steps(1);
+        settle(h, |_| true);
+    };
+    export(&mut h, "h.png");
+    assert!(
+        h.state()
+            .log_lines()
+            .any(|l| l.text.contains("W_EXPORT_LOSS"))
+    );
+    let png = std::fs::read(dir.path().join("Kit.jdproj/exports/h.png")).unwrap();
+    assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n");
+    assert_eq!(png[24], 16, "IHDR bit depth");
+    // EXR out, then in through Import: copied into assets/ and a heightmap node reading it.
+    export(&mut h, "h.exr");
+    let exr = dir.path().join("Kit.jdproj/exports/h.exr");
+    assert!(exr.exists());
+    fill(&mut h, "Import", &exr.display().to_string());
+    h.get_by_label("Import this file (⌘I opens a dialog)")
+        .click();
+    h.run_steps(1);
+    settle(&mut h, |a| {
+        a.log_lines()
+            .any(|l| l.text.starts_with("project.import_asset: ok"))
+    });
+    assert!(dir.path().join("Kit.jdproj/assets/h.exr").exists());
+    let g = probe
+        .invoke(Request::new("graph.list", json!({})))
+        .result
+        .unwrap();
+    assert!(
+        g["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|n| n["kind"] == "jd.input.heightmap@1" && n["params"]["path"] == "h.exr"),
+        "{g}"
+    );
+}
+
 #[test]
 fn a_write_from_the_editor_refreshes_the_window() {
     let dir = tempfile::tempdir().unwrap();
