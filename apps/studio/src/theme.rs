@@ -24,25 +24,25 @@ pub fn semibold(size: f32) -> FontId {
 pub mod color {
     use super::Color32;
     /// `--color-jd-bg-0`: page, text fields, viewport background.
-    pub const BG0: Color32 = Color32::from_rgb(0x0c, 0x0f, 0x15);
+    pub const BG0: Color32 = Color32::from_rgb(0x14, 0x14, 0x14);
     /// `--color-jd-bg-1`: panels.
-    pub const BG1: Color32 = Color32::from_rgb(0x15, 0x1a, 0x24);
+    pub const BG1: Color32 = Color32::from_rgb(0x1c, 0x1c, 0x1c);
     /// `--color-jd-bg-2`: cards, windows.
-    pub const BG2: Color32 = Color32::from_rgb(0x1d, 0x23, 0x31);
+    pub const BG2: Color32 = Color32::from_rgb(0x26, 0x26, 0x26);
     /// `--color-jd-bg-3`: buttons, scrollbars.
-    pub const BG3: Color32 = Color32::from_rgb(0x28, 0x30, 0x43);
+    pub const BG3: Color32 = Color32::from_rgb(0x33, 0x33, 0x33);
     /// `--color-jd-line`: separators.
-    pub const LINE: Color32 = Color32::from_rgb(0x2b, 0x33, 0x46);
+    pub const LINE: Color32 = Color32::from_rgb(0x2c, 0x2c, 0x2c);
     /// `--color-jd-fg-0`: primary text.
-    pub const FG0: Color32 = Color32::from_rgb(0xee, 0xf1, 0xf7);
+    pub const FG0: Color32 = Color32::from_rgb(0xec, 0xec, 0xec);
     /// `--color-jd-fg-1`: secondary text.
-    pub const FG1: Color32 = Color32::from_rgb(0xbe, 0xc6, 0xd5);
+    pub const FG1: Color32 = Color32::from_rgb(0xb8, 0xb8, 0xb8);
     /// `--color-jd-fg-2`: hints.
-    pub const FG2: Color32 = Color32::from_rgb(0x8a, 0x94, 0xa9);
+    pub const FG2: Color32 = Color32::from_rgb(0x85, 0x85, 0x85);
     /// `--color-jd-accent`.
-    pub const ACCENT: Color32 = Color32::from_rgb(0x6b, 0x8c, 0xff);
+    pub const ACCENT: Color32 = Color32::from_rgb(0x4b, 0x9c, 0xf5);
     /// `--color-jd-primary`.
-    pub const PRIMARY: Color32 = Color32::from_rgb(0x3f, 0x63, 0xf2);
+    pub const PRIMARY: Color32 = Color32::from_rgb(0x1d, 0x72, 0xe8);
     /// `--color-jd-warn`.
     pub const WARN: Color32 = Color32::from_rgb(0xf5, 0xc4, 0x51);
     /// `--color-jd-error`.
@@ -126,25 +126,23 @@ pub fn install(ctx: &egui::Context) {
     v.selection.stroke.color = color::ACCENT;
     v.widgets.noninteractive.bg_stroke.color = color::LINE;
     v.widgets.noninteractive.fg_stroke.color = color::FG1;
-    // `.btn`: bg-2 with a white/5 hairline; hover bg-3 and white/10; rounded-md.
-    let hair = egui::Color32::from_rgba_premultiplied(13, 13, 13, 13);
-    let hair_hover = egui::Color32::from_rgba_premultiplied(26, 26, 26, 26);
+    // `.btn`: filled bg-2, no border, hover bg-3; 4 px corners (the design pass, plan P6).
     for w in [
         &mut v.widgets.inactive,
         &mut v.widgets.hovered,
         &mut v.widgets.active,
         &mut v.widgets.open,
     ] {
-        w.corner_radius = egui::CornerRadius::same(6);
+        w.corner_radius = egui::CornerRadius::same(4);
         w.expansion = 0.0;
     }
     v.widgets.inactive.weak_bg_fill = color::BG2;
     v.widgets.inactive.bg_fill = color::BG2;
-    v.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, hair);
+    v.widgets.inactive.bg_stroke = egui::Stroke::NONE;
     v.widgets.inactive.fg_stroke.color = color::FG0;
     v.widgets.hovered.weak_bg_fill = color::BG3;
     v.widgets.hovered.bg_fill = color::BG3;
-    v.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, hair_hover);
+    v.widgets.hovered.bg_stroke = egui::Stroke::NONE;
     v.widgets.hovered.fg_stroke.color = color::FG0;
     // Text fields (`inputCls`): bg-2, focus border accent.
     v.text_edit_bg_color = Some(color::BG2);

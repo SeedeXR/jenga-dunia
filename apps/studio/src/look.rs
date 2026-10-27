@@ -14,17 +14,17 @@ pub const HAIRLINE: Color32 = Color32::from_rgba_premultiplied(13, 13, 13, 13);
 /// `border-white/10`.
 pub const HAIRLINE_HOVER: Color32 = Color32::from_rgba_premultiplied(26, 26, 26, 26);
 
-/// `.jd-panel`: a floating card (`rounded-xl bg-jd-bg-1`, a soft shadow, a `white/5` ring).
+/// `.jd-panel`: a floating card (`rounded-[10px] bg-jd-bg-1`, a quiet shadow, a `white/5` ring).
 pub fn card() -> Frame {
     Frame::new()
         .fill(color::BG1)
-        .corner_radius(CornerRadius::same(12))
+        .corner_radius(CornerRadius::same(10))
         .stroke(Stroke::new(1.0, HAIRLINE))
         .shadow(Shadow {
-            offset: [0, 10],
-            blur: 30,
+            offset: [0, 4],
+            blur: 16,
             spread: 0,
-            color: Color32::from_black_alpha(115),
+            color: Color32::from_black_alpha(80),
         })
         .inner_margin(Margin::same(12))
 }
@@ -58,6 +58,14 @@ pub fn scroll_card(ui: &mut Ui, id: &str, add: impl FnOnce(&mut Ui)) {
 pub fn section(ui: &mut Ui, title: &str) {
     let title = crate::i18n::tr(ui.ctx(), title);
     let title = title.as_str();
+    // Sections after the first in a column are set apart by a hairline (Figma's property panel).
+    if ui.cursor().top() - ui.min_rect().top() > 4.0 {
+        let y = ui.cursor().top() + 2.0;
+        let r = ui.max_rect();
+        ui.painter()
+            .hline(r.left()..=r.right(), y, Stroke::new(1.0, color::LINE));
+        ui.add_space(12.0);
+    }
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 6.0;
         let (r, _) = ui.allocate_exact_size(vec2(8.0, 12.0), Sense::hover());
@@ -73,7 +81,7 @@ pub fn section(ui: &mut Ui, title: &str) {
         ));
         ui.label(
             RichText::new(title)
-                .font(theme::semibold(12.5))
+                .font(theme::semibold(12.0))
                 .color(color::FG0),
         );
     });

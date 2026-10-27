@@ -384,6 +384,15 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   `shape`") — follow-up for S3. scripts/studio-icons.mjs now reads Studio's icon list (it read the
   desktop's App.tsx imports). Owner, same day: no mountain icon — Generate is the word alone, the
   strip's cone button draws lucide `cone`.
+- P6 S1, first part (2026-10-27): the neutral palette in both UIs (bg 141414 / 1c1c1c / 262626 /
+  333333, line 2c2c2c, fg ececec / b8b8b8 / 858585, accent 4b9cf5, primary 1d72e8; the token test
+  keeps them matched); Studio's status bar (24 px: the last log line, one click target that opens
+  the log dock — closed by default — and the viewport readout, moved out of the header, now
+  36 px); sections set apart by a hairline after the first, 12 px headings; buttons and fields
+  filled without borders, 4 px corners; the floating cards keep their place with a 10 px radius
+  and a quieter shadow (the Editor's CSS the same). Window test for the status bar.
+  Next in S1: the floating icons' states / tooltips with shortcuts / narrow-viewport behaviour,
+  then the Editor's graph window (S3).
   Open (flake, 2026-10-27): `e2e/paint.spec.ts` failed once inside a full gate run (instance count
   stayed 925 after the density stroke; 30 s poll). Not reproduced in 5 full suites + 12 parallel
   repeats; trace lost (overwritten by reruns — next time copy `test-results/` first). Ruled out:

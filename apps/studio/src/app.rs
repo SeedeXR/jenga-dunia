@@ -246,6 +246,9 @@ pub struct StudioApp {
     jobs_polled: Option<Instant>,
     /// The side panels collapsed to a strip (left, right): the desktop's `jd.layout.dock`.
     collapsed: [bool; 2],
+    /// The log dock above the status bar is open (closed by default; the status bar shows the
+    /// last line).
+    log_open: bool,
     /// The engine runs some window's operation (the server's `busy` event): the Editor's
     /// evaluations show in Tasks and the header, and Esc cancels them, as Studio's own do.
     engine_busy: bool,
@@ -847,6 +850,7 @@ impl StudioApp {
             jobs_polled: None,
             engine_busy: false,
             collapsed: [false, false],
+            log_open: false,
             diag: [None, None, None],
             reference_path: String::new(),
             reference: None,
@@ -5244,19 +5248,6 @@ impl StudioApp {
             self.toolbar(ui, frame);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 self.job_progress(ui);
-                // The readout takes what the toolbar and the layer picker leave, truncated with an
-                // ellipsis rather than running under the toolbar.
-                let picker = if self.layers.len() > 1 { 400.0 } else { 0.0 };
-                let room = (ui.available_width() - picker).max(0.0);
-                let info = self.viewport_info();
-                ui.allocate_ui(egui::vec2(room, ui.available_height()), |ui| {
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.add(
-                            egui::Label::new(RichText::new(info).size(12.0).color(color::FG2))
-                                .truncate(),
-                        );
-                    });
-                });
                 if self.layers.len() > 1 {
                     // Right to left: the colour picker, then the layer picker.
                     let mut colour = self.color_layer.clone();
@@ -5864,6 +5855,73 @@ impl StudioApp {
         self.settings_card(ui);
     }
 
+    /// The status bar: the last log line (coloured by level; a click opens or closes the log) on
+    /// the left, the viewport readout on the right, truncated rather than overlapping.
+    fn status_bar(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal_centered(|ui| {
+            let last = self.log.back();
+            let (text, c) = match last {
+                Some(l) => (
+                    l.text.clone(),
+                    match l.level {
+                        Level::Info => color::FG2,
+                        Level::Warn => color::WARN,
+                        Level::Error => color::ERROR,
+                    },
+                ),
+                None => ("Ready".to_owned(), color::FG2),
+            };
+            // One click target for the whole half: the chevron and the line, truncated.
+            let tip = if self.log_open {
+                "Hide the log"
+            } else {
+                "Show the log"
+            };
+            let size = vec2(ui.available_width() * 0.5, ui.available_height());
+            let (rect, r) = ui.allocate_exact_size(size, egui::Sense::click());
+            let icon = if self.log_open {
+                "chevron-down"
+            } else {
+                "chevron-right"
+            };
+            let tint = if r.hovered() { color::FG0 } else { color::FG2 };
+            egui::Image::new(look::icon(icon)).tint(tint).paint_at(
+                ui,
+                egui::Rect::from_center_size(
+                    egui::pos2(rect.left() + 6.0, rect.center().y),
+                    vec2(12.0, 12.0),
+                ),
+            );
+            let galley = egui::WidgetText::from(RichText::new(text).size(11.5).color(c))
+                .into_galley(
+                    ui,
+                    Some(egui::TextWrapMode::Truncate),
+                    rect.width() - 20.0,
+                    egui::FontSelection::Default,
+                );
+            ui.painter().galley(
+                egui::pos2(rect.left() + 18.0, rect.center().y - galley.size().y / 2.0),
+                galley,
+                c,
+            );
+            let r = r.on_hover_text(tip);
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::accesskit::Role::Button, true, tip));
+            if r.clicked() {
+                self.log_open = !self.log_open;
+            }
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(self.viewport_info())
+                            .size(11.5)
+                            .color(color::FG2),
+                    )
+                    .truncate(),
+                );
+            });
+        });
+    }
+
     fn log_card(&mut self, ui: &mut egui::Ui) {
         look::card()
             .inner_margin(Margin::symmetric(12, 8))
@@ -6091,22 +6149,34 @@ impl eframe::App for StudioApp {
         if !self.fullscreen {
             // The desktop's grid: a 40 px header, the panels, a 160 px log.
             egui::Panel::top("header")
-                .exact_size(40.0)
+                .exact_size(36.0)
                 .frame(
                     egui::Frame::new()
                         .fill(color::BG1)
                         .inner_margin(Margin::symmetric(12, 0)),
                 )
                 .show(ui, |ui| self.header(ui, frame));
-            egui::Panel::bottom("log")
-                .exact_size(160.0)
-                .frame(bg.inner_margin(Margin {
-                    left: 8,
-                    right: 8,
-                    top: 0,
-                    bottom: 8,
-                }))
-                .show(ui, |ui| self.log_card(ui));
+            // The status bar (Zed's): the last log line, which opens the log, and the viewport
+            // readout; the log is a closed dock above it.
+            egui::Panel::bottom("status")
+                .exact_size(24.0)
+                .frame(
+                    egui::Frame::new()
+                        .fill(color::BG1)
+                        .inner_margin(Margin::symmetric(12, 0)),
+                )
+                .show(ui, |ui| self.status_bar(ui));
+            if self.log_open {
+                egui::Panel::bottom("log")
+                    .exact_size(160.0)
+                    .frame(bg.inner_margin(Margin {
+                        left: 8,
+                        right: 8,
+                        top: 0,
+                        bottom: 4,
+                    }))
+                    .show(ui, |ui| self.log_card(ui));
+            }
             if self.collapsed[1] {
                 self.collapsed_strip(ui, 1);
             } else {

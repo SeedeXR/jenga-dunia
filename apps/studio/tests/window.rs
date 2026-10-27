@@ -938,6 +938,26 @@ fn paint_density_arms_a_clamped_brush_on_the_mask() {
     assert_eq!(strokes["params"]["clamp"], json!([0.0, 1.0]), "{strokes}");
 }
 
+/// The status bar (plan P6): the last log line and the viewport readout; the log is closed until
+/// the line is clicked.
+#[test]
+fn the_status_bar_carries_the_last_line_and_opens_the_log() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window(engine(dir.path()));
+    settle(&mut h, |a| a.viewport.info().is_some());
+    let last = h.state().log_lines().last().unwrap().text.clone();
+    h.get(egui_kittest::kittest::by().label_contains("viewport: wgpu · "));
+    assert!(
+        h.query_by_label(&last).is_none(),
+        "the log is closed: the line is drawn in the status bar, not listed"
+    );
+    h.get_by_label("Show the log").click();
+    h.run();
+    h.get_by_label("Hide the log");
+    // The log lists it now (its lines start with the local time).
+    h.get(egui_kittest::kittest::by().label_contains(&last));
+}
+
 #[test]
 fn a_write_from_the_editor_refreshes_the_window() {
     let dir = tempfile::tempdir().unwrap();
