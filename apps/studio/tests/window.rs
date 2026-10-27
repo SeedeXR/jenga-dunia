@@ -2328,6 +2328,41 @@ fn sculpt_paints_strokes_and_transforms_and_the_road_lays_a_spline() {
     assert!(h.state().viewport.tool.is_none(), "one drag, one road");
 }
 
+/// A terrain far above sea level (a DEM of the Kenyan highlands: 1.7 km up on a 2 km world) is in
+/// view: the camera orbits sea level held inside its heights, not the origin, where the home view's
+/// eye sat under it.
+#[test]
+fn a_terrain_far_above_sea_level_stays_in_view() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = Server::bind(Registry::with_builtins(), Context::default()).expect("bind");
+    let world = json!({ "resolution_px": [256, 256], "extent_m": [2048.0, 2048.0], "tile_size": 256, "halo": 0, "origin": [0.0, 0.0], "seed": 7 });
+    for (op, params) in [
+        (
+            "project.create",
+            json!({ "path": dir.path().join("High.jdproj"), "name": "High", "world": world }),
+        ),
+        (
+            "terrain.generate",
+            json!({ "noise": { "height_range_m": [1700.0, 1750.0] } }),
+        ),
+    ] {
+        let r = server.invoke(Request::new(op, params));
+        assert!(r.error.is_none(), "{op}: {:?}", r.error);
+    }
+    let mut h = window(Arc::new(server));
+    settle(&mut h, |a| a.viewport.info().is_some());
+    // The orbit's centre is inside the terrain's heights and the eye above them.
+    let in_view = |h: &Harness<'static, StudioApp>| {
+        let c = h.state().viewport.camera;
+        let eye_y = c.centre_y + c.radius * c.phi.cos();
+        (1700.0..=1750.0).contains(&c.centre_y) && eye_y > 1750.0
+    };
+    assert!(in_view(&h), "home view: {:?}", h.state().viewport.camera);
+    h.get_by_label("Fit: back to the home view").click();
+    h.run_steps(2);
+    assert!(in_view(&h), "Fit: {:?}", h.state().viewport.camera);
+}
+
 /// On a world over 512² a live edit evaluates at a coarser LOD, published as `height#lod1`: the
 /// viewport shows that evaluation, not the full-resolution layer from before the edit.
 #[test]

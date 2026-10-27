@@ -709,8 +709,8 @@ pub fn fog_planes(size: f32, amount: f32) -> [f32; 2] {
     [size * (2.0 - 1.95 * f), size * (12.0 - 11.2 * f)]
 }
 
-/// The desktop's orbit camera (`TerrainView.tsx`): around the origin, `theta` about the vertical
-/// axis, `phi` from the zenith, fov 50°.
+/// The desktop's orbit camera (`TerrainView.tsx`): around a point above the origin, `theta` about
+/// the vertical axis, `phi` from the zenith, fov 50°.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Camera {
     /// Rotation about the vertical axis (radians).
@@ -721,9 +721,19 @@ pub struct Camera {
     pub radius: f32,
     /// The world's larger side (metres): clip planes, zoom limits, fog and the dome follow it.
     pub size: f32,
+    /// Height of the orbit's centre (metres): sea level held inside the terrain's heights
+    /// ([`orbit_height`]), so a plateau far above it (a DEM of Nairobi at 1.7 km) stays in view.
+    /// The desktop always looked at 0 and lost such a terrain under the camera.
+    pub centre_y: f32,
 }
 
 const FOV_DEG: f32 = 50.0;
+
+/// The orbit's height for a terrain between `min` and `max` metres: sea level (the desktop's
+/// origin) when the terrain spans it, else the terrain's height nearest to it.
+fn orbit_height(min: f32, max: f32) -> f32 {
+    0.0f32.clamp(min, max.max(min))
+}
 
 impl Camera {
     /// The home view for a world of this extent: θ 0.6, φ 1.0, radius 1.3 × the larger side.
@@ -734,6 +744,7 @@ impl Camera {
             phi: 1.0,
             radius: size * 1.3,
             size,
+            centre_y: 0.0,
         }
     }
 
@@ -742,7 +753,7 @@ impl Camera {
         let (sp, cp) = self.phi.sin_cos();
         [
             self.radius * sp * st,
-            self.radius * cp,
+            self.centre_y + self.radius * cp,
             self.radius * sp * ct,
         ]
     }
@@ -752,13 +763,13 @@ impl Camera {
         let far = self.size * 50.0;
         mul(
             perspective(FOV_DEG.to_radians(), aspect, near, far),
-            look_at(self.eye(), [0.0, 0.0, 0.0]),
+            look_at(self.eye(), [0.0, self.centre_y, 0.0]),
         )
     }
 
     /// right, up, forward scaled for sky rays (`forward + right·x + up·y` through NDC x, y).
     fn basis(&self, aspect: f32) -> ([f32; 3], [f32; 3], [f32; 3]) {
-        let f = normalize(sub([0.0, 0.0, 0.0], self.eye()));
+        let f = normalize(sub([0.0, self.centre_y, 0.0], self.eye()));
         let r = normalize(cross(f, [0.0, 1.0, 0.0]));
         let u = cross(r, f);
         let t = (FOV_DEG.to_radians() / 2.0).tan();
@@ -807,6 +818,7 @@ impl Camera {
             phi: phi.clamp(0.15, 1.5),
             radius: ln_r.exp().clamp(first.size * 0.02, first.size * 20.0),
             size: first.size,
+            centre_y: first.centre_y,
         })
     }
 }
@@ -1606,6 +1618,11 @@ impl Viewport {
         if refit {
             self.camera = Camera::fit(extent_m);
         }
+        // Set with the home view, moved only when the terrain has left it (a fetched DEM), so a
+        // sculpt stroke does not jolt the view.
+        if refit || !(pv.min..=pv.max).contains(&self.camera.centre_y) {
+            self.camera.centre_y = orbit_height(pv.min, pv.max);
+        }
         // The desktop's frame (on by default): the base sits 15 % of the relief (≥ 10 m) below.
         let frame = self.frame.then(|| {
             let base = pv.min - (pv.max - pv.min).mul_add(0.15, 0.0).max(10.0);
@@ -1828,7 +1845,10 @@ impl Viewport {
     /// Back to the home view (the viewport's Fit button).
     pub fn fit(&mut self) {
         if let Some(i) = &self.info {
-            self.camera = Camera::fit(i.extent_m);
+            self.camera = Camera {
+                centre_y: orbit_height(i.range_m[0], i.range_m[1]),
+                ..Camera::fit(i.extent_m)
+            };
             self.dirty = true;
         }
     }
