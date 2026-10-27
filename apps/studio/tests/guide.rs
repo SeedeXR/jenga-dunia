@@ -795,3 +795,473 @@ fn guide_real_world() {
     settle(&mut h, |_| true);
     shot(&mut h, "desktop-geo", &[Callout("Fetch the DEM", "")]);
 }
+
+/// A screen recording of a scripted flow (the guide's `videos/`): frames rendered offscreen at
+/// 1440×900 with the pointer drawn, piped raw into ffmpeg (a PNG per frame takes seconds to encode
+/// in a debug build) and written at 24 fps to `<JD_GUIDE_OUT>/videos/<name>.mp4`.
+struct Film {
+    name: &'static str,
+    out: PathBuf,
+    ffmpeg: Option<std::process::Child>,
+    at: eframe::egui::Pos2,
+}
+
+impl Film {
+    fn new(name: &'static str) -> Self {
+        let out = PathBuf::from(std::env::var("JD_GUIDE_OUT").expect("JD_GUIDE_OUT=<dir>"))
+            .join("videos");
+        std::fs::create_dir_all(&out).unwrap();
+        Self {
+            name,
+            out,
+            ffmpeg: None,
+            at: eframe::egui::pos2(720.0, 450.0),
+        }
+    }
+
+    /// `n` frames, the app stepping between them (animations, engine replies).
+    fn shoot(&mut self, h: &mut Harness<'static, StudioApp>, n: usize) {
+        use std::io::Write;
+        for _ in 0..n {
+            h.step();
+            let img = render(h);
+            let enc = self.ffmpeg.get_or_insert_with(|| {
+                std::process::Command::new("ffmpeg")
+                    .args([
+                        "-loglevel",
+                        "error",
+                        "-y",
+                        "-f",
+                        "rawvideo",
+                        "-pix_fmt",
+                        "rgba",
+                    ])
+                    .args(["-s", &format!("{}x{}", img.width(), img.height())])
+                    .args([
+                        "-r", "24", "-i", "-", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                    ])
+                    .args(["-crf", "24", "-movflags", "+faststart"])
+                    .arg(self.out.join(format!("{}.mp4", self.name)))
+                    .stdin(std::process::Stdio::piped())
+                    .spawn()
+                    .expect("ffmpeg")
+            });
+            enc.stdin.as_mut().unwrap().write_all(img.as_raw()).unwrap();
+        }
+    }
+
+    /// Film until `done` holds and nothing runs; past `cap` frames the wait goes on unfilmed.
+    fn wait(
+        &mut self,
+        h: &mut Harness<'static, StudioApp>,
+        cap: usize,
+        done: impl Fn(&StudioApp) -> bool,
+    ) {
+        let mut shot = 0;
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(120);
+        while !(done(h.state()) && !h.state().busy()) {
+            if std::time::Instant::now() > until {
+                let tail: Vec<_> = h.state().log_lines().map(|l| l.text.clone()).collect();
+                panic!(
+                    "{}: waited 120 s; log tail {:?}",
+                    self.name,
+                    &tail[tail.len().saturating_sub(8)..]
+                );
+            }
+            if shot < cap {
+                self.shoot(h, 1);
+                shot += 1;
+            } else {
+                h.step();
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+        self.shoot(h, 6);
+    }
+
+    /// Glide the pointer to `to` over `n` frames (eased).
+    fn glide(&mut self, h: &mut Harness<'static, StudioApp>, to: eframe::egui::Pos2, n: usize) {
+        let from = self.at;
+        for k in 1..=n {
+            let t = k as f32 / n as f32;
+            let e = t * t * (3.0 - 2.0 * t);
+            h.hover_at(from + (to - from) * e);
+            self.shoot(h, 1);
+        }
+        self.at = to;
+    }
+
+    /// Glide to the largest control labelled `label` and click it.
+    fn click(&mut self, h: &mut Harness<'static, StudioApp>, label: &str) {
+        let r = h
+            .query_all(by().label(label))
+            .map(|n| n.rect())
+            .max_by(|a, b| a.area().total_cmp(&b.area()))
+            .unwrap_or_else(|| panic!("{}: no {label:?}", self.name));
+        self.click_rect(h, r);
+    }
+
+    /// Click the control of `role` labelled `label` (a checkbox beside its own row label).
+    fn click_on(&mut self, h: &mut Harness<'static, StudioApp>, role: Role, label: &str) {
+        let r = h.get(by().role(role).label(label)).rect();
+        self.click_rect(h, r);
+    }
+
+    fn click_rect(&mut self, h: &mut Harness<'static, StudioApp>, r: Rect) {
+        self.glide(h, r.center(), 14);
+        for pressed in [true, false] {
+            h.event(eframe::egui::Event::PointerButton {
+                pos: r.center(),
+                button: eframe::egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            });
+            self.shoot(h, 2);
+        }
+    }
+
+    /// Open the combo box `combo` and pick `option` from its list.
+    fn choose(&mut self, h: &mut Harness<'static, StudioApp>, combo: &str, option: &str) {
+        show(h, combo);
+        self.click_on(h, Role::ComboBox, combo);
+        self.shoot(h, 6);
+        let r = h.get_all(by().label(option)).last().unwrap().rect();
+        self.click_rect(h, r);
+    }
+
+    /// A left-button drag from `a` to `b` over `n` frames (a brush stroke, a road).
+    fn drag(
+        &mut self,
+        h: &mut Harness<'static, StudioApp>,
+        a: eframe::egui::Pos2,
+        b: eframe::egui::Pos2,
+        n: usize,
+    ) {
+        self.glide(h, a, 12);
+        let button = |pos, pressed| eframe::egui::Event::PointerButton {
+            pos,
+            button: eframe::egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        };
+        h.event(button(a, true));
+        self.shoot(h, 1);
+        for k in 1..=n {
+            h.hover_at(a + (b - a) * (k as f32 / n as f32));
+            self.shoot(h, 1);
+        }
+        h.event(button(b, false));
+        self.shoot(h, 2);
+        self.at = b;
+    }
+
+    /// Type `text` into the focused field, a character a frame.
+    fn type_text(&mut self, h: &mut Harness<'static, StudioApp>, text: &str) {
+        h.key_press_modifiers(eframe::egui::Modifiers::COMMAND, eframe::egui::Key::A);
+        for c in text.chars() {
+            h.event(eframe::egui::Event::Text(c.to_string()));
+            self.shoot(h, 1);
+        }
+    }
+
+    /// Orbit the camera by `d_theta` over `n` frames.
+    fn orbit(&mut self, h: &mut Harness<'static, StudioApp>, d_theta: f32, n: usize) {
+        for _ in 0..n {
+            let mut cam = h.state().viewport.camera;
+            cam.theta += d_theta / n as f32;
+            h.state_mut().viewport.set_camera(cam);
+            self.shoot(h, 1);
+        }
+    }
+
+    fn finish(mut self) {
+        let mut enc = self.ffmpeg.take().expect("no frames");
+        drop(enc.stdin.take());
+        assert!(
+            enc.wait().unwrap().success(),
+            "ffmpeg failed for {}",
+            self.name
+        );
+    }
+}
+
+/// Studio as filmed: the pointer drawn.
+fn filmed(server: Arc<Server>) -> Harness<'static, StudioApp> {
+    Harness::builder()
+        .with_size(SIZE)
+        .with_max_steps(64)
+        .wgpu()
+        .with_context_setup(jd_studio::theme::install)
+        .build_eframe(move |cc| StudioApp::new(cc, server, Options::default()))
+}
+
+#[test]
+#[ignore = "records the user guide's videos (JD_GUIDE_OUT)"]
+fn film_first_terrain() {
+    let empty =
+        Arc::new(Server::bind(Registry::with_builtins(), Context::default()).expect("bind"));
+    let dir = tempfile::Builder::new()
+        .prefix("jd")
+        .tempdir_in("/tmp")
+        .unwrap();
+    let mut h = filmed(empty);
+    let mut f = Film::new("first-terrain");
+    f.shoot(&mut h, 18);
+    // A path, New: the project opens with its starter graph evaluated.
+    f.click(&mut h, "Path");
+    f.type_text(
+        &mut h,
+        &dir.path().join("Hills.jdproj").display().to_string(),
+    );
+    f.shoot(&mut h, 8);
+    f.click(&mut h, "New");
+    // The live preview (height#lod1 on a 1024² world: no baked maps until a full evaluation).
+    f.wait(&mut h, 96, |a| a.viewport.info().is_some());
+    f.shoot(&mut h, 18);
+    // Generate, then a look round.
+    f.click(&mut h, "Generate terrain (⌘G)");
+    f.wait(&mut h, 120, |a| {
+        a.layer() == Some("height") && a.viewport.maps_px().is_some()
+    });
+    f.orbit(&mut h, 0.9, 72);
+    // Export the heightmap and open the log behind the status bar.
+    show(&mut h, "Export heightmap");
+    f.shoot(&mut h, 8);
+    f.click(&mut h, "Export heightmap");
+    f.wait(&mut h, 72, |a| {
+        a.log_lines()
+            .any(|l| l.text.contains("export") && l.text.contains(": ok"))
+    });
+    f.click(&mut h, "Show the log");
+    f.shoot(&mut h, 48);
+    f.finish();
+}
+
+#[test]
+#[ignore = "records the user guide's videos (JD_GUIDE_OUT)"]
+fn film_graph_erosion() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = filmed(world(dir.path()));
+    ready(&mut h);
+    let mut f = Film::new("graph-erosion");
+    f.shoot(&mut h, 18);
+    // The layer strip's hydraulic erosion: spliced in front of the output, live-previewed.
+    f.click(
+        &mut h,
+        "Simulation: hydraulic erosion (jd.erosion.hydraulic)",
+    );
+    f.wait(&mut h, 120, |a| {
+        a.layer().is_some_and(|l| l.contains("#lod"))
+    });
+    f.orbit(&mut h, 0.6, 48);
+    // Generate evaluates the whole graph at full resolution: the eroded terrain, textured.
+    f.click(&mut h, "Generate terrain (⌘G)");
+    f.wait(&mut h, 96, |a| {
+        a.layer() == Some("height") && a.viewport.maps_px().is_some()
+    });
+    f.orbit(&mut h, 0.6, 48);
+    f.finish();
+}
+
+#[test]
+#[ignore = "records the user guide's videos (JD_GUIDE_OUT)"]
+fn film_sculpt() {
+    use eframe::egui::vec2;
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = filmed(world_of(dir.path(), 2048.0, 512));
+    ready(&mut h);
+    let mut f = Film::new("sculpt");
+    f.shoot(&mut h, 18);
+    f.click(
+        &mut h,
+        "Sculpt: adds a stroke node before the output and paints with the brush",
+    );
+    f.wait(&mut h, 48, |a| a.viewport.tool.is_some());
+    // One raise stroke across the middle, then one lower stroke beside it.
+    let c = h.state().viewport.rect().center();
+    f.drag(&mut h, c - vec2(160.0, 30.0), c + vec2(140.0, -10.0), 30);
+    f.wait(&mut h, 72, |a| {
+        a.log_lines()
+            .any(|l| l.text.starts_with("graph.append_param"))
+    });
+    f.choose(&mut h, "Brush mode", "lower");
+    f.drag(&mut h, c + vec2(-120.0, 70.0), c + vec2(160.0, 90.0), 30);
+    f.wait(&mut h, 72, |a| {
+        a.log_lines()
+            .filter(|l| l.text.starts_with("graph.append_param"))
+            .count()
+            >= 2
+    });
+    f.click(
+        &mut h,
+        "Sculpting: drag on the terrain to paint a stroke (click to stop)",
+    );
+    f.orbit(&mut h, 0.8, 60);
+    f.finish();
+}
+
+#[test]
+#[ignore = "records the user guide's videos (JD_GUIDE_OUT)"]
+fn film_terrain_pbr_import() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = filmed(world(dir.path()));
+    ready(&mut h);
+    let mut f = Film::new("terrain-pbr-import");
+    f.shoot(&mut h, 18);
+    // Textured off (the height ramp) and on (the baked maps).
+    f.click_on(&mut h, Role::CheckBox, "Textured (PBR)");
+    f.shoot(&mut h, 30);
+    f.click_on(&mut h, Role::CheckBox, "Textured (PBR)");
+    f.wait(&mut h, 48, |a| a.viewport.maps_px().is_some());
+    f.shoot(&mut h, 18);
+    // A low, warm sun.
+    let r = h
+        .get(by().role(Role::Slider).label_contains("Elevation"))
+        .rect();
+    f.glide(&mut h, r.center(), 12);
+    h.get(by().role(Role::Slider).label_contains("Elevation"))
+        .focus();
+    for _ in 0..23 {
+        h.key_press(eframe::egui::Key::ArrowLeft);
+        f.shoot(&mut h, 2);
+    }
+    f.wait(&mut h, 24, |a| a.viewport.sky_px().is_some());
+    f.shoot(&mut h, 18);
+    // The heightmap out as EXR, and back in as a heightmap node.
+    show(&mut h, "Export heightmap");
+    f.click(&mut h, "Export heightmap");
+    f.wait(&mut h, 48, |a| {
+        a.log_lines()
+            .any(|l| l.text.starts_with("terrain.export_heightmap: ok"))
+    });
+    show(&mut h, "Import");
+    f.click_on(&mut h, Role::TextInput, "Import");
+    let exr = dir.path().join("Hills.jdproj/exports/height.exr");
+    f.type_text(&mut h, &exr.display().to_string());
+    f.click(&mut h, "Import this file (⌘I opens a dialog)");
+    f.wait(&mut h, 96, |a| {
+        a.log_lines()
+            .any(|l| l.text.starts_with("project.import_asset: ok"))
+    });
+    f.shoot(&mut h, 36);
+    f.finish();
+}
+
+#[test]
+#[ignore = "records the user guide's videos (JD_GUIDE_OUT)"]
+fn film_hydrology() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = world(dir.path());
+    // noise → rivers → height, the rivers mask published (built in the Editor; here, its ops).
+    let rivers = ok(
+        &server,
+        "graph.splice",
+        json!({ "layer": "height", "kind": "jd.hydrology.rivers@1", "params": {} }),
+    )["id"]
+        .clone();
+    publish(&server, &rivers, "rivers", "rivers");
+    ok(&server, "graph.evaluate", json!({ "lod": 0 }));
+    let probe = server.clone();
+    let mut h = filmed(server);
+    ready(&mut h);
+    let mut f = Film::new("hydrology");
+    f.shoot(&mut h, 18);
+    // Colour by the rivers mask, then back to the height ramp.
+    f.choose(&mut h, "colour", "rivers");
+    f.wait(&mut h, 48, |a| a.viewport.overlay_on());
+    f.shoot(&mut h, 36);
+    f.choose(&mut h, "colour", "height ramp");
+    f.shoot(&mut h, 12);
+    // Scatter along the rivers.
+    f.choose(&mut h, "Mask", "rivers");
+    show(&mut h, "Place");
+    f.click(&mut h, "Place");
+    f.wait(&mut h, 72, |a| a.viewport.instance_count() > 0);
+    f.shoot(&mut h, 30);
+    // A sea at 250 m (the Editor adds the node), murky water, a gale; close in on the shore.
+    let sea = add(
+        &probe,
+        "jd.hydrology.sea_level@1",
+        json!({ "level_m": 250.0 }),
+    );
+    connect(&probe, &rivers, "out", &sea, "in");
+    f.wait(&mut h, 120, |a| {
+        a.viewport_readout().contains(" · sea 250 m")
+    });
+    f.shoot(&mut h, 24);
+    for _ in 0..48 {
+        let mut cam = h.state().viewport.camera;
+        cam.radius *= 0.985;
+        cam.phi += 0.004;
+        h.state_mut().viewport.set_camera(cam);
+        f.shoot(&mut h, 1);
+    }
+    for (key, value) in [
+        ("visibility_m", json!(4.0)),
+        ("tint", json!([0.12, 0.42, 0.36])),
+    ] {
+        ok(
+            &probe,
+            "graph.set_param",
+            json!({ "id": sea, "key": key, "value": value }),
+        );
+    }
+    f.wait(&mut h, 72, |_| true);
+    f.shoot(&mut h, 36);
+    ok(
+        &probe,
+        "graph.set_param",
+        json!({ "id": sea, "key": "wind_speed_mps", "value": 20.0 }),
+    );
+    f.wait(&mut h, 72, |a| a.viewport_readout().contains(" · waves "));
+    f.shoot(&mut h, 48);
+    f.finish();
+}
+
+#[test]
+#[ignore = "records the user guide's videos (JD_GUIDE_OUT)"]
+fn film_desert() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = world_of(dir.path(), 2048.0, 512);
+    let probe = server.clone();
+    let mut h = filmed(server);
+    ready(&mut h);
+    let mut f = Film::new("desert");
+    f.shoot(&mut h, 18);
+    // The Desert plain preset fills the noise; Generate makes the plain.
+    f.choose(&mut h, "Noise preset", "Desert plain 0..40 m");
+    f.shoot(&mut h, 12);
+    f.click(&mut h, "Generate terrain (⌘G)");
+    f.wait(&mut h, 96, |_| {
+        ok(&probe, "terrain.stats", json!({ "layer": "height" }))["stats"]["max"]
+            .as_f64()
+            .is_some_and(|m| m <= 40.01)
+    });
+    f.shoot(&mut h, 24);
+    // Dunes and sinkholes (the Editor's nodes), the pits published and coloured.
+    let noise = node(&probe, "jd.noise.fbm@1");
+    let height = node(&probe, "jd.output.height@1");
+    let dunes = add(&probe, "jd.erosion.aeolian@1", json!({ "iterations": 60 }));
+    let karst = add(
+        &probe,
+        "jd.erosion.karst@1",
+        json!({ "density_per_km2": 6, "max_slope_deg": 15 }),
+    );
+    connect(&probe, &noise, "out", &dunes, "in");
+    connect(&probe, &dunes, "out", &karst, "in");
+    connect(&probe, &karst, "out", &height, "in");
+    publish(&probe, &karst, "sinkholes", "sinkholes");
+    ok(&probe, "graph.evaluate", json!({ "lod": 0 }));
+    f.wait(&mut h, 96, |a| a.layers().iter().any(|l| l == "sinkholes"));
+    f.choose(&mut h, "colour", "sinkholes");
+    f.wait(&mut h, 48, |a| a.viewport.overlay_on());
+    for _ in 0..60 {
+        let mut cam = h.state().viewport.camera;
+        cam.radius *= 0.99;
+        cam.theta += 0.01;
+        h.state_mut().viewport.set_camera(cam);
+        f.shoot(&mut h, 1);
+    }
+    f.shoot(&mut h, 24);
+    f.finish();
+}

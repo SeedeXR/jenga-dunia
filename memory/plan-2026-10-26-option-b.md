@@ -436,6 +436,12 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   to their minimums before the viewport. Spec 3: project name fg-0, world size fg-2.
   P6 done. Follow-ups outside P6: a Windows / Linux menu bar for Studio (muda is macOS-only
   here), re-recording the guide's videos, chip shortcuts if the viewport tools get any.
+- Videos (2026-10-27): the guide's seven UI recordings re-made — six Studio films rendered
+  offscreen by `film_*` in guide.rs (frames piped raw into ffmpeg; PNG encoding in a debug build
+  cost seconds a frame) and graph-editor from Playwright (`JD_VIDEO=1`). graph-erosion-native,
+  hydrology-scatter-sea, desert-dunes-sinkholes and sculpt-native were renamed (graph-erosion,
+  hydrology, desert, sculpt) since what they show changed. Left: the Windows / Linux menu bar
+  (deferred until users ask; the Editor keeps native menus there).
 - Desktop ↔ Studio brush parity: after a transform stroke the desktop selected the transforms
   node and its sculpt strokes silently stopped (they followed the selection only). It now
   remembers the strokes node Sculpt / Paint density chose (`sculptNode`, Studio's `sculpt_node`):
