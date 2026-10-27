@@ -4386,6 +4386,29 @@ impl StudioApp {
                             Some(e) => Some(crate::viewport::Image::from_png_base64(e)?),
                             None => None,
                         },
+                        details: v["details"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .map(|d| {
+                                let png = |k: &str| {
+                                    crate::viewport::Image::from_png_base64(
+                                        d[k].as_str().unwrap_or_default(),
+                                    )
+                                };
+                                Ok(crate::viewport::Detail {
+                                    albedo: png("albedo_png_base64")?,
+                                    normal: png("normal_png_base64")?,
+                                    tile_m: d["tile_m"].as_f64().unwrap_or(0.0) as f32,
+                                })
+                            })
+                            .collect::<Result<_, String>>()?,
+                        detail_weights: match v["detail_weights_png_base64"].as_str() {
+                            Some(w) if !w.is_empty() => {
+                                Some(crate::viewport::Image::from_png_base64(w)?)
+                            }
+                            _ => None,
+                        },
                     })
                 })(),
                 (None, Some(e)) => Err(format!("{} {}", e.code.as_str(), e.message)),

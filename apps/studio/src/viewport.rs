@@ -328,6 +328,9 @@ struct Uniforms {
     time: [f32; 4],
     /// Up to three Gerstner components: [amplitude, wavelength, direction°, speed], [phase, …].
     waves: [[f32; 4]; 6],
+    /// The detail tiles' repeats across the world (east, north) for tiles 0–3; 0: no tile.
+    detail_u: [f32; 4],
+    detail_v: [f32; 4],
 }
 
 const SHADER: &str = r"
@@ -337,6 +340,7 @@ struct U {
     sun_dir: vec4<f32>, sun_light: vec4<f32>, hemi_sky: vec4<f32>, hemi_ground: vec4<f32>,
     fog_color: vec4<f32>, fog: vec4<f32>, flags: vec4<f32>,
     time: vec4<f32>, waves: array<vec4<f32>, 6>,
+    detail_u: vec4<f32>, detail_v: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> u: U;
 @group(0) @binding(1) var samp: sampler;
@@ -345,6 +349,18 @@ struct U {
 @group(0) @binding(4) var rough_map: texture_2d<f32>;
 @group(0) @binding(5) var emissive_map: texture_2d<f32>;
 @group(0) @binding(6) var sky_map: texture_2d<f32>;
+// Material detail tiles (the desktop's TSL blend): their masks packed in RGBA, each tile's albedo
+// and normal, repeated by `detail_u` / `detail_v` with a wrapping sampler.
+@group(0) @binding(7) var detail_weights: texture_2d<f32>;
+@group(0) @binding(8) var detail_a0: texture_2d<f32>;
+@group(0) @binding(9) var detail_a1: texture_2d<f32>;
+@group(0) @binding(10) var detail_a2: texture_2d<f32>;
+@group(0) @binding(11) var detail_a3: texture_2d<f32>;
+@group(0) @binding(12) var detail_n0: texture_2d<f32>;
+@group(0) @binding(13) var detail_n1: texture_2d<f32>;
+@group(0) @binding(14) var detail_n2: texture_2d<f32>;
+@group(0) @binding(15) var detail_n3: texture_2d<f32>;
+@group(0) @binding(16) var tile_samp: sampler;
 
 const PI: f32 = 3.141592653589793;
 const RECIPROCAL_PI: f32 = 0.3183098861837907;
@@ -441,9 +457,33 @@ fn fs_main(i: VsOut) -> @location(0) vec4<f32> {
     if (u.flags.x > 0.5 && i.uv.x >= 0.0) {
         albedo = textureSample(albedo_map, samp, i.uv).rgb;
         roughness = textureSample(rough_map, samp, i.uv).g;
+        var nm = textureSample(normal_map, samp, i.uv).xyz;
+        // Each detail tile over the macro maps by its mask's weight, in order (the desktop's
+        // `mix(color, tile, w)`), the normals mixed before they are unpacked.
+        if (u.detail_u.x > 0.0) {
+            let w = textureSample(detail_weights, samp, i.uv);
+            let r0 = i.uv * vec2<f32>(u.detail_u.x, u.detail_v.x);
+            albedo = mix(albedo, textureSample(detail_a0, tile_samp, r0).rgb, w.r);
+            nm = mix(nm, textureSample(detail_n0, tile_samp, r0).xyz, w.r);
+            if (u.detail_u.y > 0.0) {
+                let r1 = i.uv * vec2<f32>(u.detail_u.y, u.detail_v.y);
+                albedo = mix(albedo, textureSample(detail_a1, tile_samp, r1).rgb, w.g);
+                nm = mix(nm, textureSample(detail_n1, tile_samp, r1).xyz, w.g);
+            }
+            if (u.detail_u.z > 0.0) {
+                let r2 = i.uv * vec2<f32>(u.detail_u.z, u.detail_v.z);
+                albedo = mix(albedo, textureSample(detail_a2, tile_samp, r2).rgb, w.b);
+                nm = mix(nm, textureSample(detail_n2, tile_samp, r2).xyz, w.b);
+            }
+            if (u.detail_u.w > 0.0) {
+                let r3 = i.uv * vec2<f32>(u.detail_u.w, u.detail_v.w);
+                albedo = mix(albedo, textureSample(detail_a3, tile_samp, r3).rgb, w.a);
+                nm = mix(nm, textureSample(detail_n3, tile_samp, r3).xyz, w.a);
+            }
+        }
         // Tangent space: +x east (u), +y north (v), +z out of the surface (glTF), on the mesh
         // normal (three's normalMap on a plane).
-        let m = textureSample(normal_map, samp, i.uv).xyz * 2.0 - 1.0;
+        let m = nm * 2.0 - 1.0;
         let t = normalize(vec3<f32>(1.0, 0.0, 0.0) - flat_n * flat_n.x);
         let b = normalize(vec3<f32>(0.0, 0.0, -1.0) + flat_n * flat_n.z);
         n = normalize(t * m.x + b * m.y + flat_n * m.z);
@@ -865,6 +905,21 @@ pub struct Maps {
     pub roughness: Image,
     /// Emitted light (sRGB), when any material glows.
     pub emissive: Option<Image>,
+    /// The first four material layers' detail tiles; empty without details.
+    pub details: Vec<Detail>,
+    /// Their masks in R, G, B, A at the maps' size: each tile's weight.
+    pub detail_weights: Option<Image>,
+}
+
+/// A material layer's tileable detail (`terrain.textures` `details[]`).
+#[derive(Clone)]
+pub struct Detail {
+    /// Albedo (sRGB), seamless.
+    pub albedo: Image,
+    /// Tangent-space normal, seamless.
+    pub normal: Image,
+    /// Metres per repeat.
+    pub tile_m: f32,
 }
 
 /// What the viewport shows, for readouts and tests.
@@ -896,9 +951,11 @@ struct Gpu {
     layout: wgpu::BindGroupLayout,
     uniforms: wgpu::Buffer,
     sampler: wgpu::Sampler,
+    tile_sampler: wgpu::Sampler,
     samples: u32,
     /// Textures bound in slots 2–6 (a 1 × 1 stand-in where nothing is loaded).
-    textures: [wgpu::TextureView; 5],
+    /// Bindings 2–15: the maps (2–5), the sky (6), the detail weights and tiles (7–15).
+    textures: [wgpu::TextureView; 14],
     bind_group: wgpu::BindGroup,
     post: PostGpu,
 }
@@ -1432,6 +1489,8 @@ pub struct Viewport {
     overlay: Option<(Preview, bool)>,
     post: Post,
     maps_px: Option<[u32; 2]>,
+    /// The detail tiles' metres per repeat (≤ 4; empty: none).
+    detail_tiles: Vec<f32>,
     emissive: bool,
     sky_px: Option<[u32; 2]>,
     dirty: bool,
@@ -1492,6 +1551,7 @@ impl Default for Viewport {
             overlay: None,
             post: Post::default(),
             maps_px: None,
+            detail_tiles: Vec::new(),
             emissive: false,
             sky_px: None,
             dirty: true,
@@ -1788,6 +1848,11 @@ impl Viewport {
     /// Shade with these baked maps (`None`: the ramp vertex colours).
     pub fn set_maps(&mut self, maps: Option<Maps>) {
         self.maps_px = maps.as_ref().map(|m| m.albedo.size);
+        self.detail_tiles = maps
+            .as_ref()
+            .filter(|m| m.detail_weights.is_some())
+            .map(|m| m.details.iter().take(4).map(|d| d.tile_m).collect())
+            .unwrap_or_default();
         self.emissive = maps.as_ref().is_some_and(|m| m.emissive.is_some());
         self.pending_maps = Some(maps);
         self.dirty = true;
@@ -2080,6 +2145,11 @@ impl Viewport {
         self.info.as_ref()
     }
 
+    /// How many material detail tiles shade the terrain (≤ 4).
+    pub fn detail_tiles(&self) -> usize {
+        self.detail_tiles.len()
+    }
+
     /// The baked maps' size while they shade the terrain.
     pub fn maps_px(&self) -> Option<[u32; 2]> {
         // Shading only without a colour overlay (the desktop's readout drops `pbr` then).
@@ -2178,7 +2248,8 @@ impl Viewport {
         let mut rebind = false;
         if let Some(maps) = self.pending_maps.take() {
             let views = maps_views(rs, maps.as_ref());
-            gpu.textures[..4].clone_from_slice(&views);
+            gpu.textures[..4].clone_from_slice(&views[..4]);
+            gpu.textures[5..].clone_from_slice(&views[4..]);
             rebind = true;
         }
         if let Some(sky) = self.pending_sky.take() {
@@ -2571,7 +2642,22 @@ impl Viewport {
                 }
                 w
             },
+            detail_u: self.detail_repeats(0),
+            detail_v: self.detail_repeats(1),
         }
+    }
+
+    /// Tiles 0–3's repeats across the world along `axis` (extent ÷ tile metres; 0: no tile).
+    fn detail_repeats(&self, axis: usize) -> [f32; 4] {
+        let mut r = [0.0; 4];
+        if let Some(info) = &self.info {
+            for (k, tile) in self.detail_tiles.iter().enumerate() {
+                if *tile > 0.0 {
+                    r[k] = info.extent_m[axis] / tile;
+                }
+            }
+        }
+        r
     }
 
     fn render(&mut self, rs: &RenderState, size: [u32; 2]) {
@@ -2784,23 +2870,23 @@ fn stand_in(rs: &RenderState, srgb: bool) -> wgpu::TextureView {
     upload_image(rs, &img, srgb, false)
 }
 
-fn maps_views(rs: &RenderState, maps: Option<&Maps>) -> [wgpu::TextureView; 4] {
-    match maps {
-        Some(m) => [
-            upload_image(rs, &m.albedo, true, true),
-            upload_image(rs, &m.normal, false, true),
-            upload_image(rs, &m.roughness, false, true),
-            m.emissive
-                .as_ref()
-                .map_or_else(|| stand_in(rs, true), |e| upload_image(rs, e, true, true)),
-        ],
-        None => [
-            stand_in(rs, true),
-            stand_in(rs, false),
-            stand_in(rs, false),
-            stand_in(rs, true),
-        ],
-    }
+/// The maps' views for bindings 2–5 and 7–15: albedo, normal, roughness, emissive, then the
+/// detail weights, the four tiles' albedos and their four normals (stand-ins where absent).
+fn maps_views(rs: &RenderState, maps: Option<&Maps>) -> Vec<wgpu::TextureView> {
+    let img = |i: Option<&Image>, srgb| {
+        i.map_or_else(|| stand_in(rs, srgb), |i| upload_image(rs, i, srgb, true))
+    };
+    let tile = |k: usize| maps.and_then(|m| m.details.get(k));
+    let mut v = vec![
+        img(maps.map(|m| &m.albedo), true),
+        img(maps.map(|m| &m.normal), false),
+        img(maps.map(|m| &m.roughness), false),
+        img(maps.and_then(|m| m.emissive.as_ref()), true),
+        img(maps.and_then(|m| m.detail_weights.as_ref()), false),
+    ];
+    v.extend((0..4).map(|k| img(tile(k).map(|d| &d.albedo), true)));
+    v.extend((0..4).map(|k| img(tile(k).map(|d| &d.normal), false)));
+    v
 }
 
 fn bind_group(rs: &RenderState, gpu: &Gpu) -> wgpu::BindGroup {
@@ -2820,6 +2906,10 @@ fn bind_group(rs: &RenderState, gpu: &Gpu) -> wgpu::BindGroup {
             resource: wgpu::BindingResource::TextureView(view),
         });
     }
+    entries.push(wgpu::BindGroupEntry {
+        binding: 16,
+        resource: wgpu::BindingResource::Sampler(&gpu.tile_sampler),
+    });
     rs.device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("viewport"),
         layout: &gpu.layout,
@@ -2884,7 +2974,32 @@ fn create_gpu(rs: &RenderState) -> Gpu {
             texture_entry(4),
             texture_entry(5),
             texture_entry(6),
+            texture_entry(7),
+            texture_entry(8),
+            texture_entry(9),
+            texture_entry(10),
+            texture_entry(11),
+            texture_entry(12),
+            texture_entry(13),
+            texture_entry(14),
+            texture_entry(15),
+            wgpu::BindGroupLayoutEntry {
+                binding: 16,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
         ],
+    });
+    // The detail tiles repeat both ways (the main sampler clamps v for the sky's poles).
+    let tile_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        label: Some("viewport-tiles"),
+        address_mode_u: wgpu::AddressMode::Repeat,
+        address_mode_v: wgpu::AddressMode::Repeat,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        mipmap_filter: wgpu::MipmapFilterMode::Linear,
+        ..Default::default()
     });
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("viewport"),
@@ -3219,6 +3334,7 @@ fn create_gpu(rs: &RenderState) -> Gpu {
         layout,
         uniforms,
         sampler,
+        tile_sampler,
         samples,
         textures: [
             stand_in(rs, true),
@@ -3226,6 +3342,15 @@ fn create_gpu(rs: &RenderState) -> Gpu {
             stand_in(rs, false),
             stand_in(rs, true),
             stand_in(rs, true),
+            stand_in(rs, false),
+            stand_in(rs, true),
+            stand_in(rs, true),
+            stand_in(rs, true),
+            stand_in(rs, true),
+            stand_in(rs, false),
+            stand_in(rs, false),
+            stand_in(rs, false),
+            stand_in(rs, false),
         ],
         // Replaced right below; wgpu needs a real group to start from.
         bind_group: rs.device.create_bind_group(&wgpu::BindGroupDescriptor {

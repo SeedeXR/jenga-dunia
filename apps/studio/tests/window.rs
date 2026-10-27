@@ -251,6 +251,71 @@ fn the_side_panels_collapse_to_a_strip_and_come_back() {
 }
 
 #[test]
+fn detail_tiles_blend_over_the_maps_by_their_weights() {
+    use jd_studio::viewport::{Detail, Image, Maps};
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window(engine(dir.path()));
+    settle(&mut h, |a| a.viewport.maps_px().is_some());
+    let flat = |px: u32, rgba: [u8; 4]| Image {
+        size: [px, px],
+        rgba: rgba.repeat((px * px) as usize),
+    };
+    let maps = |details: Vec<Detail>, weight: u8| Maps {
+        albedo: flat(64, [128, 128, 128, 255]),
+        normal: flat(64, [128, 128, 255, 255]),
+        roughness: flat(64, [255, 230, 0, 255]),
+        emissive: None,
+        details,
+        detail_weights: Some(flat(64, [weight, 0, 0, 0])),
+    };
+    // A black-and-white checker tile, fully weighted: it must show.
+    let checker = Image {
+        size: [8, 8],
+        rgba: (0..64)
+            .flat_map(|i| {
+                if (i % 8 + i / 8) % 2 == 0 {
+                    [0u8, 0, 0, 255]
+                } else {
+                    [255, 255, 255, 255]
+                }
+            })
+            .collect(),
+    };
+    let tile = Detail {
+        albedo: checker,
+        normal: flat(8, [128, 128, 255, 255]),
+        tile_m: 64.0,
+    };
+    let shot = |h: &mut Harness<'static, StudioApp>, m: Maps| {
+        h.state_mut().viewport.set_maps(Some(m));
+        h.run_steps(3);
+        let rect = h.state().viewport.rect();
+        let img = render(h);
+        let ppp = img.width() as f32 / 1200.0;
+        image::imageops::crop_imm(
+            &img,
+            (rect.left() * ppp) as u32,
+            (rect.top() * ppp) as u32,
+            (rect.width() * ppp) as u32,
+            (rect.height() * ppp) as u32,
+        )
+        .to_image()
+    };
+    let plain = shot(&mut h, maps(vec![tile.clone()], 0));
+    let detailed = shot(&mut h, maps(vec![tile], 255));
+    let changed = plain
+        .pixels()
+        .zip(detailed.pixels())
+        .filter(|(a, b)| a.0.iter().zip(b.0).any(|(x, y)| x.abs_diff(y) > 16))
+        .count();
+    assert!(
+        changed * 10 > (plain.width() * plain.height()) as usize,
+        "the weighted tile changed only {changed} of {} pixels",
+        plain.width() * plain.height()
+    );
+}
+
+#[test]
 fn a_write_from_the_editor_refreshes_the_window() {
     let dir = tempfile::tempdir().unwrap();
     let server = engine(dir.path());
@@ -940,6 +1005,12 @@ fn the_materials_section_edits_the_stack_and_rebakes_the_maps() {
         h.step();
         std::thread::sleep(Duration::from_millis(20));
     }
+    // Its detail tile: the maps re-bake with it.
+    h.get_by_label("Material 1 detail").scroll_to_me();
+    h.run();
+    h.get_by_label("Material 1 detail").click();
+    h.run_steps(1);
+    settle(&mut h, |a| a.viewport.detail_tiles() == 1);
     // Remove it: the stack is empty again.
     h.get_by_label("Remove material 1").scroll_to_me();
     h.run();

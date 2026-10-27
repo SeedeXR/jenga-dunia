@@ -303,6 +303,15 @@ label on top with value at the end, double-click handle / Esc resets, arrow keys
   `jd.layout.<panel>`). Verified on macOS: moved / resized, Quit Jenga Dunia, relaunch → same
   bounds. The app menu's Hide / Quit read "jd-studio" (muda's default is the process name) — named
   "Jenga Dunia".
+  Closed (slice 2d): G3 the material detail tiles — `terrain.textures` `details[]` and
+  `detail_weights_png_base64` decoded into `viewport::Maps`; bindings 7–15 (weights, four
+  albedos, four normals) and a wrapping sampler (16; the main one clamps v for the sky); the
+  terrain shader mixes each tile over the macro maps by its weight channel, repeated extent ÷
+  tile_m (the desktop's TSL `mix`), normals mixed before unpacking. Tests: the materials window
+  test reaches `detail_tiles() == 1` from a real bake; a render test with a checker tile at
+  weight 255 vs 0 changes > 10 % of the viewport (mutation: blend off → 0 pixels, fails). A first
+  render test compared before / after the re-bake and passed with the blend off — the bake itself
+  changes the pixels — so it was replaced.
   Open (flake, 2026-10-27): `e2e/paint.spec.ts` failed once inside a full gate run (instance count
   stayed 925 after the density stroke; 30 s poll). Not reproduced in 5 full suites + 12 parallel
   repeats; trace lost (overwritten by reruns — next time copy `test-results/` first). Ruled out:
