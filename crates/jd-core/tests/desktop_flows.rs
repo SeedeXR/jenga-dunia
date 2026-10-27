@@ -183,7 +183,9 @@ fn stills_are_written_under_exports_and_nowhere_else() {
     let written = e.path.join("exports/stills/view_01.png");
     assert_eq!(std::fs::read(&written).unwrap(), b"\x89PNG\r\n\x1a\nstill");
     assert_eq!(std::path::Path::new(r["path"].as_str().unwrap()), written);
-    for bad in ["../escape.png", "/tmp/jd-escape.png", ""] {
+    // Absolute on this platform (`/tmp/…` has no drive on Windows, so it would be relative there).
+    let outside = std::env::temp_dir().join("jd-escape.png");
+    for bad in ["../escape.png", outside.to_str().unwrap(), ""] {
         let r = e.call(
             "project.write_export",
             json!({ "path": bad, "bytes_base64": png }),
