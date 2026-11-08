@@ -585,6 +585,8 @@ enum Drawing {
     Road,
     /// Each click is an entrance of this cave node.
     Cave(String),
+    /// Each click is a spring of this rivers node.
+    Spring(String),
 }
 
 /// A road's bed width (the desktop's `roadWidthM`).
@@ -3473,11 +3475,14 @@ impl StudioApp {
     pub fn cave_entrances(&self, i: usize) -> Vec<[f64; 2]> {
         self.cave_nodes()
             .get(i)
-            .and_then(|n| n["params"]["entrances"].as_array().cloned())
-            .unwrap_or_default()
-            .iter()
-            .map(|e| [e[0].as_f64().unwrap_or(0.0), e[1].as_f64().unwrap_or(0.0)])
-            .collect()
+            .map_or_else(Vec::new, |n| points(&n["params"]["entrances"]))
+    }
+
+    /// Rivers node `i`'s springs as the graph holds them (metres east, north): for tests.
+    pub fn river_springs(&self, i: usize) -> Vec<[f64; 2]> {
+        self.nodes_of("jd.hydrology.rivers@")
+            .get(i)
+            .map_or_else(Vec::new, |n| points(&n["params"]["springs"]))
     }
 
     /// The desktop's `startCaveEntrance`: clicks on the terrain add entrances to cave `id`.
@@ -3508,7 +3513,7 @@ impl StudioApp {
         match self.drawing.as_ref()? {
             Drawing::Sculpt => Some(self.brush.radius_m as f32),
             Drawing::Road => Some(ROAD_WIDTH_M / 2.0),
-            Drawing::Cave(_) => Some((width * 0.006).max(4.0)),
+            Drawing::Cave(_) | Drawing::Spring(_) => Some((width * 0.006).max(4.0)),
         }
     }
 
@@ -3524,10 +3529,15 @@ impl StudioApp {
         let Some(&last) = stroke.last() else { return };
         let mut steps: Vec<Step> = Vec::new();
         match drawing {
-            Drawing::Cave(id) => {
+            Drawing::Cave(ref id) | Drawing::Spring(ref id) => {
+                let key = if matches!(drawing, Drawing::Cave(_)) {
+                    "entrances"
+                } else {
+                    "springs"
+                };
                 let r = Self::request(
                     "graph.append_param",
-                    json!({ "id": id, "key": "entrances", "value": [r1(last[0]), r1(last[1])] }),
+                    json!({ "id": id, "key": key, "value": [r1(last[0]), r1(last[1])] }),
                 );
                 steps.push(Box::new(move |_| Some(r)));
             }
@@ -4128,15 +4138,16 @@ impl StudioApp {
 
     /// The cave nodes of the graph, in order.
     fn cave_nodes(&self) -> Vec<Value> {
+        self.nodes_of("jd.cave.system@")
+    }
+
+    /// The graph's nodes whose kind starts with `prefix`, in graph order.
+    fn nodes_of(&self, prefix: &str) -> Vec<Value> {
         self.graph["nodes"]
             .as_array()
             .map(|n| {
                 n.iter()
-                    .filter(|n| {
-                        n["kind"]
-                            .as_str()
-                            .is_some_and(|k| k.starts_with("jd.cave.system@"))
-                    })
+                    .filter(|n| n["kind"].as_str().is_some_and(|k| k.starts_with(prefix)))
                     .cloned()
                     .collect()
             })
@@ -4296,14 +4307,7 @@ impl StudioApp {
                 .find(|(k, _)| *k == kind)
                 .map_or("Cave", |(_, l)| l);
             let (line, notes) = self.cave_line(&id);
-            let entrances: Vec<[f64; 2]> = node["params"]["entrances"]
-                .as_array()
-                .map(|a| {
-                    a.iter()
-                        .map(|e| [e[0].as_f64().unwrap_or(0.0), e[1].as_f64().unwrap_or(0.0)])
-                        .collect()
-                })
-                .unwrap_or_default();
+            let entrances = points(&node["params"]["entrances"]);
             // `border-jd-accent/40` on the selected cave, `border-white/5` otherwise.
             let edge = if self.selected_node.as_deref() == Some(id.as_str()) {
                 color::ACCENT.gamma_multiply(0.4)
@@ -4335,26 +4339,14 @@ impl StudioApp {
                                 }
                             }
                             let placing = self.drawing == Some(Drawing::Cave(id.clone()));
-                            let fg = if placing { color::ACCENT } else { color::FG0 };
-                            let place = ui
-                                .add_enabled(
-                                    !busy,
-                                    egui::Button::new(
-                                        RichText::new(if placing { "Placing…" } else { "Place" })
-                                            .size(12.0)
-                                            .color(fg),
-                                    ),
-                                )
-                                .on_hover_text(if placing {
-                                    "Click the terrain to add entrances; click here to stop"
-                                } else {
-                                    "Place entrances by clicking the terrain (sinkholes, mouths, portals — a tunnel takes two)"
-                                });
-                            let name = format!("Place entrances of cave {}", ci + 1);
-                            place.widget_info(|| {
-                                egui::WidgetInfo::selected(egui::accesskit::Role::Button, !busy, placing, &name)
-                            });
-                            if place.clicked() {
+                            if place_button(
+                                ui,
+                                !busy,
+                                placing,
+                                "Place entrances by clicking the terrain (sinkholes, mouths, portals — a tunnel takes two)",
+                                "Click the terrain to add entrances; click here to stop",
+                                &format!("Place entrances of cave {}", ci + 1),
+                            ) {
                                 toggle_place = Some(id.clone());
                             }
                             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
@@ -4373,38 +4365,8 @@ impl StudioApp {
                             });
                         });
                     });
-                    for (i, e) in entrances.iter().enumerate() {
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                RichText::new(format!("{}. {} m E, {} m N", i + 1, e[0].round(), e[1].round()))
-                                    .size(11.0)
-                                    .color(color::FG1),
-                            );
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                let remove = ui
-                                    .add_enabled(
-                                        !busy,
-                                        egui::Button::new(RichText::new("×").size(11.0).color(color::ERROR)),
-                                    )
-                                    .on_hover_text("Remove this entrance");
-                                let name = format!("Remove entrance {} of cave {}", i + 1, ci + 1);
-                                remove.widget_info(|| {
-                                    egui::WidgetInfo::labeled(egui::accesskit::Role::Button, !busy, &name)
-                                });
-                                if remove.clicked() {
-                                    let rest: Vec<[f64; 2]> = entrances
-                                        .iter()
-                                        .enumerate()
-                                        .filter(|(k, _)| *k != i)
-                                        .map(|(_, e)| *e)
-                                        .collect();
-                                    action = Some((
-                                        "graph.set_param",
-                                        json!({ "id": id, "key": "entrances", "value": rest }),
-                                    ));
-                                }
-                            });
-                        });
+                    if let Some(rest) = point_rows(ui, &entrances, !busy, "entrance", &format!("cave {}", ci + 1)) {
+                        action = Some(("graph.set_param", json!({ "id": id, "key": "entrances", "value": rest })));
                     }
                     for n in &notes {
                         ui.label(RichText::new(n).size(11.0).color(color::WARN));
@@ -4430,6 +4392,95 @@ impl StudioApp {
                 Tag::User
             };
             self.invoke(tag, op, params);
+        }
+    }
+
+    /// The right column's Rivers section: Add rivers (the strip's rivers button), then one box per
+    /// rivers node — its springs, placed by clicking the terrain (as cave entrances) and listed
+    /// with a remove button each.
+    fn rivers_card(&mut self, ui: &mut egui::Ui) {
+        look::section(ui, "Rivers");
+        let busy = self.busy > 0;
+        let rivers = self.nodes_of("jd.hydrology.rivers@");
+        // The rivers node being placed into is gone (removed, undone): stop placing.
+        if matches!(&self.drawing, Some(Drawing::Spring(p)) if !rivers.iter().any(|n| n["id"] == p.as_str()))
+        {
+            self.stop_placing();
+        }
+        if look::button(ui, None, "Add rivers", false, self.project.is_some() && !busy)
+            .on_hover_text("Carve rivers where flow gathers and fill them with water (a jd.hydrology.rivers node in front of the height; rivers and river_water published)")
+            .clicked()
+        {
+            self.add_layer(crate::chrome::Add::Simulation("rivers"));
+        }
+        let mut toggle: Option<String> = None;
+        let mut action: Option<Value> = None;
+        let mut select: Option<String> = None;
+        for (ri, node) in rivers.iter().enumerate() {
+            let id = node["id"].as_str().unwrap_or_default().to_owned();
+            let springs = points(&node["params"]["springs"]);
+            let line = format!(
+                "Rivers {} · {} spring{}",
+                ri + 1,
+                springs.len(),
+                if springs.len() == 1 { "" } else { "s" }
+            );
+            let edge = if self.selected_node.as_deref() == Some(id.as_str()) {
+                color::ACCENT.gamma_multiply(0.4)
+            } else {
+                egui::Color32::from_white_alpha(13)
+            };
+            egui::Frame::new()
+                .stroke(Stroke::new(1.0, edge))
+                .corner_radius(6.0)
+                .inner_margin(Margin::same(6))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            let placing = self.drawing == Some(Drawing::Spring(id.clone()));
+                            if place_button(
+                                ui,
+                                !busy,
+                                placing,
+                                "Place springs by clicking the terrain: a river starts at each (a karst resurgence, a river entering from beyond the world's edge)",
+                                "Click the terrain to add springs; click here to stop",
+                                &format!("Place springs of rivers {}", ri + 1),
+                            ) {
+                                toggle = Some(id.clone());
+                            }
+                            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                                let summary = ui
+                                    .add(
+                                        egui::Label::new(RichText::new(&line).size(11.0).color(color::FG0))
+                                            .wrap()
+                                            .sense(egui::Sense::click()),
+                                    )
+                                    .on_hover_text("Select the rivers node: the inspector edits threshold, depth, routing, spring catchment and the water's depth and width");
+                                if summary.clicked() {
+                                    select = Some(id.clone());
+                                }
+                            });
+                        });
+                    });
+                    if let Some(rest) = point_rows(ui, &springs, !busy, "spring", &format!("rivers {}", ri + 1)) {
+                        action = Some(json!({ "id": id, "key": "springs", "value": rest }));
+                    }
+                });
+            ui.add_space(8.0);
+        }
+        if let Some(id) = select {
+            self.select_node(id);
+        }
+        if let Some(id) = toggle {
+            if self.drawing == Some(Drawing::Spring(id.clone())) {
+                self.stop_placing();
+            } else {
+                self.drawing = Some(Drawing::Spring(id));
+            }
+        }
+        if let Some(params) = action {
+            self.invoke(Tag::User, "graph.set_param", params);
         }
     }
 
@@ -6290,6 +6341,90 @@ fn default_layer(layers: &[String]) -> Option<String> {
         .cloned()
 }
 
+/// A `[[east, north], …]` param (cave entrances, springs) as points.
+fn points(v: &Value) -> Vec<[f64; 2]> {
+    v.as_array().map_or_else(Vec::new, |a| {
+        a.iter()
+            .map(|e| [e[0].as_f64().unwrap_or(0.0), e[1].as_f64().unwrap_or(0.0)])
+            .collect()
+    })
+}
+
+/// A Place / Placing… toggle (cave entrances, springs) named `name` for accessibility; true when
+/// clicked.
+fn place_button(
+    ui: &mut egui::Ui,
+    enabled: bool,
+    placing: bool,
+    idle: &str,
+    armed: &str,
+    name: &str,
+) -> bool {
+    let fg = if placing { color::ACCENT } else { color::FG0 };
+    let place = ui
+        .add_enabled(
+            enabled,
+            egui::Button::new(
+                RichText::new(if placing { "Placing…" } else { "Place" })
+                    .size(12.0)
+                    .color(fg),
+            ),
+        )
+        .on_hover_text(if placing { armed } else { idle });
+    place.widget_info(|| {
+        egui::WidgetInfo::selected(egui::accesskit::Role::Button, enabled, placing, name)
+    });
+    place.clicked()
+}
+
+/// One row per point, `n. E m E, N m N` with a remove button named `Remove <noun> n of <owner>`;
+/// the points without the removed one when one is clicked.
+fn point_rows(
+    ui: &mut egui::Ui,
+    pts: &[[f64; 2]],
+    enabled: bool,
+    noun: &str,
+    owner: &str,
+) -> Option<Vec<[f64; 2]>> {
+    let mut rest = None;
+    for (i, e) in pts.iter().enumerate() {
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(format!(
+                    "{}. {} m E, {} m N",
+                    i + 1,
+                    e[0].round(),
+                    e[1].round()
+                ))
+                .size(11.0)
+                .color(color::FG1),
+            );
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                let remove = ui
+                    .add_enabled(
+                        enabled,
+                        egui::Button::new(RichText::new("×").size(11.0).color(color::ERROR)),
+                    )
+                    .on_hover_text(format!("Remove this {noun}"));
+                let name = format!("Remove {noun} {} of {owner}", i + 1);
+                remove.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::accesskit::Role::Button, enabled, &name)
+                });
+                if remove.clicked() {
+                    rest = Some(
+                        pts.iter()
+                            .enumerate()
+                            .filter(|(k, _)| *k != i)
+                            .map(|(_, e)| *e)
+                            .collect(),
+                    );
+                }
+            });
+        });
+    }
+    rest
+}
+
 /// Standing water to draw: the merged depth, and the wetland's own (stained) water.
 type Water = (
     Option<jd_terrain::preview::Preview>,
@@ -6441,6 +6576,8 @@ impl eframe::App for StudioApp {
                             ui.add_space(12.0);
                             self.caves_card(ui);
                             ui.add_space(12.0);
+                            self.rivers_card(ui);
+                            ui.add_space(12.0);
                             self.actions_card(ui);
                             ui.add_space(12.0);
                             self.materials_card(ui);
@@ -6536,6 +6673,7 @@ impl eframe::App for StudioApp {
                     road: self.drawing == Some(Drawing::Road),
                     grid: self.grid.on,
                     cave: matches!(self.drawing, Some(Drawing::Cave(_))),
+                    spring: matches!(self.drawing, Some(Drawing::Spring(_))),
                 };
                 if let Some(action) = crate::chrome::show(ui, self.viewport.rect(), &st)
                     .or_else(|| crate::chrome::key_action(ui.ctx(), &st))

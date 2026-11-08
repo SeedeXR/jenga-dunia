@@ -188,6 +188,8 @@ pub struct State {
     pub grid: bool,
     /// The next click places a cave entrance.
     pub cave: bool,
+    /// The spring tool is armed (a click places a spring).
+    pub spring: bool,
 }
 
 /// `fill-jd-bg-1/80` and friends: a token at an opacity.
@@ -588,6 +590,12 @@ fn hint_rows(st: &State) -> &'static [(&'static str, &'static str)] {
             ("Right drag", "orbit"),
             ("Placing…", "stop"),
         ]
+    } else if st.spring {
+        &[
+            ("Click", "place a spring"),
+            ("Right drag", "orbit"),
+            ("Placing…", "stop"),
+        ]
     } else if st.sculpting {
         &[
             ("Left drag", "stroke"),
@@ -652,6 +660,7 @@ mod tests {
             road,
             grid,
             cave,
+            spring: false,
         };
         assert_eq!(
             hint_rows(&st(false, false, false, false))[0],
@@ -669,6 +678,11 @@ mod tests {
             hint_rows(&st(true, false, false, true))[0],
             ("Click", "place a cave entrance")
         );
+        let spring = State {
+            spring: true,
+            ..st(true, false, false, false)
+        };
+        assert_eq!(hint_rows(&spring)[0], ("Click", "place a spring"));
         assert_eq!(
             hint_rows(&st(false, false, true, false))[0],
             ("Click", "toggle a cell")

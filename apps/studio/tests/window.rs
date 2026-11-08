@@ -2482,6 +2482,72 @@ fn the_rivers_button_carves_channels_and_draws_the_water_in_them() {
     );
 }
 
+/// The Rivers section: Add rivers, then Place arms the spring tool — a click on the terrain adds
+/// a spring there (the river now starts at it), listed with ×, which removes it.
+#[test]
+fn the_rivers_section_places_and_removes_springs_by_clicking_the_terrain() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = engine(dir.path());
+    let probe = server.clone();
+    let mut h = window(server);
+    settle(&mut h, |a| a.viewport.info().is_some());
+    h.get_by_label("Add rivers").scroll_to_me();
+    h.run();
+    h.get_by_label("Add rivers").click();
+    h.run_steps(1);
+    settle(&mut h, |a| a.layers().iter().any(|l| l == "river_water"));
+    h.get_by_label("Rivers 1 · 0 springs");
+    let rivers_hash = || {
+        probe
+            .invoke(Request::new("graph.evaluate", json!({})))
+            .result
+            .unwrap()["layers"]["rivers"]
+            .clone()
+    };
+    let dry = rivers_hash();
+    tap(
+        &mut h,
+        Some(eframe::egui::accesskit::Role::Button),
+        "Place springs of rivers 1",
+    );
+    assert!(h.state().viewport.tool.is_some(), "the tool is armed");
+    let c = h.state().viewport.rect().center();
+    let ground = h.state().viewport.pick(c).expect("ground under the centre");
+    h.hover_at(c);
+    h.run_steps(1);
+    for pressed in [true, false] {
+        h.event(eframe::egui::Event::PointerButton {
+            pos: c,
+            button: eframe::egui::PointerButton::Primary,
+            pressed,
+            modifiers: Default::default(),
+        });
+        h.run_steps(1);
+    }
+    settle(&mut h, |a| a.river_springs(0).len() == 1);
+    let spring = h.state().river_springs(0)[0];
+    assert!(
+        (spring[0] - f64::from(ground[0])).abs() < 1.0
+            && (spring[1] - f64::from(ground[1])).abs() < 1.0,
+        "{spring:?} vs {ground:?}"
+    );
+    h.get_by_label("Rivers 1 · 1 spring");
+    assert_ne!(rivers_hash(), dry, "a river starts at the spring");
+    tap(
+        &mut h,
+        Some(eframe::egui::accesskit::Role::Button),
+        "Place springs of rivers 1",
+    );
+    assert!(h.state().viewport.tool.is_none(), "placing stopped");
+    tap(
+        &mut h,
+        Some(eframe::egui::accesskit::Role::Button),
+        "Remove spring 1 of rivers 1",
+    );
+    settle(&mut h, |a| a.river_springs(0).is_empty());
+    assert_eq!(rivers_hash(), dry, "and the river goes with it");
+}
+
 /// A terrain far above sea level (a DEM of the Kenyan highlands: 1.7 km up on a 2 km world) is in
 /// view: the camera orbits sea level held inside its heights, not the origin, where the home view's
 /// eye sat under it.

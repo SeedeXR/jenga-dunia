@@ -32,7 +32,7 @@ Loop prompt: `/loop Water features per memory/plan-2026-11-08-water.md (waterfal
 | W2b | node `jd.hydrology.wetland@1` (in, wetness? → wetland, marsh, swamp, water); `+ wetland` button publishes `wetland_water` + masks; biome docs; tests | done |
 | W3a | rivers node: `water` output — depth ∝ Q^0.4 scaled so the largest river reaches `water_depth_m`, over the channel; tests (exponent, monotonic downstream) | done |
 | W3b | Studio draws every water layer (lakes + `*_water`), strip's rivers adds `river_water`; window test | done |
-| W4 | Studio Rivers section: rivers nodes listed, **Place springs** arms click-to-place (as cave entrances), springs listed with ×; window test | todo |
+| W4 | Studio Rivers section: rivers nodes listed, **Place springs** arms click-to-place (as cave entrances), springs listed with ×; window test | done |
 | W5 | engine export: `water` in export_profile + `water.export` op; Unity importer + check, Unreal check, Blender bridge + test; run the headless engine checks | todo |
 | W6 | docs (guide sections, figures via guide.rs, CLI quickstart), acceptance item?, gates, CI, push | todo |
 
@@ -56,3 +56,8 @@ Loop prompt: `/loop Water features per memory/plan-2026-11-08-water.md (waterfal
   `river_water`. Wetland water draws tea-brown with a CDOM spectrum (research log). Fixed in
   passing: the wetland simulation test compared `layers.height.hash` (always Null — the layers map
   is name → hash), so its "terrain unchanged" check was vacuous; both tests now read the hash.
+- 2026-11-08 W4 done. Rivers card after Caves: Add rivers (= the strip's button), one box per rivers
+  node ("Rivers n · k springs", click selects), Place arms `Drawing::Spring` (hint "Click — place a
+  spring"), springs listed with ×. The caves card's Place button and point rows became shared
+  helpers (`place_button`, `point_rows`, `points`). No viewport marker for springs (the river
+  appearing marks it) — follow-up if wanted.
