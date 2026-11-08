@@ -2240,7 +2240,7 @@
   },
   {
     "kind": "jd.hydrology.rivers@1",
-    "description": "Carve river channels where flow accumulates (depressions filled first), plus any `springs` you place (points that pour `spring_area_m2` of catchment in, so a river starts there); outputs the carved terrain and a 0..1 river mask",
+    "description": "Carve river channels where flow accumulates (depressions filled first), plus any `springs` you place (points that pour `spring_area_m2` of catchment in, so a river starts there); outputs the carved terrain, a 0..1 river mask and the water standing in the channels (metres; depth ∝ Q^0.4, width ∝ Q^0.5 up to the largest river's `water_depth_m` × `water_width_m`)",
     "inputs": [
       {
         "name": "in",
@@ -2261,6 +2261,11 @@
       },
       {
         "name": "rivers",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "water",
         "ty": "heightfield",
         "required": false
       }
@@ -2306,6 +2311,18 @@
           "type": "number",
           "format": "float",
           "default": 1000000.0
+        },
+        "water_depth_m": {
+          "description": "Water depth in the largest river, metres (the `water` output; 0 = none). Smaller rivers\nscale by discharge^0.4 (Leopold & Maddock 1953).",
+          "type": "number",
+          "format": "float",
+          "default": 3.0
+        },
+        "water_width_m": {
+          "description": "Water surface width of the largest river, metres. Smaller rivers scale by discharge^0.5.",
+          "type": "number",
+          "format": "float",
+          "default": 40.0
         }
       },
       "additionalProperties": false,

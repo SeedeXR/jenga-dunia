@@ -127,8 +127,8 @@ pub const STRIP: [(&str, &str, &str, Add); 11] = [
     (
         "strip-rivers",
         "git-branch",
-        "Simulation: carve rivers (jd.hydrology.rivers)",
-        Add::Splice("jd.hydrology.rivers@1"),
+        "Simulation: carve rivers and fill them with water (jd.hydrology.rivers)",
+        Add::Simulation("rivers"),
     ),
     (
         "strip-snow",

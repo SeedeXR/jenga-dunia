@@ -30,8 +30,8 @@ Loop prompt: `/loop Water features per memory/plan-2026-11-08-water.md (waterfal
 | W1c | Studio: falling-water sheets drawn at each fall (viewport), `+ falls` button; window test | done (d97574c) |
 | W2a | `jd-terrain::wetland`: probability from wetness (MFD) × flatness, cut 0.5; marsh core (standing water) / swamp fringe; standing water depth ≤ water_depth_m in micro-depressions; unit tests | done |
 | W2b | node `jd.hydrology.wetland@1` (in, wetness? → wetland, marsh, swamp, water); `+ wetland` button publishes `wetland_water` + masks; biome docs; tests | done |
-| W3a | rivers node: `water` output — depth ∝ Q^0.4 scaled so the largest river reaches `water_depth_m`, over the channel; tests (exponent, monotonic downstream) | todo |
-| W3b | Studio draws every water layer (lakes + `*_water`), strip's rivers adds `river_water`; window test | todo |
+| W3a | rivers node: `water` output — depth ∝ Q^0.4 scaled so the largest river reaches `water_depth_m`, over the channel; tests (exponent, monotonic downstream) | done |
+| W3b | Studio draws every water layer (lakes + `*_water`), strip's rivers adds `river_water`; window test | done |
 | W4 | Studio Rivers section: rivers nodes listed, **Place springs** arms click-to-place (as cave entrances), springs listed with ×; window test | todo |
 | W5 | engine export: `water` in export_profile + `water.export` op; Unity importer + check, Unreal check, Blender bridge + test; run the headless engine checks | todo |
 | W6 | docs (guide sections, figures via guide.rs, CLI quickstart), acceptance item?, gates, CI, push | todo |
@@ -49,3 +49,10 @@ Loop prompt: `/loop Water features per memory/plan-2026-11-08-water.md (waterfal
   mean + 1σ picked drainage lines (dendritic speckle), HAND gives the broad valley floors. TWI or a
   painted mask can still be wired to `wetness`. Open: wetland water draws with the lakes' clear
   tint; a murkier look for `wetland_water` belongs with W3b's water drawing.
+- 2026-11-08 W3 done. The rivers node's `water` output (params `water_depth_m` 3, `water_width_m`
+  40) uses each cell's nearest cross-section; ground below that section's bed stays dry (a perched
+  reach on fBm otherwise showed 12 m of water). `carve_rivers_area` returns the raw area the mask
+  is built from (same log scale). `Simulation::Rivers` (strip's rivers button) publishes `rivers` +
+  `river_water`. Wetland water draws tea-brown with a CDOM spectrum (research log). Fixed in
+  passing: the wetland simulation test compared `layers.height.hash` (always Null — the layers map
+  is name → hash), so its "terrain unchanged" check was vacuous; both tests now read the hash.

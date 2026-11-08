@@ -2459,6 +2459,29 @@ fn the_wetland_button_maps_marsh_and_swamp_and_draws_their_water() {
     );
 }
 
+/// The strip's rivers button carves the channels and fills them: `rivers` and `river_water`
+/// published, the water drawn with the lakes.
+#[test]
+fn the_rivers_button_carves_channels_and_draws_the_water_in_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window(engine(dir.path()));
+    settle(&mut h, |a| a.viewport.info().is_some());
+    h.get_by_label("Simulation: carve rivers and fill them with water (jd.hydrology.rivers)")
+        .click();
+    h.run_steps(1);
+    settle(&mut h, |a| {
+        ["rivers", "river_water"]
+            .iter()
+            .all(|l| a.layers().iter().any(|x| x == l))
+    });
+    settle(&mut h, |a| a.viewport.lake_cells() > 0);
+    assert!(
+        h.state().viewport_readout().contains(" · lakes "),
+        "{}",
+        h.state().viewport_readout()
+    );
+}
+
 /// A terrain far above sea level (a DEM of the Kenyan highlands: 1.7 km up on a 2 km world) is in
 /// view: the camera orbits sea level held inside its heights, not the origin, where the home view's
 /// eye sat under it.

@@ -61,7 +61,7 @@
   },
   {
     "id": "graph.add_simulation",
-    "description": "Add a simulation layer for the height — snow (beside it, cover published as `snow`), sand, debris (`debris`) or lava (`heat`, `lava`, glowing) in front of it — with its material rows in the look (journaled)",
+    "description": "Add a simulation layer for the height — snow (beside it, cover published as `snow`), sand, debris (`debris`), lava (`heat`, `lava`, glowing), rivers (`rivers`, `river_water`) or waterfalls (`falls`, `falls_water`) in front of it, or a wetland beside it (`wetland`, `marsh`, `swamp`, `wetland_water`) — with its material rows in the look (journaled)",
     "scope": "project-write"
   },
   {

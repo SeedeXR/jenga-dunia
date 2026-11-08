@@ -440,7 +440,7 @@ export type GraphAddNodeResult = {
   "id": NodeId;
 };
 
-export type Simulation = "snow" | "sand" | "debris" | "lava" | "falls" | "wetland";
+export type Simulation = "snow" | "sand" | "debris" | "lava" | "falls" | "wetland" | "rivers";
 
 export type GraphAddSimulationRequest = {
   /** Which simulation. */
@@ -2826,6 +2826,11 @@ area in (a karst resurgence, a river entering from beyond the world's edge). */
   "springs"?: ([number, number])[];
   /** Upstream area each spring contributes, m² (default 1 km²). */
   "spring_area_m2"?: number;
+  /** Water depth in the largest river, metres (the `water` output; 0 = none). Smaller rivers
+scale by discharge^0.4 (Leopold & Maddock 1953). */
+  "water_depth_m"?: number;
+  /** Water surface width of the largest river, metres. Smaller rivers scale by discharge^0.5. */
+  "water_width_m"?: number;
 };
 
 export type NodeParams_jd_hydrology_sea_level_1 = {
@@ -3294,7 +3299,7 @@ export interface JdOps {
   "graph.add_cave": { request: GraphAddCaveRequest; result: GraphAddCaveResult };
   /** Add a node (journaled) */
   "graph.add_node": { request: GraphAddNodeRequest; result: GraphAddNodeResult };
-  /** Add a simulation layer for the height — snow (beside it, cover published as `snow`), sand, debris (`debris`) or lava (`heat`, `lava`, glowing) in front of it — with its material rows in the look (journaled) */
+  /** Add a simulation layer for the height — snow (beside it, cover published as `snow`), sand, debris (`debris`), lava (`heat`, `lava`, glowing), rivers (`rivers`, `river_water`) or waterfalls (`falls`, `falls_water`) in front of it, or a wetland beside it (`wetland`, `marsh`, `swamp`, `wetland_water`) — with its material rows in the look (journaled) */
   "graph.add_simulation": { request: GraphAddSimulationRequest; result: GraphAddSimulationResult };
   /** Push one element onto an array parameter (brush strokes): journaled with just the element, so a long sculpt session grows the journal linearly */
   "graph.append_param": { request: GraphAppendParamRequest; result: GraphAppendParamResult };

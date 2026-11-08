@@ -76,9 +76,10 @@ pub use export::{
 };
 pub use falls::{FallsParams, FallsResult, Waterfall, waterfalls};
 pub use flow::{
-    FlowMethod, carve_rivers, carve_rivers_sourced, carve_rivers_with, d8_receivers,
-    fill_depressions, fill_depressions_with, flow_accumulation, flow_accumulation_sourced,
-    flow_accumulation_with, sea_level, wetness_index, wetness_index_with,
+    FlowMethod, carve_rivers, carve_rivers_area, carve_rivers_sourced, carve_rivers_with,
+    d8_receivers, fill_depressions, fill_depressions_with, flow_accumulation,
+    flow_accumulation_sourced, flow_accumulation_with, river_water, sea_level, wetness_index,
+    wetness_index_with,
 };
 pub use heightfield::{Heightfield, HeightfieldStats, Tile, TileCoord};
 pub use import::{

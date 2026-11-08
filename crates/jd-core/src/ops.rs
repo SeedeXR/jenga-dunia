@@ -1636,6 +1636,9 @@ pub mod graph {
         /// `jd.hydrology.wetland@1` beside the height (`wetland`, `marsh`, `swamp` and its standing
         /// `wetland_water` published, marsh and swamp materials).
         Wetland,
+        /// `jd.hydrology.rivers@1` in front of the height (`rivers` and the water in its channels,
+        /// `river_water`, published).
+        Rivers,
     }
 
     /// `graph.add_simulation` params.
@@ -2005,7 +2008,7 @@ pub mod graph {
         );
         r.register::<AddSimulation, Added, _>(
             "graph.add_simulation",
-            "Add a simulation layer for the height — snow (beside it, cover published as `snow`), sand, debris (`debris`) or lava (`heat`, `lava`, glowing) in front of it — with its material rows in the look (journaled)",
+            "Add a simulation layer for the height — snow (beside it, cover published as `snow`), sand, debris (`debris`), lava (`heat`, `lava`, glowing), rivers (`rivers`, `river_water`) or waterfalls (`falls`, `falls_water`) in front of it, or a wetland beside it (`wetland`, `marsh`, `swamp`, `wetland_water`) — with its material rows in the look (journaled)",
             Scope::ProjectWrite,
             |ctx, a| {
                 // Snow: with the 6.5 °C/km lapse, a sea-level temperature of 6.5 × 0.6 × (max in km)
@@ -2018,6 +2021,7 @@ pub mod graph {
                     Simulation::Sand => ("jd.erosion.aeolian@1", serde_json::json!({ "iterations": 60 }), true, vec![], vec![]),
                     // Spray keeps the rock at a fall dark and glossy: wet basalt-grey, roughness 0.25.
                     Simulation::Falls => ("jd.hydrology.waterfalls@1", serde_json::json!({}), true, vec![("falls", "falls"), ("water", "falls_water")], vec![material("falls", [0.2, 0.2, 0.21], 0.25, None)]),
+                    Simulation::Rivers => ("jd.hydrology.rivers@1", serde_json::json!({}), true, vec![("rivers", "rivers"), ("water", "river_water")], vec![]),
                     // Marsh: emergent reeds and sedges, green-brown; swamp: a dark, wet forest floor.
                     Simulation::Wetland => (
                         "jd.hydrology.wetland@1",
@@ -4719,8 +4723,9 @@ pub mod graph {
             let ev = call(&reg, &ctx, "graph.evaluate", serde_json::json!({}));
             assert_eq!(ev.status, Status::Ok, "{:?}", ev.error);
             let after = ev.result.expect("eval");
+            assert!(before["layers"]["height"].is_string(), "{before}");
             assert_eq!(
-                after["layers"]["height"]["hash"], before["layers"]["height"]["hash"],
+                after["layers"]["height"], before["layers"]["height"],
                 "beside the height: the terrain is unchanged"
             );
             let water = call(
@@ -4748,6 +4753,64 @@ pub mod graph {
             assert!(
                 masks.contains(&"marsh") && masks.contains(&"swamp"),
                 "{look}"
+            );
+        }
+
+        #[test]
+        fn the_rivers_simulation_carves_the_height_and_publishes_the_water_in_its_channels() {
+            use crate::envelope::Status;
+            let reg = Registry::with_builtins();
+            let dir = tempfile::tempdir().expect("tmp");
+            let ctx = Context::default();
+            let world = jd_types::WorldSettings {
+                resolution_px: [64, 64],
+                extent_m: [640.0, 640.0],
+                tile_size: 64,
+                halo: 0,
+                ..Default::default()
+            };
+            call(
+                &reg,
+                &ctx,
+                "project.create",
+                serde_json::json!({ "path": dir.path().join("r.jdproj"), "name": "R", "world": world }),
+            );
+            let before = call(&reg, &ctx, "graph.evaluate", serde_json::json!({}))
+                .result
+                .expect("eval");
+            for _ in 0..2 {
+                let added = call(
+                    &reg,
+                    &ctx,
+                    "graph.add_simulation",
+                    serde_json::json!({ "which": "rivers" }),
+                );
+                assert_eq!(added.status, Status::Ok, "{:?}", added.error);
+                assert_eq!(
+                    added.result.expect("added")["published"],
+                    serde_json::json!(["rivers", "river_water"])
+                );
+            }
+            let ev = call(&reg, &ctx, "graph.evaluate", serde_json::json!({}));
+            assert_eq!(ev.status, Status::Ok, "{:?}", ev.error);
+            assert!(before["layers"]["height"].is_string(), "{before}");
+            assert_ne!(
+                ev.result.expect("eval")["layers"]["height"],
+                before["layers"]["height"],
+                "in front of the height: the channels are carved"
+            );
+            let water = call(
+                &reg,
+                &ctx,
+                "terrain.stats",
+                serde_json::json!({ "layer": "river_water" }),
+            )
+            .result
+            .expect("stats");
+            let max = water["stats"]["max"].as_f64().expect("max");
+            assert!(
+                max > 0.0 && max <= 3.0 + 1e-3,
+                "default 3 m at most: {water}"
             );
         }
 

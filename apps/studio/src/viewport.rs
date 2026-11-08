@@ -187,15 +187,24 @@ fn falls_mesh(falls: &[FallSheet], extent_m: [f32; 2]) -> (Vec<LakeVertex>, Vec<
 /// The desktop's `buildLakesGeometry`: each vertex `depth` above the terrain where the fill node's
 /// depth is positive (> 5 cm), tucked under it elsewhere, coloured like the sea by depth; `None`
 /// when nothing is wet or the grids differ. Returns the mesh and the wet cell count.
+///
+/// `murk`: wetland water (`wetland_water`) on the same grid — where it is the water drawn, it is
+/// stained tea-brown and soon opaque, as humic swamp water is ([`HUMIC_ABSORPTION`]; Secchi
+/// depths 0.25–1.84 m in humic and turbid lakes, CSIRO, Mar. Freshw. Res. 45:1209).
 fn lakes_mesh(
     terrain: &Preview,
     lakes: &Preview,
+    murk: Option<&Preview>,
     extent_m: [f32; 2],
     look: &Sea,
 ) -> Option<(Vec<LakeVertex>, Vec<u32>, usize)> {
     if (terrain.width, terrain.height) != (lakes.width, lakes.height) {
         return None;
     }
+    let murk = murk.filter(|m| (m.width, m.height) == (lakes.width, lakes.height));
+    let at = |p: &Preview, i: usize| {
+        p.min + f32::from(p.data[i.min(p.data.len() - 1)]) / 65535.0 * (p.max - p.min)
+    };
     let (ground, indices) = grid_mesh(terrain, extent_m);
     let t_range = (terrain.max - terrain.min).max(f32::EPSILON);
     let l_range = if lakes.max - lakes.min == 0.0 {
@@ -214,7 +223,14 @@ fn lakes_mesh(
         .map(|(i, g)| {
             let depth =
                 lakes.min + f32::from(lakes.data[i.min(lakes.data.len() - 1)]) / 65535.0 * l_range;
-            let (rgb, mut alpha) = water_colour(depth.max(0.0), look);
+            // The wetland's own water (its depth is the drawn depth, within quantisation).
+            let stained = murk
+                .is_some_and(|m| at(m, i) > 0.05 && at(m, i) >= depth - 0.01 * l_range.max(1.0));
+            let (rgb, mut alpha) = if stained {
+                colour_through(depth.max(0.0), &HUMIC_ABSORPTION, [0.2, 0.15, 0.07])
+            } else {
+                water_colour(depth.max(0.0), look)
+            };
             let mut y = g.pos[1] - t_range * 0.01 - 1.0;
             if depth > 0.05 {
                 y = g.pos[1] + depth;
@@ -306,12 +322,24 @@ const PURE_WATER_ABSORPTION: [f32; 3] = [0.4, 0.07, 0.005];
 /// plus the tint scattered back; murkier or deeper water is more opaque.
 fn water_colour(depth_m: f32, sea: &Sea) -> ([f32; 3], f32) {
     let k = 15.0 / sea.visibility_m.max(0.5);
+    colour_through(depth_m * k, &PURE_WATER_ABSORPTION, sea.tint)
+}
+
+/// Humic (tea-stained) wetland water's absorption per channel in m⁻¹: coloured dissolved organic
+/// matter, a(λ) = a(440)·e^(−0.015·(λ − 440)) with a(440) = 10 m⁻¹ (Negro basin 1.9–20.1, Marinho
+/// et al. 2024; slope 0.012–0.022 nm⁻¹ typical) at 650 / 550 / 450 nm, plus pure water's — blue
+/// dies first, so it shows brown.
+const HUMIC_ABSORPTION: [f32; 3] = [0.83, 1.97, 8.6];
+
+/// Water `depth_m` deep over the sandy bottom with per-channel `absorption` (m⁻¹): the bottom
+/// through Beer–Lambert transmittance (down and up) plus `tint` scattered back; and its opacity.
+fn colour_through(depth_m: f32, absorption: &[f32; 3], tint: [f32; 3]) -> ([f32; 3], f32) {
     let bottom = [0.62, 0.55, 0.38];
     let mut rgb = [0.0; 3];
     let mut seen = 0.0;
     for c in 0..3 {
-        let t = (-PURE_WATER_ABSORPTION[c] * k * depth_m * 2.0).exp();
-        rgb[c] = bottom[c] * t + sea.tint[c] * (1.0 - t);
+        let t = (-absorption[c] * depth_m * 2.0).exp();
+        rgb[c] = bottom[c] * t + tint[c] * (1.0 - t);
         seen += t;
     }
     (rgb, 0.35 + 0.55 * (1.0 - seen / 3.0))
@@ -1605,6 +1633,7 @@ pub struct Viewport {
     rain_buf: Option<(wgpu::Buffer, usize)>,
     rain_frames: f32,
     lakes: Option<Preview>,
+    murk: Option<Preview>,
     falls: Vec<FallSheet>,
     pending_lakes: Option<Option<LakesGeometry>>,
     lakes_mesh: Option<(wgpu::Buffer, wgpu::Buffer, u32)>,
@@ -1667,6 +1696,7 @@ impl Default for Viewport {
             rain_buf: None,
             rain_frames: 0.0,
             lakes: None,
+            murk: None,
             falls: Vec::new(),
             pending_lakes: None,
             lakes_mesh: None,
@@ -2043,12 +2073,13 @@ impl Viewport {
         self.falls.len()
     }
 
-    /// Standing water from a `lakes` depth layer at the shown preview's size (`None`: none).
-    pub fn set_lakes(&mut self, lakes: Option<Preview>) {
-        if self.lakes == lakes {
+    /// Standing water from a `lakes` depth layer at the shown preview's size (`None`: none), and
+    /// the wetland's share of it (`murk`, drawn stained brown).
+    pub fn set_lakes(&mut self, lakes: Option<Preview>, murk: Option<Preview>) {
+        if self.lakes == lakes && self.murk == murk {
             return;
         }
-        self.lakes = lakes;
+        (self.lakes, self.murk) = (lakes, murk);
         self.rebuild_lakes();
     }
 
@@ -2062,7 +2093,7 @@ impl Viewport {
             waves_m: None,
         });
         let mut built = match (&self.lakes, &self.shown) {
-            (Some(l), Some((pv, extent))) => lakes_mesh(pv, l, *extent, &look),
+            (Some(l), Some((pv, extent))) => lakes_mesh(pv, l, self.murk.as_ref(), *extent, &look),
             _ => None,
         };
         // The falls ride on the lakes' geometry (the same transparent water pipeline).
@@ -3914,17 +3945,27 @@ mod tests {
             waves: vec![],
             waves_m: None,
         };
-        let (v, i, wet) = lakes_mesh(&terrain, &lakes, [20.0, 20.0], &look).expect("wet");
+        let (v, i, wet) = lakes_mesh(&terrain, &lakes, None, [20.0, 20.0], &look).expect("wet");
         assert_eq!((wet, i.len()), (1, 4 * 6));
         assert_eq!(v[4].pos[1], 102.0);
         assert!(v[4].color[3] > 0.3 && v[0].color[3] == 0.0);
         assert!(v[0].pos[1] < 100.0, "dry cells hide under the ground");
+        // The same water as a wetland's: browner and more opaque, at the same height.
+        let (m, _, _) =
+            lakes_mesh(&terrain, &lakes, Some(&lakes), [20.0, 20.0], &look).expect("wet");
+        let (clear, brown) = (v[4].color, m[4].color);
+        assert_eq!(m[4].pos, v[4].pos);
+        assert!(
+            brown[0] > brown[2] && clear[2] > clear[0],
+            "{brown:?} vs {clear:?}"
+        );
+        assert!(brown[3] > clear[3]);
         // Nothing wet, or another grid size: no lakes.
         let dry = Preview {
             data: vec![0; 9],
             ..lakes.clone()
         };
-        assert!(lakes_mesh(&terrain, &dry, [20.0, 20.0], &look).is_none());
+        assert!(lakes_mesh(&terrain, &dry, None, [20.0, 20.0], &look).is_none());
         let other = Preview {
             width: 2,
             height: 2,
@@ -3932,7 +3973,7 @@ mod tests {
             max: 1.0,
             data: vec![1; 4],
         };
-        assert!(lakes_mesh(&terrain, &other, [20.0, 20.0], &look).is_none());
+        assert!(lakes_mesh(&terrain, &other, None, [20.0, 20.0], &look).is_none());
     }
 
     #[test]

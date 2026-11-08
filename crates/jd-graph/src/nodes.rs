@@ -786,6 +786,19 @@ struct RiversParams {
     /// Upstream area each spring contributes, m² (default 1 km²).
     #[serde(default = "spring_area")]
     spring_area_m2: f32,
+    /// Water depth in the largest river, metres (the `water` output; 0 = none). Smaller rivers
+    /// scale by discharge^0.4 (Leopold & Maddock 1953).
+    #[serde(default = "river_water_depth")]
+    water_depth_m: f32,
+    /// Water surface width of the largest river, metres. Smaller rivers scale by discharge^0.5.
+    #[serde(default = "river_water_width")]
+    water_width_m: f32,
+}
+fn river_water_depth() -> f32 {
+    3.0
+}
+fn river_water_width() -> f32 {
+    40.0
 }
 fn spring_area() -> f32 {
     1.0e6
@@ -1839,9 +1852,9 @@ pub fn register_all(r: &mut Registry) {
     .with_memory_fn(|p| if p.get("refraction").and_then(|v| v.as_bool()).unwrap_or(false) { 36.0 } else { 22.0 }));
     r.register(NodeDef::new::<RiversParams, _>(
         "jd.hydrology.rivers@1",
-        "Carve river channels where flow accumulates (depressions filled first), plus any `springs` you place (points that pour `spring_area_m2` of catchment in, so a river starts there); outputs the carved terrain and a 0..1 river mask",
+        "Carve river channels where flow accumulates (depressions filled first), plus any `springs` you place (points that pour `spring_area_m2` of catchment in, so a river starts there); outputs the carved terrain, a 0..1 river mask and the water standing in the channels (metres; depth ∝ Q^0.4, width ∝ Q^0.5 up to the largest river's `water_depth_m` × `water_width_m`)",
         vec![port("in", PortType::Heightfield, true), port("drains", PortType::Heightfield, false)],
-        vec![port("out", PortType::Heightfield, false), port("rivers", PortType::Heightfield, false)],
+        vec![port("out", PortType::Heightfield, false), port("rivers", PortType::Heightfield, false), port("water", PortType::Heightfield, false)],
         |ctx, p, i| {
             let rp: RiversParams = params(p)?;
             let drains = i.get("drains").map(|v| v.as_field());
@@ -1866,10 +1879,14 @@ pub fn register_all(r: &mut Registry) {
                 }
                 Some(src)
             };
-            let (carved, rivers) = jd_terrain::carve_rivers_sourced(h, sp, rp.threshold, rp.depth_m, rp.method, drains.map(|d| &**d), springs.as_ref())?;
-            Ok(BTreeMap::from([("out".to_owned(), Value::field(carved)), ("rivers".to_owned(), Value::field(rivers))]))
+            let (carved, rivers, area) = jd_terrain::carve_rivers_area(h, sp, rp.threshold, rp.depth_m, rp.method, drains.map(|d| &**d), springs.as_ref())?;
+            let water = jd_terrain::river_water(&carved, sp, &rivers, &area, rp.water_depth_m, rp.water_width_m)?;
+            Ok(BTreeMap::from([("out".to_owned(), Value::field(carved)), ("rivers".to_owned(), Value::field(rivers)), ("water".to_owned(), Value::field(water))]))
         },
-    ).with_memory(32.0));
+    )
+    // Scratch: the fill and accumulation ≈ 32 B/cell; the water's area, nearest-section distance,
+    // level, reach and depth add ≈ 20.
+    .with_memory(52.0));
     r.register(NodeDef::new::<WetnessParams, _>(
         "jd.hydrology.wetness@1",
         "Topographic wetness index ln(a / tan β) normalised to 0..1 — wet valley floors high, steep ridges low (biome/moisture masks); `method` picks d8 / dinf / mfd routing",
@@ -2948,6 +2965,55 @@ mod tests {
             .expect("eval");
         let m = outs[&(f, "out".into())].as_field().stats();
         assert!(m.min > 0.0 && m.max <= 1.0 && m.max > m.min, "{m:?}");
+    }
+
+    #[test]
+    fn rivers_node_fills_its_channels_with_water_as_deep_as_asked_and_only_there() {
+        let reg = Registry::with_builtins();
+        let cache = Cache::default();
+        let mut g = Graph::default();
+        let n = add(
+            &mut g,
+            "jd.noise.fbm@1",
+            serde_json::json!({ "seed": 8, "feature_size_m": 96.0, "height_range_m": [0.0, 200.0] }),
+        );
+        let rv = add(
+            &mut g,
+            "jd.hydrology.rivers@1",
+            serde_json::json!({ "threshold": 0.4, "water_depth_m": 2.5, "water_width_m": 12.0 }),
+        );
+        connect(&mut g, &n, "out", &rv, "in");
+        let dry = add(
+            &mut g,
+            "jd.hydrology.rivers@1",
+            serde_json::json!({ "threshold": 0.4, "water_depth_m": 0.0 }),
+        );
+        connect(&mut g, &n, "out", &dry, "in");
+        let (outs, _) = Evaluator::new(&reg, &cache)
+            .evaluate(&g, &world(), 0)
+            .expect("eval");
+        let get = |id: &NodeId, port: &str| outs[&(id.clone(), port.into())].as_field().to_vec();
+        let (mask, water) = (get(&rv, "rivers"), get(&rv, "water"));
+        let deepest = water.iter().copied().fold(0.0f32, f32::max);
+        assert!(
+            (deepest - 2.5).abs() < 0.01,
+            "the largest river is water_depth_m deep: {deepest}"
+        );
+        let wet = water.iter().filter(|w| **w > 0.0).count();
+        let channel = mask.iter().filter(|m| **m >= 0.5).count();
+        assert!(
+            wet >= channel / 2 && wet < water.len() / 4,
+            "water follows the channels ({channel} river cells, {wet} wet)"
+        );
+        assert!(
+            get(&dry, "water").iter().all(|w| *w == 0.0),
+            "0 m asks for none"
+        );
+        assert_eq!(
+            get(&rv, "out"),
+            get(&dry, "out"),
+            "the water leaves the carving alone"
+        );
     }
 
     #[test]

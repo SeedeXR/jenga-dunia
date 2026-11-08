@@ -111,7 +111,8 @@ enum Msg {
     /// The colour layer's preview (`name`, then the preview or the error).
     Color(String, Result<jd_terrain::preview::Preview, String>),
     /// The `lakes` depth layer's preview, for the terrain preview of this layer.
-    Lakes(String, Result<Option<jd_terrain::preview::Preview>, String>),
+    /// Merged water depth and the wetland's share of it (drawn stained).
+    Lakes(String, Result<Water, String>),
     /// The waterfalls of the graph's waterfalls nodes (`hydrology.waterfalls`), for that layer.
     Falls(String, Result<Vec<crate::viewport::FallSheet>, String>),
     /// The wind sea for a wind (`ocean.waves`).
@@ -1246,7 +1247,7 @@ impl StudioApp {
                         continue;
                     }
                     match lakes {
-                        Ok(pv) => self.viewport.set_lakes(pv),
+                        Ok((pv, murk)) => self.viewport.set_lakes(pv, murk),
                         Err(e) => self.log(format!("layer_preview (lakes): {e}"), Level::Error),
                     }
                 }
@@ -1676,12 +1677,13 @@ impl StudioApp {
             })
             .collect();
         if names.is_empty() {
-            return self.viewport.set_lakes(None);
+            return self.viewport.set_lakes(None, None);
         }
         let (server, tx, ctx) = (self.server.clone(), self.tx.clone(), self.ctx.clone());
         self.reads += 1;
         std::thread::spawn(move || {
             let mut merged: Result<Option<jd_terrain::preview::Preview>, String> = Ok(None);
+            let mut murk = None;
             for name in names {
                 let r = server.invoke(Self::request(
                     "terrain.preview",
@@ -1692,13 +1694,18 @@ impl StudioApp {
                     (None, Some(e)) => Err(format!("{} {}", e.code.as_str(), e.message)),
                     (None, None) => continue,
                 };
+                if name.starts_with("wetland_water")
+                    && let Ok(p) = &pv
+                {
+                    murk = Some(p.clone());
+                }
                 merged = match (merged, pv) {
                     (Err(e), _) | (_, Err(e)) => Err(e),
                     (Ok(None), Ok(p)) => Ok(Some(p)),
                     (Ok(Some(a)), Ok(b)) => Ok(Some(deeper(&a, &b))),
                 };
             }
-            let _ = tx.send(Msg::Lakes(layer, merged));
+            let _ = tx.send(Msg::Lakes(layer, merged.map(|m| (m, murk))));
             ctx.request_repaint();
         });
     }
@@ -6282,6 +6289,12 @@ fn default_layer(layers: &[String]) -> Option<String> {
         .or_else(|| layers.first())
         .cloned()
 }
+
+/// Standing water to draw: the merged depth, and the wetland's own (stained) water.
+type Water = (
+    Option<jd_terrain::preview::Preview>,
+    Option<jd_terrain::preview::Preview>,
+);
 
 /// Two water-depth previews merged cell by cell (the deeper water wins), re-quantised over the
 /// combined range; `a` when the grids differ (one layer evaluated at another lod).

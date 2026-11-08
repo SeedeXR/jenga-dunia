@@ -63,6 +63,16 @@ already requires "Riverbeds and drainage basins" and "Lakes and wetlands".
   INFERRED: use the exponents with a user scale — the largest river's depth and width — and
   discharge proportional to the upstream area, which our flow accumulation already is.
 
+- VERIFIED (Marinho et al. 2024, Remote Sensing 16:613, Negro basin): CDOM absorption 1.9–20.1
+  m⁻¹ (higher in the blackwater upper course). VERIFIED (Ocean Optics Web Book, "Absorption by
+  oceanic constituents"): CDOM spectral slopes typically 0.012–0.022 nm⁻¹. VERIFIED (CSIRO, Mar.
+  Freshw. Res. 45:1209): humic black-water and turbid lakes have Secchi depths 0.25–1.84 m.
+  So wetland water is drawn with a(440) = 10 m⁻¹, slope 0.015 — absorption ≈ 0.83 / 1.97 / 8.6
+  m⁻¹ at 650 / 550 / 450 nm with pure water's added: blue dies first, the water shows tea-brown.
+- FOUND IN USE (2026-11-08): stamping a river section's level onto every cell within its
+  half-width floods ground beside a perched reach (lower than the bed; 12 m "deep" on fBm noise).
+  Each cell takes its nearest section's level and stays dry when it lies below that section's bed.
+
 ### Springs
 
 - No research needed beyond what the rivers node does: a spring adds catchment at a point
@@ -80,4 +90,5 @@ already requires "Riverbeds and drainage basins" and "Lakes and wetlands".
 | waterlogged above drainage | 5.3 m (HAND) | Nobre et al. 2011 |
 | drainage network | ≥ 0.1 km² upstream | INFERRED (channel heads ~0.1–1 km²) |
 | wetland standing water | 0.3 m, ≤ 2 m | marsh > 0.15 m; Cowardin 2 m |
-| river depth / width | ∝ Q^0.4 / Q^0.5 | Leopold & Maddock |
+| river depth / width | ∝ Q^0.4 / Q^0.5; largest 3 m × 40 m | Leopold & Maddock; scale INFERRED |
+| wetland water colour | CDOM a(440) 10 m⁻¹, slope 0.015 nm⁻¹ | Marinho 2024; Ocean Optics |

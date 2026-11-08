@@ -55,6 +55,11 @@
           "description": "`jd.hydrology.wetland@1` beside the height (`wetland`, `marsh`, `swamp` and its standing\n`wetland_water` published, marsh and swamp materials).",
           "type": "string",
           "const": "wetland"
+        },
+        {
+          "description": "`jd.hydrology.rivers@1` in front of the height (`rivers` and the water in its channels,\n`river_water`, published).",
+          "type": "string",
+          "const": "rivers"
         }
       ]
     }

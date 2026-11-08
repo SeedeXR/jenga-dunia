@@ -394,6 +394,21 @@ pub fn carve_rivers_sourced(
     drains: Option<&Heightfield>,
     springs: Option<&Heightfield>,
 ) -> JdResult<(Heightfield, Heightfield)> {
+    carve_rivers_area(h, spacing_m, threshold, depth_m, method, drains, springs)
+        .map(|(carved, mask, _)| (carved, mask))
+}
+
+/// [`carve_rivers_sourced`] that also returns the raw upstream area (cells, springs included) on
+/// the filled terrain — the discharge proxy [`river_water`] takes.
+pub fn carve_rivers_area(
+    h: &Heightfield,
+    spacing_m: [f32; 2],
+    threshold: f32,
+    depth_m: f32,
+    method: FlowMethod,
+    drains: Option<&Heightfield>,
+    springs: Option<&Heightfield>,
+) -> JdResult<(Heightfield, Heightfield, Heightfield)> {
     if !(0.0..1.0).contains(&threshold) {
         return Err(JdError::invalid("threshold", "must be within 0..1"));
     }
@@ -401,15 +416,90 @@ pub fn carve_rivers_sourced(
         return Err(JdError::invalid("depth_m", "must be finite and ≥ 0"));
     }
     let (filled, _) = fill_depressions_with(h, 0.001, drains)?;
-    let acc = flow_accumulation_sourced(&filled, spacing_m, true, method, springs)?;
+    let area = flow_accumulation_sourced(&filled, spacing_m, false, method, springs)?;
+    // The log scale of `flow_accumulation_sourced`: ln(1 + a) / ln(1 + total mass).
+    let total = (h.width() * h.height()) as f32 + springs.map_or(0.0, |s| s.to_vec().iter().sum());
     let mut mask = Heightfield::new(h.width(), h.height(), h.tile_size(), h.halo())?;
     mask.fill_with(|x, y| {
-        let t = ((acc.get(x, y) - threshold) / (1.0 - threshold)).clamp(0.0, 1.0);
+        let acc = (1.0 + area.get(x, y)).ln() / (1.0 + total).ln();
+        let t = ((acc - threshold) / (1.0 - threshold)).clamp(0.0, 1.0);
         t * t * (3.0 - 2.0 * t)
     });
     let mut out = h.clone();
     out.fill_with(|x, y| h.get(x, y) - depth_m * mask.get(x, y));
-    Ok((out, mask))
+    Ok((out, mask, area))
+}
+
+/// Water standing in river channels, metres deep. Downstream hydraulic geometry (Leopold &
+/// Maddock 1953, USGS PP 252): depth ∝ Q^0.4 and width ∝ Q^0.5, with discharge Q proportional to
+/// the upstream `area` (raw flow accumulation). On each river cell (`mask` ≥ 0.5) the water
+/// stands `depth_m × (A / A_max)^0.4` above the bed, its surface level across a section
+/// `width_m × (A / A_max)^0.5` wide (at least one cell) — so the water fills the channel and
+/// stops at its banks. `depth_m` / `width_m` are the largest river's; no universal coefficients
+/// exist, so they are the user's scale and the exponents carry the shape.
+pub fn river_water(
+    bed: &Heightfield,
+    spacing_m: [f32; 2],
+    mask: &Heightfield,
+    area: &Heightfield,
+    depth_m: f32,
+    width_m: f32,
+) -> JdResult<Heightfield> {
+    for (k, v) in [("water_depth_m", depth_m), ("water_width_m", width_m)] {
+        if !(v.is_finite() && v >= 0.0) {
+            return Err(JdError::invalid(k, "must be finite and ≥ 0"));
+        }
+    }
+    let (w, hh) = (bed.width(), bed.height());
+    if (mask.width(), mask.height()) != (w, hh) || (area.width(), area.height()) != (w, hh) {
+        return Err(JdError::invalid("mask", "must match the terrain's size"));
+    }
+    let (b, m, a) = (bed.to_vec(), mask.to_vec(), area.to_vec());
+    let a_max = (0..b.len())
+        .filter(|i| m[*i] >= 0.5)
+        .map(|i| a[i])
+        .fold(0.0f32, f32::max);
+    // Each cell takes the water level of its nearest river centreline cell (its cross-section),
+    // within that section's half-width: a circular stamp would let a higher section upstream spill
+    // its level onto the lower bed downstream. Ground below the section's own bed stays dry: the
+    // channel's banks hold the water, and lower ground beside a perched reach is not channel.
+    let n = b.len();
+    let (mut best_d, mut level, mut floor) = (vec![f32::MAX; n], vec![0.0f32; n], vec![0.0f32; n]);
+    if a_max > 0.0 && depth_m > 0.0 {
+        let cell = spacing_m[0].min(spacing_m[1]);
+        for i in (0..n).filter(|i| m[*i] >= 0.5) {
+            let q = a[i] / a_max;
+            let lv = b[i] + depth_m * q.powf(0.4);
+            let half = (width_m * q.powf(0.5)).max(cell) / 2.0;
+            let (cx, cy) = ((i % w as usize) as i64, (i / w as usize) as i64);
+            let (rx, ry) = (
+                (half / spacing_m[0]).floor() as i64,
+                (half / spacing_m[1]).floor() as i64,
+            );
+            for y in (cy - ry).max(0)..=(cy + ry).min(hh as i64 - 1) {
+                for x in (cx - rx).max(0)..=(cx + rx).min(w as i64 - 1) {
+                    let d =
+                        (((x - cx) as f32) * spacing_m[0]).hypot(((y - cy) as f32) * spacing_m[1]);
+                    let j = y as usize * w as usize + x as usize;
+                    if d <= half && d < best_d[j] {
+                        (best_d[j], level[j], floor[j]) = (d, lv, b[i]);
+                    }
+                }
+            }
+        }
+    }
+    let water: Vec<f32> = (0..n)
+        .map(|j| {
+            if best_d[j] < f32::MAX && b[j] >= floor[j] {
+                level[j] - b[j]
+            } else {
+                0.0
+            }
+        })
+        .collect();
+    let mut out = Heightfield::new(w, hh, bed.tile_size(), bed.halo())?;
+    out.fill_with(|x, y| water[(y * w + x) as usize].max(0.0));
+    Ok(out)
 }
 
 /// Sea level: `ocean` is 1 where the terrain lies below `level_m` **and** is connected to the
@@ -521,6 +611,48 @@ pub fn wetness_index_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn river_water_deepens_and_widens_downstream_and_stays_in_the_channel() {
+        // A river down the middle of a shallow V-valley, incised 1 m; its area grows southwards.
+        let mut bed = Heightfield::new(41, 80, 64, 0).expect("hf");
+        bed.fill_with(|x, y| {
+            100.0 + (x as f32 - 20.0).abs() * 0.5 - if x == 20 { 1.0 } else { 0.0 } + y as f32 * 0.1
+        });
+        let mut mask = bed.clone();
+        mask.fill_with(|x, _| if x == 20 { 1.0 } else { 0.0 });
+        let mut area = bed.clone();
+        area.fill_with(|_, y| (80 - y) as f32 * 100.0); // cells upstream: most at the south end (y 0)
+        let water = river_water(&bed, [5.0, 5.0], &mask, &area, 3.0, 20.0).expect("water");
+        let (south, north) = (water.get(20, 0), water.get(20, 60));
+        assert!(
+            (south - 3.0).abs() < 1e-3,
+            "the largest river is water_depth_m deep: {south}"
+        );
+        // depth ∝ Q^0.4: a quarter of the area → 0.25^0.4 of the depth.
+        let q = area.get(20, 60) / area.get(20, 0);
+        assert!(
+            (north - 3.0 * q.powf(0.4)).abs() < 1e-3,
+            "{north} vs {}",
+            3.0 * q.powf(0.4)
+        );
+        // The banks rise 0.5 m a cell: the water spreads over them as far as the level is above
+        // them, and no further than half the river's width (10 m at the mouth).
+        assert!(
+            water.get(19, 0) > 0.0 && water.get(19, 0) < south,
+            "{}",
+            water.get(19, 0)
+        );
+        assert_eq!(water.get(14, 0), 0.0, "dry bank beyond the channel");
+        assert!(river_water(&bed, [5.0, 5.0], &mask, &area, -1.0, 20.0).is_err());
+        // A perched reach: ground beside it lower than its bed stays dry, never deeper than the
+        // river.
+        let mut low = bed.clone();
+        low.set(19, 0, 90.0);
+        let w = river_water(&low, [5.0, 5.0], &mask, &area, 3.0, 20.0).expect("water");
+        assert_eq!(w.get(19, 0), 0.0);
+        assert!(w.to_vec().iter().all(|d| *d <= 3.0 + 1e-4));
+    }
 
     #[test]
     fn a_spring_starts_a_river_on_a_plane_that_would_not_have_one() {
