@@ -1,17 +1,15 @@
 import { expect, test } from "@playwright/test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, installBridge, createProject, coreOp } from "./bridge";
+import { connectCore, installBridge, createProject, coreOp, cleanWorkspace } from "./bridge";
 
 test.describe("jobs against the real core", () => {
   let ws: string;
   test.beforeEach(() => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-jobs-"));
   });
-  test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-  });
+  test.afterEach(() => cleanWorkspace(ws));
 
   test("a long evaluation shows progress in the header and can be cancelled", async ({ page }) => {
     const core = await connectCore(ws);

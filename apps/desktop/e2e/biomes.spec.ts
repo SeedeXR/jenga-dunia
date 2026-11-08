@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, evaluateAndWait, installBridge, wire, createProject, coreOp, figure } from "./bridge";
+import { connectCore, evaluateAndWait, installBridge, wire, createProject, coreOp, figure, cleanWorkspace } from "./bridge";
 
 const NOISE = "01JDGRAPH000000000000N01SE";
 const HEIGHT = "01JDGRAPH0000000000HE1GHT0";
@@ -12,9 +12,7 @@ test.describe("biome rules editor against the real core", () => {
   test.beforeEach(() => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-biomes-"));
   });
-  test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-  });
+  test.afterEach(() => cleanWorkspace(ws));
 
   test("rules are edited as a table: add a row, type a range, the core journals the array; a bad range is refused", async ({ page }, testInfo) => {
     const core = await connectCore(ws);

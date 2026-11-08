@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, evaluateAndWait, installBridge, createProject, coreOp, figure } from "./bridge";
+import { connectCore, evaluateAndWait, installBridge, createProject, coreOp, figure, cleanWorkspace } from "./bridge";
 
 const NOISE = "01JDGRAPH000000000000N01SE"; // starter graph ids (jd_graph::nodes)
 
@@ -11,9 +11,7 @@ test.describe("node graph editor against the real core", () => {
   test.beforeEach(() => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-graph-"));
   });
-  test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-  });
+  test.afterEach(() => cleanWorkspace(ws));
 
   test("starter graph → edit param → add node → drag → evaluate → delete; every edit is journaled", async ({ page }, testInfo) => {
     const core = await connectCore(ws);

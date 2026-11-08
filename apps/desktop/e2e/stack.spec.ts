@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, evaluateAndWait, installBridge, logCount, createProject, coreOp } from "./bridge";
+import { connectCore, evaluateAndWait, installBridge, logCount, createProject, coreOp, cleanWorkspace } from "./bridge";
 
 /** The layer stack against the real core: the chain feeding the height output as rows, "+" splices
  *  a node, the eye bypasses it, the arrows re-order it, the bin removes it and closes the gap. */
@@ -11,9 +11,7 @@ test.describe("layer stack against the real core", () => {
   test.beforeEach(() => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-stack-"));
   });
-  test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-  });
+  test.afterEach(() => cleanWorkspace(ws));
 
   test("add, bypass, reorder and remove layers from the stack", async ({ page }, testInfo) => {
     const core = await connectCore(ws);

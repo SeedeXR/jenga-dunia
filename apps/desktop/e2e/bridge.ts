@@ -4,7 +4,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { expect, type Locator, type Page, type TestInfo } from "@playwright/test";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -24,6 +24,9 @@ export function mcpBinary(): string {
   throw new Error("jd-mcp binary not found; run `cargo build -p jd-mcp` or set JD_MCP_BIN");
 }
 
+/** The cores started for each workspace, closed before it is deleted ([`cleanWorkspace`]). */
+const cores = new Map<string, Client[]>();
+
 export async function connectCore(workspace: string): Promise<Client> {
   const transport = new StdioClientTransport({
     command: mcpBinary(),
@@ -34,7 +37,17 @@ export async function connectCore(workspace: string): Promise<Client> {
   });
   const client = new Client({ name: "jd-e2e", version: readFileSync(new URL("../../../VERSION", import.meta.url), "utf8").trim() });
   await client.connect(transport);
+  cores.set(workspace, [...(cores.get(workspace) ?? []), client]);
   return client;
+}
+
+/** Close the workspace's cores — each exits once its stdin ends (the SDK waits, then SIGTERM,
+ *  SIGKILL) — and only then delete the workspace: a core still writing its cache or ops.log into
+ *  the project made `rmSync` fail with ENOTEMPTY on a slow CI runner. */
+export async function cleanWorkspace(workspace: string): Promise<void> {
+  await Promise.all((cores.get(workspace) ?? []).map((c) => c.close()));
+  cores.delete(workspace);
+  rmSync(workspace, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }
 
 type Envelope = { status: string; result?: Record<string, unknown>; error?: unknown };

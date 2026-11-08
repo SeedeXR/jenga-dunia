@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, evaluateAndWait, installBridge, selectNode, wire, createProject, coreOp } from "./bridge";
+import { connectCore, evaluateAndWait, installBridge, selectNode, wire, createProject, coreOp, cleanWorkspace } from "./bridge";
 
 const NOISE = "01JDGRAPH000000000000N01SE"; // starter graph ids (jd_graph::nodes)
 const HEIGHT = "01JDGRAPH0000000000HE1GHT0";
@@ -12,9 +12,7 @@ test.describe("hydrology-first node against the real core", () => {
   test.beforeEach(() => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-network-"));
   });
-  test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-  });
+  test.afterEach(() => cleanWorkspace(ws));
 
   test("network node: no inputs, `rivers` published as a layer and shown as the colour; a fill node on `out` reports no lakes", async ({ page }, testInfo) => {
     const core = await connectCore(ws);

@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, coreOp, createProject, evaluateAndWait, installBridge, layerStats, selectNode } from "./bridge";
+import { connectCore, coreOp, createProject, evaluateAndWait, installBridge, layerStats, selectNode, cleanWorkspace } from "./bridge";
 
 /** One-click simulation layers against the real core: Snow beside the height output, Lava, Debris and
  *  Sand in front of it; masks published as layers, materials added, the viewport coloured by them. */
@@ -11,9 +11,7 @@ test.describe("simulation layers against the real core", () => {
   test.beforeEach(() => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-sim-layers-"));
   });
-  test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-  });
+  test.afterEach(() => cleanWorkspace(ws));
 
   test("Snow, Lava, Debris and Sand each wire themselves in one click", async ({ page }, testInfo) => {
     test.slow();

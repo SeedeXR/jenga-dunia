@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, evaluateAndWait, installBridge, selectNode, wire, createProject, coreOp } from "./bridge";
+import { connectCore, evaluateAndWait, installBridge, selectNode, wire, createProject, coreOp, cleanWorkspace } from "./bridge";
 
 const NOISE = "01JDGRAPH000000000000N01SE"; // starter graph ids (jd_graph::nodes)
 const HEIGHT = "01JDGRAPH0000000000HE1GHT0";
@@ -12,9 +12,7 @@ test.describe("climate nodes against the real core", () => {
   test.beforeEach(() => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-climate-"));
   });
-  test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-  });
+  test.afterEach(() => cleanWorkspace(ws));
 
   test("orographic rain: node added, wired from the noise, its `rain` output published and shown as the colour layer", async ({ page }, testInfo) => {
     const core = await connectCore(ws);

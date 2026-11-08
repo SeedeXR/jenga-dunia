@@ -1,10 +1,10 @@
 // Lakes drawn as water: a fill node's `lakes` depth layer, published under that name, is fetched
 // beside the height preview and drawn as standing water on the terrain; the header counts its cells.
 import { expect, test } from "@playwright/test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, evaluateAndWait, fitView, installBridge, selectNode, wire, createProject, layerStats } from "./bridge";
+import { connectCore, evaluateAndWait, fitView, installBridge, selectNode, wire, createProject, layerStats, cleanWorkspace } from "./bridge";
 
 const NOISE = "01JDGRAPH000000000000N01SE";
 
@@ -13,9 +13,7 @@ test.describe("lakes against the real core", () => {
   test.beforeEach(() => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-lakes-"));
   });
-  test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-  });
+  test.afterEach(() => cleanWorkspace(ws));
 
   test("a published `lakes` layer from the fill node is drawn as standing water", async ({ page }) => {
     const core = await connectCore(ws);

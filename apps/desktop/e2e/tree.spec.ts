@@ -1,19 +1,17 @@
 // The layer tree and the icon strip: strip buttons add layers (spliced into the height stack or as
 // simulation layers), the tree groups side branches by category, and the search box filters rows.
 import { expect, test } from "@playwright/test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, evaluateAndWait, installBridge, createProject, coreOp } from "./bridge";
+import { connectCore, evaluateAndWait, installBridge, createProject, coreOp, cleanWorkspace } from "./bridge";
 
 test.describe("layer tree and icon strip against the real core", () => {
   let ws: string;
   test.beforeEach(() => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-tree-"));
   });
-  test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-  });
+  test.afterEach(() => cleanWorkspace(ws));
 
   test("strip adds, tree groups, search filters", async ({ page }, testInfo) => {
     const core = await connectCore(ws);

@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { connectCore, evaluateAndWait, fitView, installBridge, logCount, selectNode, wire, createProject, coreOp, layerStats, figure } from "./bridge";
+import { connectCore, evaluateAndWait, fitView, installBridge, logCount, selectNode, wire, createProject, coreOp, layerStats, figure, cleanWorkspace } from "./bridge";
 
 const NOISE = "01JDGRAPH000000000000N01SE"; // starter graph ids (jd_graph::nodes)
 const HEIGHT = "01JDGRAPH0000000000HE1GHT0";
@@ -13,9 +13,7 @@ test.describe("hydrology nodes against the real core", () => {
   test.beforeEach(() => {
     ws = mkdtempSync(path.join(tmpdir(), "jd-e2e-hydro-"));
   });
-  test.afterEach(() => {
-    rmSync(ws, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
-  });
+  test.afterEach(() => cleanWorkspace(ws));
 
   test("rivers node: method select (d8 → dinf) in the inspector, wired and evaluated; sea-level node added", async ({ page }, testInfo) => {
     // ~70 UI actions with live previews between them: 10 s here, close to the 300 s budget on the
