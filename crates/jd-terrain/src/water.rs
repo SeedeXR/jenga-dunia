@@ -68,12 +68,9 @@ pub fn water_surface(
     let wet: Vec<bool> = depth.to_vec().iter().map(|d| *d >= WET_M).collect();
     let mut remap = vec![u32::MAX; wet.len()];
     let mut m = GridMesh {
-        positions: Vec::new(),
-        normals: Vec::new(),
-        uvs: Vec::new(),
-        indices: Vec::new(),
         grid: full.grid,
         height_range: [f32::MAX, f32::MIN],
+        ..Default::default()
     };
     for t in full.indices.as_chunks::<3>().0 {
         if !t.iter().any(|i| wet[*i as usize]) {
@@ -102,12 +99,8 @@ pub fn water_surface(
 /// is one-sided by default. UV: u across (0..1), v down the fall (0 at the lip, 1 at the foot).
 pub fn fall_sheets(falls: &[FallSheet], extent_m: [f32; 2]) -> GridMesh {
     let mut m = GridMesh {
-        positions: Vec::new(),
-        normals: Vec::new(),
-        uvs: Vec::new(),
-        indices: Vec::new(),
-        grid: [0, 0],
         height_range: [f32::MAX, f32::MIN],
+        ..Default::default()
     };
     let per = 2 * (FALL_ROWS + 1);
     for f in falls {

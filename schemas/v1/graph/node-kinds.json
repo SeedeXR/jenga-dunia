@@ -2530,7 +2530,7 @@
   },
   {
     "kind": "jd.hydrology.wetland@1",
-    "description": "Wetlands where water gathers on flat ground: probability = wet × flat — wet rising through this field's mean MFD wetness + `wetness_sigma` standard deviations (or the optional `wetness` input), flat fading out by `max_slope_deg` — cut at 0.5 (as the Wetland Intrinsic Potential tool). Outputs the `wetland` probability, the `marsh` core (≥ `marsh_at`, emergent plants in standing water) and `swamp` fringe (trees on saturated ground) masks, and the standing `water` depth (`water_depth_m` over the marsh, deeper in hollows, ≤ 2 m; publish it as `wetland_water` and the viewport draws it). Beside the height: the terrain is unchanged",
+    "description": "Wetlands where water gathers on flat ground: probability = wet × flat — wet where the height above the nearest drainage (HAND: the network is ≥ `drainage_km2` upstream) is within about `waterlogged_m` (5.3 m, Nobre et al. 2011), or the optional 0..1 `wetness` input instead; flat fading out by `max_slope_deg` — cut at 0.5 (as the Wetland Intrinsic Potential tool). Outputs the `wetland` probability, the `marsh` core (≥ `marsh_at`, emergent plants in standing water) and `swamp` fringe (trees on saturated ground) masks, and the standing `water` depth (`water_depth_m` over the marsh, deeper in hollows, ≤ 2 m; publish it as `wetland_water` and the viewport draws it). Beside the height: the terrain is unchanged",
     "inputs": [
       {
         "name": "in",

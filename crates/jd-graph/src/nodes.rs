@@ -1711,10 +1711,11 @@ pub fn register_all(r: &mut Registry) {
             Ok(BTreeMap::from([("out".to_owned(), Value::field(out_h)), ("sinkholes".to_owned(), Value::field(mask))]))
         },
     ).with_memory(16.0));
-    // MFD wetness, slope, the filled copy and four outputs: ≈ 44 B/cell.
+    // HAND (the fill, its lake depth, receivers, accumulation, order, base), slope and four
+    // outputs: ≈ 44 B/cell.
     r.register(NodeDef::new::<jd_terrain::WetlandParams, _>(
         "jd.hydrology.wetland@1",
-        "Wetlands where water gathers on flat ground: probability = wet × flat — wet rising through this field's mean MFD wetness + `wetness_sigma` standard deviations (or the optional `wetness` input), flat fading out by `max_slope_deg` — cut at 0.5 (as the Wetland Intrinsic Potential tool). Outputs the `wetland` probability, the `marsh` core (≥ `marsh_at`, emergent plants in standing water) and `swamp` fringe (trees on saturated ground) masks, and the standing `water` depth (`water_depth_m` over the marsh, deeper in hollows, ≤ 2 m; publish it as `wetland_water` and the viewport draws it). Beside the height: the terrain is unchanged",
+        "Wetlands where water gathers on flat ground: probability = wet × flat — wet where the height above the nearest drainage (HAND: the network is ≥ `drainage_km2` upstream) is within about `waterlogged_m` (5.3 m, Nobre et al. 2011), or the optional 0..1 `wetness` input instead; flat fading out by `max_slope_deg` — cut at 0.5 (as the Wetland Intrinsic Potential tool). Outputs the `wetland` probability, the `marsh` core (≥ `marsh_at`, emergent plants in standing water) and `swamp` fringe (trees on saturated ground) masks, and the standing `water` depth (`water_depth_m` over the marsh, deeper in hollows, ≤ 2 m; publish it as `wetland_water` and the viewport draws it). Beside the height: the terrain is unchanged",
         vec![port("in", PortType::Heightfield, true), port("wetness", PortType::Heightfield, false)],
         vec![
             port("wetland", PortType::Heightfield, false),

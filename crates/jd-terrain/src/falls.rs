@@ -161,13 +161,15 @@ pub fn waterfalls(
     // pit does not end a river above its fall.
     let (filled, _) = fill_depressions(h, 0.001)?;
     let recv = d8_receivers(&filled.to_vec(), w, hh, spacing_m);
-    let acc = flow_accumulation_with(&filled, spacing_m, false, FlowMethod::D8)?;
+    let acc = flow_accumulation_with(&filled, spacing_m, false, FlowMethod::D8)?.to_vec();
+    let n = w * hh;
     let river: Vec<bool> = match rivers {
         Some(r) => r.to_vec().iter().map(|v| *v >= 0.5).collect(),
-        None => {
-            let log = flow_accumulation_with(&filled, spacing_m, true, FlowMethod::D8)?;
-            log.to_vec().iter().map(|v| *v > p.threshold).collect()
-        }
+        // The log scale of `flow_accumulation_with`: ln(1 + a) / ln(1 + cells).
+        None => acc
+            .iter()
+            .map(|a| (1.0 + a).ln() / (1.0 + n as f32).ln() > p.threshold)
+            .collect(),
     };
     let step = |i: usize, j: usize| {
         let (dx, dy) = (
@@ -176,7 +178,6 @@ pub fn waterfalls(
         );
         (dx * spacing_m[0]).hypot(dy * spacing_m[1])
     };
-    let n = w * hh;
     let steep: Vec<bool> = (0..n)
         .map(|i| {
             river[i]
@@ -186,16 +187,22 @@ pub fn waterfalls(
                 })
         })
         .collect();
-    let mut fed_steep = vec![false; n];
+    // A cell is fed by its largest donor (ties to the lower index): a small steep tributary joining
+    // at the top of a big fall does not take the main river's lip.
+    let mut main_donor: Vec<Option<usize>> = vec![None; n];
     for i in 0..n {
-        if steep[i]
-            && let Some(r) = recv[i]
-        {
-            fed_steep[r as usize] = true;
+        if let Some(r) = recv[i] {
+            let r = r as usize;
+            if main_donor[r].is_none_or(|d| acc[i] > acc[d]) {
+                main_donor[r] = Some(i);
+            }
         }
     }
+    let fed_steep: Vec<bool> = main_donor
+        .iter()
+        .map(|d| d.is_some_and(|d| steep[d]))
+        .collect();
     let cell_area_km2 = spacing_m[0] * spacing_m[1] / 1.0e6;
-    let acc = acc.to_vec();
     // Every steep run that drops far enough: (lip, foot, run length, face cells).
     let mut runs: Vec<(usize, usize, f32, Vec<usize>)> = Vec::new();
     for lip in 0..n {
@@ -209,10 +216,7 @@ pub fn waterfalls(
             let r = r as usize;
             run += step(cur, r);
             cur = r;
-            path.push(cur);
-            if path.len() > n {
-                break; // strict descent cannot cycle; belt and braces
-            }
+            path.push(cur); // receivers on the ε-filled terrain strictly descend: no cycles
         }
         if heights[lip] - heights[cur] >= p.min_drop_m {
             path.pop();
@@ -220,8 +224,8 @@ pub fn waterfalls(
         }
     }
     // A river several cells wide crosses a cliff in parallel runs: runs whose lips touch
-    // (8-connected) are one fall, led by the lip carrying the most water; how many lips it has
-    // across the river is its width.
+    // (8-connected), or that land on the same foot (a tributary steep down to the main lip), are
+    // one fall, led by the lip carrying the most water; how many lips it has is its width.
     let mut group: Vec<usize> = (0..runs.len()).collect();
     fn root(g: &mut [usize], mut i: usize) -> usize {
         while g[i] != i {
@@ -232,7 +236,14 @@ pub fn waterfalls(
     }
     let at: std::collections::HashMap<usize, usize> =
         runs.iter().enumerate().map(|(k, r)| (r.0, k)).collect();
+    let mut by_foot: std::collections::HashMap<usize, usize> = Default::default();
     for (k, r) in runs.iter().enumerate() {
+        if let Some(&j) = by_foot.get(&r.1) {
+            let (a, b) = (root(&mut group, k), root(&mut group, j));
+            group[a.max(b)] = a.min(b);
+        } else {
+            by_foot.insert(r.1, k);
+        }
         let (x, y) = ((r.0 % w) as i64, (r.0 / w) as i64);
         for (dx, dy) in [(1i64, 0i64), (-1, 1), (0, 1), (1, 1)] {
             let (nx, ny) = (x + dx, y + dy);
@@ -277,19 +288,49 @@ pub fn waterfalls(
             width_m: ks.len() as f32 * cell,
             area_km2: ks.iter().map(|&k| acc[runs[k].0]).sum::<f32>() * cell_area_km2,
             pool_depth_m: p.pool_depth * drop,
-            pool_radius_m: (p.pool_radius * drop).max(cell),
+            pool_radius_m: if p.pool_radius > 0.0 {
+                (p.pool_radius * drop).max(cell)
+            } else {
+                0.0
+            },
         });
     }
     falls.sort_by_key(|f| (f.lip[1], f.lip[0]));
     let mut height = h.clone();
     let mut mask = Heightfield::new(h.width(), h.height(), h.tile_size(), h.halo())?;
-    let mut water = Heightfield::new(h.width(), h.height(), h.tile_size(), h.halo())?;
     for &i in &faces {
         mask.set((i % w) as u32, (i / w) as u32, 1.0);
     }
+    let mut pool = vec![false; n];
     for f in &falls {
-        dig_pool(&mut height, &mut mask, &mut water, f, spacing_m);
+        dig_pool(&mut height, &mut mask, &mut pool, f, spacing_m);
     }
+    // The pools hold water to their own spill level — the lowest outlet of the dug bowl, found by
+    // filling the dug terrain — and the water is the lake each pool sits in, nothing else.
+    let (_, lakes) = fill_depressions(&height, 0.0)?;
+    let lakes = lakes.to_vec();
+    let mut wet = vec![false; n];
+    let mut todo: Vec<usize> = (0..n).filter(|i| pool[*i] && lakes[*i] > 0.0).collect();
+    while let Some(i) = todo.pop() {
+        if std::mem::replace(&mut wet[i], true) {
+            continue;
+        }
+        let (x, y) = ((i % w) as i64, (i / w) as i64);
+        for (dx, dy) in [(1i64, 0i64), (-1, 0), (0, 1), (0, -1)] {
+            let (nx, ny) = (x + dx, y + dy);
+            if nx >= 0 && ny >= 0 && nx < w as i64 && ny < hh as i64 {
+                let j = ny as usize * w + nx as usize;
+                if !wet[j] && lakes[j] > 0.0 {
+                    todo.push(j);
+                }
+            }
+        }
+    }
+    let mut water = Heightfield::new(h.width(), h.height(), h.tile_size(), h.halo())?;
+    water.fill_with(|x, y| {
+        let i = y as usize * w + x as usize;
+        if wet[i] { lakes[i] } else { 0.0 }
+    });
     Ok(FallsResult {
         height,
         mask,
@@ -299,16 +340,16 @@ pub fn waterfalls(
 }
 
 /// Dig `f`'s plunge pool: a raised-cosine bowl centred on the foot, lowering only ground at or
-/// below the foot (the floor), never the cliff above it, and fill it with water to the foot's
-/// level.
+/// below the foot (the floor), never the cliff above it; `pool` marks the cells dug. No depth or
+/// no radius: no pool.
 fn dig_pool(
     height: &mut Heightfield,
     mask: &mut Heightfield,
-    water: &mut Heightfield,
+    pool: &mut [bool],
     f: &Waterfall,
     spacing_m: [f32; 2],
 ) {
-    if f.pool_radius_m <= 0.0 {
+    if f.pool_radius_m <= 0.0 || f.pool_depth_m <= 0.0 {
         return;
     }
     let (w, hh) = (height.width() as i64, height.height() as i64);
@@ -327,9 +368,8 @@ fn dig_pool(
             let (ux, uy) = (x as u32, y as u32);
             let ground = height.get(ux, uy);
             if ground <= f.base_m + 1e-3 {
-                let floor = ground.min(f.base_m - f.pool_depth_m * t);
-                height.set(ux, uy, floor);
-                water.set(ux, uy, water.get(ux, uy).max(f.base_m - floor));
+                height.set(ux, uy, ground.min(f.base_m - f.pool_depth_m * t));
+                pool[(y * w + x) as usize] = true;
             }
             mask.set(ux, uy, mask.get(ux, uy).max(t));
         }
@@ -387,13 +427,60 @@ mod tests {
             "the cliff top is never dug"
         );
         assert_eq!(r.mask.get(24, 32), 1.0, "the face is in the mask");
+        // The pool holds water to its spill level: one flat surface, never above the foot.
+        let level = |x, y| r.height.get(x, y) + r.water.get(x, y);
+        assert!(r.water.get(24, 31) > 1.0, "{}", r.water.get(24, 31));
+        let wet: Vec<f32> = (0..48)
+            .flat_map(|x| (0..64).map(move |y| (x, y)))
+            .filter(|(x, y)| r.water.get(*x, *y) > 0.0)
+            .map(|(x, y)| level(x, y))
+            .collect();
         assert!(
-            (r.water.get(24, 31) - f.pool_depth_m).abs() < 1e-3,
-            "the pool is full to the foot"
+            wet.iter()
+                .all(|l| (l - wet[0]).abs() < 1e-3 && *l <= f.base_m + 1e-3),
+            "{wet:?}"
         );
         assert_eq!(r.water.get(24, 33), 0.0, "no water above the fall");
         assert_eq!(r.water.get(10, 31), 0.0, "nor beyond the pool");
         assert!(r.mask.get(24, 31) > 0.99 && r.mask.get(24, 20) == 0.0);
+    }
+
+    #[test]
+    fn a_pool_above_a_gorge_spills_over_its_rim_and_no_pool_digs_nothing() {
+        // Below the cliff the valley drops 2 m a cell: the pool's rim downstream is far below the
+        // foot, so the water stands at the rim, not at the foot over the open gorge.
+        let mut h = Heightfield::new(48, 64, 64, 0).expect("hf");
+        h.fill_with(|x, y| {
+            let across = (x as f32 - 24.0).abs() * 0.5;
+            let down = if y >= 32 {
+                y as f32 * 0.3 + 30.0
+            } else {
+                y as f32 * 2.0
+            };
+            200.0 + down + across
+        });
+        let mut rivers = h.clone();
+        rivers.fill_with(|x, _| if (23..=25).contains(&x) { 1.0 } else { 0.0 });
+        let r = waterfalls(&h, [5.0, 5.0], Some(&rivers), &FallsParams::default()).expect("falls");
+        let f = &r.falls[0];
+        for y in 0..31 {
+            let surface = r.height.get(24, y) + r.water.get(24, y);
+            assert!(
+                r.water.get(24, y) == 0.0 || surface < f.base_m - 1.0,
+                "row {y}: water up to {surface} over the gorge (foot {})",
+                f.base_m
+            );
+        }
+        // pool_depth 0: falls, but nothing dug, no water, no pool disk in the mask.
+        let p = FallsParams {
+            pool_depth: 0.0,
+            ..FallsParams::default()
+        };
+        let r = waterfalls(&h, [5.0, 5.0], Some(&rivers), &p).expect("falls");
+        assert_eq!(r.falls.len(), 1);
+        assert_eq!(r.height.to_vec(), h.to_vec());
+        assert!(r.water.to_vec().iter().all(|w| *w == 0.0));
+        assert_eq!(r.mask.get(20, 31), 0.0, "no pool disk beside the foot");
     }
 
     #[test]

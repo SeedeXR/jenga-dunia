@@ -96,6 +96,12 @@ type LakesGeometry = (Vec<LakeVertex>, Vec<u32>, usize);
 
 pub use jd_terrain::FallSheet;
 
+/// A cell-centred coordinate (`(c + 0.5)·extent/n`, the core's) on the viewport's grid, which
+/// puts cell c at `c·extent/(n − 1)`.
+fn cell_to_grid(m: f32, n: u32, extent: f32) -> f32 {
+    (m * n as f32 / extent - 0.5) * extent / (n.max(2) - 1) as f32
+}
+
 /// Each fall as the shared two-sided ribbon of falling water (`jd_terrain::fall_sheets`: the
 /// jet's free-fall arc from the lip, as the engines get it) in the viewport frame, white water
 /// at the lip thinning towards the pool, where a disk of aerated foam marks the impact.
@@ -2057,9 +2063,28 @@ impl Viewport {
             (Some(l), Some((pv, extent))) => lakes_mesh(pv, l, self.murk.as_ref(), *extent, &look),
             _ => None,
         };
-        // The falls ride on the lakes' geometry (the same transparent water pipeline).
-        if let (false, Some((_, extent))) = (self.falls.is_empty(), &self.shown) {
-            let (fv, fi) = falls_mesh(&self.falls, *extent);
+        // The falls ride on the lakes' geometry (the same transparent water pipeline). They come
+        // cell-centred (`(c + 0.5)·extent/n`); this grid puts cell c at `c·extent/(n − 1)`.
+        if let (false, Some((pv, extent))) = (self.falls.is_empty(), &self.shown) {
+            let falls: Vec<FallSheet> = self
+                .falls
+                .iter()
+                .map(|f| {
+                    let at = |p: [f32; 3]| {
+                        [
+                            cell_to_grid(p[0], pv.width, extent[0]),
+                            cell_to_grid(p[1], pv.height, extent[1]),
+                            p[2],
+                        ]
+                    };
+                    FallSheet {
+                        lip: at(f.lip),
+                        base: at(f.base),
+                        width_m: f.width_m,
+                    }
+                })
+                .collect();
+            let (fv, fi) = falls_mesh(&falls, *extent);
             let (lv, li, wet) = built.get_or_insert_with(|| (Vec::new(), Vec::new(), 0));
             let at = lv.len() as u32;
             lv.extend(fv);
@@ -3833,6 +3858,14 @@ mod tests {
             "{:?}",
             shore.iter().map(|p| p.pos).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn cell_centres_land_on_the_viewport_grid_vertices() {
+        // 4 cells over 100 m: centres 12.5 … 87.5 m, grid vertices 0 … 100 m.
+        assert_eq!(cell_to_grid(12.5, 4, 100.0), 0.0);
+        assert_eq!(cell_to_grid(87.5, 4, 100.0), 100.0);
+        assert!((cell_to_grid(37.5, 4, 100.0) - 100.0 / 3.0).abs() < 1e-4);
     }
 
     #[test]

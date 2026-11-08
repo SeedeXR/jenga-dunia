@@ -108,11 +108,15 @@ pub fn height_above_drainage(
     spacing_m: [f32; 2],
     drainage_km2: f32,
 ) -> JdResult<Heightfield> {
-    let (w, hh) = (h.width() as usize, h.height() as usize);
-    let (filled, _) = fill_depressions(h, 0.001)?;
+    hand_on(&fill_depressions(h, 0.001)?.0, spacing_m, drainage_km2)
+}
+
+/// [`height_above_drainage`] on an already depression-filled terrain.
+fn hand_on(filled: &Heightfield, spacing_m: [f32; 2], drainage_km2: f32) -> JdResult<Heightfield> {
+    let (h, w, hh) = (filled, filled.width() as usize, filled.height() as usize);
     let fv = filled.to_vec();
     let recv = d8_receivers(&fv, w, hh, spacing_m);
-    let acc = flow_accumulation_with(&filled, spacing_m, false, FlowMethod::D8)?.to_vec();
+    let acc = flow_accumulation_with(filled, spacing_m, false, FlowMethod::D8)?.to_vec();
     let cell_km2 = spacing_m[0] * spacing_m[1] / 1.0e6;
     // Lowest first: a cell's receiver (strictly lower after the fill) has its base already.
     let mut order: Vec<usize> = (0..fv.len()).collect();
@@ -164,12 +168,14 @@ pub fn wetland(
     {
         return Err(JdError::invalid("wetness", "must match the terrain's size"));
     }
+    // One fill serves HAND and the wetland's own hollows.
+    let (filled, hollows) = fill_depressions(h, 0.001)?;
     let wet: Vec<f32> = match wetness {
         Some(w) => w.to_vec(),
         None => {
             let lo = 0.8 * p.waterlogged_m;
             let hi = 1.2 * p.waterlogged_m;
-            height_above_drainage(h, spacing_m, p.drainage_km2)?
+            hand_on(&filled, spacing_m, p.drainage_km2)?
                 .to_vec()
                 .iter()
                 .map(|d| 1.0 - smoothstep(lo, hi, *d))
@@ -177,7 +183,6 @@ pub fn wetland(
         }
     };
     let slope = crate::slope_mask(h, spacing_m, 90.0)?.to_vec(); // degrees / 90
-    let (_, hollows) = fill_depressions(h, 0.001)?;
     let hollows = hollows.to_vec();
     let w = h.width() as usize;
     let field = |f: &(dyn Fn(usize) -> f32 + Sync)| -> JdResult<Heightfield> {

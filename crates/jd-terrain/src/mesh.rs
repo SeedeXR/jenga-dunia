@@ -892,6 +892,7 @@ pub(crate) fn quad_kept(holes: Option<&Heightfield>, step: u32, gx: u32, gz: u32
 
 /// A regular grid mesh in metres: +X east, +Y up, +Z south, centred on the world (same frame as
 /// the GLB writer and the viewport).
+#[derive(Default)]
 pub struct GridMesh {
     /// Vertex positions, 3 per vertex.
     pub positions: Vec<f32>,
@@ -908,6 +909,18 @@ pub struct GridMesh {
 }
 
 impl GridMesh {
+    /// Axis-aligned bounds of the vertices `(min, max)`; `(MAX, MIN)` when there are none.
+    pub fn bounds(&self) -> ([f32; 3], [f32; 3]) {
+        let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+        for v in self.positions.as_chunks::<3>().0 {
+            for k in 0..3 {
+                lo[k] = lo[k].min(v[k]);
+                hi[k] = hi[k].max(v[k]);
+            }
+        }
+        (lo, hi)
+    }
+
     /// Topology summary of this mesh's triangles.
     pub fn topology(&self) -> MeshTopology {
         mesh_topology(

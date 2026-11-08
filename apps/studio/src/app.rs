@@ -1657,12 +1657,11 @@ impl StudioApp {
         };
         let live = layer.contains('#');
         let base = |n: &str| n.split('#').next().unwrap_or(n).to_owned();
-        let watery = |b: &str| b == "lakes" || b.ends_with("_water");
         let mut bases: Vec<String> = self
             .layers
             .iter()
+            .filter(|n| water_layer(n))
             .map(|n| base(n))
-            .filter(|b| watery(b))
             .collect();
         bases.sort();
         bases.dedup();
@@ -1684,30 +1683,23 @@ impl StudioApp {
         let (server, tx, ctx) = (self.server.clone(), self.tx.clone(), self.ctx.clone());
         self.reads += 1;
         std::thread::spawn(move || {
-            let mut merged: Result<Option<jd_terrain::preview::Preview>, String> = Ok(None);
-            let mut murk = None;
-            for name in names {
-                let r = server.invoke(Self::request(
-                    "terrain.preview",
-                    json!({ "layer": name, "lod": lod }),
-                ));
-                let pv = match (&r.result, &r.error) {
-                    (Some(v), _) => decode_preview(v).map(|(p, _)| p),
-                    (None, Some(e)) => Err(format!("{} {}", e.code.as_str(), e.message)),
-                    (None, None) => continue,
-                };
-                if name.starts_with("wetland_water")
-                    && let Ok(p) = &pv
-                {
-                    murk = Some(p.clone());
-                }
-                merged = match (merged, pv) {
-                    (Err(e), _) | (_, Err(e)) => Err(e),
-                    (Ok(None), Ok(p)) => Ok(Some(p)),
-                    (Ok(Some(a)), Ok(b)) => Ok(Some(deeper(&a, &b))),
-                };
-            }
-            let _ = tx.send(Msg::Lakes(layer, merged.map(|m| (m, murk))));
+            let loaded: Vec<(String, Result<jd_terrain::preview::Preview, String>)> = names
+                .into_iter()
+                .filter_map(|name| {
+                    let r = server.invoke(Self::request(
+                        "terrain.preview",
+                        json!({ "layer": name, "lod": lod }),
+                    ));
+                    let pv = match (&r.result, &r.error) {
+                        (Some(v), _) => decode_preview(v).map(|(p, _)| p),
+                        (None, Some(e)) => Err(format!("{} {}", e.code.as_str(), e.message)),
+                        (None, None) => return None,
+                    };
+                    Some((name, pv))
+                })
+                .collect();
+            let water = merge_water(loaded);
+            let _ = tx.send(Msg::Lakes(layer, water));
             ctx.request_repaint();
         });
     }
@@ -1718,14 +1710,7 @@ impl StudioApp {
         let Some(layer) = self.layer.clone() else {
             return;
         };
-        let any = self.graph["nodes"].as_array().is_some_and(|n| {
-            n.iter().any(|n| {
-                n["kind"]
-                    .as_str()
-                    .is_some_and(|k| k.starts_with("jd.hydrology.waterfalls@"))
-            })
-        });
-        if !any {
+        if self.nodes_of("jd.hydrology.waterfalls@").is_empty() {
             return self.viewport.set_falls(Vec::new());
         }
         let request = Self::request("hydrology.waterfalls", json!({ "lod": lod }));
@@ -2474,11 +2459,7 @@ impl StudioApp {
                     params["caves"] = json!(true);
                 }
                 // And the water: rivers, wetlands, pools and the falls' sheets as one mesh.
-                let watery = |l: &String| {
-                    let b = l.split('#').next().unwrap_or(l);
-                    b == "lakes" || b.ends_with("_water")
-                };
-                if self.layers.iter().any(watery)
+                if self.layers.iter().any(|l| water_layer(l))
                     || !self.nodes_of("jd.hydrology.waterfalls@").is_empty()
                 {
                     params["water"] = json!(true);
@@ -4318,19 +4299,9 @@ impl StudioApp {
                 .map_or("Cave", |(_, l)| l);
             let (line, notes) = self.cave_line(&id);
             let entrances = points(&node["params"]["entrances"]);
-            // `border-jd-accent/40` on the selected cave, `border-white/5` otherwise.
-            let edge = if self.selected_node.as_deref() == Some(id.as_str()) {
-                color::ACCENT.gamma_multiply(0.4)
-            } else {
-                egui::Color32::from_white_alpha(13)
-            };
-            egui::Frame::new()
-                .stroke(Stroke::new(1.0, edge))
-                .corner_radius(6.0)
-                .inner_margin(Margin::same(6))
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.horizontal(|ui| {
+            let selected = self.selected_node.as_deref() == Some(id.as_str());
+            node_frame(ui, selected, |ui| {
+                ui.horizontal(|ui| {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             for ext in ["fbx", "glb"] {
                                 let tip = if ext == "glb" {
@@ -4375,13 +4346,22 @@ impl StudioApp {
                             });
                         });
                     });
-                    if let Some(rest) = point_rows(ui, &entrances, !busy, "entrance", &format!("cave {}", ci + 1)) {
-                        action = Some(("graph.set_param", json!({ "id": id, "key": "entrances", "value": rest })));
-                    }
-                    for n in &notes {
-                        ui.label(RichText::new(n).size(11.0).color(color::WARN));
-                    }
-                });
+                if let Some(rest) = point_rows(
+                    ui,
+                    &entrances,
+                    !busy,
+                    "entrance",
+                    &format!("cave {}", ci + 1),
+                ) {
+                    action = Some((
+                        "graph.set_param",
+                        json!({ "id": id, "key": "entrances", "value": rest }),
+                    ));
+                }
+                for n in &notes {
+                    ui.label(RichText::new(n).size(11.0).color(color::WARN));
+                }
+            });
             ui.add_space(8.0);
         }
         if let Some(id) = select {
@@ -4435,18 +4415,9 @@ impl StudioApp {
                 springs.len(),
                 if springs.len() == 1 { "" } else { "s" }
             );
-            let edge = if self.selected_node.as_deref() == Some(id.as_str()) {
-                color::ACCENT.gamma_multiply(0.4)
-            } else {
-                egui::Color32::from_white_alpha(13)
-            };
-            egui::Frame::new()
-                .stroke(Stroke::new(1.0, edge))
-                .corner_radius(6.0)
-                .inner_margin(Margin::same(6))
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.horizontal(|ui| {
+            let selected = self.selected_node.as_deref() == Some(id.as_str());
+            node_frame(ui, selected, |ui| {
+                ui.horizontal(|ui| {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             let placing = self.drawing == Some(Drawing::Spring(id.clone()));
                             if place_button(
@@ -4473,10 +4444,12 @@ impl StudioApp {
                             });
                         });
                     });
-                    if let Some(rest) = point_rows(ui, &springs, !busy, "spring", &format!("rivers {}", ri + 1)) {
-                        action = Some(json!({ "id": id, "key": "springs", "value": rest }));
-                    }
-                });
+                if let Some(rest) =
+                    point_rows(ui, &springs, !busy, "spring", &format!("rivers {}", ri + 1))
+                {
+                    action = Some(json!({ "id": id, "key": "springs", "value": rest }));
+                }
+            });
             ui.add_space(8.0);
         }
         if let Some(id) = select {
@@ -6351,6 +6324,30 @@ fn default_layer(layers: &[String]) -> Option<String> {
         .cloned()
 }
 
+/// One node's box in a right-column card (a cave, a rivers node): `border-jd-accent/40` when it
+/// is the selected node, `border-white/5` otherwise.
+fn node_frame(ui: &mut egui::Ui, selected: bool, body: impl FnOnce(&mut egui::Ui)) {
+    let edge = if selected {
+        color::ACCENT.gamma_multiply(0.4)
+    } else {
+        egui::Color32::from_white_alpha(13)
+    };
+    egui::Frame::new()
+        .stroke(Stroke::new(1.0, edge))
+        .corner_radius(6.0)
+        .inner_margin(Margin::same(6))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            body(ui);
+        });
+}
+
+/// A water-depth layer (`lakes`, `*_water`, either at a `#lod<N>`): drawn as water, exported.
+fn water_layer(name: &str) -> bool {
+    let b = name.split('#').next().unwrap_or(name);
+    b == "lakes" || b.ends_with("_water")
+}
+
 /// A `[[east, north], …]` param (cave entrances, springs) as points.
 fn points(v: &Value) -> Vec<[f64; 2]> {
     v.as_array().map_or_else(Vec::new, |a| {
@@ -6433,6 +6430,35 @@ fn point_rows(
         });
     }
     rest
+}
+
+/// The water layers' previews merged by the deeper water, `wetland_water` kept apart as the
+/// stained share. A layer that failed (not evaluated at this lod yet) is skipped rather than hiding
+/// the others; only when none loaded is it an error.
+fn merge_water(
+    loaded: Vec<(String, Result<jd_terrain::preview::Preview, String>)>,
+) -> Result<Water, String> {
+    let (mut merged, mut murk, mut failed) = (None, None, None);
+    for (name, pv) in loaded {
+        let pv = match pv {
+            Ok(p) => p,
+            Err(e) => {
+                failed.get_or_insert(format!("{name}: {e}"));
+                continue;
+            }
+        };
+        if name.starts_with("wetland_water") {
+            murk = Some(pv.clone());
+        }
+        merged = Some(match merged {
+            None => pv,
+            Some(a) => deeper(&a, &pv),
+        });
+    }
+    match (merged, failed) {
+        (None, Some(e)) => Err(e),
+        (m, _) => Ok((m, murk)),
+    }
 }
 
 /// Standing water to draw: the merged depth, and the wetland's own (stained) water.
@@ -6810,6 +6836,16 @@ mod tests {
             lakes,
             "grids that differ keep the first"
         );
+        // One layer failing leaves the others drawn; the wetland's is kept as the stained share.
+        let (m, murk) = merge_water(vec![
+            ("lakes".into(), Ok(lakes.clone())),
+            ("falls_water".into(), Err("not evaluated".into())),
+            ("wetland_water".into(), Ok(pools.clone())),
+        ])
+        .expect("partial");
+        assert_eq!((m.map(|m| m.data.len()), murk), (Some(2), Some(pools)));
+        assert!(merge_water(vec![("lakes".into(), Err("x".into()))]).is_err());
+        assert_eq!(merge_water(Vec::new()), Ok((None, None)));
     }
 
     #[test]

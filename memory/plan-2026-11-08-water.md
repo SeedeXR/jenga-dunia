@@ -80,3 +80,15 @@ Loop prompt: `/loop Water features per memory/plan-2026-11-08-water.md (waterfal
   Studio (and the Editor) so a camera can visit a feature off-centre; a fall's width is its lip
   cells × cell size (a D8 river is 1–2 cells), narrower than the river water drawn above it; steep
   cliff faces render near-black (vertical faces in the heightfield shading).
+- 2026-11-08 Reviews (/code-review medium + /ponytail-review over 017c9d5..HEAD; W2–W4 had been
+  pushed before them — a slip against the review-before-push rule). Fixed: plunge-pool water now
+  stands at the dug bowl's spill level (fill of the dug terrain, the lake connected to each pool),
+  not at the foot over a lower gorge; a run is fed only by its largest donor and runs sharing a foot
+  merge (a steep tributary no longer takes the main lip); pool_depth/pool_radius 0 = no pool;
+  falls' log accumulation derived from the raw one; wetland fills once; the wetland node's
+  description (still the abandoned TWI σ model) rewritten; unevaluated water layers are left out of
+  the export with a note; the Blender bridge survives "no water"; one failed water preview no longer
+  hides the rest; Studio maps cell-centred falls onto its corner grid. Ponytail: GridMesh Default +
+  bounds(), shared water_layer / node_frame, the dead cycle guard. Follow-up: build_falls re-runs
+  the graph and the falls search on every Studio refresh — the node could publish its falls list.
+  No dedicated test for the tributary rule (hard to build a D8 junction by hand).

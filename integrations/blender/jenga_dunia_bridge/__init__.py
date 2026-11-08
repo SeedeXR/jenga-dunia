@@ -106,10 +106,14 @@ def import_project(context, binary, project, layer, step, texture, scatter_mask,
         _adopt([o for o in bpy.data.objects if o not in before], collection, f"JD {name} cave {i + 1}")
     if has_water:
         path = os.path.join(exports, "water.glb")
-        run_jd(binary, ["op", "water.export", "--project", project, "--params", json.dumps({"path": path, "layer": layer})])
-        before = set(bpy.data.objects)
-        bpy.ops.import_scene.gltf(filepath=path)
-        _adopt([o for o in bpy.data.objects if o not in before], collection, f"JD {name} water")
+        try:
+            run_jd(binary, ["op", "water.export", "--project", project, "--params", json.dumps({"path": path, "layer": layer})])
+        except RuntimeError:
+            path = None  # water layers published but nothing wet (or no falls found): the terrain still comes in
+        if path:
+            before = set(bpy.data.objects)
+            bpy.ops.import_scene.gltf(filepath=path)
+            _adopt([o for o in bpy.data.objects if o not in before], collection, f"JD {name} water")
     return terrain, count, report
 
 

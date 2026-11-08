@@ -1396,6 +1396,8 @@ pub mod graph {
         pub mesh: jd_terrain::mesh::GridMesh,
         /// The water-depth layers merged.
         pub layers: Vec<String>,
+        /// Published water layers that are not evaluated yet (left out).
+        pub missing: Vec<String>,
         /// The waterfalls (world metres).
         pub falls: Vec<FallInfo>,
         /// The deepest water's surface `[u, v, z]`: a point an engine check finds on the mesh.
@@ -1407,13 +1409,7 @@ pub mod graph {
     impl Water {
         /// The sidecar: frame, layers, falls, probe — and the mesh file's bounds when written.
         pub fn doc(&self, file: Option<&str>) -> Value {
-            let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
-            for v in self.mesh.positions.as_chunks::<3>().0 {
-                for k in 0..3 {
-                    lo[k] = lo[k].min(v[k]);
-                    hi[k] = hi[k].max(v[k]);
-                }
-            }
+            let (lo, hi) = self.mesh.bounds();
             let meshes = file.map_or_else(Vec::new, |f| vec![serde_json::json!({ "file": f, "triangles": self.mesh.indices.len() / 3, "bounds_min": lo, "bounds_max": hi })]);
             serde_json::json!({
                 "frame": "meshes: x = u − extent_x/2 (east), y = height, z = extent_y/2 − v (south), metres; falls and probe: u east, v north from the south-west corner, z height",
@@ -1450,8 +1446,15 @@ pub mod graph {
         let ground = ctx.with_layer(layer, |hf| Ok(hf.clone()))?;
         let mut depth = ground.clone();
         depth.fill_with(|_, _| 0.0);
-        for name in &names {
-            ctx.with_layer(name, |d| {
+        // A water layer that is published but not evaluated yet is left out (and reported), not a
+        // reason to fail an engine export.
+        let (mut layers, mut missing) = (Vec::new(), Vec::new());
+        for name in names {
+            if ctx.with_layer(&name, |_| Ok(())).is_err() {
+                missing.push(name);
+                continue;
+            }
+            ctx.with_layer(&name, |d| {
                 if (d.width(), d.height()) != (ground.width(), ground.height()) {
                     return Err(JdError::invalid(
                         "layer",
@@ -1462,6 +1465,7 @@ pub mod graph {
                 depth.fill_with(|x, y| prev.get(x, y).max(d.get(x, y)));
                 Ok(())
             })?;
+            layers.push(name);
         }
         let falls = build_falls(ctx, None, 0)?;
         let surface = jd_terrain::water_surface(&ground, &depth, extent)?;
@@ -1473,8 +1477,7 @@ pub mod graph {
                 width_m: f.width_m,
             })
             .collect();
-        let mut mesh = surface
-            .unwrap_or_else(|| jd_terrain::fall_sheets(&[], [extent[0] as f32, extent[1] as f32]));
+        let mut mesh = surface.unwrap_or_default();
         jd_terrain::append_mesh(
             &mut mesh,
             &jd_terrain::fall_sheets(&sheets, [extent[0] as f32, extent[1] as f32]),
@@ -1499,7 +1502,8 @@ pub mod graph {
         });
         Ok(Some(Water {
             mesh,
-            layers: names,
+            layers,
+            missing,
             falls,
             probe,
             extent,
@@ -5052,6 +5056,14 @@ pub mod graph {
                 serde_json::json!({ "path": "w.obj" }),
             );
             assert_eq!(bad.status, Status::Error);
+            // A water layer published but never evaluated is left out with a note, not a failure.
+            let ghost = call(
+                &reg,
+                &ctx,
+                "graph.add_node",
+                serde_json::json!({ "kind": "jd.output.height@1", "params": { "layer": "ghost_water" } }),
+            );
+            assert_eq!(ghost.status, Status::Ok, "{:?}", ghost.error);
             // Engine profiles carry it: the mesh, water.json, the README's placement; the probe (the
             // deepest water's surface) lies inside the mesh's bounds in the export frame.
             for (profile, file) in [("unity", "water.fbx"), ("unreal", "water.glb")] {
@@ -5062,9 +5074,17 @@ pub mod graph {
                     serde_json::json!({ "profile": profile, "dir": profile, "water": true }),
                 );
                 assert_eq!(r.status, Status::Ok, "{:?}", r.error);
+                let report = r.result.expect("report");
+                assert!(
+                    report["notes"]
+                        .as_array()
+                        .expect("notes")
+                        .iter()
+                        .any(|n| n.as_str().is_some_and(|n| n.contains("ghost_water"))),
+                    "{report}"
+                );
                 let files: Vec<String> =
-                    serde_json::from_value(r.result.expect("report")["files"].clone())
-                        .expect("files");
+                    serde_json::from_value(report["files"].clone()).expect("files");
                 for f in [file, "water.json"] {
                     assert!(files.iter().any(|x| x == f), "{profile}: {f} in {files:?}");
                 }
@@ -7050,13 +7070,7 @@ pub mod terrain {
                                 jd_terrain::mesh::write_glb_mesh_named(mesh, extent, &path, 1, None, "cave")?;
                             }
                         }
-                        let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
-                        for v in mesh.positions.as_chunks::<3>().0 {
-                            for k in 0..3 {
-                                lo[k] = lo[k].min(v[k]);
-                                hi[k] = hi[k].max(v[k]);
-                            }
-                        }
+                        let (lo, hi) = mesh.bounds();
                         report.files.push(name.clone());
                         listed.push(serde_json::json!({ "file": name, "triangles": mesh.indices.len() / 3, "bounds_min": lo, "bounds_max": hi, "entrances": entrances.iter().map(|e| serde_json::json!({ "u": e.at[0], "v": e.at[1], "z": e.at[2], "kind": e.kind, "underwater": e.underwater })).collect::<Vec<_>>() }));
                     }
@@ -7102,6 +7116,9 @@ pub mod terrain {
                     });
                     std::fs::write(&readme, text)?;
                     report.notes.push(format!("water ({}) and {} waterfall sheet(s) as {name}: place it as the caves (the README)", water.layers.join(", "), water.falls.len()));
+                    if !water.missing.is_empty() {
+                        report.notes.push(format!("water layer(s) {} not evaluated: left out of {name} (evaluate the graph, then export again)", water.missing.join(", ")));
+                    }
                 }
                 let warnings = report.notes.iter().map(|n| Warning::new("W_ENGINE_SIZE", n.clone())).collect();
                 ctx.with_project(|proj| crate::geo::write_attribution_txt(proj, &dir).map(|_| ()))?;
