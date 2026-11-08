@@ -1289,4 +1289,36 @@ fn guide_water() {
     frame(&mut h, 0.45, 0.8);
     settle(&mut h, |_| true);
     shot(&mut h, "desktop-waterfalls-close", &[]);
+    // Wetlands: rolling lowland, `+ wetland` — marsh in the wet flats, swamp around it.
+    let dir = tempfile::tempdir().unwrap();
+    let server = world(dir.path());
+    let noise = node(&server, "jd.noise.fbm@1");
+    for (key, value) in [
+        ("height_range_m", json!([0.0, 60.0])),
+        ("feature_size_m", json!(1600.0)),
+    ] {
+        ok(
+            &server,
+            "graph.set_param",
+            json!({ "id": noise, "key": key, "value": value }),
+        );
+    }
+    ok(
+        &server,
+        "graph.add_simulation",
+        json!({ "which": "wetland" }),
+    );
+    ok(&server, "graph.evaluate", json!({ "lod": 0 }));
+    let mut h = studio(server);
+    ready(&mut h);
+    settle(&mut h, |a| a.viewport.lake_cells() > 0);
+    show(&mut h, "+ wetland");
+    shot(
+        &mut h,
+        "desktop-wetland",
+        &[Callout("+ wetland", ""), Callout("Material 1 mask", "")],
+    );
+    choose(&mut h, "colour", "wetland");
+    settle(&mut h, |a| a.viewport.overlay_on());
+    shot(&mut h, "desktop-wetland-mask", &[Callout("colour", "")]);
 }

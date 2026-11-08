@@ -41,6 +41,14 @@ already requires "Riverbeds and drainage basins" and "Lakes and wetlands".
   thresholds are site-specific (3.1–7.3 across Illinois watersheds; one standard deviation above
   the mean was used); MFD routing fits field wetlands best; WIP models a per-cell wetland
   probability from slope, curvature, TWI and depth-to-water and cuts it at 0.5.
+- VERIFIED (Nobre et al. 2011, J. Hydrology 404:13–29, doi:10.1016/j.jhydrol.2011.03.051; Rennó
+  et al. 2008, Remote Sensing of Environment): HAND — height above the nearest drainage, each
+  cell's height above where its flow path meets the stream network — correlates strongly with
+  water-table depth; field-optimised classes over 18,000 km² of the lower Rio Negro: ≤ 5.3 m
+  waterlogged, 5.3–15 m ecotone, above that slope and plateau (validated on 70 points).
+- FOUND IN USE (2026-11-08): a TWI cut at mean + 1σ on gentle synthetic relief picks the
+  drainage *lines* (dendritic speckle), not the flats a marsh fills; HAND gives the broad,
+  waterlogged valley floors. So the wetness is HAND-based; TWI stays as an optional input.
 - NOT FOUND: a published slope cut-off for wetlands. INFERRED: low slope is a proxy only, so it
   enters as a soft term with an exposed limit, not a hard rule.
 - INFERRED (Cowardin's classes): persistently flooded cores grow emergent plants (marsh);
@@ -69,5 +77,7 @@ already requires "Riverbeds and drainage basins" and "Lakes and wetlands".
 | plunge pool depth / drop | 0.33 | Table S1, pools ≥ 0.5 m deep |
 | plunge pool radius / drop | 0.57 | Table S1 median |
 | wetland probability cut | 0.5 | WIP |
+| waterlogged above drainage | 5.3 m (HAND) | Nobre et al. 2011 |
+| drainage network | ≥ 0.1 km² upstream | INFERRED (channel heads ~0.1–1 km²) |
 | wetland standing water | 0.3 m, ≤ 2 m | marsh > 0.15 m; Cowardin 2 m |
 | river depth / width | ∝ Q^0.4 / Q^0.5 | Leopold & Maddock |

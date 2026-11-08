@@ -1633,6 +1633,9 @@ pub mod graph {
         /// `jd.hydrology.waterfalls@1` in front of the height, fed the rivers mask of a rivers node
         /// up its chain (`falls` and its pools' `falls_water` published).
         Falls,
+        /// `jd.hydrology.wetland@1` beside the height (`wetland`, `marsh`, `swamp` and its standing
+        /// `wetland_water` published, marsh and swamp materials).
+        Wetland,
     }
 
     /// `graph.add_simulation` params.
@@ -2015,6 +2018,14 @@ pub mod graph {
                     Simulation::Sand => ("jd.erosion.aeolian@1", serde_json::json!({ "iterations": 60 }), true, vec![], vec![]),
                     // Spray keeps the rock at a fall dark and glossy: wet basalt-grey, roughness 0.25.
                     Simulation::Falls => ("jd.hydrology.waterfalls@1", serde_json::json!({}), true, vec![("falls", "falls"), ("water", "falls_water")], vec![material("falls", [0.2, 0.2, 0.21], 0.25, None)]),
+                    // Marsh: emergent reeds and sedges, green-brown; swamp: a dark, wet forest floor.
+                    Simulation::Wetland => (
+                        "jd.hydrology.wetland@1",
+                        serde_json::json!({}),
+                        false,
+                        vec![("wetland", "wetland"), ("marsh", "marsh"), ("swamp", "swamp"), ("water", "wetland_water")],
+                        vec![material("marsh", [0.36, 0.4, 0.22], 0.85, None), material("swamp", [0.17, 0.16, 0.11], 0.9, None)],
+                    ),
                     Simulation::Lava => (
                         "jd.volcanic.lava@1",
                         serde_json::json!({ "eruption_s": 1800, "duration_s": 1800 }),
@@ -4668,6 +4679,75 @@ pub mod graph {
                     .iter()
                     .any(|n| n == "lakes"),
                 "{layers}"
+            );
+        }
+
+        #[test]
+        fn the_wetland_simulation_sits_beside_the_height_and_publishes_its_layers() {
+            use crate::envelope::Status;
+            let reg = Registry::with_builtins();
+            let dir = tempfile::tempdir().expect("tmp");
+            let ctx = Context::default();
+            let world = jd_types::WorldSettings {
+                resolution_px: [64, 64],
+                extent_m: [640.0, 640.0],
+                tile_size: 64,
+                halo: 0,
+                ..Default::default()
+            };
+            call(
+                &reg,
+                &ctx,
+                "project.create",
+                serde_json::json!({ "path": dir.path().join("w.jdproj"), "name": "W", "world": world }),
+            );
+            let before = call(&reg, &ctx, "graph.evaluate", serde_json::json!({}))
+                .result
+                .expect("eval");
+            let added = call(
+                &reg,
+                &ctx,
+                "graph.add_simulation",
+                serde_json::json!({ "which": "wetland" }),
+            );
+            assert_eq!(added.status, Status::Ok, "{:?}", added.error);
+            let added = added.result.expect("added");
+            assert_eq!(
+                added["published"],
+                serde_json::json!(["wetland", "marsh", "swamp", "wetland_water"])
+            );
+            let ev = call(&reg, &ctx, "graph.evaluate", serde_json::json!({}));
+            assert_eq!(ev.status, Status::Ok, "{:?}", ev.error);
+            let after = ev.result.expect("eval");
+            assert_eq!(
+                after["layers"]["height"]["hash"], before["layers"]["height"]["hash"],
+                "beside the height: the terrain is unchanged"
+            );
+            let water = call(
+                &reg,
+                &ctx,
+                "terrain.stats",
+                serde_json::json!({ "layer": "wetland_water" }),
+            )
+            .result
+            .expect("stats");
+            assert!(
+                water["stats"]["max"].as_f64().expect("max") <= 2.0,
+                "{water}"
+            );
+            let look = call(&reg, &ctx, "project.info", serde_json::json!({}))
+                .result
+                .expect("info")["look"]["materials"]
+                .clone();
+            let masks: Vec<_> = look
+                .as_array()
+                .expect("rows")
+                .iter()
+                .filter_map(|m| m["mask"].as_str())
+                .collect();
+            assert!(
+                masks.contains(&"marsh") && masks.contains(&"swamp"),
+                "{look}"
             );
         }
 

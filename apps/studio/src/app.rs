@@ -1771,7 +1771,7 @@ impl StudioApp {
                 "Flatten the terrain to its mean height (set height_m in the inspector)",
             ),
         ];
-        const SIMULATIONS: [(&str, &str); 5] = [
+        const SIMULATIONS: [(&str, &str); 6] = [
             (
                 "snow",
                 "A season of snow on the terrain (jd.climate.snowpack): the cover becomes the `snow` layer, a snow material and the viewport colour",
@@ -1787,6 +1787,10 @@ impl StudioApp {
             (
                 "lava",
                 "A lava flow from the summit (jd.volcanic.lava) in front of the height output: the `heat` glow and `lava` thickness layers, a basalt material",
+            ),
+            (
+                "wetland",
+                "Wetlands where water gathers on flat ground (jd.hydrology.wetland) beside the height: `wetland`, `marsh` (flooded core) and `swamp` (wet fringe) layers, their standing water drawn, marsh and swamp materials",
             ),
             (
                 "falls",

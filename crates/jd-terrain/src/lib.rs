@@ -45,7 +45,11 @@ pub mod spline;
 pub mod transform;
 pub use transform::{RegionShape, RegionTransform, TransformKind, apply_transforms};
 pub mod vector;
+pub mod wetland;
 pub use vector::{Polyline, contour_lines, geojson_lines, river_polylines};
+pub use wetland::{
+    MAX_WETLAND_WATER_M, WetlandParams, WetlandResult, height_above_drainage, wetland,
+};
 pub mod stamp;
 pub mod strata;
 pub mod yardang;

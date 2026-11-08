@@ -2512,6 +2512,83 @@
     }
   },
   {
+    "kind": "jd.hydrology.wetland@1",
+    "description": "Wetlands where water gathers on flat ground: probability = wet × flat — wet rising through this field's mean MFD wetness + `wetness_sigma` standard deviations (or the optional `wetness` input), flat fading out by `max_slope_deg` — cut at 0.5 (as the Wetland Intrinsic Potential tool). Outputs the `wetland` probability, the `marsh` core (≥ `marsh_at`, emergent plants in standing water) and `swamp` fringe (trees on saturated ground) masks, and the standing `water` depth (`water_depth_m` over the marsh, deeper in hollows, ≤ 2 m; publish it as `wetland_water` and the viewport draws it). Beside the height: the terrain is unchanged",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      },
+      {
+        "name": "wetness",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "name": "wetland",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "marsh",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "swamp",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "water",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WetlandParams",
+      "description": "Wetland settings.",
+      "type": "object",
+      "properties": {
+        "waterlogged_m": {
+          "description": "Height above the nearest drainage up to which the ground is waterlogged, metres (> 0);\n5.3 = Nobre et al.'s field-optimised waterlogged class.",
+          "type": "number",
+          "format": "float",
+          "default": 5.300000190734863
+        },
+        "drainage_km2": {
+          "description": "Upstream area at which a cell is part of the drainage network, km² (> 0).",
+          "type": "number",
+          "format": "float",
+          "default": 0.10000000149011612
+        },
+        "max_slope_deg": {
+          "description": "Steepest ground a wetland holds, degrees (0, 90); the probability fades out from half of it.",
+          "type": "number",
+          "format": "float",
+          "default": 5.0
+        },
+        "marsh_at": {
+          "description": "Probability above which a wetland is marsh (flooded core) rather than swamp (0.5..1).",
+          "type": "number",
+          "format": "float",
+          "default": 0.75
+        },
+        "water_depth_m": {
+          "description": "Standing water over the marsh, metres (0..2): marshes hold more than ~15 cm all year,\nwooded swamps a few centimetres.",
+          "type": "number",
+          "format": "float",
+          "default": 0.30000001192092896
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
     "kind": "jd.hydrology.wetness@1",
     "description": "Topographic wetness index ln(a / tan β) normalised to 0..1 — wet valley floors high, steep ridges low (biome/moisture masks); `method` picks d8 / dinf / mfd routing",
     "inputs": [

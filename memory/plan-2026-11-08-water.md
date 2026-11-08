@@ -25,11 +25,11 @@ Loop prompt: `/loop Water features per memory/plan-2026-11-08-water.md (waterfal
 
 | # | Stage | Status |
 |---|---|---|
-| W1a | `jd-terrain::falls`: find waterfalls on a river path (lip→base run of steps ≥ min_gradient, drop ≥ min_drop), carve plunge pools (depth 0.33 × drop, radius 0.57 × drop), falls mask; unit tests | todo |
-| W1b | node `jd.hydrology.waterfalls@1` (in, rivers? → out, falls); op `hydrology.waterfalls {id}` listing them; jd-graph + jd-core tests; schemas | todo |
-| W1c | Studio: falling-water sheets drawn at each fall (viewport), `+ falls` button; window test | todo |
-| W2a | `jd-terrain::wetland`: probability from wetness (MFD) × flatness, cut 0.5; marsh core (standing water) / swamp fringe; standing water depth ≤ water_depth_m in micro-depressions; unit tests | todo |
-| W2b | node `jd.hydrology.wetland@1` (in, wetness? → wetland, marsh, swamp, water); `+ wetland` button publishes `wetland_water` + masks; biome docs; tests | todo |
+| W1a | `jd-terrain::falls`: find waterfalls on a river path (lip→base run of steps ≥ min_gradient, drop ≥ min_drop), carve plunge pools (depth 0.33 × drop, radius 0.57 × drop), falls mask; unit tests | done (d97574c) |
+| W1b | node `jd.hydrology.waterfalls@1` (in, rivers? → out, falls); op `hydrology.waterfalls {id}` listing them; jd-graph + jd-core tests; schemas | done (d97574c) |
+| W1c | Studio: falling-water sheets drawn at each fall (viewport), `+ falls` button; window test | done (d97574c) |
+| W2a | `jd-terrain::wetland`: probability from wetness (MFD) × flatness, cut 0.5; marsh core (standing water) / swamp fringe; standing water depth ≤ water_depth_m in micro-depressions; unit tests | done |
+| W2b | node `jd.hydrology.wetland@1` (in, wetness? → wetland, marsh, swamp, water); `+ wetland` button publishes `wetland_water` + masks; biome docs; tests | done |
 | W3a | rivers node: `water` output — depth ∝ Q^0.4 scaled so the largest river reaches `water_depth_m`, over the channel; tests (exponent, monotonic downstream) | todo |
 | W3b | Studio draws every water layer (lakes + `*_water`), strip's rivers adds `river_water`; window test | todo |
 | W4 | Studio Rivers section: rivers nodes listed, **Place springs** arms click-to-place (as cave entrances), springs listed with ×; window test | todo |
@@ -37,3 +37,15 @@ Loop prompt: `/loop Water features per memory/plan-2026-11-08-water.md (waterfal
 | W6 | docs (guide sections, figures via guide.rs, CLI quickstart), acceptance item?, gates, CI, push | todo |
 
 ## Log
+- 2026-11-08 W1 done (d97574c). Changes from the plan: the pools hold their own water (the node's
+  `water` output, published `falls_water`) instead of a fill node, which lakes every hollow (on
+  terraces it flooded 207 k cells); W3b's "draw every `*_water` layer" moved forward for it.
+  Ribbons follow a jet's free-fall arc at 1.5 m/s with impact foam. Found: on high relief the
+  orbit centre (sea level clamped to the terrain's range = its minimum) puts a zoomed-in camera
+  underground — a Studio follow-up (orbit the relief's middle, or a pan target), noted for W6.
+  The guide figure for falls needs a view near a fall; the orbit only circles the world centre.
+- 2026-11-08 W2 done. Changed from the plan: the wetness is HAND (height above the nearest
+  drainage, Nobre et al. 2011: ≤ 5.3 m waterlogged) not a TWI cut — on gentle relief the TWI at
+  mean + 1σ picked drainage lines (dendritic speckle), HAND gives the broad valley floors. TWI or a
+  painted mask can still be wired to `wetness`. Open: wetland water draws with the lakes' clear
+  tint; a murkier look for `wetland_water` belongs with W3b's water drawing.

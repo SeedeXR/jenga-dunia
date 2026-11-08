@@ -1698,6 +1698,29 @@ pub fn register_all(r: &mut Registry) {
             Ok(BTreeMap::from([("out".to_owned(), Value::field(out_h)), ("sinkholes".to_owned(), Value::field(mask))]))
         },
     ).with_memory(16.0));
+    // MFD wetness, slope, the filled copy and four outputs: ≈ 44 B/cell.
+    r.register(NodeDef::new::<jd_terrain::WetlandParams, _>(
+        "jd.hydrology.wetland@1",
+        "Wetlands where water gathers on flat ground: probability = wet × flat — wet rising through this field's mean MFD wetness + `wetness_sigma` standard deviations (or the optional `wetness` input), flat fading out by `max_slope_deg` — cut at 0.5 (as the Wetland Intrinsic Potential tool). Outputs the `wetland` probability, the `marsh` core (≥ `marsh_at`, emergent plants in standing water) and `swamp` fringe (trees on saturated ground) masks, and the standing `water` depth (`water_depth_m` over the marsh, deeper in hollows, ≤ 2 m; publish it as `wetland_water` and the viewport draws it). Beside the height: the terrain is unchanged",
+        vec![port("in", PortType::Heightfield, true), port("wetness", PortType::Heightfield, false)],
+        vec![
+            port("wetland", PortType::Heightfield, false),
+            port("marsh", PortType::Heightfield, false),
+            port("swamp", PortType::Heightfield, false),
+            port("water", PortType::Heightfield, false),
+        ],
+        |ctx, p, i| {
+            let wp: jd_terrain::WetlandParams = params(p)?;
+            let wetness = i.get("wetness").map(|v| v.as_field());
+            let r = jd_terrain::wetland(field(i, "in")?, spacing_m(ctx), wetness.map(|w| &**w), &wp)?;
+            Ok(BTreeMap::from([
+                ("wetland".to_owned(), Value::field(r.wetland)),
+                ("marsh".to_owned(), Value::field(r.marsh)),
+                ("swamp".to_owned(), Value::field(r.swamp)),
+                ("water".to_owned(), Value::field(r.water)),
+            ]))
+        },
+    ).with_memory(44.0));
     // The filled copy, receivers, two accumulations, the step flags and three outputs: ≈ 44 B/cell.
     r.register(NodeDef::new::<jd_terrain::FallsParams, _>(
         "jd.hydrology.waterfalls@1",
@@ -2974,6 +2997,40 @@ mod tests {
             outs[&(fed, "out".into())].as_field().to_vec(),
         );
         assert!(a.iter().zip(&b).any(|(a, b)| b < a), "and digs their pools");
+    }
+
+    #[test]
+    fn wetland_node_maps_marsh_swamp_and_shallow_water_without_touching_the_terrain() {
+        let reg = Registry::with_builtins();
+        let cache = Cache::default();
+        let mut g = Graph::default();
+        let n = add(
+            &mut g,
+            "jd.noise.fbm@1",
+            serde_json::json!({ "seed": 3, "feature_size_m": 160.0, "height_range_m": [0.0, 60.0] }),
+        );
+        let wl = add(&mut g, "jd.hydrology.wetland@1", serde_json::json!({}));
+        connect(&mut g, &n, "out", &wl, "in");
+        let (outs, _) = Evaluator::new(&reg, &cache)
+            .evaluate(&g, &world(), 0)
+            .expect("eval");
+        let get = |port: &str| outs[&(wl.clone(), port.into())].as_field().to_vec();
+        let (p, marsh, swamp, water) = (get("wetland"), get("marsh"), get("swamp"), get("water"));
+        assert!(p.iter().any(|v| *v >= 0.5), "rolling lowland has wetlands");
+        assert!(p.iter().any(|v| *v < 0.5), "and dry ground");
+        for i in 0..p.len() {
+            assert!(
+                marsh[i] + swamp[i] <= 1.0 + 1e-5 && (0.0..=2.0).contains(&water[i]),
+                "{i}"
+            );
+            if p[i] < 0.4 {
+                assert_eq!(
+                    (marsh[i], swamp[i], water[i]),
+                    (0.0, 0.0, 0.0),
+                    "dry ground at {i}"
+                );
+            }
+        }
     }
 
     #[test]

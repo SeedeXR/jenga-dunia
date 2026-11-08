@@ -440,7 +440,7 @@ export type GraphAddNodeResult = {
   "id": NodeId;
 };
 
-export type Simulation = "snow" | "sand" | "debris" | "lava" | "falls";
+export type Simulation = "snow" | "sand" | "debris" | "lava" | "falls" | "wetland";
 
 export type GraphAddSimulationRequest = {
   /** Which simulation. */
@@ -2875,6 +2875,21 @@ near-vertical falls, which need metre cells to show). */
   "threshold"?: number;
 };
 
+export type NodeParams_jd_hydrology_wetland_1 = {
+  /** Height above the nearest drainage up to which the ground is waterlogged, metres (> 0);
+5.3 = Nobre et al.'s field-optimised waterlogged class. */
+  "waterlogged_m"?: number;
+  /** Upstream area at which a cell is part of the drainage network, km² (> 0). */
+  "drainage_km2"?: number;
+  /** Steepest ground a wetland holds, degrees (0, 90); the probability fades out from half of it. */
+  "max_slope_deg"?: number;
+  /** Probability above which a wetland is marsh (flooded core) rather than swamp (0.5..1). */
+  "marsh_at"?: number;
+  /** Standing water over the marsh, metres (0..2): marshes hold more than ~15 cm all year,
+wooded swamps a few centimetres. */
+  "water_depth_m"?: number;
+};
+
 export type NodeParams_jd_hydrology_wetness_1 = {
   /** Flow routing for the drainage area: `d8` (channel-like streaks), `dinf` (smoother) or `mfd` (diffuse moisture). */
   "method"?: FlowMethod;
@@ -3435,6 +3450,7 @@ export interface NodeKinds {
   "jd.hydrology.rivers@1": NodeParams_jd_hydrology_rivers_1;
   "jd.hydrology.sea_level@1": NodeParams_jd_hydrology_sea_level_1;
   "jd.hydrology.waterfalls@1": NodeParams_jd_hydrology_waterfalls_1;
+  "jd.hydrology.wetland@1": NodeParams_jd_hydrology_wetland_1;
   "jd.hydrology.wetness@1": NodeParams_jd_hydrology_wetness_1;
   "jd.input.heightmap@1": NodeParams_jd_input_heightmap_1;
   "jd.input.layer@1": NodeParams_jd_input_layer_1;

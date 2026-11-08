@@ -2436,6 +2436,29 @@ fn the_falls_button_draws_the_rivers_waterfalls() {
     );
 }
 
+/// `+ wetland`: the marsh and swamp layers come in and the marsh's standing water is drawn.
+#[test]
+fn the_wetland_button_maps_marsh_and_swamp_and_draws_their_water() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window(engine(dir.path()));
+    settle(&mut h, |a| a.viewport.info().is_some());
+    h.get_by_label("+ wetland").scroll_to_me();
+    h.run();
+    h.get_by_label("+ wetland").click();
+    h.run_steps(1);
+    settle(&mut h, |a| {
+        ["wetland", "marsh", "swamp", "wetland_water"]
+            .iter()
+            .all(|l| a.layers().iter().any(|x| x == l))
+    });
+    settle(&mut h, |a| a.viewport.lake_cells() > 0);
+    assert!(
+        h.state().viewport_readout().contains(" · lakes "),
+        "{}",
+        h.state().viewport_readout()
+    );
+}
+
 /// A terrain far above sea level (a DEM of the Kenyan highlands: 1.7 km up on a 2 km world) is in
 /// view: the camera orbits sea level held inside its heights, not the origin, where the home view's
 /// eye sat under it.
