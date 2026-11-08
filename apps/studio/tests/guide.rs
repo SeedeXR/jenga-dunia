@@ -1253,21 +1253,50 @@ fn film_desert() {
 #[test]
 #[ignore = "writes the user guide's figures (JD_GUIDE_OUT)"]
 fn guide_water() {
-    // Waterfalls: rivers running over 25 m terraces on a 1 km world, `+ falls` at its research
-    // defaults.
+    // Waterfalls: a 400 m world rising 80 m to the north with one 40 m terrace cliff across its
+    // middle; a spring on the high ground feeds a river (`+ rivers`: carved, with its water) south
+    // over the cliff, where `+ falls` finds the fall and digs its pool — at the orbit's centre.
     let dir = tempfile::tempdir().unwrap();
-    let server = world_of(dir.path(), 1024.0, 512);
+    let server = world_of(dir.path(), 400.0, 256);
+    let noise = node(&server, "jd.noise.fbm@1");
+    ok(
+        &server,
+        "graph.set_param",
+        json!({ "id": noise, "key": "height_range_m", "value": [0.0, 4.0] }),
+    );
     for (kind, params) in [
         (
-            "jd.filter.terrace@1",
-            json!({ "step_m": 25.0, "softness": 0.1 }),
+            "jd.shape.primitive@1",
+            json!({ "shape": "ramp", "center_m": [200.0, 200.0], "size_m": [400.0, 400.0], "height_range_m": [0.0, 80.0] }),
         ),
-        ("jd.hydrology.rivers@1", json!({ "threshold": 0.5 })),
+        (
+            "jd.filter.terrace@1",
+            json!({ "step_m": 40.0, "softness": 0.05 }),
+        ),
     ] {
         ok(
             &server,
             "graph.splice",
             json!({ "layer": "height", "kind": kind, "params": params }),
+        );
+    }
+    let rivers = ok(
+        &server,
+        "graph.add_simulation",
+        json!({ "which": "rivers" }),
+    )["id"]
+        .clone();
+    for (key, value) in [
+        ("threshold", json!(0.9)),
+        ("depth_m", json!(3.0)),
+        ("springs", json!([[200.0, 380.0]])),
+        ("water_depth_m", json!(1.5)),
+        ("water_width_m", json!(12.0)),
+    ] {
+        ok(
+            &server,
+            "graph.set_param",
+            json!({ "id": rivers, "key": key, "value": value }),
         );
     }
     ok(&server, "graph.add_simulation", json!({ "which": "falls" }));
@@ -1276,19 +1305,39 @@ fn guide_water() {
     ready(&mut h);
     settle(&mut h, |a| a.viewport.fall_count() > 0);
     show(&mut h, "+ falls");
+    // From the south, looking up the river at the cliff; the orbit at the cliff's foot.
+    let range = h.state().viewport.info().map_or([0.0, 0.0], |i| i.range_m);
+    let mut cam = h.state().viewport.camera;
+    (cam.theta, cam.centre_y) = (0.5, (range[0] + range[1]) / 2.0);
+    h.state_mut().viewport.set_camera(cam);
+    frame(&mut h, 0.8, 0.95);
+    settle(&mut h, |_| true);
     shot(
         &mut h,
         "desktop-waterfalls",
         &[Callout("+ falls", ""), Callout("viewport: wgpu", "")],
     );
-    // Orbit the middle of the relief, not its lowest point, so the close view stays above ground.
-    let range = h.state().viewport.info().map_or([0.0, 0.0], |i| i.range_m);
     let mut cam = h.state().viewport.camera;
-    cam.centre_y = (range[0] + range[1]) / 2.0;
+    (cam.theta, cam.centre_y) = (0.3, 20.0);
     h.state_mut().viewport.set_camera(cam);
-    frame(&mut h, 0.45, 0.8);
+    frame(&mut h, 0.25, 1.15);
     settle(&mut h, |_| true);
     shot(&mut h, "desktop-waterfalls-close", &[]);
+    // The Rivers section: the spring listed under its rivers node, Place arming the tool.
+    show(&mut h, "Rivers 1 · 1 spring");
+    h.query_all(by().role(Role::Button).label("Place springs of rivers 1"))
+        .next()
+        .unwrap()
+        .click();
+    h.run_steps(4);
+    shot(
+        &mut h,
+        "desktop-rivers-springs",
+        &[
+            Callout("Add rivers", ""),
+            Callout("Place springs of rivers 1", ""),
+        ],
+    );
     // Wetlands: rolling lowland, `+ wetland` — marsh in the wet flats, swamp around it.
     let dir = tempfile::tempdir().unwrap();
     let server = world(dir.path());

@@ -34,7 +34,7 @@ Loop prompt: `/loop Water features per memory/plan-2026-11-08-water.md (waterfal
 | W3b | Studio draws every water layer (lakes + `*_water`), strip's rivers adds `river_water`; window test | done |
 | W4 | Studio Rivers section: rivers nodes listed, **Place springs** arms click-to-place (as cave entrances), springs listed with ×; window test | done |
 | W5 | engine export: `water` in export_profile + `water.export` op; Unity importer + check, Unreal check, Blender bridge + test; run the headless engine checks | done |
-| W6 | docs (guide sections, figures via guide.rs, CLI quickstart), acceptance item?, gates, CI, push | todo |
+| W6 | docs (guide sections, figures via guide.rs, CLI quickstart), acceptance item?, gates, CI, push | done (docs, figures; acceptance list unchanged) |
 
 ## Log
 - 2026-11-08 W1 done (d97574c). Changes from the plan: the pools hold their own water (the node's
@@ -72,3 +72,11 @@ Loop prompt: `/loop Water features per memory/plan-2026-11-08-water.md (waterfal
   water.glb, 0 m bound error (the square bounds can't tell Y from X — the caves check measured
   the mapping); Blender bridge brings it in, probe 0.0 m. CI fix pushed with W2–W4 (80044eb):
   yanked async-executor, and a 3-min job-wait ceiling for a slow ubuntu runner.
+- 2026-11-08 W6. Guide: desktop-app.md "Water: rivers, waterfalls, wetlands and springs" (5 figures,
+  viewed), CLI quickstart "Water … and to engines" (measured on the terraced 1 km world), blender.md,
+  the Unity/Unreal READMEs. The waterfalls figure needed its own scene: falls are metres wide on a
+  km world and the orbit only circles the centre, so the scene is a 400 m ramp with a 40 m terrace
+  cliff across the middle and a spring-fed river over it. Open follow-ups: an orbit pan target in
+  Studio (and the Editor) so a camera can visit a feature off-centre; a fall's width is its lip
+  cells × cell size (a D8 river is 1–2 cells), narrower than the river water drawn above it; steep
+  cliff faces render near-black (vertical faces in the heightfield shading).

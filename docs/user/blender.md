@@ -10,7 +10,7 @@ Jenga Dunia ships a small Blender add-on, **Jenga Dunia Bridge** (`integrations/
 
 ## Use
 
-**File ▸ Import ▸ Jenga Dunia project (.jdproj)** — select the `project.json` inside the `.jdproj` folder. Options in the file browser's side panel: **Layer** (default `height`), **Grid step** (0 = automatic, ≈ 1 M vertices), **Baked texture**, **Scatter mask** (a 0..1 layer; empty = no instances), **Spacing (m)**, **Seed**. The import creates collection `JD <project>` with the terrain object `JD <project> terrain` and, when a mask is given, one proxy mesh instanced per point (`JD <project> <mask> …`). Replace the 1 m proxy with your asset: all instances share one mesh datablock, so swapping the mesh data swaps every tree.
+**File ▸ Import ▸ Jenga Dunia project (.jdproj)** — select the `project.json` inside the `.jdproj` folder. Options in the file browser's side panel: **Layer** (default `height`), **Grid step** (0 = automatic, ≈ 1 M vertices), **Baked texture**, **Scatter mask** (a 0..1 layer; empty = no instances), **Spacing (m)**, **Seed**. The import creates collection `JD <project>` with the terrain object `JD <project> terrain` and, when a mask is given, one proxy mesh instanced per point (`JD <project> <mask> …`). Replace the 1 m proxy with your asset: all instances share one mesh datablock, so swapping the mesh data swaps every tree. The project's caves come along under the terrain (`JD <project> cave <n>`), and its water — every published `lakes` / `*_water` layer and each waterfall's sheet, from `jd op water.export` — as `JD <project> water`, standing on the terrain in the same frame; give it a water material.
 
 ![Blender render of a bridged project: textured terrain with instanced proxies scattered over it](images/blender-bridge.png)
 
@@ -21,9 +21,11 @@ Jenga Dunia ships a small Blender add-on, **Jenga Dunia Bridge** (`integrations/
 ```
 $ blender -b --python-exit-code 1 --python integrations/blender/test_bridge.py -- target/debug/jd render.png
 BRIDGE OK {"terrain": "JD Bridge terrain", "vertices": 65536, "dimensions_m": [2040.0, 2040.0, 400.6],
-           "instances": 1024, "shared_mesh": "proxy", "surface_samples": 25, "max_height_error_m": 0.709}
+           "instances": 1024, "caves": ["JD Bridge cave 1 cave"],
+           "water": {"object": "JD Bridge water water", "vertices": 483, "probe_dist_m": 0.0},
+           "shared_mesh": "proxy", "surface_samples": 25, "max_height_error_m": 0.709}
 ```
 
-Run on Blender 5.2.0 LTS (macOS). The mesh spans 2 040 m because vertices sit at cell centres ((256 − 1)/256 × 2 048); every one of the 1 024 candidates (64 m grid) was kept because the mask layer (`height`, clamped to 0..1) is ≥ 1 everywhere; a vertical ray from each of 25 sampled instances hits the terrain within 0.71 m of the instance base. The picture above is that test's render with the proxies scaled ×8 (1 m is sub-pixel on a 2 km world).
+Run on Blender 5.2.0 LTS (macOS). The mesh spans 2 040 m because vertices sit at cell centres ((256 − 1)/256 × 2 048); every one of the 1 024 candidates (64 m grid) was kept because the mask layer (`height`, clamped to 0..1) is ≥ 1 everywhere; a vertical ray from each of 25 sampled instances hits the terrain within 0.71 m of the instance base. The test also adds a cave and `+ rivers`: the cave's mesh comes in under the terrain, which is open over its mouth, and the deepest river water's surface (`water.json`'s probe) is a vertex of the imported water mesh. The picture above is that test's render with the proxies scaled ×8 (1 m is sub-pixel on a 2 km world).
 
 `blender --command extension validate integrations/blender/jenga_dunia_bridge` passes (`Success parsing TOML`). CI does not run Blender; run the test locally after changing the bridge or the exporters.

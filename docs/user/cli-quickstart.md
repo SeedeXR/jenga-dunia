@@ -283,6 +283,32 @@ Measured on this 512² world (debug build): the rivers node takes 329 ms with `d
 
 **Springs.** `jd.hydrology.rivers@1` takes `springs: [[u, v], …]` (layer metres: east from the west edge, north from the south edge) and `spring_area_m2` (default 1 km²): each point pours that much upstream area into the flow at its cell, so a river starts there whether or not the local catchment would make one — a karst resurgence, a river entering from beyond the world's edge, a culvert. The log-scaled accumulation is normalised by the total mass, so `threshold` keeps its meaning. Unit test: on a plane tilted east no row reaches the threshold; a 4 096-cell spring at one cell makes a river downstream of it and nothing upstream or on other rows; negative source areas are refused.
 
+### Water: rivers, waterfalls, wetlands — and to engines
+
+Grounding and defaults: `docs/research/research-log/2026-11-08-water-features.md`. `graph.add_simulation` wires each in one call (the desktop's buttons do the same):
+
+```console
+$ jd new Water.jdproj --extent 1024 --resolution 512
+$ jd op graph.splice --project Water.jdproj --save --params '{"layer":"height","kind":"jd.filter.terrace@1","params":{"step_m":25,"softness":0.1}}'
+$ jd op graph.add_simulation --project Water.jdproj --save --params '{"which":"rivers"}'    # publishes rivers, river_water
+$ jd op graph.add_simulation --project Water.jdproj --save --params '{"which":"falls"}'     # falls, falls_water (fed the rivers mask)
+$ jd op graph.add_simulation --project Water.jdproj --save --params '{"which":"wetland"}'   # wetland, marsh, swamp, wetland_water
+$ jd op graph.evaluate --project Water.jdproj
+$ jd op hydrology.waterfalls --project Water.jdproj --params '{}'
+{"falls":[{"lip":[689.0,17.0,87.4],"base":[691.0,15.0,62.7],"drop_m":24.7,"run_m":2.8,"width_m":2.0,"area_km2":0.1,"pool_depth_m":8.1,"pool_radius_m":14.1,...}, ...]}
+$ jd op water.export --project Water.jdproj --params '{"path":"water.glb"}'
+{"path":"Water.jdproj/exports/water.glb","triangles":29066,"bytes":937612,"layers":["falls_water","river_water","wetland_water"],"falls":15}
+$ jd op terrain.export_profile --project Water.jdproj --params '{"profile":"unity","dir":"unity","water":true,"masks":["rivers","falls","marsh","swamp"]}'
+```
+
+On this world (debug build) the 25 m terraces give 15 falls with drops of 15–25 m (median 24.6 m), each with its plunge pool (8.1 m deep, 14.1 m wide for a 24.7 m drop); `river_water` peaks at 3.0 m (the default `water_depth_m`), `falls_water` at 8.3 m, `wetland_water` at 2.0 m. What each node does:
+
+- **`jd.hydrology.rivers@1` → `water`**: the water in the channels, depth ∝ Q^0.4 and width ∝ Q^0.5 downstream (Leopold & Maddock 1953) with discharge Q the upstream area, scaled so the largest river is `water_depth_m` (3) deep and `water_width_m` (40) wide; each cell takes its nearest cross-section's level and stays dry below that section's bed. `water_depth_m: 0` turns it off.
+- **`jd.hydrology.waterfalls@1`** (`in`, optional `rivers` mask → `out`, `falls`, `water`): a fall is a run of river steps at least `min_gradient` (1 = 45°) steep dropping at least `min_drop_m` (6.1 m); its plunge pool is `pool_depth` (0.33) × drop deep and `pool_radius` (0.57) × drop wide (Scheingross & Lamb 2016 medians), dug only into the floor, holding water to its outlet. `hydrology.waterfalls` lists them in world metres.
+- **`jd.hydrology.wetland@1`** (`in`, optional `wetness` → `wetland`, `marsh`, `swamp`, `water`): probability from HAND (height above the nearest drainage, waterlogged within `waterlogged_m` 5.3 m, Nobre et al. 2011) times flatness (`max_slope_deg` 5); marsh where it is at least `marsh_at` (0.75) with a `water_depth_m` (0.3 m) sheet, swamp around it, hollows up to 2 m.
+- **Springs**: `springs` on the rivers node (above), placed by clicking in Studio's Rivers section.
+- **`water.export`** (`path` .glb / .fbx / .json, `layer` the ground): every published `lakes` / `*_water` layer merged by the deeper water as a surface on the terrain (dry corners on the banks), plus each fall's two-sided sheet along its jet's arc, as one mesh in the terrain export frame; `.json` lists the layers, the falls and a probe point (the deepest water's surface). `terrain.export_profile { water: true }` adds `water.fbx` (Unity) / `water.glb` (Unreal) and `water.json`. Checked headlessly on this world: Unity 6000.4 places `water.fbx` (29 066 triangles) with the probe 0.0 m from the mesh, Unreal 5.8 imports `water.glb` with 0 m bound error, and the Blender bridge imports it with the probe on a vertex.
+
 ### Sea level and coastlines
 
 ```
