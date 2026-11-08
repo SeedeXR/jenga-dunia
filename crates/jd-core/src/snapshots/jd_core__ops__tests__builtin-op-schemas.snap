@@ -1920,6 +1920,11 @@ expression: list
               "description": "`jd.volcanic.lava@1` in front of the height (`heat` and `lava` published, glowing).",
               "type": "string",
               "const": "lava"
+            },
+            {
+              "description": "`jd.hydrology.waterfalls@1` in front of the height, fed the rivers mask of a rivers node\nup its chain (`falls` and its pools' `falls_water` published).",
+              "type": "string",
+              "const": "falls"
             }
           ]
         }
@@ -5430,6 +5435,141 @@ expression: list
             "node",
             "port"
           ]
+        }
+      }
+    }
+  },
+  {
+    "id": "hydrology.waterfalls",
+    "description": "List the waterfalls a `jd.hydrology.waterfalls@1` node (or every one) finds on its evaluated inputs: lip and foot `[u, v, z]` in metres from the south-west corner, drop, run, width, upstream area and plunge pool — for a viewport's falling water and for engines",
+    "scope": "project-read",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WaterfallsParams",
+      "description": "`hydrology.waterfalls` params.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "A `jd.hydrology.waterfalls@1` node; omitted = every one in the graph.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "lod": {
+          "description": "Level of detail to evaluate at (0 = full resolution).",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 0
+        }
+      },
+      "additionalProperties": false,
+      "$defs": {
+        "NodeId": {
+          "description": "Identifies a graph node.",
+          "type": "string"
+        }
+      }
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WaterfallsResult",
+      "description": "`hydrology.waterfalls` result.",
+      "type": "object",
+      "properties": {
+        "falls": {
+          "description": "Every fall, node by node, south to north then west to east within a node.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FallInfo"
+          }
+        }
+      },
+      "required": [
+        "falls"
+      ],
+      "$defs": {
+        "FallInfo": {
+          "description": "One waterfall, positions `[u, v, z]` in metres from the world's south-west corner (u east,\nv north, z height) — the cave entrances' frame.",
+          "type": "object",
+          "properties": {
+            "node": {
+              "description": "The waterfalls node that found it.",
+              "$ref": "#/$defs/NodeId"
+            },
+            "lip": {
+              "description": "Top of the fall (the lip), on the river bed.",
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "minItems": 3,
+              "maxItems": 3
+            },
+            "base": {
+              "description": "Foot of the fall (the plunge pool's centre, before the pool is dug).",
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "float"
+              },
+              "minItems": 3,
+              "maxItems": 3
+            },
+            "drop_m": {
+              "description": "Lip minus foot, metres.",
+              "type": "number",
+              "format": "float"
+            },
+            "run_m": {
+              "description": "Horizontal length of the fall along the river, metres.",
+              "type": "number",
+              "format": "float"
+            },
+            "width_m": {
+              "description": "Width across the river, metres.",
+              "type": "number",
+              "format": "float"
+            },
+            "area_km2": {
+              "description": "Upstream area draining over it, km².",
+              "type": "number",
+              "format": "float"
+            },
+            "pool_depth_m": {
+              "description": "Plunge pool depth below the foot, metres.",
+              "type": "number",
+              "format": "float"
+            },
+            "pool_radius_m": {
+              "description": "Plunge pool radius, metres.",
+              "type": "number",
+              "format": "float"
+            }
+          },
+          "required": [
+            "node",
+            "lip",
+            "base",
+            "drop_m",
+            "run_m",
+            "width_m",
+            "area_km2",
+            "pool_depth_m",
+            "pool_radius_m"
+          ]
+        },
+        "NodeId": {
+          "description": "Identifies a graph node.",
+          "type": "string"
         }
       }
     }

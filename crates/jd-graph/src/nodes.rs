@@ -1698,6 +1698,19 @@ pub fn register_all(r: &mut Registry) {
             Ok(BTreeMap::from([("out".to_owned(), Value::field(out_h)), ("sinkholes".to_owned(), Value::field(mask))]))
         },
     ).with_memory(16.0));
+    // The filled copy, receivers, two accumulations, the step flags and three outputs: ≈ 44 B/cell.
+    r.register(NodeDef::new::<jd_terrain::FallsParams, _>(
+        "jd.hydrology.waterfalls@1",
+        "Waterfalls where a river meets a near-vertical step: along each river (the optional `rivers` mask ≥ 0.5, else flow over `threshold`), a run of steps at least `min_gradient` steep (1 = 45°) dropping at least `min_drop_m` (6.1 m = 20 ft) is a fall; its plunge pool is dug into the floor below, `pool_depth` × drop deep and `pool_radius` × drop wide (medians of 75 surveyed pools, Scheingross & Lamb 2016). Outputs the terrain with the pools, the `falls` mask (faces 1, pools fading) and the pools' `water` depth (full to each foot; publish it as `falls_water` and the viewport draws it); `hydrology.waterfalls` lists each fall",
+        vec![port("in", PortType::Heightfield, true), port("rivers", PortType::Heightfield, false)],
+        vec![port("out", PortType::Heightfield, false), port("falls", PortType::Heightfield, false), port("water", PortType::Heightfield, false)],
+        |ctx, p, i| {
+            let fp: jd_terrain::FallsParams = params(p)?;
+            let rivers = i.get("rivers").map(|v| v.as_field());
+            let r = jd_terrain::waterfalls(field(i, "in")?, spacing_m(ctx), rivers.map(|r| &**r), &fp)?;
+            Ok(BTreeMap::from([("out".to_owned(), Value::field(r.height)), ("falls".to_owned(), Value::field(r.mask)), ("water".to_owned(), Value::field(r.water))]))
+        },
+    ).with_memory(44.0));
     r.register(NodeDef::new::<jd_terrain::CaveParams, _>(
         "jd.cave.system@1",
         "A cave system under the terrain — `kind`: karst (sinkholes → spring through phreatic tubes and vadose canyons, chambers, stalactites and stalagmites), lava_tube (under a flow path, skylights), sea_cave (at sea level into cliffs, arches), mountain (wandering caves under hills), mine (adit rising 1 in 200, crosscuts, levels, shaft), tunnel (two portals), catacombs (a shallow maze). `entrances` are the points you place; an optional `water` depth layer (lakes, rivers, the sea) floods what lies under it and puts springs under water; an optional `inlets` mask (the karst node's `sinkholes`) gives a karst cave its sinkholes; an optional `cover` (0..1 soil / vegetation, e.g. a forest or grassland mask) sets how many speleothems grow — bare rock and desert grow almost none. Outputs the terrain unchanged, the `holes` mask over the entrances (wire it to the exports) and the `plan` footprint; `caves.mesh` / `caves.export` build the 3-D walls",
@@ -2912,6 +2925,55 @@ mod tests {
             .expect("eval");
         let m = outs[&(f, "out".into())].as_field().stats();
         assert!(m.min > 0.0 && m.max <= 1.0 && m.max > m.min, "{m:?}");
+    }
+
+    #[test]
+    fn waterfalls_node_digs_pools_below_river_steps_and_only_ever_lowers_the_ground() {
+        let reg = Registry::with_builtins();
+        let cache = Cache::default();
+        let mut g = Graph::default();
+        let n = add(
+            &mut g,
+            "jd.noise.fbm@1",
+            serde_json::json!({ "seed": 8, "feature_size_m": 96.0, "height_range_m": [0.0, 400.0] }),
+        );
+        let rv = add(
+            &mut g,
+            "jd.hydrology.rivers@1",
+            serde_json::json!({ "threshold": 0.4 }),
+        );
+        connect(&mut g, &n, "out", &rv, "in");
+        // Thresholds low enough that this rough noise has falls on its rivers.
+        let p = serde_json::json!({ "min_drop_m": 2.0, "min_gradient": 0.3 });
+        let fed = add(&mut g, "jd.hydrology.waterfalls@1", p.clone());
+        connect(&mut g, &rv, "out", &fed, "in");
+        connect(&mut g, &rv, "rivers", &fed, "rivers");
+        let own = add(&mut g, "jd.hydrology.waterfalls@1", p);
+        connect(&mut g, &rv, "out", &own, "in");
+        let (outs, _) = Evaluator::new(&reg, &cache)
+            .evaluate(&g, &world(), 0)
+            .expect("eval");
+        let carved = outs[&(rv, "out".into())].as_field();
+        for id in [&fed, &own] {
+            let (out, mask) = (
+                outs[&(id.clone(), "out".into())].as_field(),
+                outs[&(id.clone(), "falls".into())].as_field(),
+            );
+            let (a, b) = (carved.to_vec(), out.to_vec());
+            assert!(a.iter().zip(&b).all(|(a, b)| b <= a), "pools only dig");
+            let m = mask.stats();
+            assert!(m.min >= 0.0 && m.max <= 1.0, "{m:?}");
+        }
+        let m = outs[&(fed.clone(), "falls".into())].as_field().stats();
+        assert!(
+            m.max > 0.0,
+            "the river-fed node finds falls on this relief: {m:?}"
+        );
+        let (a, b) = (
+            carved.to_vec(),
+            outs[&(fed, "out".into())].as_field().to_vec(),
+        );
+        assert!(a.iter().zip(&b).any(|(a, b)| b < a), "and digs their pools");
     }
 
     #[test]

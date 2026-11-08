@@ -94,6 +94,96 @@ struct LakeVertex {
 /// The lakes grid (vertices, indices) and its wet cell count.
 type LakesGeometry = (Vec<LakeVertex>, Vec<u32>, usize);
 
+/// A waterfall to draw (`hydrology.waterfalls`): lip and foot `[u, v, z]` in metres from the
+/// world's south-west corner, and its width.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FallSheet {
+    /// Top of the fall.
+    pub lip: [f32; 3],
+    /// Foot of the fall.
+    pub base: [f32; 3],
+    /// Width across the river, metres.
+    pub width_m: f32,
+}
+
+/// Each fall as a double-sided ribbon of falling water from its lip to its foot, in the viewport
+/// frame (x = u − extent/2 east, y up, z = extent/2 − v south). A jet leaving the lip
+/// horizontally at `JET_MPS` falls freely: after dropping `d` it has covered `JET_MPS·√(2d/g)`,
+/// so the ribbon bows out along that arc (clear of the rock face) and lands at least as far out
+/// as the foot; white water at the lip thins towards the pool, where a disk of aerated foam
+/// marks the impact.
+fn falls_mesh(falls: &[FallSheet], extent_m: [f32; 2]) -> (Vec<LakeVertex>, Vec<u32>) {
+    const ROWS: u32 = 10;
+    // INFERRED: a typical mountain-stream velocity at the lip (rivers run at ~1–3 m/s).
+    const JET_MPS: f32 = 1.5;
+    const FOAM: u32 = 16;
+    let (mut v, mut idx) = (Vec::new(), Vec::new());
+    for f in falls {
+        let (du, dv) = (f.base[0] - f.lip[0], f.base[1] - f.lip[1]);
+        let run = du.hypot(dv);
+        let dir = if run > 1e-3 {
+            [du / run, dv / run]
+        } else {
+            [0.0, -1.0]
+        };
+        let side = [-dir[1] * f.width_m / 2.0, dir[0] * f.width_m / 2.0];
+        let to_view = |u: f32, vv: f32, z: f32| [u - extent_m[0] / 2.0, z, extent_m[1] / 2.0 - vv];
+        let drop = (f.lip[2] - f.base[2]).max(0.0);
+        let reach_m = run.max(JET_MPS * (2.0 * drop / 9.81).sqrt());
+        let normal = normalize([dir[0], 0.0, -dir[1]]);
+        let first = v.len() as u32;
+        for k in 0..=ROWS {
+            let t = k as f32 / ROWS as f32;
+            let reach = reach_m * t.sqrt();
+            let (u, vv, z) = (
+                f.lip[0] + dir[0] * reach,
+                f.lip[1] + dir[1] * reach,
+                f.lip[2] + (f.base[2] - f.lip[2]) * t,
+            );
+            let alpha = 0.9 - 0.3 * t;
+            for s in [-1.0, 1.0] {
+                v.push(LakeVertex {
+                    pos: to_view(u + s * side[0], vv + s * side[1], z),
+                    normal,
+                    color: [0.86, 0.92, 0.96, alpha],
+                });
+            }
+        }
+        for k in 0..ROWS {
+            let (a, b) = (first + 2 * k, first + 2 * k + 2);
+            // Both windings: the sheet is seen from up- and downstream.
+            idx.extend_from_slice(&[a, b, a + 1, a + 1, b, b + 1]);
+            idx.extend_from_slice(&[a, a + 1, b, a + 1, b + 1, b]);
+        }
+        // The impact: a disk of white water where the jet lands, 1.5 × the fall's width across.
+        let (cu, cv) = (f.lip[0] + dir[0] * reach_m, f.lip[1] + dir[1] * reach_m);
+        let radius = 0.75 * f.width_m;
+        let centre = v.len() as u32;
+        v.push(LakeVertex {
+            pos: to_view(cu, cv, f.base[2] + 0.05),
+            normal: [0.0, 1.0, 0.0],
+            color: [0.95, 0.97, 0.98, 0.9],
+        });
+        for k in 0..FOAM {
+            let a = std::f32::consts::TAU * k as f32 / FOAM as f32;
+            v.push(LakeVertex {
+                pos: to_view(
+                    cu + radius * a.cos(),
+                    cv + radius * a.sin(),
+                    f.base[2] + 0.05,
+                ),
+                normal: [0.0, 1.0, 0.0],
+                color: [0.9, 0.95, 0.97, 0.0],
+            });
+        }
+        for k in 0..FOAM {
+            let (a, b) = (centre + 1 + k, centre + 1 + (k + 1) % FOAM);
+            idx.extend_from_slice(&[centre, a, b, centre, b, a]);
+        }
+    }
+    (v, idx)
+}
+
 /// The desktop's `buildLakesGeometry`: each vertex `depth` above the terrain where the fill node's
 /// depth is positive (> 5 cm), tucked under it elsewhere, coloured like the sea by depth; `None`
 /// when nothing is wet or the grids differ. Returns the mesh and the wet cell count.
@@ -1515,6 +1605,7 @@ pub struct Viewport {
     rain_buf: Option<(wgpu::Buffer, usize)>,
     rain_frames: f32,
     lakes: Option<Preview>,
+    falls: Vec<FallSheet>,
     pending_lakes: Option<Option<LakesGeometry>>,
     lakes_mesh: Option<(wgpu::Buffer, wgpu::Buffer, u32)>,
     lake_cells: usize,
@@ -1576,6 +1667,7 @@ impl Default for Viewport {
             rain_buf: None,
             rain_frames: 0.0,
             lakes: None,
+            falls: Vec::new(),
             pending_lakes: None,
             lakes_mesh: None,
             lake_cells: 0,
@@ -1937,6 +2029,20 @@ impl Viewport {
         self.dirty = true;
     }
 
+    /// The waterfalls to draw (empty: none).
+    pub fn set_falls(&mut self, falls: Vec<FallSheet>) {
+        if self.falls == falls {
+            return;
+        }
+        self.falls = falls;
+        self.rebuild_lakes();
+    }
+
+    /// How many waterfalls are drawn.
+    pub fn fall_count(&self) -> usize {
+        self.falls.len()
+    }
+
     /// Standing water from a `lakes` depth layer at the shown preview's size (`None`: none).
     pub fn set_lakes(&mut self, lakes: Option<Preview>) {
         if self.lakes == lakes {
@@ -1955,10 +2061,19 @@ impl Viewport {
             waves: Vec::new(),
             waves_m: None,
         });
-        let built = match (&self.lakes, &self.shown) {
+        let mut built = match (&self.lakes, &self.shown) {
             (Some(l), Some((pv, extent))) => lakes_mesh(pv, l, *extent, &look),
             _ => None,
         };
+        // The falls ride on the lakes' geometry (the same transparent water pipeline).
+        if let (false, Some((_, extent))) = (self.falls.is_empty(), &self.shown) {
+            let (fv, fi) = falls_mesh(&self.falls, *extent);
+            let (lv, li, wet) = built.get_or_insert_with(|| (Vec::new(), Vec::new(), 0));
+            let at = lv.len() as u32;
+            lv.extend(fv);
+            li.extend(fi.into_iter().map(|i| i + at));
+            let _ = wet;
+        }
         self.lake_cells = built.as_ref().map_or(0, |b| b.2);
         self.pending_lakes = Some(built);
         self.dirty = true;
@@ -3726,6 +3841,51 @@ mod tests {
             "{:?}",
             shore.iter().map(|p| p.pos).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn a_fall_is_a_double_sided_ribbon_arcing_from_its_lip_to_its_foot() {
+        // A 20 m fall running south over 4 m, 10 m wide, on a 100 m world.
+        let f = FallSheet {
+            lip: [50.0, 60.0, 120.0],
+            base: [50.0, 56.0, 100.0],
+            width_m: 10.0,
+        };
+        let (v, i) = falls_mesh(std::slice::from_ref(&f), [100.0, 100.0]);
+        assert_eq!(
+            v.len(),
+            22 + 17,
+            "11 rows of two, then the foam disk's centre and rim"
+        );
+        assert_eq!(
+            i.len(),
+            10 * 12 + 16 * 6,
+            "two triangles a row and a foam fan, both windings"
+        );
+        let (top, foot) = (&v[0], &v[21]);
+        // A 20 m drop at 1.5 m/s carries √(40/9.81) × 1.5 = 3.03 m out — less than the 4 m run, so
+        // the jet lands on the foot.
+        assert_eq!(top.pos[1], 120.0);
+        assert!((foot.pos[1] - 100.0).abs() < 1e-4);
+        // The frame: u 50 → x 0; v 60 → z −10, landing at v 56 → z −6; ±5 m across (x).
+        assert_eq!((top.pos[0], top.pos[2]), (-5.0, -10.0));
+        assert!((foot.pos[2] + 6.0).abs() < 1e-4 && (foot.pos[0] - 5.0).abs() < 1e-4);
+        // Free fall: half way down the jet has covered √½ of the run, not half.
+        let mid = &v[10];
+        assert!(
+            (mid.pos[2] - (-10.0 + 4.0 * 0.5f32.sqrt())).abs() < 1e-3,
+            "{:?}",
+            mid.pos
+        );
+        assert!(top.color[3] > foot.color[3], "white water at the lip");
+        // Off a sheer face (0.5 m run) the jet still flies 1.5 · √(2 · 20 / 9.81) = 3.03 m out.
+        let sheer = FallSheet {
+            base: [50.0, 59.5, 100.0],
+            ..f
+        };
+        let (v, _) = falls_mesh(&[sheer], [100.0, 100.0]);
+        let landing = -10.0 + 1.5 * (40.0f32 / 9.81).sqrt();
+        assert!((v[21].pos[2] - landing).abs() < 1e-3, "{:?}", v[21].pos);
     }
 
     #[test]

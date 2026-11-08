@@ -18,6 +18,7 @@ pub use detail::TextureSet;
 mod dist;
 pub mod droplet;
 pub mod export;
+pub mod falls;
 pub mod fbx;
 pub mod flow;
 pub mod heightfield;
@@ -69,6 +70,7 @@ pub use export::{
     ExportOptions, GeoRef, HeightmapFormat, epsg_code, export_heightmap, export_heightmap_geo,
     sidecar_path,
 };
+pub use falls::{FallsParams, FallsResult, Waterfall, waterfalls};
 pub use flow::{
     FlowMethod, carve_rivers, carve_rivers_sourced, carve_rivers_with, d8_receivers,
     fill_depressions, fill_depressions_with, flow_accumulation, flow_accumulation_sourced,

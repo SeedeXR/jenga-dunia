@@ -440,7 +440,7 @@ export type GraphAddNodeResult = {
   "id": NodeId;
 };
 
-export type Simulation = "snow" | "sand" | "debris" | "lava";
+export type Simulation = "snow" | "sand" | "debris" | "lava" | "falls";
 
 export type GraphAddSimulationRequest = {
   /** Which simulation. */
@@ -894,6 +894,39 @@ export type GraphUnspliceResult = {
   "redo_depth": number;
   /** Timeline position 0..1 at which keyed parameters resolve (`graph.set_time`). */
   "time"?: number;
+};
+
+export type HydrologyWaterfallsRequest = {
+  /** A `jd.hydrology.waterfalls@1` node; omitted = every one in the graph. */
+  "id"?: NodeId | null;
+  /** Level of detail to evaluate at (0 = full resolution). */
+  "lod"?: number;
+};
+
+export type FallInfo = {
+  /** The waterfalls node that found it. */
+  "node": NodeId;
+  /** Top of the fall (the lip), on the river bed. */
+  "lip": [number, number, number];
+  /** Foot of the fall (the plunge pool's centre, before the pool is dug). */
+  "base": [number, number, number];
+  /** Lip minus foot, metres. */
+  "drop_m": number;
+  /** Horizontal length of the fall along the river, metres. */
+  "run_m": number;
+  /** Width across the river, metres. */
+  "width_m": number;
+  /** Upstream area draining over it, km². */
+  "area_km2": number;
+  /** Plunge pool depth below the foot, metres. */
+  "pool_depth_m": number;
+  /** Plunge pool radius, metres. */
+  "pool_radius_m": number;
+};
+
+export type HydrologyWaterfallsResult = {
+  /** Every fall, node by node, south to north then west to east within a node. */
+  "falls": FallInfo[];
 };
 
 export type JobsCancelRequest = {
@@ -2827,6 +2860,21 @@ wind's direction to run alongshore. */
   "current_band_m"?: number;
 };
 
+export type NodeParams_jd_hydrology_waterfalls_1 = {
+  /** Smallest total drop that counts as a waterfall, metres (> 0). 6.1 m = the 20 ft convention. */
+  "min_drop_m"?: number;
+  /** Smallest step gradient (rise over run) inside a fall (> 0): 1 = 45°, 4 = 76° (Mabin's
+near-vertical falls, which need metre cells to show). */
+  "min_gradient"?: number;
+  /** Plunge pool depth as a share of the drop (≥ 0; 0 = no pool). */
+  "pool_depth"?: number;
+  /** Plunge pool radius as a share of the drop (≥ 0). */
+  "pool_radius"?: number;
+  /** Without a `rivers` mask: rivers are where the log-scaled flow accumulation exceeds this
+(0..1), as in `jd.hydrology.rivers@1`. */
+  "threshold"?: number;
+};
+
 export type NodeParams_jd_hydrology_wetness_1 = {
   /** Flow routing for the drainage area: `d8` (channel-like streaks), `dinf` (smoother) or `mfd` (diffuse moisture). */
   "method"?: FlowMethod;
@@ -3271,6 +3319,8 @@ export interface JdOps {
   "graph.undo": { request: GraphUndoRequest; result: GraphUndoResult };
   /** Take a node out of its chain: whatever it fed is fed by what fed it, and the node is removed (journaled; the layer stack's bin) */
   "graph.unsplice": { request: GraphUnspliceRequest; result: GraphUnspliceResult };
+  /** List the waterfalls a `jd.hydrology.waterfalls@1` node (or every one) finds on its evaluated inputs: lip and foot `[u, v, z]` in metres from the south-west corner, drop, run, width, upstream area and plunge pool — for a viewport's falling water and for engines */
+  "hydrology.waterfalls": { request: HydrologyWaterfallsRequest; result: HydrologyWaterfallsResult };
   /** Request cancellation of a running job; it stops at the next node or kernel iteration with E_CANCELLED */
   "jobs.cancel": { request: JobsCancelRequest; result: JobsCancelResult };
   /** Running jobs with progress (steps done/total, current node) — poll while an evaluation runs */
@@ -3384,6 +3434,7 @@ export interface NodeKinds {
   "jd.hydrology.network@1": NodeParams_jd_hydrology_network_1;
   "jd.hydrology.rivers@1": NodeParams_jd_hydrology_rivers_1;
   "jd.hydrology.sea_level@1": NodeParams_jd_hydrology_sea_level_1;
+  "jd.hydrology.waterfalls@1": NodeParams_jd_hydrology_waterfalls_1;
   "jd.hydrology.wetness@1": NodeParams_jd_hydrology_wetness_1;
   "jd.input.heightmap@1": NodeParams_jd_input_heightmap_1;
   "jd.input.layer@1": NodeParams_jd_input_layer_1;

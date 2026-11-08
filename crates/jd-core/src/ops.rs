@@ -1245,6 +1245,123 @@ pub mod graph {
         #[serde(default)]
         pub lod: Option<u8>,
     }
+    /// `hydrology.waterfalls` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct WaterfallsParams {
+        /// A `jd.hydrology.waterfalls@1` node; omitted = every one in the graph.
+        #[serde(default)]
+        pub id: Option<NodeId>,
+        /// Level of detail to evaluate at (0 = full resolution).
+        #[serde(default)]
+        pub lod: u8,
+    }
+    /// One waterfall, positions `[u, v, z]` in metres from the world's south-west corner (u east,
+    /// v north, z height) — the cave entrances' frame.
+    #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct FallInfo {
+        /// The waterfalls node that found it.
+        pub node: NodeId,
+        /// Top of the fall (the lip), on the river bed.
+        pub lip: [f32; 3],
+        /// Foot of the fall (the plunge pool's centre, before the pool is dug).
+        pub base: [f32; 3],
+        /// Lip minus foot, metres.
+        pub drop_m: f32,
+        /// Horizontal length of the fall along the river, metres.
+        pub run_m: f32,
+        /// Width across the river, metres.
+        pub width_m: f32,
+        /// Upstream area draining over it, km².
+        pub area_km2: f32,
+        /// Plunge pool depth below the foot, metres.
+        pub pool_depth_m: f32,
+        /// Plunge pool radius, metres.
+        pub pool_radius_m: f32,
+    }
+    /// `hydrology.waterfalls` result.
+    #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct WaterfallsResult {
+        /// Every fall, node by node, south to north then west to east within a node.
+        pub falls: Vec<FallInfo>,
+    }
+
+    /// The waterfalls of `id` (or of every waterfalls node) found on their evaluated inputs.
+    pub(crate) fn build_falls(
+        ctx: &Context,
+        id: Option<&NodeId>,
+        lod: u8,
+    ) -> JdResult<Vec<FallInfo>> {
+        const KIND: &str = "jd.hydrology.waterfalls@1";
+        let (graph, world, root) = ctx.with_project(|pr| {
+            Ok((
+                pr.graph.clone(),
+                pr.doc.world.clone(),
+                pr.root().to_path_buf(),
+            ))
+        })?;
+        let ids: Vec<NodeId> = match id {
+            Some(id) => {
+                let node = graph.nodes.get(id).ok_or_else(|| {
+                    JdError::new(ErrorCode::E_INPUT_INVALID, format!("no node `{id}`"))
+                })?;
+                if node.kind.0 != KIND {
+                    return Err(JdError::invalid(
+                        "id",
+                        format!("`{id}` is a {}, not a {KIND} node", node.kind.0),
+                    ));
+                }
+                vec![id.clone()]
+            }
+            None => graph
+                .nodes
+                .iter()
+                .filter(|(_, n)| n.kind.0 == KIND)
+                .map(|(id, _)| id.clone())
+                .collect(),
+        };
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let tiered = cache_for(ctx, &root);
+        let (outputs, _) = Evaluator::new(registry(), &tiered)
+            .with_layers(ctx.layer_loader(&root))
+            .evaluate_with(&graph, &world, lod, Some(&root.join("assets")))?;
+        let mut falls = Vec::new();
+        for id in ids {
+            let input = |port: &str| {
+                graph
+                    .edges
+                    .iter()
+                    .find(|e| e.to.node == id && e.to.port == port)
+                    .and_then(|e| outputs.get(&(e.from.node.clone(), e.from.port.clone())))
+                    .map(|v| v.as_field().clone())
+            };
+            let Some(hf) = input("in") else { continue };
+            let fp: jd_terrain::FallsParams =
+                serde_json::from_value(serde_json::Value::Object(graph.nodes[&id].params.clone()))
+                    .map_err(|e| JdError::invalid("params", e.to_string()))?;
+            let (sx, sy) = (
+                world.extent_m[0] as f32 / hf.width() as f32,
+                world.extent_m[1] as f32 / hf.height() as f32,
+            );
+            let found = jd_terrain::waterfalls(&hf, [sx, sy], input("rivers").as_deref(), &fp)?;
+            let at = |c: [u32; 2], z: f32| [(c[0] as f32 + 0.5) * sx, (c[1] as f32 + 0.5) * sy, z];
+            falls.extend(found.falls.into_iter().map(|f| FallInfo {
+                node: id.clone(),
+                lip: at(f.lip, f.lip_m),
+                base: at(f.base, f.base_m),
+                drop_m: f.drop_m,
+                run_m: f.run_m,
+                width_m: f.width_m,
+                area_km2: f.area_km2,
+                pool_depth_m: f.pool_depth_m,
+                pool_radius_m: f.pool_radius_m,
+            }));
+        }
+        Ok(falls)
+    }
+
     /// `caves.mesh` params.
     #[derive(Debug, Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
@@ -1513,6 +1630,9 @@ pub mod graph {
         Debris,
         /// `jd.volcanic.lava@1` in front of the height (`heat` and `lava` published, glowing).
         Lava,
+        /// `jd.hydrology.waterfalls@1` in front of the height, fed the rivers mask of a rivers node
+        /// up its chain (`falls` and its pools' `falls_water` published).
+        Falls,
     }
 
     /// `graph.add_simulation` params.
@@ -1893,6 +2013,8 @@ pub mod graph {
                     Simulation::Snow => ("jd.climate.snowpack@1", serde_json::json!({ "steps": 40, "temperature_c": snow_c }), false, vec![("cover", "snow")], vec![material("snow", [0.93, 0.95, 0.98], 0.6, None)]),
                     Simulation::Debris => ("jd.erosion.debris@1", serde_json::json!({}), true, vec![("debris", "debris")], vec![material("debris", [0.33, 0.3, 0.27], 0.95, None)]),
                     Simulation::Sand => ("jd.erosion.aeolian@1", serde_json::json!({ "iterations": 60 }), true, vec![], vec![]),
+                    // Spray keeps the rock at a fall dark and glossy: wet basalt-grey, roughness 0.25.
+                    Simulation::Falls => ("jd.hydrology.waterfalls@1", serde_json::json!({}), true, vec![("falls", "falls"), ("water", "falls_water")], vec![material("falls", [0.2, 0.2, 0.21], 0.25, None)]),
                     Simulation::Lava => (
                         "jd.volcanic.lava@1",
                         serde_json::json!({ "eruption_s": 1800, "duration_s": 1800 }),
@@ -1921,6 +2043,19 @@ pub mod graph {
                         let y = at[1] + 140.0 * (k + 1) as f32;
                         publish(p, &id, port, layer, [at[0] + 320.0, y], [at[0] + 160.0, y])?;
                         published.push(layer.to_owned());
+                    }
+                    if matches!(a.which, Simulation::Falls) {
+                        // Follow the carved rivers: the mask of the nearest rivers node up the chain.
+                        let mut cur = id.clone();
+                        let mut seen = std::collections::HashSet::new();
+                        while seen.insert(cur.clone()) {
+                            let Some(f) = feed_of(p, &cur) else { break };
+                            if p.graph.nodes.get(&f.node).is_some_and(|n| n.kind.0.starts_with("jd.hydrology.rivers@")) {
+                                connect(p, &f.node, "rivers", &id, "rivers")?;
+                                break;
+                            }
+                            cur = f.node;
+                        }
                     }
                     let materials = add_materials(p, rows)?;
                     Ok((Added { id, published, materials }, Vec::new()))
@@ -1957,6 +2092,15 @@ pub mod graph {
                     Ok((Added { id, published, materials: None }, Vec::new()))
                 })
             },
+        );
+    }
+
+    fn register_water(r: &mut Registry) {
+        r.register::<WaterfallsParams, WaterfallsResult, _>(
+            "hydrology.waterfalls",
+            "List the waterfalls a `jd.hydrology.waterfalls@1` node (or every one) finds on its evaluated inputs: lip and foot `[u, v, z]` in metres from the south-west corner, drop, run, width, upstream area and plunge pool — for a viewport's falling water and for engines",
+            Scope::ProjectRead,
+            |ctx, p| Ok((WaterfallsResult { falls: build_falls(ctx, p.id.as_ref(), p.lod)? }, Vec::new())),
         );
     }
 
@@ -2558,6 +2702,7 @@ pub mod graph {
     /// Register graph ops.
     pub fn register_all(r: &mut Registry) {
         register_caves(r);
+        register_water(r);
         register_workflows(r);
         r.register::<NodePreview, crate::ops::terrain::PreviewResult, _>(
             "graph.node_preview",
@@ -4324,6 +4469,206 @@ pub mod graph {
                 .find(|n| n["id"] == noise_id)
                 .expect("noise");
             assert_eq!(moved["ui"]["position"], serde_json::json!([10.0, 20.0]));
+        }
+
+        #[test]
+        fn the_waterfalls_op_lists_the_falls_a_node_finds_in_world_metres() {
+            use crate::envelope::Status;
+            let reg = Registry::with_builtins();
+            let dir = tempfile::tempdir().expect("tmp");
+            let ctx = Context::default();
+            let world = jd_types::WorldSettings {
+                resolution_px: [128, 128],
+                extent_m: [1024.0, 1024.0],
+                tile_size: 64,
+                halo: 0,
+                ..Default::default()
+            };
+            call(
+                &reg,
+                &ctx,
+                "project.create",
+                serde_json::json!({ "path": dir.path().join("falls.jdproj"), "name": "Falls", "world": world }),
+            );
+            let nodes = call(&reg, &ctx, "graph.list", serde_json::json!({}))
+                .result
+                .expect("list")["nodes"]
+                .clone();
+            let id_of = |kind: &str| {
+                nodes
+                    .as_array()
+                    .expect("nodes")
+                    .iter()
+                    .find(|n| n["kind"] == kind)
+                    .expect(kind)["id"]
+                    .clone()
+            };
+            let (noise, height) = (id_of("jd.noise.fbm@1"), id_of("jd.output.height@1"));
+            let add = |kind: &str, params: serde_json::Value| {
+                call(
+                    &reg,
+                    &ctx,
+                    "graph.add_node",
+                    serde_json::json!({ "kind": kind, "params": params }),
+                )
+                .result
+                .expect("add")["id"]
+                    .clone()
+            };
+            let connect = |from: &serde_json::Value, fp: &str, to: &serde_json::Value, tp: &str| {
+                let r = call(
+                    &reg,
+                    &ctx,
+                    "graph.connect",
+                    serde_json::json!({ "from": from, "from_port": fp, "to": to, "to_port": tp }),
+                );
+                assert_eq!(r.status, Status::Ok, "{:?}", r.error);
+            };
+            assert!(
+                call(&reg, &ctx, "hydrology.waterfalls", serde_json::json!({}))
+                    .result
+                    .expect("none")["falls"]
+                    .as_array()
+                    .is_some_and(Vec::is_empty),
+                "no waterfalls node, no falls"
+            );
+            let rivers = add(
+                "jd.hydrology.rivers@1",
+                serde_json::json!({ "threshold": 0.4 }),
+            );
+            let falls = add(
+                "jd.hydrology.waterfalls@1",
+                serde_json::json!({ "min_drop_m": 2.0, "min_gradient": 0.3 }),
+            );
+            connect(&noise, "out", &rivers, "in");
+            connect(&rivers, "out", &falls, "in");
+            connect(&rivers, "rivers", &falls, "rivers");
+            connect(&falls, "out", &height, "in");
+            let all = call(&reg, &ctx, "hydrology.waterfalls", serde_json::json!({}));
+            assert_eq!(all.status, Status::Ok, "{:?}", all.error);
+            let list = all.result.expect("falls")["falls"]
+                .as_array()
+                .cloned()
+                .expect("array");
+            assert!(
+                !list.is_empty(),
+                "this relief has falls at these thresholds"
+            );
+            for f in &list {
+                let (lip, base) = (&f["lip"], &f["base"]);
+                for v in [lip, base] {
+                    let (u, v_) = (v[0].as_f64().expect("u"), v[1].as_f64().expect("v"));
+                    assert!(
+                        (0.0..=1024.0).contains(&u) && (0.0..=1024.0).contains(&v_),
+                        "{f}"
+                    );
+                }
+                let drop = f["drop_m"].as_f64().expect("drop");
+                assert!(
+                    drop >= 2.0
+                        && (lip[2].as_f64().expect("z") - base[2].as_f64().expect("z") - drop)
+                            .abs()
+                            < 1e-3,
+                    "{f}"
+                );
+                assert!((f["pool_depth_m"].as_f64().expect("d") - 0.33 * drop).abs() < 1e-3);
+                assert_eq!(f["node"], falls);
+            }
+            let one = call(
+                &reg,
+                &ctx,
+                "hydrology.waterfalls",
+                serde_json::json!({ "id": falls }),
+            );
+            assert_eq!(
+                one.result.expect("one")["falls"].as_array().map(Vec::len),
+                Some(list.len())
+            );
+            let wrong = call(
+                &reg,
+                &ctx,
+                "hydrology.waterfalls",
+                serde_json::json!({ "id": noise }),
+            );
+            assert_eq!(wrong.status, Status::Error);
+        }
+
+        #[test]
+        fn the_falls_simulation_follows_the_rivers_and_publishes_its_pools_water() {
+            use crate::envelope::Status;
+            let reg = Registry::with_builtins();
+            let dir = tempfile::tempdir().expect("tmp");
+            let ctx = Context::default();
+            let world = jd_types::WorldSettings {
+                resolution_px: [64, 64],
+                extent_m: [512.0, 512.0],
+                tile_size: 64,
+                halo: 0,
+                ..Default::default()
+            };
+            call(
+                &reg,
+                &ctx,
+                "project.create",
+                serde_json::json!({ "path": dir.path().join("f.jdproj"), "name": "F", "world": world }),
+            );
+            let rivers = call(&reg, &ctx, "graph.splice", serde_json::json!({ "layer": "height", "kind": "jd.hydrology.rivers@1", "params": {} })).result.expect("rivers")["id"].clone();
+            let added = call(
+                &reg,
+                &ctx,
+                "graph.add_simulation",
+                serde_json::json!({ "which": "falls" }),
+            );
+            assert_eq!(added.status, Status::Ok, "{:?}", added.error);
+            let added = added.result.expect("added");
+            assert_eq!(
+                added["published"],
+                serde_json::json!(["falls", "falls_water"])
+            );
+            let falls = added["id"].clone();
+            let g = call(&reg, &ctx, "graph.list", serde_json::json!({}))
+                .result
+                .expect("graph");
+            let edge = |from: &serde_json::Value, fp: &str, to: &serde_json::Value, tp: &str| {
+                g["edges"].as_array().expect("edges").iter().any(|e| {
+                    e["from"]["node"] == *from
+                        && e["from"]["port"] == fp
+                        && e["to"]["node"] == *to
+                        && e["to"]["port"] == tp
+                })
+            };
+            assert!(
+                edge(&rivers, "out", &falls, "in"),
+                "spliced after the rivers: {g}"
+            );
+            assert!(
+                edge(&rivers, "rivers", &falls, "rivers"),
+                "fed the rivers mask"
+            );
+            let ev = call(&reg, &ctx, "graph.evaluate", serde_json::json!({}));
+            assert_eq!(ev.status, Status::Ok, "{:?}", ev.error);
+            let layers = call(&reg, &ctx, "terrain.layers", serde_json::json!({}))
+                .result
+                .expect("layers");
+            for l in ["falls", "falls_water"] {
+                assert!(
+                    layers["layers"]
+                        .as_array()
+                        .expect("names")
+                        .iter()
+                        .any(|n| n == l),
+                    "{l}: {layers}"
+                );
+            }
+            // Nothing else is lakes: only the pools hold water.
+            assert!(
+                !layers["layers"]
+                    .as_array()
+                    .expect("names")
+                    .iter()
+                    .any(|n| n == "lakes"),
+                "{layers}"
+            );
         }
 
         #[test]

@@ -1249,3 +1249,44 @@ fn film_desert() {
     f.shoot(&mut h, 24);
     f.finish();
 }
+
+#[test]
+#[ignore = "writes the user guide's figures (JD_GUIDE_OUT)"]
+fn guide_water() {
+    // Waterfalls: rivers running over 25 m terraces on a 1 km world, `+ falls` at its research
+    // defaults.
+    let dir = tempfile::tempdir().unwrap();
+    let server = world_of(dir.path(), 1024.0, 512);
+    for (kind, params) in [
+        (
+            "jd.filter.terrace@1",
+            json!({ "step_m": 25.0, "softness": 0.1 }),
+        ),
+        ("jd.hydrology.rivers@1", json!({ "threshold": 0.5 })),
+    ] {
+        ok(
+            &server,
+            "graph.splice",
+            json!({ "layer": "height", "kind": kind, "params": params }),
+        );
+    }
+    ok(&server, "graph.add_simulation", json!({ "which": "falls" }));
+    ok(&server, "graph.evaluate", json!({ "lod": 0 }));
+    let mut h = studio(server);
+    ready(&mut h);
+    settle(&mut h, |a| a.viewport.fall_count() > 0);
+    show(&mut h, "+ falls");
+    shot(
+        &mut h,
+        "desktop-waterfalls",
+        &[Callout("+ falls", ""), Callout("viewport: wgpu", "")],
+    );
+    // Orbit the middle of the relief, not its lowest point, so the close view stays above ground.
+    let range = h.state().viewport.info().map_or([0.0, 0.0], |i| i.range_m);
+    let mut cam = h.state().viewport.camera;
+    cam.centre_y = (range[0] + range[1]) / 2.0;
+    h.state_mut().viewport.set_camera(cam);
+    frame(&mut h, 0.45, 0.8);
+    settle(&mut h, |_| true);
+    shot(&mut h, "desktop-waterfalls-close", &[]);
+}

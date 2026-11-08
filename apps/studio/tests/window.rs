@@ -2388,6 +2388,54 @@ fn the_viewport_tools_answer_their_keys_but_not_while_typing() {
     );
 }
 
+/// `+ falls` on a rivered project: the waterfalls node goes in after the rivers, the falls are
+/// drawn as falling water and counted in the readout.
+#[test]
+fn the_falls_button_draws_the_rivers_waterfalls() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = engine(dir.path());
+    let probe = server.clone();
+    let r = probe.invoke(Request::new(
+        "graph.splice",
+        json!({ "layer": "height", "kind": "jd.hydrology.rivers@1", "params": { "threshold": 0.4 } }),
+    ));
+    assert!(r.error.is_none(), "{:?}", r.error);
+    let mut h = window(server);
+    settle(&mut h, |a| a.viewport.info().is_some());
+    h.get_by_label("+ falls").scroll_to_me();
+    h.run();
+    h.get_by_label("+ falls").click();
+    h.run_steps(1);
+    settle(&mut h, |a| a.layers().iter().any(|l| l == "falls"));
+    // Low thresholds (the Editor's inspector would set them) so this 8 m-cell noise has falls.
+    let g = probe
+        .invoke(Request::new("graph.list", json!({})))
+        .result
+        .unwrap();
+    let falls = g["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["kind"] == "jd.hydrology.waterfalls@1")
+        .expect("a waterfalls node")["id"]
+        .clone();
+    for (key, value) in [("min_drop_m", 2.0), ("min_gradient", 0.2)] {
+        let r = probe.invoke(Request::new(
+            "graph.set_param",
+            json!({ "id": falls, "key": key, "value": value }),
+        ));
+        assert!(r.error.is_none(), "{:?}", r.error);
+    }
+    let r = probe.invoke(Request::new("graph.evaluate", json!({ "lod": 0 })));
+    assert!(r.error.is_none(), "{:?}", r.error);
+    settle(&mut h, |a| a.viewport.fall_count() > 0);
+    assert!(
+        h.state().viewport_readout().contains(" · falls "),
+        "{}",
+        h.state().viewport_readout()
+    );
+}
+
 /// A terrain far above sea level (a DEM of the Kenyan highlands: 1.7 km up on a 2 km world) is in
 /// view: the camera orbits sea level held inside its heights, not the origin, where the home view's
 /// eye sat under it.

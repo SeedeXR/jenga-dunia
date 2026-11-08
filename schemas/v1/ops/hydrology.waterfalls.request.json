@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WaterfallsParams",
+  "description": "`hydrology.waterfalls` params.",
+  "type": "object",
+  "properties": {
+    "id": {
+      "description": "A `jd.hydrology.waterfalls@1` node; omitted = every one in the graph.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/NodeId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "lod": {
+      "description": "Level of detail to evaluate at (0 = full resolution).",
+      "type": "integer",
+      "format": "uint8",
+      "minimum": 0,
+      "maximum": 255,
+      "default": 0
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "NodeId": {
+      "description": "Identifies a graph node.",
+      "type": "string"
+    }
+  }
+}

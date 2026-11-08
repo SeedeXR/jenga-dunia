@@ -112,6 +112,8 @@ enum Msg {
     Color(String, Result<jd_terrain::preview::Preview, String>),
     /// The `lakes` depth layer's preview, for the terrain preview of this layer.
     Lakes(String, Result<Option<jd_terrain::preview::Preview>, String>),
+    /// The waterfalls of the graph's waterfalls nodes (`hydrology.waterfalls`), for that layer.
+    Falls(String, Result<Vec<crate::viewport::FallSheet>, String>),
     /// The wind sea for a wind (`ocean.waves`).
     Waves([Option<f64>; 3], Box<Response>),
     /// An HDRI's preview (`sky.load_hdri`).
@@ -1228,6 +1230,16 @@ impl StudioApp {
                         Err(e) => self.log(format!("layer_preview (colour): {e}"), Level::Error),
                     }
                 }
+                Msg::Falls(layer, falls) => {
+                    self.reads = self.reads.saturating_sub(1);
+                    if self.layer.as_deref() != Some(layer.as_str()) {
+                        continue;
+                    }
+                    match falls {
+                        Ok(f) => self.viewport.set_falls(f),
+                        Err(e) => self.log(format!("hydrology.waterfalls: {e}"), Level::Error),
+                    }
+                }
                 Msg::Lakes(layer, lakes) => {
                     self.reads = self.reads.saturating_sub(1);
                     if self.layer.as_deref() != Some(layer.as_str()) {
@@ -1494,6 +1506,7 @@ impl StudioApp {
                         self.fetch_maps();
                         self.fetch_horizon();
                         self.fetch_lakes(lod);
+                        self.fetch_falls(lod);
                         self.fetch_color(lod);
                         self.fetch_caves(lod);
                         self.preview = Some((
@@ -1632,34 +1645,105 @@ impl StudioApp {
         self.viewport.set_sea(sea);
     }
 
-    /// The desktop's standing water: a published `lakes` layer (`lakes#lod<N>` beside a live
-    /// preview) is the fill node's depth map, fetched at the shown preview's lod.
+    /// Standing water: every published water-depth layer — `lakes` (the fill node's) and any
+    /// `*_water` (`falls_water`, `river_water`, `wetland_water`) — preferring the `#lod<N>` variant
+    /// beside a live preview, fetched at the shown preview's lod and merged by the deeper water.
     fn fetch_lakes(&mut self, lod: u32) {
         let Some(layer) = self.layer.clone() else {
             return;
         };
         let live = layer.contains('#');
-        let base = |n: &String| n.split('#').next() == Some("lakes");
-        let lakes = self
+        let base = |n: &str| n.split('#').next().unwrap_or(n).to_owned();
+        let watery = |b: &str| b == "lakes" || b.ends_with("_water");
+        let mut bases: Vec<String> = self
             .layers
             .iter()
-            .find(|n| base(n) && n.contains('#') == live)
-            .or_else(|| self.layers.iter().find(|n| base(n)))
-            .cloned();
-        let Some(lakes) = lakes else {
+            .map(|n| base(n))
+            .filter(|b| watery(b))
+            .collect();
+        bases.sort();
+        bases.dedup();
+        let names: Vec<String> = bases
+            .iter()
+            .filter_map(|b| {
+                let of = |n: &&String| base(n) == *b;
+                self.layers
+                    .iter()
+                    .filter(of)
+                    .find(|n| n.contains('#') == live)
+                    .or_else(|| self.layers.iter().find(of))
+                    .cloned()
+            })
+            .collect();
+        if names.is_empty() {
             return self.viewport.set_lakes(None);
+        }
+        let (server, tx, ctx) = (self.server.clone(), self.tx.clone(), self.ctx.clone());
+        self.reads += 1;
+        std::thread::spawn(move || {
+            let mut merged: Result<Option<jd_terrain::preview::Preview>, String> = Ok(None);
+            for name in names {
+                let r = server.invoke(Self::request(
+                    "terrain.preview",
+                    json!({ "layer": name, "lod": lod }),
+                ));
+                let pv = match (&r.result, &r.error) {
+                    (Some(v), _) => decode_preview(v).map(|(p, _)| p),
+                    (None, Some(e)) => Err(format!("{} {}", e.code.as_str(), e.message)),
+                    (None, None) => continue,
+                };
+                merged = match (merged, pv) {
+                    (Err(e), _) | (_, Err(e)) => Err(e),
+                    (Ok(None), Ok(p)) => Ok(Some(p)),
+                    (Ok(Some(a)), Ok(b)) => Ok(Some(deeper(&a, &b))),
+                };
+            }
+            let _ = tx.send(Msg::Lakes(layer, merged));
+            ctx.request_repaint();
+        });
+    }
+
+    /// The graph's waterfalls (`hydrology.waterfalls`) at the shown preview's lod, drawn as
+    /// falling water; none without a waterfalls node.
+    fn fetch_falls(&mut self, lod: u32) {
+        let Some(layer) = self.layer.clone() else {
+            return;
         };
-        let request = Self::request("terrain.preview", json!({ "layer": lakes, "lod": lod }));
+        let any = self.graph["nodes"].as_array().is_some_and(|n| {
+            n.iter().any(|n| {
+                n["kind"]
+                    .as_str()
+                    .is_some_and(|k| k.starts_with("jd.hydrology.waterfalls@"))
+            })
+        });
+        if !any {
+            return self.viewport.set_falls(Vec::new());
+        }
+        let request = Self::request("hydrology.waterfalls", json!({ "lod": lod }));
         let (server, tx, ctx) = (self.server.clone(), self.tx.clone(), self.ctx.clone());
         self.reads += 1;
         std::thread::spawn(move || {
             let r = server.invoke(request);
-            let pv = match (&r.result, &r.error) {
-                (Some(v), _) => decode_preview(v).map(|(p, _)| Some(p)),
-                (None, Some(e)) => Err(format!("{} {}", e.code.as_str(), e.message)),
-                (None, None) => Ok(None),
+            let at = |v: &Value| -> [f32; 3] {
+                std::array::from_fn(|k| v[k].as_f64().unwrap_or(0.0) as f32)
             };
-            let _ = tx.send(Msg::Lakes(layer, pv));
+            let falls = match (&r.result, &r.error) {
+                (Some(v), _) => Ok(v["falls"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .map(|f| crate::viewport::FallSheet {
+                                lip: at(&f["lip"]),
+                                base: at(&f["base"]),
+                                width_m: f["width_m"].as_f64().unwrap_or(1.0) as f32,
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default()),
+                (None, Some(e)) => Err(format!("{} {}", e.code.as_str(), e.message)),
+                (None, None) => Ok(Vec::new()),
+            };
+            let _ = tx.send(Msg::Falls(layer, falls));
             ctx.request_repaint();
         });
     }
@@ -1687,7 +1771,7 @@ impl StudioApp {
                 "Flatten the terrain to its mean height (set height_m in the inspector)",
             ),
         ];
-        const SIMULATIONS: [(&str, &str); 4] = [
+        const SIMULATIONS: [(&str, &str); 5] = [
             (
                 "snow",
                 "A season of snow on the terrain (jd.climate.snowpack): the cover becomes the `snow` layer, a snow material and the viewport colour",
@@ -1703,6 +1787,10 @@ impl StudioApp {
             (
                 "lava",
                 "A lava flow from the summit (jd.volcanic.lava) in front of the height output: the `heat` glow and `lava` thickness layers, a basalt material",
+            ),
+            (
+                "falls",
+                "Waterfalls on the rivers (jd.hydrology.waterfalls) in front of the height output: falls where a river drops 6.1 m or more down a steep step, plunge pools dug below them and filled as lakes, the `falls` layer and a wet-rock material",
             ),
         ];
         let enabled = self.project.is_some() && self.busy == 0;
@@ -5357,6 +5445,9 @@ impl StudioApp {
         if self.xray > 0.0 {
             s += &format!(" · x-ray {} %", (self.xray * 100.0).round());
         }
+        if self.viewport.fall_count() > 0 {
+            s += &format!(" · falls {}", self.viewport.fall_count());
+        }
         if self.viewport.lake_cells() > 0 {
             s += &format!(
                 " · lakes {} cells",
@@ -6188,6 +6279,37 @@ fn default_layer(layers: &[String]) -> Option<String> {
         .cloned()
 }
 
+/// Two water-depth previews merged cell by cell (the deeper water wins), re-quantised over the
+/// combined range; `a` when the grids differ (one layer evaluated at another lod).
+fn deeper(
+    a: &jd_terrain::preview::Preview,
+    b: &jd_terrain::preview::Preview,
+) -> jd_terrain::preview::Preview {
+    if (a.width, a.height) != (b.width, b.height) {
+        return a.clone();
+    }
+    let depth = |p: &jd_terrain::preview::Preview, i: usize| {
+        p.min + f32::from(p.data[i]) / 65535.0 * (p.max - p.min)
+    };
+    let d: Vec<f32> = (0..a.data.len())
+        .map(|i| depth(a, i).max(depth(b, i)))
+        .collect();
+    let (lo, hi) = d
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(lo, hi), v| (lo.min(*v), hi.max(*v)));
+    let span = (hi - lo).max(f32::EPSILON);
+    jd_terrain::preview::Preview {
+        width: a.width,
+        height: a.height,
+        min: lo,
+        max: hi,
+        data: d
+            .iter()
+            .map(|v| ((v - lo) / span * 65535.0).round() as u16)
+            .collect(),
+    }
+}
+
 fn decode_preview(v: &Value) -> Result<(jd_terrain::preview::Preview, usize), String> {
     use base64::Engine as _;
     let bytes = base64::engine::general_purpose::STANDARD
@@ -6489,6 +6611,41 @@ fn adapt_lod_bias(bias: u32, ms: f64, target: f64) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn water_layers_merge_by_the_deeper_water() {
+        use jd_terrain::preview::Preview;
+        let q = |d: &[f32], lo: f32, hi: f32| Preview {
+            width: 2,
+            height: 1,
+            min: lo,
+            max: hi,
+            data: d
+                .iter()
+                .map(|v| ((v - lo) / (hi - lo) * 65535.0).round() as u16)
+                .collect(),
+        };
+        let lakes = q(&[0.0, 4.0], 0.0, 4.0);
+        let pools = q(&[2.0, 1.0], 0.0, 2.0);
+        let m = deeper(&lakes, &pools);
+        let at = |i: usize| m.min + f32::from(m.data[i]) / 65535.0 * (m.max - m.min);
+        assert!(
+            (at(0) - 2.0).abs() < 1e-3 && (at(1) - 4.0).abs() < 1e-3,
+            "{m:?}"
+        );
+        let other = Preview {
+            width: 1,
+            height: 1,
+            min: 0.0,
+            max: 1.0,
+            data: vec![0],
+        };
+        assert_eq!(
+            deeper(&lakes, &other),
+            lakes,
+            "grids that differ keep the first"
+        );
+    }
 
     #[test]
     fn preview_detail_picks_the_fetch_lod_like_the_desktop() {

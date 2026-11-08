@@ -2440,6 +2440,78 @@
     }
   },
   {
+    "kind": "jd.hydrology.waterfalls@1",
+    "description": "Waterfalls where a river meets a near-vertical step: along each river (the optional `rivers` mask ≥ 0.5, else flow over `threshold`), a run of steps at least `min_gradient` steep (1 = 45°) dropping at least `min_drop_m` (6.1 m = 20 ft) is a fall; its plunge pool is dug into the floor below, `pool_depth` × drop deep and `pool_radius` × drop wide (medians of 75 surveyed pools, Scheingross & Lamb 2016). Outputs the terrain with the pools, the `falls` mask (faces 1, pools fading) and the pools' `water` depth (full to each foot; publish it as `falls_water` and the viewport draws it); `hydrology.waterfalls` lists each fall",
+    "inputs": [
+      {
+        "name": "in",
+        "ty": "heightfield",
+        "required": true
+      },
+      {
+        "name": "rivers",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "outputs": [
+      {
+        "name": "out",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "falls",
+        "ty": "heightfield",
+        "required": false
+      },
+      {
+        "name": "water",
+        "ty": "heightfield",
+        "required": false
+      }
+    ],
+    "param_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "FallsParams",
+      "description": "Waterfall settings.",
+      "type": "object",
+      "properties": {
+        "min_drop_m": {
+          "description": "Smallest total drop that counts as a waterfall, metres (> 0). 6.1 m = the 20 ft convention.",
+          "type": "number",
+          "format": "float",
+          "default": 6.099999904632568
+        },
+        "min_gradient": {
+          "description": "Smallest step gradient (rise over run) inside a fall (> 0): 1 = 45°, 4 = 76° (Mabin's\nnear-vertical falls, which need metre cells to show).",
+          "type": "number",
+          "format": "float",
+          "default": 1.0
+        },
+        "pool_depth": {
+          "description": "Plunge pool depth as a share of the drop (≥ 0; 0 = no pool).",
+          "type": "number",
+          "format": "float",
+          "default": 0.33000001311302185
+        },
+        "pool_radius": {
+          "description": "Plunge pool radius as a share of the drop (≥ 0).",
+          "type": "number",
+          "format": "float",
+          "default": 0.5699999928474426
+        },
+        "threshold": {
+          "description": "Without a `rivers` mask: rivers are where the log-scaled flow accumulation exceeds this\n(0..1), as in `jd.hydrology.rivers@1`.",
+          "type": "number",
+          "format": "float",
+          "default": 0.6000000238418579
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
     "kind": "jd.hydrology.wetness@1",
     "description": "Topographic wetness index ln(a / tan β) normalised to 0..1 — wet valley floors high, steep ridges low (biome/moisture masks); `method` picks d8 / dinf / mfd routing",
     "inputs": [

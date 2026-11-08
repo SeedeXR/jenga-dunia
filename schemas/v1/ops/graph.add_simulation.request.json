@@ -45,6 +45,11 @@
           "description": "`jd.volcanic.lava@1` in front of the height (`heat` and `lava` published, glowing).",
           "type": "string",
           "const": "lava"
+        },
+        {
+          "description": "`jd.hydrology.waterfalls@1` in front of the height, fed the rivers mask of a rivers node\nup its chain (`falls` and its pools' `falls_water` published).",
+          "type": "string",
+          "const": "falls"
         }
       ]
     }

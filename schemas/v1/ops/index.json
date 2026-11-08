@@ -160,6 +160,11 @@
     "scope": "project-write"
   },
   {
+    "id": "hydrology.waterfalls",
+    "description": "List the waterfalls a `jd.hydrology.waterfalls@1` node (or every one) finds on its evaluated inputs: lip and foot `[u, v, z]` in metres from the south-west corner, drop, run, width, upstream area and plunge pool — for a viewport's falling water and for engines",
+    "scope": "project-read"
+  },
+  {
     "id": "jobs.cancel",
     "description": "Request cancellation of a running job; it stops at the next node or kernel iteration with E_CANCELLED",
     "scope": "none"
