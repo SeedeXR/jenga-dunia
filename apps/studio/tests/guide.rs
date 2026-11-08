@@ -408,7 +408,12 @@ fn guide_layers_and_project() {
     let dir = tempfile::tempdir().unwrap();
     let server = world(dir.path());
     let noise = node(&server, "jd.noise.fbm@1");
-    let snow = add(&server, "jd.climate.snow@1", json!({}));
+    // The snow line lowered to 300 m (as the biomes e2e does): the default sits above this world.
+    let snow = add(
+        &server,
+        "jd.climate.snow@1",
+        json!({ "snow_line_m": 300.0 }),
+    );
     connect(&server, &noise, "out", &snow, "in");
     publish(&server, &snow, "snow", "snow");
     ok(&server, "graph.evaluate", json!({ "lod": 0 }));
