@@ -74,6 +74,11 @@ def mesh_info(asset):
         # 1.0 by default), not the mesh: the full mesh is what the asset registry's Nanite tags count.
         reg = unreal.AssetRegistryHelpers.get_asset_registry()
         data = reg.get_asset_by_object_path(asset.get_path_name())
+        if not data.get_tag_value("NaniteTriangles"):
+            # The registry's tags are written when the asset is saved: a mesh read before its
+            # first save has none (the count came back None on fresh imports).
+            unreal.EditorAssetLibrary.save_loaded_asset(asset, only_if_is_dirty=False)
+            data = reg.get_asset_by_object_path(asset.get_path_name())
         tag = lambda t: (lambda v: int(v) if v and str(v).isdigit() else None)(data.get_tag_value(t))
         nanite = str(data.get_tag_value("NaniteEnabled") or "").lower() == "true"
         info["nanite"] = {"enabled": nanite, "triangles": tag("NaniteTriangles"), "vertices": tag("NaniteVertices"),

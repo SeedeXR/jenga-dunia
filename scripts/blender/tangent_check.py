@@ -48,7 +48,7 @@ for p, t in zip(pos, tan):
         if p[0] < lo[0] or p[0] > hi[0] or p[2] < lo[1] or p[2] > hi[1]:
             over30_border += 1
     for l in loops:
-        signs += 1; signs_ok += 1 if (l[1] > 0) != (t[3] > 0) else 0  # Blender flips V on import (v → 1 − v), so its bitangent sign is the negation of glTF w
+        signs += 1; signs_ok += 1 if (l[1] > 0) == (t[3] > 0) else 0  # the same 3-D bitangent: glTF w = Blender's sign (a Y-up → Z-up rotation keeps handedness; checked by baking shading normals, 2026-11-08 — the negated rule had passed a map that shaded slopes flat)
 angles.sort()
 print("TANGENT_CHECK " + json.dumps({"vertices": len(pos), "matched": len(angles), "missing": missing,
     "mean_deg": round(sum(angles) / len(angles), 3), "p99_deg": round(angles[int(len(angles) * 0.99)], 3), "max_deg": round(angles[-1], 3),

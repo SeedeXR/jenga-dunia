@@ -139,11 +139,13 @@ pub struct FallsResult {
 
 /// Find the waterfalls on the rivers of `h` and dig their plunge pools. `rivers` is a 0..1 river
 /// mask (≥ 0.5 = river; `jd.hydrology.rivers@1`'s); without one, rivers come from flow
-/// accumulation over `p.threshold`.
+/// accumulation over `p.threshold`. `river_water` (the rivers node's `water`, metres) sets each
+/// fall's width: the river's wet width across the flow at the lip, never less than its lips.
 pub fn waterfalls(
     h: &Heightfield,
     spacing_m: [f32; 2],
     rivers: Option<&Heightfield>,
+    river_water: Option<&Heightfield>,
     p: &FallsParams,
 ) -> JdResult<FallsResult> {
     p.validate()?;
@@ -151,11 +153,14 @@ pub fn waterfalls(
         return Err(JdError::invalid("spacing_m", "must be > 0"));
     }
     let (w, hh) = (h.width() as usize, h.height() as usize);
-    if let Some(r) = rivers
-        && (r.width() as usize, r.height() as usize) != (w, hh)
-    {
-        return Err(JdError::invalid("rivers", "must match the terrain's size"));
+    for (k, f) in [("rivers", rivers), ("water", river_water)] {
+        if let Some(r) = f
+            && (r.width() as usize, r.height() as usize) != (w, hh)
+        {
+            return Err(JdError::invalid(k, "must match the terrain's size"));
+        }
     }
+    let wet = river_water.map(|r| r.to_vec());
     let heights = h.to_vec();
     // Paths follow the drainage the rivers node carved along: routing on the filled terrain, so a
     // pit does not end a river above its fall.
@@ -285,7 +290,10 @@ pub fn waterfalls(
             base_m: heights[foot],
             drop_m: drop,
             run_m: *run,
-            width_m: ks.len() as f32 * cell,
+            width_m: (ks.len() as f32 * cell).max(
+                wet.as_ref()
+                    .map_or(0.0, |d| wet_width(d, w, hh, lip, foot, spacing_m)),
+            ),
             area_km2: ks.iter().map(|&k| acc[runs[k].0]).sum::<f32>() * cell_area_km2,
             pool_depth_m: p.pool_depth * drop,
             pool_radius_m: if p.pool_radius > 0.0 {
@@ -337,6 +345,47 @@ pub fn waterfalls(
         water,
         falls,
     })
+}
+
+/// The river's wet width (water ≥ [`crate::water::WET_M`]) across the flow at `lip`: from the lip
+/// cell, steps of one cell along the perpendicular to `lip → foot`, both ways, while still wet.
+fn wet_width(
+    depth: &[f32],
+    w: usize,
+    hh: usize,
+    lip: usize,
+    foot: usize,
+    spacing_m: [f32; 2],
+) -> f32 {
+    let (lx, ly) = ((lip % w) as f32, (lip / w) as f32);
+    let (dx, dy) = (
+        ((foot % w) as f32 - lx) * spacing_m[0],
+        ((foot / w) as f32 - ly) * spacing_m[1],
+    );
+    let len = dx.hypot(dy).max(f32::EPSILON);
+    let cell = spacing_m[0].min(spacing_m[1]);
+    // Across the flow, in cells per step of one `cell`.
+    let (px, py) = (
+        -dy / len * cell / spacing_m[0],
+        dx / len * cell / spacing_m[1],
+    );
+    let wet_at = |k: f32| {
+        let (x, y) = ((lx + px * k).round(), (ly + py * k).round());
+        x >= 0.0
+            && y >= 0.0
+            && (x as usize) < w
+            && (y as usize) < hh
+            && depth[y as usize * w + x as usize] >= crate::water::WET_M
+    };
+    if !wet_at(0.0) {
+        return 0.0;
+    }
+    let side = |sign: f32| {
+        (1..)
+            .take_while(|k| *k <= w.max(hh) && wet_at(sign * *k as f32))
+            .count()
+    };
+    (1 + side(1.0) + side(-1.0)) as f32 * cell
 }
 
 /// Dig `f`'s plunge pool: a raised-cosine bowl centred on the foot, lowering only ground at or
@@ -398,7 +447,8 @@ mod tests {
     fn a_cliff_across_a_river_is_one_fall_with_a_plunge_pool_dug_below_it() {
         // y grows north and the valley rises northwards, so the river runs south over the cliff.
         let (h, rivers) = valley(20.0);
-        let r = waterfalls(&h, [5.0, 5.0], Some(&rivers), &FallsParams::default()).expect("falls");
+        let r = waterfalls(&h, [5.0, 5.0], Some(&rivers), None, &FallsParams::default())
+            .expect("falls");
         assert_eq!(r.falls.len(), 1, "{:?}", r.falls);
         let f = &r.falls[0];
         assert_eq!(
@@ -446,6 +496,50 @@ mod tests {
     }
 
     #[test]
+    fn a_fall_is_as_wide_as_the_rivers_water_at_its_lip() {
+        // The mask's river is 3 cells wide; its water spreads over 5 (x 22..=26).
+        let (h, rivers) = valley(20.0);
+        let mut water = h.clone();
+        water.fill_with(|x, _| if (22..=26).contains(&x) { 1.0 } else { 0.0 });
+        let r = waterfalls(
+            &h,
+            [5.0, 5.0],
+            Some(&rivers),
+            Some(&water),
+            &FallsParams::default(),
+        )
+        .expect("falls");
+        assert_eq!(r.falls.len(), 1);
+        assert!(
+            (r.falls[0].width_m - 25.0).abs() < 1e-3,
+            "{}",
+            r.falls[0].width_m
+        );
+        // Water narrower than the lips never narrows the fall; a mismatched layer is refused.
+        water.fill_with(|x, _| if x == 24 { 1.0 } else { 0.0 });
+        let r = waterfalls(
+            &h,
+            [5.0, 5.0],
+            Some(&rivers),
+            Some(&water),
+            &FallsParams::default(),
+        )
+        .expect("falls");
+        assert!((r.falls[0].width_m - 15.0).abs() < 1e-3);
+        let small = Heightfield::new(8, 8, 8, 0).expect("hf");
+        assert!(
+            waterfalls(
+                &h,
+                [5.0, 5.0],
+                Some(&rivers),
+                Some(&small),
+                &FallsParams::default()
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn a_pool_above_a_gorge_spills_over_its_rim_and_no_pool_digs_nothing() {
         // Below the cliff the valley drops 2 m a cell: the pool's rim downstream is far below the
         // foot, so the water stands at the rim, not at the foot over the open gorge.
@@ -461,7 +555,8 @@ mod tests {
         });
         let mut rivers = h.clone();
         rivers.fill_with(|x, _| if (23..=25).contains(&x) { 1.0 } else { 0.0 });
-        let r = waterfalls(&h, [5.0, 5.0], Some(&rivers), &FallsParams::default()).expect("falls");
+        let r = waterfalls(&h, [5.0, 5.0], Some(&rivers), None, &FallsParams::default())
+            .expect("falls");
         let f = &r.falls[0];
         for y in 0..31 {
             let surface = r.height.get(24, y) + r.water.get(24, y);
@@ -476,7 +571,7 @@ mod tests {
             pool_depth: 0.0,
             ..FallsParams::default()
         };
-        let r = waterfalls(&h, [5.0, 5.0], Some(&rivers), &p).expect("falls");
+        let r = waterfalls(&h, [5.0, 5.0], Some(&rivers), None, &p).expect("falls");
         assert_eq!(r.falls.len(), 1);
         assert_eq!(r.height.to_vec(), h.to_vec());
         assert!(r.water.to_vec().iter().all(|w| *w == 0.0));
@@ -487,14 +582,16 @@ mod tests {
     fn small_steps_are_rapids_and_steps_off_the_river_are_cliffs_not_falls() {
         // A 3 m step: steep, but under 6.1 m — rapids.
         let (h, rivers) = valley(3.0);
-        let r = waterfalls(&h, [5.0, 5.0], Some(&rivers), &FallsParams::default()).expect("falls");
+        let r = waterfalls(&h, [5.0, 5.0], Some(&rivers), None, &FallsParams::default())
+            .expect("falls");
         assert!(r.falls.is_empty(), "{:?}", r.falls);
         assert_eq!(r.height.to_vec(), h.to_vec(), "nothing dug");
         // A 20 m step with no river on it: a cliff.
         let (h, _) = valley(20.0);
         let mut dry = h.clone();
         dry.fill_with(|_, _| 0.0);
-        let r = waterfalls(&h, [5.0, 5.0], Some(&dry), &FallsParams::default()).expect("falls");
+        let r =
+            waterfalls(&h, [5.0, 5.0], Some(&dry), None, &FallsParams::default()).expect("falls");
         assert!(r.falls.is_empty());
         // The 3 m step over a 5 m cell is a 0.66 gradient: lower both thresholds and it is a fall.
         let (h, rivers) = valley(3.0);
@@ -504,7 +601,7 @@ mod tests {
             ..FallsParams::default()
         };
         assert_eq!(
-            waterfalls(&h, [5.0, 5.0], Some(&rivers), &p)
+            waterfalls(&h, [5.0, 5.0], Some(&rivers), None, &p)
                 .expect("falls")
                 .falls
                 .len(),
@@ -515,14 +612,14 @@ mod tests {
     #[test]
     fn without_a_mask_the_rivers_come_from_the_flow_and_bad_settings_are_refused() {
         let (h, _) = valley(20.0);
-        let a = waterfalls(&h, [5.0, 5.0], None, &FallsParams::default()).expect("falls");
+        let a = waterfalls(&h, [5.0, 5.0], None, None, &FallsParams::default()).expect("falls");
         assert_eq!(
             a.falls.len(),
             1,
             "the valley's own flow finds the fall: {:?}",
             a.falls
         );
-        let b = waterfalls(&h, [5.0, 5.0], None, &FallsParams::default()).expect("again");
+        let b = waterfalls(&h, [5.0, 5.0], None, None, &FallsParams::default()).expect("again");
         assert_eq!(a.falls, b.falls, "deterministic");
         assert_eq!(a.height.to_vec(), b.height.to_vec());
         for bad in [
@@ -543,9 +640,12 @@ mod tests {
                 ..FallsParams::default()
             },
         ] {
-            assert!(waterfalls(&h, [5.0, 5.0], None, &bad).is_err(), "{bad:?}");
+            assert!(
+                waterfalls(&h, [5.0, 5.0], None, None, &bad).is_err(),
+                "{bad:?}"
+            );
         }
         let small = Heightfield::new(8, 8, 8, 0).expect("hf");
-        assert!(waterfalls(&h, [5.0, 5.0], Some(&small), &FallsParams::default()).is_err());
+        assert!(waterfalls(&h, [5.0, 5.0], Some(&small), None, &FallsParams::default()).is_err());
     }
 }

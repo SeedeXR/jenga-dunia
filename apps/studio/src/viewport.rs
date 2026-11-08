@@ -542,9 +542,14 @@ fn fs_main(i: VsOut) -> @location(0) vec4<f32> {
     if (u.flags.x > 0.5 && i.uv.x >= 0.0) {
         albedo = textureSample(albedo_map, samp, i.uv).rgb;
         roughness = textureSample(rough_map, samp, i.uv).g;
-        var nm = textureSample(normal_map, samp, i.uv).xyz;
-        // Each detail tile over the macro maps by its mask's weight, in order (the desktop's
-        // `mix(color, tile, w)`), the normals mixed before they are unpacked.
+        // The macro map is the terrain's own normal baked against flat ground (T east, B north,
+        // N up — slope included), so it is decoded in that frame, not the tilted face's: applied
+        // on the face it counted the slope twice (45° shaded as 90°, cliffs turned to face down).
+        let mm = textureSample(normal_map, samp, i.uv).xyz * 2.0 - 1.0;
+        let macro_n = normalize(vec3<f32>(mm.x, mm.z, -mm.y));
+        // Each detail tile perturbs it by its mask's weight, in order (the desktop's
+        // `mix(color, tile, w)`), the tangent-space normals mixed before they are unpacked.
+        var nm = vec3<f32>(0.5, 0.5, 1.0);
         if (u.detail_u.x > 0.0) {
             let w = textureSample(detail_weights, samp, i.uv);
             let r0 = i.uv * vec2<f32>(u.detail_u.x, u.detail_v.x);
@@ -566,12 +571,11 @@ fn fs_main(i: VsOut) -> @location(0) vec4<f32> {
                 nm = mix(nm, textureSample(detail_n3, tile_samp, r3).xyz, w.a);
             }
         }
-        // Tangent space: +x east (u), +y north (v), +z out of the surface (glTF), on the mesh
-        // normal (three's normalMap on a plane).
+        // Tangent space for the tiles: +x east (u), +y north (v), +z the macro normal.
         let m = nm * 2.0 - 1.0;
-        let t = normalize(vec3<f32>(1.0, 0.0, 0.0) - flat_n * flat_n.x);
-        let b = normalize(vec3<f32>(0.0, 0.0, -1.0) + flat_n * flat_n.z);
-        n = normalize(t * m.x + b * m.y + flat_n * m.z);
+        let t = normalize(vec3<f32>(1.0, 0.0, 0.0) - macro_n * macro_n.x);
+        let b = normalize(vec3<f32>(0.0, 0.0, -1.0) + macro_n * macro_n.z);
+        n = normalize(t * m.x + b * m.y + macro_n * m.z);
         if (u.flags.y > 0.5) {
             emissive = textureSample(emissive_map, samp, i.uv).rgb;
         }
@@ -810,6 +814,12 @@ pub struct Camera {
     /// ([`orbit_height`]), so a plateau far above it (a DEM of Nairobi at 1.7 km) stays in view.
     /// The desktop always looked at 0 and lost such a terrain under the camera.
     pub centre_y: f32,
+    /// Where the orbit's centre sits on the ground, east and south of the world's centre (metres,
+    /// the viewport frame): 0, 0 at home; middle- or Shift-drag pans it so the camera can visit a
+    /// feature off the centre.
+    pub centre_x: f32,
+    /// See [`Camera::centre_x`].
+    pub centre_z: f32,
 }
 
 const FOV_DEG: f32 = 50.0;
@@ -830,17 +840,34 @@ impl Camera {
             radius: size * 1.3,
             size,
             centre_y: 0.0,
+            centre_x: 0.0,
+            centre_z: 0.0,
         }
+    }
+
+    fn target(&self) -> [f32; 3] {
+        [self.centre_x, self.centre_y, self.centre_z]
     }
 
     fn eye(&self) -> [f32; 3] {
         let (st, ct) = self.theta.sin_cos();
         let (sp, cp) = self.phi.sin_cos();
         [
-            self.radius * sp * st,
+            self.centre_x + self.radius * sp * st,
             self.centre_y + self.radius * cp,
-            self.radius * sp * ct,
+            self.centre_z + self.radius * sp * ct,
         ]
+    }
+
+    /// Pan the orbit's centre across the ground by a drag of `dx`, `dy` pixels: the ground follows
+    /// the pointer, faster the farther the camera is; kept over the world (± half its size).
+    pub fn pan(&mut self, dx: f32, dy: f32) {
+        let k = self.radius * 0.0015;
+        let (st, ct) = self.theta.sin_cos();
+        // On the ground: right = (cos θ, −sin θ), towards the view = −(sin θ, cos θ).
+        let half = self.size / 2.0;
+        self.centre_x = (self.centre_x - dx * k * ct - dy * k * st).clamp(-half, half);
+        self.centre_z = (self.centre_z + dx * k * st - dy * k * ct).clamp(-half, half);
     }
 
     fn view_proj(&self, aspect: f32) -> [[f32; 4]; 4] {
@@ -848,13 +875,13 @@ impl Camera {
         let far = self.size * 50.0;
         mul(
             perspective(FOV_DEG.to_radians(), aspect, near, far),
-            look_at(self.eye(), [0.0, self.centre_y, 0.0]),
+            look_at(self.eye(), self.target()),
         )
     }
 
     /// right, up, forward scaled for sky rays (`forward + right·x + up·y` through NDC x, y).
     fn basis(&self, aspect: f32) -> ([f32; 3], [f32; 3], [f32; 3]) {
-        let f = normalize(sub([0.0, self.centre_y, 0.0], self.eye()));
+        let f = normalize(sub(self.target(), self.eye()));
         let r = normalize(cross(f, [0.0, 1.0, 0.0]));
         let u = cross(r, f);
         let t = (FOV_DEG.to_radians() / 2.0).tan();
@@ -867,7 +894,7 @@ impl Camera {
     /// even; held to the orbit's own limits.
     pub fn along(keys: &[Camera], t: f32) -> Option<Camera> {
         let first = *keys.first()?;
-        let mut k: Vec<[f32; 3]> = Vec::with_capacity(keys.len());
+        let mut k: Vec<[f32; 5]> = Vec::with_capacity(keys.len());
         for c in keys {
             let mut theta = c.theta;
             if let Some(prev) = k.last() {
@@ -878,10 +905,10 @@ impl Camera {
                     theta += std::f32::consts::TAU;
                 }
             }
-            k.push([theta, c.phi, c.radius.ln()]);
+            k.push([theta, c.phi, c.radius.ln(), c.centre_x, c.centre_z]);
         }
         let n = k.len() - 1;
-        let [theta, phi, ln_r] = if n == 0 {
+        let [theta, phi, ln_r, cx, cz] = if n == 0 {
             k[0]
         } else {
             let x = t.clamp(0.0, 1.0) * n as f32;
@@ -904,6 +931,8 @@ impl Camera {
             radius: ln_r.exp().clamp(first.size * 0.02, first.size * 20.0),
             size: first.size,
             centre_y: first.centre_y,
+            centre_x: cx,
+            centre_z: cz,
         })
     }
 }
@@ -2712,9 +2741,13 @@ impl Viewport {
         }
         let d = resp.drag_delta();
         let orbit_primary = resp.dragged_by(PointerButton::Primary) && self.tool.is_none();
-        let orbit_other =
-            resp.dragged_by(PointerButton::Secondary) || resp.dragged_by(PointerButton::Middle);
-        if (orbit_primary || orbit_other) && d != egui::Vec2::ZERO {
+        let orbit_other = resp.dragged_by(PointerButton::Secondary);
+        let pan = resp.dragged_by(PointerButton::Middle)
+            || ((orbit_primary || orbit_other) && ui.input(|i| i.modifiers.shift));
+        if pan && d != egui::Vec2::ZERO {
+            self.camera.pan(d.x, d.y);
+            self.dirty = true;
+        } else if (orbit_primary || orbit_other) && d != egui::Vec2::ZERO {
             self.camera.theta -= d.x * 0.005;
             self.camera.phi = (self.camera.phi - d.y * 0.005).clamp(0.15, 1.5);
             self.dirty = true;
@@ -3687,6 +3720,23 @@ mod tests {
         assert_eq!((cam.theta, cam.phi, cam.radius), (0.6, 1.0, 4096.0 * 1.3));
         // Flythrough: the path passes through every key, eases between them, crosses north the
         // short way and interpolates the radius in log space.
+        // Pan: the centre moves across the ground opposite the drag, within the world; the eye
+        // keeps its offset from it; home is the world's centre again.
+        let mut p = Camera { theta: 0.0, ..cam };
+        let eye0 = p.eye();
+        p.pan(100.0, 0.0); // drag right, camera looking north (θ 0): the ground moves east → centre west
+        assert!(p.centre_x < 0.0 && p.centre_z.abs() < 1e-3, "{p:?}");
+        let e = p.eye();
+        assert!((e[0] - eye0[0] - p.centre_x).abs() < 1e-3 && (e[2] - eye0[2]).abs() < 1e-3);
+        p.pan(0.0, 1.0e6);
+        assert_eq!(p.centre_z, -cam.size / 2.0, "held over the world");
+        assert_eq!(
+            (
+                Camera::fit([4096.0, 2048.0]).centre_x,
+                Camera::fit([4096.0, 2048.0]).centre_z
+            ),
+            (0.0, 0.0)
+        );
         let key = |theta: f32, radius: f32| Camera {
             theta,
             radius,

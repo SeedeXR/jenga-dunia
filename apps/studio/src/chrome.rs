@@ -613,7 +613,7 @@ fn hint_rows(st: &State) -> &'static [(&'static str, &'static str)] {
             ("Grid panel", "level / raise / lower"),
         ]
     } else {
-        &[("Drag", "orbit"), ("Wheel", "zoom")]
+        &[("Drag", "orbit"), ("Shift drag", "pan"), ("Wheel", "zoom")]
     }
 }
 

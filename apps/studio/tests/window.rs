@@ -2576,6 +2576,30 @@ fn the_engine_export_carries_the_rivers_water() {
     assert!(unity.join("water.fbx").is_file());
 }
 
+/// A middle-button drag pans the orbit's centre across the ground (the view no longer only circles
+/// the world's centre); Fit brings it home.
+#[test]
+fn a_middle_drag_pans_the_view_and_fit_brings_it_home() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window(engine(dir.path()));
+    settle(&mut h, |a| a.viewport.info().is_some());
+    let theta = h.state().viewport.camera.theta;
+    let c = h.state().viewport.rect().center();
+    drag_with(
+        &mut h,
+        eframe::egui::PointerButton::Middle,
+        c,
+        c + eframe::egui::vec2(150.0, 60.0),
+    );
+    let cam = h.state().viewport.camera;
+    assert!(cam.centre_x.hypot(cam.centre_z) > 1.0, "panned: {cam:?}");
+    assert_eq!(cam.theta, theta, "a pan does not orbit");
+    h.get_by_label("Fit: back to the home view").click();
+    h.run_steps(2);
+    let cam = h.state().viewport.camera;
+    assert_eq!((cam.centre_x, cam.centre_z), (0.0, 0.0));
+}
+
 /// A terrain far above sea level (a DEM of the Kenyan highlands: 1.7 km up on a 2 km world) is in
 /// view: the camera orbits sea level held inside its heights, not the origin, where the home view's
 /// eye sat under it.

@@ -1738,13 +1738,13 @@ pub fn register_all(r: &mut Registry) {
     // The filled copy, receivers, two accumulations, the step flags and three outputs: ≈ 44 B/cell.
     r.register(NodeDef::new::<jd_terrain::FallsParams, _>(
         "jd.hydrology.waterfalls@1",
-        "Waterfalls where a river meets a near-vertical step: along each river (the optional `rivers` mask ≥ 0.5, else flow over `threshold`), a run of steps at least `min_gradient` steep (1 = 45°) dropping at least `min_drop_m` (6.1 m = 20 ft) is a fall; its plunge pool is dug into the floor below, `pool_depth` × drop deep and `pool_radius` × drop wide (medians of 75 surveyed pools, Scheingross & Lamb 2016). Outputs the terrain with the pools, the `falls` mask (faces 1, pools fading) and the pools' `water` depth (full to each foot; publish it as `falls_water` and the viewport draws it); `hydrology.waterfalls` lists each fall",
-        vec![port("in", PortType::Heightfield, true), port("rivers", PortType::Heightfield, false)],
+        "Waterfalls where a river meets a near-vertical step: along each river (the optional `rivers` mask ≥ 0.5, else flow over `threshold`), a run of steps at least `min_gradient` steep (1 = 45°) dropping at least `min_drop_m` (6.1 m = 20 ft) is a fall; its plunge pool is dug into the floor below, `pool_depth` × drop deep and `pool_radius` × drop wide (medians of 75 surveyed pools, Scheingross & Lamb 2016). A fall is as wide as the river's water at its lip when the rivers node's `water` is wired in (else its lip cells side by side). Outputs the terrain with the pools, the `falls` mask (faces 1, pools fading) and the pools' `water` depth (each pool full to its own rim, where it spills; publish it as `falls_water` and the viewport draws it); `hydrology.waterfalls` lists each fall",
+        vec![port("in", PortType::Heightfield, true), port("rivers", PortType::Heightfield, false), port("water", PortType::Heightfield, false)],
         vec![port("out", PortType::Heightfield, false), port("falls", PortType::Heightfield, false), port("water", PortType::Heightfield, false)],
         |ctx, p, i| {
             let fp: jd_terrain::FallsParams = params(p)?;
-            let rivers = i.get("rivers").map(|v| v.as_field());
-            let r = jd_terrain::waterfalls(field(i, "in")?, spacing_m(ctx), rivers.map(|r| &**r), &fp)?;
+            let (rivers, water) = (i.get("rivers").map(|v| v.as_field()), i.get("water").map(|v| v.as_field()));
+            let r = jd_terrain::waterfalls(field(i, "in")?, spacing_m(ctx), rivers.map(|r| &**r), water.map(|w| &**w), &fp)?;
             Ok(BTreeMap::from([("out".to_owned(), Value::field(r.height)), ("falls".to_owned(), Value::field(r.mask)), ("water".to_owned(), Value::field(r.water))]))
         },
     ).with_memory(44.0));

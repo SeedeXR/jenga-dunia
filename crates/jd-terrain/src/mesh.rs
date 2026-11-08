@@ -274,7 +274,7 @@ pub struct MaterialLayer {
 }
 
 /// Bake albedo, normal and roughness maps from the full field, sampled every `ts` cells so no
-/// side exceeds `max_px` (see [`bake_normal_roughness_with`] for the conventions).
+/// side exceeds `max_px` (see [`bake_normal_roughness_against`] for the conventions).
 pub fn bake_maps(hf: &Heightfield, extent_m: [f64; 2], max_px: u32) -> JdResult<BakedMaps> {
     bake_maps_with(hf, extent_m, max_px, &[])
 }
@@ -288,7 +288,20 @@ pub fn bake_maps_with(
     layers: &[MaterialLayer],
 ) -> JdResult<BakedMaps> {
     validate_layers(hf, layers)?;
-    bake_maps_body(hf, extent_m, max_px, layers)
+    bake_maps_body(hf, extent_m, max_px, layers, None)
+}
+
+/// [`bake_maps_with`] for a glTF export of `mesh`: the normal map is tangent-space against that
+/// mesh (see [`bake_normal_roughness_against`]) instead of against flat ground.
+pub fn bake_maps_against(
+    hf: &Heightfield,
+    extent_m: [f64; 2],
+    max_px: u32,
+    layers: &[MaterialLayer],
+    mesh: &GridMesh,
+) -> JdResult<BakedMaps> {
+    validate_layers(hf, layers)?;
+    bake_maps_body(hf, extent_m, max_px, layers, Some(mesh))
 }
 
 /// Every material mask matches the terrain and every colour / roughness sits in 0..=1 — checked
@@ -327,6 +340,7 @@ fn bake_maps_body(
     extent_m: [f64; 2],
     max_px: u32,
     layers: &[MaterialLayer],
+    against: Option<&GridMesh>,
 ) -> JdResult<BakedMaps> {
     let (w, h) = (hf.width(), hf.height());
     let ts = w.max(h).div_ceil(max_px.max(16)).max(1);
@@ -358,7 +372,8 @@ fn bake_maps_body(
         &|gx, gz| ((gx * ts).min(w - 1), (gz * ts).min(h - 1)),
         &|gx, gz| ((gx * ts) as f64 * sx, (gz * ts) as f64 * sz),
     )?;
-    let (normal, roughness, px) = bake_normal_roughness_with(hf, extent_m, max_px, layers)?;
+    let (normal, roughness, px) =
+        bake_normal_roughness_against(hf, extent_m, max_px, layers, against)?;
     let emissive = bake_emissive(layers, tw, th, &|gx, gz| {
         ((gx * ts).min(w - 1), (gz * ts).min(h - 1))
     })?;
@@ -467,18 +482,94 @@ pub(crate) fn bake_emissive(
     Ok(Some(out.into_inner()))
 }
 
-/// Bake a tangent-space normal map (glTF convention: +X = +U east, +Y = +V north, +Z out of
-/// the surface) and a roughness map (G channel; B metallic = 0) from the full field, sampled
-/// every `ts` cells so no side exceeds `max_px`. Row 0 = south, like the albedo.
+/// Bake a normal map and a roughness map (G channel; B metallic = 0) from the full field, sampled
+/// every `ts` cells so no side exceeds `max_px`. Row 0 = south, like the albedo. The normal map is
+/// the terrain's own normal against flat ground (+X east, +Y north, +Z up: slope included) — what
+/// the viewport decodes.
 /// Roughness: 0.92 on flat ground, down to 0.62 on steep rock, 0.6 above the snow line.
+/// `mesh`'s normal at every texel of a `tex[0] × tex[1]` map sampled every `ts` cells of a
+/// `size`-cell field: its vertex normals interpolated across the triangle over each texel's cell
+/// centre (as a renderer interpolates them); `None` where no triangle covers it (a hole).
+fn mesh_normals_at(
+    mesh: &GridMesh,
+    size: [u32; 2],
+    extent_m: [f64; 2],
+    ts: u32,
+    tex: [u32; 2],
+) -> Vec<Option<[f64; 3]>> {
+    let (sx, sz) = (extent_m[0] / size[0] as f64, extent_m[1] / size[1] as f64);
+    // A vertex in cell units (x east, z north): the inverse of the export frame.
+    let cell_of = |i: usize| {
+        let p = &mesh.positions[i * 3..i * 3 + 3];
+        (
+            (f64::from(p[0]) + extent_m[0] / 2.0) / sx - 0.5,
+            (extent_m[1] / 2.0 - f64::from(p[2])) / sz - 0.5,
+        )
+    };
+    // Texel k samples cell min(k·ts, size − 1): the texels a cell span [c0, c1] may hold.
+    let texels = |c0: f64, c1: f64, n: u32| {
+        let last = i64::from(n) - 1;
+        let ts = f64::from(ts);
+        ((c0 / ts).floor() as i64).clamp(0, last)..=((c1 / ts).ceil() as i64).clamp(0, last)
+    };
+    let mut out: Vec<Option<[f64; 3]>> = vec![None; (tex[0] * tex[1]) as usize];
+    for t in mesh.indices.as_chunks::<3>().0 {
+        let v = t.map(|i| i as usize);
+        let c = v.map(cell_of);
+        let (x0, x1) = (
+            c.iter().map(|p| p.0).fold(f64::MAX, f64::min),
+            c.iter().map(|p| p.0).fold(f64::MIN, f64::max),
+        );
+        let (z0, z1) = (
+            c.iter().map(|p| p.1).fold(f64::MAX, f64::min),
+            c.iter().map(|p| p.1).fold(f64::MIN, f64::max),
+        );
+
+        let den = (c[1].1 - c[2].1) * (c[0].0 - c[2].0) + (c[2].0 - c[1].0) * (c[0].1 - c[2].1);
+        if den.abs() < 1e-12 {
+            continue;
+        }
+        for tz in texels(z0, z1, tex[1]) {
+            for tx in texels(x0, x1, tex[0]) {
+                let px = f64::from((tx as u32 * ts).min(size[0] - 1));
+                let pz = f64::from((tz as u32 * ts).min(size[1] - 1));
+                let a =
+                    ((c[1].1 - c[2].1) * (px - c[2].0) + (c[2].0 - c[1].0) * (pz - c[2].1)) / den;
+                let b =
+                    ((c[2].1 - c[0].1) * (px - c[2].0) + (c[0].0 - c[2].0) * (pz - c[2].1)) / den;
+                let g = 1.0 - a - b;
+                if a < -1e-6 || b < -1e-6 || g < -1e-6 {
+                    continue;
+                }
+                let n: [f64; 3] = std::array::from_fn(|k| {
+                    [(a, v[0]), (b, v[1]), (g, v[2])]
+                        .iter()
+                        .map(|(wgt, vi)| wgt * f64::from(mesh.normals[vi * 3 + k]))
+                        .sum()
+                });
+                let l = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt().max(1e-12);
+                out[(tz as u32 * tex[0] + tx as u32) as usize] = Some(n.map(|c| c / l));
+            }
+        }
+    }
+    out
+}
+
 /// How far the baked ambient occlusion looks for cover, in cells of the source field.
 pub(crate) const AO_REACH_CELLS: f32 = 16.0;
 
-pub(crate) fn bake_normal_roughness_with(
+/// With `against`, tangent-space against that mesh instead — glTF's normal map:
+/// at each texel the full-resolution normal (detail included) is written in the frame of the
+/// exported mesh's own interpolated normal N, tangent T = [`tangent_of`]`(N)` (east, ∂P/∂u) and
+/// bitangent B = −(N × T): glTF's +Y is "up" in the image, towards v = 0, and v = 0 is our south
+/// edge, so B points south (tangent w = −1). Written against flat ground instead, the map carried
+/// the slope a second time: Blender shaded a 26.6° ramp flat (measured, 2026-11-08).
+pub(crate) fn bake_normal_roughness_against(
     hf: &Heightfield,
     extent_m: [f64; 2],
     max_px: u32,
     layers: &[MaterialLayer],
+    against: Option<&GridMesh>,
 ) -> JdResult<(Vec<u8>, Vec<u8>, [u32; 2])> {
     let (w, h) = (hf.width(), hf.height());
     let ts = w.max(h).div_ceil(max_px.max(16)).max(1);
@@ -498,6 +589,7 @@ pub(crate) fn bake_normal_roughness_with(
     // metallic packing, so the one texture serves as occlusionTexture and metallicRoughnessTexture.
     let cell = (sx.max(sz)) as f32;
     let occ = crate::occlusion_mask(hf, [sx as f32, sz as f32], AO_REACH_CELLS * cell)?;
+    let base = against.map(|m| mesh_normals_at(m, [w, h], extent_m, ts, [tw, th]));
     for ty in 0..th {
         for tx in 0..tw {
             let (x, z) = ((tx * ts).min(w - 1) as i64, (ty * ts).min(h - 1) as i64);
@@ -521,8 +613,24 @@ pub(crate) fn bake_normal_roughness_with(
             }
             let len = (dh_dx * dh_dx + 1.0 + dh_dz * dh_dz).sqrt();
             let (nx, ny, nz) = (-dh_dx / len, 1.0 / len, -dh_dz / len);
-            // Tangent frame: T = +X, B = +V = north = −Z, N = +Y.
-            for c in [nx, -nz, ny] {
+            let enc = match base.as_ref().and_then(|b| b[(ty * tw + tx) as usize]) {
+                // Against flat ground: T = +X, B = north = −Z, N = +Y.
+                None if base.is_none() => [nx, -nz, ny],
+                // A texel no triangle covers (a hole): straight out of the surface.
+                None => [0.0, 0.0, 1.0],
+                Some(n0) => {
+                    let t = tangent_of(&n0.map(|c| c as f32)).map(f64::from);
+                    let cross = [
+                        n0[1] * t[2] - n0[2] * t[1],
+                        n0[2] * t[0] - n0[0] * t[2],
+                        n0[0] * t[1] - n0[1] * t[0],
+                    ];
+                    let b = cross.map(|c| -c); // south along the surface
+                    let dot = |a: [f64; 3]| a[0] * nx + a[1] * ny + a[2] * nz;
+                    [dot(t), dot(b), dot(n0)]
+                }
+            };
+            for c in enc {
                 nrm.push(((c * 0.5 + 0.5) * 255.0).round().clamp(0.0, 255.0) as u8);
             }
             let slope = ((1.0 - ny) * 1.4).clamp(0.0, 1.0);
@@ -694,7 +802,8 @@ pub fn export_glb_with_holes(
     // is what MikkTSpace computes. U runs east, so on a heightfield y = h(x, z) the tangent is
     // (1, ∂h/∂x, 0) with ∂h/∂x = −n.x / n.y: in the tangent plane and, unlike +X projected onto
     // the plane, without a z component (that projection was off by up to 51° on cross-slopes
-    // against Blender's calc_tangents). w = +1: normal × tangent = −Z = +V (north).
+    // against Blender's calc_tangents). w = −1: the bitangent −(normal × tangent) points south,
+    // towards v = 0 — glTF's "up" in the normal map's image (see bake_normal_roughness_against).
     let tan_off = bin.len();
     if texture {
         for v in 0..n_vertices as usize {
@@ -705,7 +814,7 @@ pub fn export_glb_with_holes(
                 })
                 .collect();
             let t = tangent_of(&[n[0], n[1], n[2]]);
-            for c in [t[0], t[1], t[2], 1.0] {
+            for c in [t[0], t[1], t[2], -1.0] {
                 bin.extend_from_slice(&c.to_le_bytes());
             }
         }
@@ -753,8 +862,9 @@ pub fn export_glb_with_holes(
                 )
             },
         )?;
+        let grid = GridMesh::build_with(hf, extent_m, step, holes)?;
         let (normal_png, rough_png, px) =
-            bake_normal_roughness_with(hf, extent_m, NORMAL_MAP_CAP, materials)?;
+            bake_normal_roughness_against(hf, extent_m, NORMAL_MAP_CAP, materials, Some(&grid))?;
         normal_px = Some(px);
         // The albedo is one texel per exported vertex: the emissive map matches it.
         let emissive = bake_emissive(materials, gw, gh, &|gx, gz| {
@@ -1631,7 +1741,7 @@ pub fn export_mesh_with_holes(
         let grid = GridMesh::build_with(hf, extent_m, step, holes)?;
         let mesh = crate::decimate::decimate(&grid, extent_m, target)?;
         let maps = (texture && matches!(ext.as_deref(), None | Some("glb")))
-            .then(|| bake_maps_with(hf, extent_m, NORMAL_MAP_CAP, materials))
+            .then(|| bake_maps_against(hf, extent_m, NORMAL_MAP_CAP, materials, &mesh))
             .transpose()?;
         return write_decimated(&mesh, ext.as_deref(), extent_m, path, step, maps.as_ref());
     }
@@ -1670,7 +1780,8 @@ pub fn tangent_of(n: &[f32; 3]) -> [f32; 3] {
 /// MikkTSpace tangents for a mesh whose U runs east and V north with no seams: every triangle's
 /// ∂P/∂u = (1, ∂h/∂x, 0) from its plane, accumulated at each corner weighted by the corner angle,
 /// then made orthogonal to the vertex normal. Irregular (decimated) triangles need this; on the
-/// regular grid [`tangent_of`] is within a degree of it. w = +1 (normal × tangent = north).
+/// regular grid [`tangent_of`] is within a degree of it. w = −1 (the bitangent points south, to
+/// v = 0: glTF's "up" in the image).
 pub fn mikk_tangents(positions: &[f32], normals: &[f32], indices: &[u32]) -> Vec<[f32; 4]> {
     let n = positions.len() / 3;
     let mut acc = vec![[0.0f32; 3]; n];
@@ -1726,7 +1837,7 @@ pub fn mikk_tangents(positions: &[f32], normals: &[f32], indices: &[u32]) -> Vec
             } else {
                 tangent_of(&nrm)
             };
-            [t[0], t[1], t[2], 1.0]
+            [t[0], t[1], t[2], -1.0]
         })
         .collect()
 }
@@ -1848,8 +1959,10 @@ pub fn export_mesh_lods_with_holes(
         holes,
     )?;
     let grid = GridMesh::build_with(hf, extent_m, step, holes)?;
+    // ponytail: the levels share LOD 0's maps, tangent-space against the full grid; a coarser level
+    // loses the slope between its vertices' normals and the grid's — fine at the distances it is for.
     let maps = (texture && matches!(ext.as_deref(), None | Some("glb")))
-        .then(|| bake_maps_with(hf, extent_m, NORMAL_MAP_CAP, materials))
+        .then(|| bake_maps_against(hf, extent_m, NORMAL_MAP_CAP, materials, &grid))
         .transpose()?;
     let stem = path
         .file_stem()
@@ -2103,7 +2216,7 @@ mod tests {
             (d / 24.0).min(1.0) * 60.0
         });
         let (_, rough_png, px) =
-            bake_normal_roughness_with(&h, [640.0, 640.0], 64, &[]).expect("maps");
+            bake_normal_roughness_against(&h, [640.0, 640.0], 64, &[], None).expect("maps");
         assert_eq!(px, [64, 64]);
         let img = image::load_from_memory(&rough_png)
             .expect("png")
@@ -2261,7 +2374,7 @@ mod tests {
             for d in 0..3 {
                 assert!((mt[d] - t[d]).abs() < 1e-5, "{mt:?} vs {t:?}");
             }
-            assert_eq!(mt[3], 1.0);
+            assert_eq!(mt[3], -1.0, "the bitangent points south, glTF's image up");
         }
     }
 
@@ -2389,16 +2502,20 @@ mod tests {
         let tangent0: Vec<f32> = (0..4)
             .map(|k| f32::from_le_bytes(bin[to + 4 * k..to + 4 * k + 4].try_into().unwrap()))
             .collect();
-        // The 0.1 slope tilts the normal west; the tangent stays unit, leans up, w = +1.
+        // The 0.1 slope tilts the normal west; the tangent stays unit, leans up, w = −1 (the
+        // bitangent points south: v = 0, glTF's "up" in the image).
         assert!(
-            (tangent0[0] - 0.995).abs() < 0.01 && tangent0[1] > 0.09 && tangent0[3] == 1.0,
+            (tangent0[0] - 0.995).abs() < 0.01 && tangent0[1] > 0.09 && tangent0[3] == -1.0,
             "{tangent0:?}"
         );
         assert_eq!(
             json["materials"][0]["pbrMetallicRoughness"]["metallicRoughnessTexture"]["index"],
             2
         );
-        // Normal map: a 0.1 east-facing slope → tangent-space (−0.0995, 0, 0.995) → ≈ (115, 128, 254).
+        // Normal map, tangent-space against the exported mesh: a plane's own normals already carry
+        // its 0.1 slope, so the map is neutral (0, 0, 1) → ≈ (128, 128, 255) — written against flat
+        // ground it held the slope again (Blender shaded a ramp flat, glTF tangents doubling it).
+        // The viewport's flat-ground bake still carries it: (−0.0995, 0, 0.995) → ≈ (115, 128, 254).
         let decode = |i: usize| {
             let v =
                 &json["bufferViews"][json["images"][i]["bufferView"].as_u64().unwrap() as usize];
@@ -2412,8 +2529,16 @@ mod tests {
         };
         let n = decode(1).get_pixel(16, 8).0;
         assert!(
-            (110..=120).contains(&n[0]) && (126..=130).contains(&n[1]) && n[2] >= 250,
+            (126..=130).contains(&n[0]) && (126..=130).contains(&n[1]) && n[2] >= 253,
             "normal texel {n:?}"
+        );
+        let (flat_png, _, _) =
+            bake_normal_roughness_against(&hf, [330.0, 170.0], 64, &[], None).expect("flat");
+        let flat = image::load_from_memory(&flat_png).expect("png").into_rgb8();
+        let f = flat.get_pixel(16, 8).0;
+        assert!(
+            (110..=120).contains(&f[0]) && (126..=130).contains(&f[1]) && f[2] >= 250,
+            "flat-ground texel {f:?}"
         );
         let rough = decode(2).get_pixel(16, 8).0;
         assert!(

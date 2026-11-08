@@ -36,6 +36,17 @@ Loop prompt: `/loop Water features per memory/plan-2026-11-08-water.md (waterfal
 | W5 | engine export: `water` in export_profile + `water.export` op; Unity importer + check, Unreal check, Blender bridge + test; run the headless engine checks | done |
 | W6 | docs (guide sections, figures via guide.rs, CLI quickstart), acceptance item?, gates, CI, push | done (docs, figures; acceptance list unchanged) |
 
+## Follow-ups (owner, 2026-11-08: "pick this up and proceed")
+
+| # | Follow-up | Status |
+|---|---|---|
+| W7a | a fall as wide as its river: the falls node reads the river's water and spans its wet width at the lip | done |
+| W7b | measure `hydrology.waterfalls` (build_falls re-runs the search per Studio evaluation); memo it if it costs | done: 0.26 s wall on 1024² incl. process start — no memo |
+| W7c | near-black cliff faces in the viewport: find why (albedo, AO, shading) and fix at the cause | done |
+| W7f | the GLB normal map (same root cause): written against the exported mesh, bitangent south, w −1; Blender-verified | done |
+| W7d | Studio orbit pan target, so the camera can visit a feature off the world's centre | done: middle / Shift drag, keys interpolate it, Fit resets |
+| W7e | Unreal check: triangles None when the NaniteTriangles tag is unreadable | done: the registry tags exist only after a save — saved first (29 066 reported) |
+
 ## Log
 - 2026-11-08 W1 done (d97574c). Changes from the plan: the pools hold their own water (the node's
   `water` output, published `falls_water`) instead of a fill node, which lakes every hollow (on
@@ -92,3 +103,15 @@ Loop prompt: `/loop Water features per memory/plan-2026-11-08-water.md (waterfal
   bounds(), shared water_layer / node_frame, the dead cycle guard. Follow-up: build_falls re-runs
   the graph and the falls search on every Studio refresh — the node could publish its falls list.
   No dedicated test for the tributary rule (hard to build a D8 junction by hand).
+- 2026-11-08 W7a–c, f. Fall width = the river water's wet width across the flow at the lip
+  (the node's new `water` input, wired by + falls). build_falls: 0.26 s on 1024² — left alone.
+  Black cliffs: the macro normal map is the terrain's normal against flat ground (slope included)
+  and the viewport applied it in the tilted face's frame, counting the slope twice (cliffs tipped
+  past horizontal). The viewport now decodes it in the flat frame. Same root in the GLB: the map
+  was tangent-space against flat ground with the bitangent north (w +1); Blender (oracle: Cycles
+  bake of object-space shading normals, sine bumps step 8 vs step 1) showed median 99° error, a
+  26.6° ramp shaded flat. Now baked against the exported mesh's own interpolated normals
+  (rasterized; grid, decimated, LODs share LOD 0's), bitangent south (glTF image-up = v 0 = our
+  south), w −1: median 6.8° (decimated 5.3°); the control (bitangent north) is back at 99°.
+  scripts/blender/tangent_check.py had the sign rule inverted (glTF w = −Blender sign) and had
+  passed the broken map; corrected. Old textured GLBs should be re-exported (quickstart says so).

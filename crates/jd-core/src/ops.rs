@@ -1345,7 +1345,13 @@ pub mod graph {
                 world.extent_m[0] as f32 / hf.width() as f32,
                 world.extent_m[1] as f32 / hf.height() as f32,
             );
-            let found = jd_terrain::waterfalls(&hf, [sx, sy], input("rivers").as_deref(), &fp)?;
+            let found = jd_terrain::waterfalls(
+                &hf,
+                [sx, sy],
+                input("rivers").as_deref(),
+                input("water").as_deref(),
+                &fp,
+            )?;
             let at = |c: [u32; 2], z: f32| [(c[0] as f32 + 0.5) * sx, (c[1] as f32 + 0.5) * sy, z];
             falls.extend(found.falls.into_iter().map(|f| FallInfo {
                 node: id.clone(),
@@ -2215,6 +2221,7 @@ pub mod graph {
                             let Some(f) = feed_of(p, &cur) else { break };
                             if p.graph.nodes.get(&f.node).is_some_and(|n| n.kind.0.starts_with("jd.hydrology.rivers@")) {
                                 connect(p, &f.node, "rivers", &id, "rivers")?;
+                                connect(p, &f.node, "water", &id, "water")?;
                                 break;
                             }
                             cur = f.node;
@@ -4844,8 +4851,9 @@ pub mod graph {
                 "spliced after the rivers: {g}"
             );
             assert!(
-                edge(&rivers, "rivers", &falls, "rivers"),
-                "fed the rivers mask"
+                edge(&rivers, "rivers", &falls, "rivers")
+                    && edge(&rivers, "water", &falls, "water"),
+                "fed the rivers mask and their water"
             );
             let ev = call(&reg, &ctx, "graph.evaluate", serde_json::json!({}));
             assert_eq!(ev.status, Status::Ok, "{:?}", ev.error);

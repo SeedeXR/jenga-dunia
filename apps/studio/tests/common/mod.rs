@@ -131,9 +131,19 @@ pub fn right_drag(
     a: eframe::egui::Pos2,
     b: eframe::egui::Pos2,
 ) {
+    drag_with(h, eframe::egui::PointerButton::Secondary, a, b);
+}
+
+/// A drag with `button` from `a` to `b` (press, five moves, release).
+pub fn drag_with(
+    h: &mut Harness<'static, StudioApp>,
+    which: eframe::egui::PointerButton,
+    a: eframe::egui::Pos2,
+    b: eframe::egui::Pos2,
+) {
     let button = |pos, pressed| eframe::egui::Event::PointerButton {
         pos,
-        button: eframe::egui::PointerButton::Secondary,
+        button: which,
         pressed,
         modifiers: Default::default(),
     };
