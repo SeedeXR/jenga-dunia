@@ -64,7 +64,12 @@ jd_op("graph.connect", {"from": noise, "from_port": "out", "to": cave, "to_port"
 jd_op("graph.connect", {"from": cave, "from_port": "out", "to": height, "to_port": "in"})
 holes_out = jd_op("graph.add_node", {"kind": "jd.output.height@1", "params": {"layer": "cave_holes"}})["id"]
 jd_op("graph.connect", {"from": cave, "from_port": "holes", "to": holes_out, "to_port": "in"})
+# Rivers in front of the height, their water published as river_water: the bridge brings it in.
+jd_op("graph.add_simulation", {"which": "rivers"})
 jd_op("graph.evaluate", {})
+probe = jd_op("water.export", {"path": os.path.join(work, "water.json")}, save=False)
+assert probe["layers"] == ["river_water"], probe
+probe = json.load(open(os.path.join(work, "water.json")))["probe"]
 
 result = bpy.ops.jd.import_project(filepath=os.path.join(project, "project.json"), layer="height", scatter_mask="height", spacing_m=64.0, seed=1)
 assert result == {"FINISHED"}, result
@@ -75,13 +80,21 @@ assert coll is not None, [c.name for c in bpy.data.collections]
 meshes = [o for o in coll.objects if o.type == "MESH"]
 instances = [o for o in meshes if o.name.startswith("JD Bridge height")]
 caves = [o for o in meshes if o.name.startswith("JD Bridge cave")]
-terrain = [o for o in meshes if o not in instances and o not in caves]
+water = [o for o in meshes if o.name.startswith("JD Bridge water")]
+terrain = [o for o in meshes if o not in instances and o not in caves and o not in water]
 assert len(terrain) == 1, [o.name for o in coll.objects][:5]
 # The cave came along, under the terrain, and the terrain is open over its mouth: a ray straight
 # down at the mouth (Blender x = u − 1024, y = v − 1024) does not hit the terrain within 3 m of it.
 assert len(caves) == 1, [o.name for o in coll.objects][:8]
 cb = [caves[0].matrix_world @ mathutils.Vector(c) for c in caves[0].bound_box]
 assert min(v.z for v in cb) < 400 and -1024 < min(v.x for v in cb) and max(v.x for v in cb) < 1024, [tuple(round(x) for x in v) for v in cb[:2]]
+
+# The water came along, on the terrain: the deepest water's surface (water.json's probe, u east,
+# v north, z up) is a vertex of the imported water mesh (Blender x = u − 1024, y = v − 1024).
+assert len(water) == 1, [o.name for o in coll.objects][:10]
+at = mathutils.Vector((probe[0] - 1024.0, probe[1] - 1024.0, probe[2]))
+near = min((water[0].matrix_world @ v.co - at).length for v in water[0].data.vertices)
+assert near < 0.5, ("the water's probe point should lie on the imported water mesh", near, tuple(at))
 
 t = terrain[0]
 dims = t.dimensions
@@ -105,6 +118,7 @@ summary = {
     "dimensions_m": [round(dims.x, 1), round(dims.y, 1), round(dims.z, 1)],
     "instances": len(instances),
     "caves": [o.name for o in caves],
+    "water": {"object": water[0].name, "vertices": len(water[0].data.vertices), "probe_dist_m": round(near, 3)},
     "shared_mesh": instances[0].data.name,
     "surface_samples": len(errors),
     "max_height_error_m": round(max(errors), 3),

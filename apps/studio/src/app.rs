@@ -2473,6 +2473,16 @@ impl StudioApp {
                 if !self.cave_nodes().is_empty() {
                     params["caves"] = json!(true);
                 }
+                // And the water: rivers, wetlands, pools and the falls' sheets as one mesh.
+                let watery = |l: &String| {
+                    let b = l.split('#').next().unwrap_or(l);
+                    b == "lakes" || b.ends_with("_water")
+                };
+                if self.layers.iter().any(watery)
+                    || !self.nodes_of("jd.hydrology.waterfalls@").is_empty()
+                {
+                    params["water"] = json!(true);
+                }
                 self.invoke(Tag::Export, "terrain.export_profile", params);
             }
             Some("mesh") => {

@@ -353,5 +353,10 @@
     "id": "vision.depth",
     "description": "Monocular depth from a photograph (MoGe-2 or Depth Anything 3 metric through ONNX Runtime, CPU) written as an OpenEXR relief 0..1 — or metres with `metric` — import it with `jd.input.heightmap@1` to sculpt from a picture",
     "scope": "export"
+  },
+  {
+    "id": "water.export",
+    "description": "Write the project's water — every published `lakes` / `*_water` depth layer as a surface standing on the height, plus each waterfall's two-sided sheet — as one .glb or .fbx mesh in the terrain export frame (it drops onto the terrain mesh / engine terrain as is), or as .json (the water layers, the falls, a probe point)",
+    "scope": "export"
   }
 ]

@@ -45,6 +45,7 @@ pub mod spline;
 pub mod transform;
 pub use transform::{RegionShape, RegionTransform, TransformKind, apply_transforms};
 pub mod vector;
+pub mod water;
 pub mod wetland;
 pub use vector::{Polyline, contour_lines, geojson_lines, river_polylines};
 pub use wetland::{
@@ -133,4 +134,5 @@ pub use stamp::{
     place_stamp,
 };
 pub use strata::{StrataParams, strata_hardness};
+pub use water::{FallSheet, fall_sheets, water_surface};
 pub use yardang::{YardangParams, wind_abrasion};

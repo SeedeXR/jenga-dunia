@@ -12468,6 +12468,11 @@ expression: list
           "description": "Carry the project's caves: every `jd.cave.system@1` node's walls and speleothems as\n`cave_<n>.fbx` (Unity) / `cave_<n>.glb` (Unreal) in the terrain frame, their entrance holes\nmerged into `holes.png`, and `caves.json` listing the files, bounds and entrances.",
           "type": "boolean",
           "default": false
+        },
+        "water": {
+          "description": "Carry the project's water: every published `lakes` / `*_water` depth layer as a surface\non the terrain plus each waterfall's sheet, as `water.fbx` (Unity) / `water.glb`\n(Unreal) in the terrain frame, and `water.json` listing the file, its bounds, the falls\nand a probe point.",
+          "type": "boolean",
+          "default": false
         }
       },
       "additionalProperties": false,
@@ -14714,6 +14719,76 @@ expression: list
         "metric_scale",
         "load_ms",
         "infer_ms"
+      ]
+    }
+  },
+  {
+    "id": "water.export",
+    "description": "Write the project's water — every published `lakes` / `*_water` depth layer as a surface standing on the height, plus each waterfall's two-sided sheet — as one .glb or .fbx mesh in the terrain export frame (it drops onto the terrain mesh / engine terrain as is), or as .json (the water layers, the falls, a probe point)",
+    "scope": "export",
+    "request_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WaterExport",
+      "description": "`water.export` params.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "`.glb` or `.fbx`: the water surfaces (every published `lakes` / `*_water` depth layer,\nstanding on `layer`) and the waterfalls' sheets as one mesh in the terrain export frame;\n`.json`: the water layers, the falls and a probe point. Relative paths land in the\nproject's `exports/`.",
+          "type": "string"
+        },
+        "layer": {
+          "description": "The height layer the water stands on.",
+          "type": "string",
+          "default": "height"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    },
+    "result_schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "WaterExportResult",
+      "description": "`water.export` result.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "File written.",
+          "type": "string"
+        },
+        "triangles": {
+          "description": "Triangles written (0 for `.json`).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "bytes": {
+          "description": "Bytes written.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "layers": {
+          "description": "The water-depth layers merged into the surface.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "falls": {
+          "description": "Waterfalls drawn as sheets.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "path",
+        "triangles",
+        "bytes",
+        "layers",
+        "falls"
       ]
     }
   }

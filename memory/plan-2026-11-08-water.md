@@ -33,7 +33,7 @@ Loop prompt: `/loop Water features per memory/plan-2026-11-08-water.md (waterfal
 | W3a | rivers node: `water` output — depth ∝ Q^0.4 scaled so the largest river reaches `water_depth_m`, over the channel; tests (exponent, monotonic downstream) | done |
 | W3b | Studio draws every water layer (lakes + `*_water`), strip's rivers adds `river_water`; window test | done |
 | W4 | Studio Rivers section: rivers nodes listed, **Place springs** arms click-to-place (as cave entrances), springs listed with ×; window test | done |
-| W5 | engine export: `water` in export_profile + `water.export` op; Unity importer + check, Unreal check, Blender bridge + test; run the headless engine checks | todo |
+| W5 | engine export: `water` in export_profile + `water.export` op; Unity importer + check, Unreal check, Blender bridge + test; run the headless engine checks | done |
 | W6 | docs (guide sections, figures via guide.rs, CLI quickstart), acceptance item?, gates, CI, push | todo |
 
 ## Log
@@ -61,3 +61,14 @@ Loop prompt: `/loop Water features per memory/plan-2026-11-08-water.md (waterfal
   spring"), springs listed with ×. The caves card's Place button and point rows became shared
   helpers (`place_button`, `point_rows`, `points`). No viewport marker for springs (the river
   appearing marks it) — follow-up if wanted.
+- 2026-11-08 W5 done. `jd-terrain::water`: `water_surface` (the terrain grid lifted by the merged
+  depth, triangles touching a wet cell; dry corners on the bank) and `fall_sheets` (the jet-arc
+  ribbon, now shared with Studio; two-sided as geometry — a back copy, flipped normals). One mesh
+  `water` (surfaces + sheets): `water.export` (.glb/.fbx/.json) and `export_profile { water }`
+  (water.fbx / water.glb + water.json: meshes with bounds, layers, falls, probe = the deepest
+  water's surface). Studio's engine export sets `water` when water layers or falls exist.
+  Checked headlessly on a terraced 1024 m / 512² scene (15 falls, river + wetland + pools water):
+  Unity 6000.4 places water.fbx (29 066 tris), probe 0.0 m from the mesh; Unreal 5.8 imports
+  water.glb, 0 m bound error (the square bounds can't tell Y from X — the caves check measured
+  the mapping); Blender bridge brings it in, probe 0.0 m. CI fix pushed with W2–W4 (80044eb):
+  yanked async-executor, and a 3-min job-wait ceiling for a slow ubuntu runner.

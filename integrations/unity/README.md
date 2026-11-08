@@ -33,3 +33,7 @@ MIT, like the rest of the repository.
 ## Caves
 
 A profile exported with `caves: true` carries `cave_<n>.fbx` and `caves.json`. `JengaDunia.Import.Run` imports each cave with mesh colliders and places it at rotation Y = 180° and the terrain's centre (the FBX is in the terrain export's frame: x east, y up, z south, centred), then checks every entrance in `caves.json` lies within a few metres of the placed mesh (`cave_entrance_max_dist_m` in the report; 2.25 m on the test mine). The mouths open through `holes.png` (`SetHoles`); in URP, enable Terrain Holes in the URP asset or they vanish in builds.
+
+## Water
+
+A profile exported with `water: true` carries `water.fbx` and `water.json`: the water surfaces of every published `lakes` / `*_water` depth layer (rivers, wetlands, plunge pools) standing on the terrain, plus each waterfall's two-sided sheet, as one mesh in the same frame as the caves. `JengaDunia.Import.Run` places it the same way (rotation Y = 180°, the terrain's centre), without a collider, and checks that the probe point in `water.json` (the deepest water's surface) lies on the placed mesh (`water_probe_dist_m`; 0.0 m on the terraced-rivers test scene, 29 066 triangles with 15 falls). Give it a transparent water material, two-sided for the falls; `weight_rivers.png`, `weight_falls.png`, `weight_marsh.png` and `weight_swamp.png` paint the banks when those masks are exported.

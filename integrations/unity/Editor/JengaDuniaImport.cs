@@ -21,9 +21,10 @@ namespace JengaDunia
         [Serializable] class Trees { public int count; public TreeInst[] instances; }
         [Serializable] class CaveEntrance { public float u, v, z; public string kind; public bool underwater; }
         [Serializable] class CaveList { public CaveEntrance[] entrances; }
+        [Serializable] class WaterDoc { public float[] probe; public string[] layers; }
         [Serializable] class Report
         {
-            public string unity, dir; public int heightmap_resolution, source_px, alphamap_layers, trees, holes, caves, cave_triangles; public float cave_entrance_max_dist_m;
+            public string unity, dir; public int heightmap_resolution, source_px, alphamap_layers, trees, holes, caves, cave_triangles, water_triangles; public float cave_entrance_max_dist_m, water_probe_dist_m;
             public float[] terrain_size, sampled_height_min_max; public string[] layers; public float mean_height; public float[] layer_mean_height; public string[] layer_detail; public float[] layer_tile_m; public List<string> warnings = new List<string>(); public bool ok;
         }
 
@@ -278,7 +279,32 @@ namespace JengaDunia
                     report.cave_entrance_max_dist_m = worst;
                     if (worst > 12) throw new Exception($"a cave entrance is {worst:F1} m from the placed cave mesh: the placement is wrong");
                 }
-                if (caveRoots.Count > 0) UnityEditor.SceneManagement.EditorSceneManager.SaveScene(scene, "Assets/JengaDunia/Terrain.unity");
+                // Water: water.fbx (the water surfaces and the waterfalls' sheets) is in the same frame as
+                // the caves and placed the same way, without a collider. Check: the probe point in
+                // water.json (the deepest water's surface, u east, v north, z height) is on the mesh.
+                var waterFbx = Path.Combine(dir, "water.fbx");
+                GameObject water = null;
+                if (File.Exists(waterFbx))
+                {
+                    var dst = "Assets/JengaDunia/water.fbx";
+                    File.Copy(waterFbx, dst, true);
+                    AssetDatabase.ImportAsset(dst, ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
+                    var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(dst) ?? throw new Exception("Unity made no model from " + dst);
+                    water = (GameObject)PrefabUtility.InstantiatePrefab(prefab);
+                    water.transform.SetPositionAndRotation(new Vector3(ex / 2, 0, ez / 2), Quaternion.Euler(0, 180, 0));
+                    foreach (var mf in water.GetComponentsInChildren<MeshFilter>()) report.water_triangles += mf.sharedMesh.triangles.Length / 3;
+                    var doc = JsonUtility.FromJson<WaterDoc>(File.ReadAllText(Path.Combine(dir, "water.json")));
+                    if (doc.probe != null && doc.probe.Length == 3)
+                    {
+                        var p = new Vector3(doc.probe[0], doc.probe[2], doc.probe[1]);
+                        var best = float.MaxValue;
+                        foreach (var mf in water.GetComponentsInChildren<MeshFilter>())
+                            foreach (var v in mf.sharedMesh.vertices) best = Math.Min(best, (mf.transform.TransformPoint(v) - p).sqrMagnitude);
+                        report.water_probe_dist_m = Mathf.Sqrt(best);
+                        if (report.water_probe_dist_m > 0.5f) throw new Exception($"the water's probe point is {report.water_probe_dist_m:F2} m from the placed water mesh: the placement is wrong");
+                    }
+                }
+                if (caveRoots.Count > 0 || water != null) UnityEditor.SceneManagement.EditorSceneManager.SaveScene(scene, "Assets/JengaDunia/Terrain.unity");
                 report.terrain_size = new[] { data.size.x, data.size.y, data.size.z };
                 report.sampled_height_min_max = new[] { mn, mx };
                 report.heightmap_resolution = data.heightmapResolution;

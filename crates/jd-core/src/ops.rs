@@ -1362,6 +1362,150 @@ pub mod graph {
         Ok(falls)
     }
 
+    /// `water.export` params.
+    #[derive(Debug, Deserialize, schemars::JsonSchema)]
+    #[serde(deny_unknown_fields)]
+    pub struct WaterExport {
+        /// `.glb` or `.fbx`: the water surfaces (every published `lakes` / `*_water` depth layer,
+        /// standing on `layer`) and the waterfalls' sheets as one mesh in the terrain export frame;
+        /// `.json`: the water layers, the falls and a probe point. Relative paths land in the
+        /// project's `exports/`.
+        pub path: PathBuf,
+        /// The height layer the water stands on.
+        #[serde(default = "height_layer")]
+        pub layer: String,
+    }
+    /// `water.export` result.
+    #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+    pub struct WaterExportResult {
+        /// File written.
+        pub path: PathBuf,
+        /// Triangles written (0 for `.json`).
+        pub triangles: u32,
+        /// Bytes written.
+        pub bytes: u64,
+        /// The water-depth layers merged into the surface.
+        pub layers: Vec<String>,
+        /// Waterfalls drawn as sheets.
+        pub falls: u32,
+    }
+
+    /// The project's water for engines (`water.export`, `terrain.export_profile { water }`).
+    pub(crate) struct Water {
+        /// Water surfaces and fall sheets in the terrain export frame.
+        pub mesh: jd_terrain::mesh::GridMesh,
+        /// The water-depth layers merged.
+        pub layers: Vec<String>,
+        /// The waterfalls (world metres).
+        pub falls: Vec<FallInfo>,
+        /// The deepest water's surface `[u, v, z]`: a point an engine check finds on the mesh.
+        pub probe: Option<[f32; 3]>,
+        /// The world's extent, metres.
+        pub extent: [f64; 2],
+    }
+
+    impl Water {
+        /// The sidecar: frame, layers, falls, probe — and the mesh file's bounds when written.
+        pub fn doc(&self, file: Option<&str>) -> Value {
+            let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+            for v in self.mesh.positions.as_chunks::<3>().0 {
+                for k in 0..3 {
+                    lo[k] = lo[k].min(v[k]);
+                    hi[k] = hi[k].max(v[k]);
+                }
+            }
+            let meshes = file.map_or_else(Vec::new, |f| vec![serde_json::json!({ "file": f, "triangles": self.mesh.indices.len() / 3, "bounds_min": lo, "bounds_max": hi })]);
+            serde_json::json!({
+                "frame": "meshes: x = u − extent_x/2 (east), y = height, z = extent_y/2 − v (south), metres; falls and probe: u east, v north from the south-west corner, z height",
+                "extent_m": self.extent,
+                "layers": self.layers,
+                "meshes": meshes,
+                "falls": self.falls,
+                "probe": self.probe,
+            })
+        }
+    }
+
+    /// Every published water-depth layer (`lakes`, `*_water`) merged by the deeper water over
+    /// `layer`, meshed as a surface, plus every waterfall's sheet; `None` when there is no water.
+    pub(crate) fn build_water(ctx: &Context, layer: &str) -> JdResult<Option<Water>> {
+        let (names, extent) = ctx.with_project(|pr| {
+            let mut names: Vec<String> = pr
+                .graph
+                .nodes
+                .values()
+                .filter(|n| n.kind.0.starts_with("jd.output.height@"))
+                .filter_map(|n| {
+                    n.params
+                        .get("layer")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                })
+                .filter(|l| l == "lakes" || l.ends_with("_water"))
+                .collect();
+            names.sort();
+            names.dedup();
+            Ok((names, pr.doc.world.extent_m))
+        })?;
+        let ground = ctx.with_layer(layer, |hf| Ok(hf.clone()))?;
+        let mut depth = ground.clone();
+        depth.fill_with(|_, _| 0.0);
+        for name in &names {
+            ctx.with_layer(name, |d| {
+                if (d.width(), d.height()) != (ground.width(), ground.height()) {
+                    return Err(JdError::invalid(
+                        "layer",
+                        format!("`{name}` is not the size of `{layer}`"),
+                    ));
+                }
+                let prev = depth.clone();
+                depth.fill_with(|x, y| prev.get(x, y).max(d.get(x, y)));
+                Ok(())
+            })?;
+        }
+        let falls = build_falls(ctx, None, 0)?;
+        let surface = jd_terrain::water_surface(&ground, &depth, extent)?;
+        let sheets: Vec<jd_terrain::FallSheet> = falls
+            .iter()
+            .map(|f| jd_terrain::FallSheet {
+                lip: f.lip,
+                base: f.base,
+                width_m: f.width_m,
+            })
+            .collect();
+        let mut mesh = surface
+            .unwrap_or_else(|| jd_terrain::fall_sheets(&[], [extent[0] as f32, extent[1] as f32]));
+        jd_terrain::append_mesh(
+            &mut mesh,
+            &jd_terrain::fall_sheets(&sheets, [extent[0] as f32, extent[1] as f32]),
+        );
+        if mesh.indices.is_empty() {
+            return Ok(None);
+        }
+        let (sx, sy) = (
+            extent[0] as f32 / ground.width() as f32,
+            extent[1] as f32 / ground.height() as f32,
+        );
+        let deepest = (0..ground.height())
+            .flat_map(|y| (0..ground.width()).map(move |x| (x, y)))
+            .max_by(|a, b| depth.get(a.0, a.1).total_cmp(&depth.get(b.0, b.1)))
+            .filter(|(x, y)| depth.get(*x, *y) >= jd_terrain::water::WET_M);
+        let probe = deepest.map(|(x, y)| {
+            [
+                (x as f32 + 0.5) * sx,
+                (y as f32 + 0.5) * sy,
+                ground.get(x, y) + depth.get(x, y),
+            ]
+        });
+        Ok(Some(Water {
+            mesh,
+            layers: names,
+            falls,
+            probe,
+            extent,
+        }))
+    }
+
     /// `caves.mesh` params.
     #[derive(Debug, Deserialize, schemars::JsonSchema)]
     #[serde(deny_unknown_fields)]
@@ -2117,7 +2261,45 @@ pub mod graph {
             Scope::ProjectRead,
             |ctx, p| Ok((WaterfallsResult { falls: build_falls(ctx, p.id.as_ref(), p.lod)? }, Vec::new())),
         );
+        r.register::<WaterExport, WaterExportResult, _>(
+            "water.export",
+            "Write the project's water — every published `lakes` / `*_water` depth layer as a surface standing on the height, plus each waterfall's two-sided sheet — as one .glb or .fbx mesh in the terrain export frame (it drops onto the terrain mesh / engine terrain as is), or as .json (the water layers, the falls, a probe point)",
+            Scope::Export,
+            |ctx, p| {
+                let path = ctx.with_project(|proj| Ok(if p.path.is_absolute() { p.path.clone() } else { proj.root().join("exports").join(&p.path) }))?;
+                let ext = path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
+                if !matches!(ext.as_str(), "glb" | "fbx" | "json") {
+                    return Err(JdError::new(ErrorCode::E_FORMAT_UNSUPPORTED, "water exports as .glb, .fbx or .json"));
+                }
+                let water = build_water(ctx, &p.layer)?.ok_or_else(|| {
+                    JdError::new(ErrorCode::E_INPUT_INVALID, "the project has no water")
+                        .next("Publish a water-depth layer (`lakes`, `river_water`, `wetland_water`, `falls_water`: + rivers, + wetland, + falls) or add waterfalls, then evaluate.")
+                })?;
+                if let Some(dir) = path.parent() {
+                    std::fs::create_dir_all(dir)?;
+                }
+                let (triangles, bytes) = match ext.as_str() {
+                    "json" => {
+                        let bytes = serde_json::to_vec_pretty(&water.doc(None)).map_err(|e| JdError::new(ErrorCode::E_INTERNAL, e.to_string()))?;
+                        std::fs::write(&path, &bytes)?;
+                        (0, bytes.len() as u64)
+                    }
+                    "glb" => {
+                        let r = jd_terrain::mesh::write_glb_mesh_named(&water.mesh, water.extent, &path, 1, None, "water")?;
+                        (r.triangles, r.bytes)
+                    }
+                    _ => {
+                        let r = jd_terrain::fbx::export_fbx_mesh(&water.mesh, &path, "water", WATER_RGB)?;
+                        (r.triangles, r.bytes)
+                    }
+                };
+                Ok((WaterExportResult { path, triangles, bytes, layers: water.layers, falls: water.falls.len() as u32 }, Vec::new()))
+            },
+        );
     }
+
+    /// Clear fresh water's colour for the exported mesh's material (the sea look's default tint).
+    pub(crate) const WATER_RGB: [f64; 3] = [0.1, 0.35, 0.4];
 
     fn register_caves(r: &mut Registry) {
         r.register::<CaveMeshParams, CaveMeshResult, _>(
@@ -4816,6 +4998,103 @@ pub mod graph {
         }
 
         #[test]
+        fn the_projects_water_exports_as_a_mesh_and_travels_with_the_engine_profiles() {
+            use crate::envelope::Status;
+            let reg = Registry::with_builtins();
+            let dir = tempfile::tempdir().expect("tmp");
+            let ctx = Context::default();
+            let world = jd_types::WorldSettings {
+                resolution_px: [64, 64],
+                extent_m: [640.0, 640.0],
+                tile_size: 64,
+                halo: 0,
+                ..Default::default()
+            };
+            call(
+                &reg,
+                &ctx,
+                "project.create",
+                serde_json::json!({ "path": dir.path().join("w.jdproj"), "name": "W", "world": world }),
+            );
+            call(&reg, &ctx, "graph.evaluate", serde_json::json!({}));
+            let dry = call(
+                &reg,
+                &ctx,
+                "water.export",
+                serde_json::json!({ "path": "w.glb" }),
+            );
+            assert_eq!(dry.status, Status::Error, "no water yet");
+            let added = call(
+                &reg,
+                &ctx,
+                "graph.add_simulation",
+                serde_json::json!({ "which": "rivers" }),
+            );
+            assert_eq!(added.status, Status::Ok, "{:?}", added.error);
+            call(&reg, &ctx, "graph.evaluate", serde_json::json!({}));
+            let mut tris = Vec::new();
+            for f in ["w.glb", "w.fbx", "w.json"] {
+                let r = call(&reg, &ctx, "water.export", serde_json::json!({ "path": f }));
+                assert_eq!(r.status, Status::Ok, "{f}: {:?}", r.error);
+                let r = r.result.expect("result");
+                assert_eq!(r["layers"], serde_json::json!(["river_water"]), "{f}");
+                assert!(dir.path().join("w.jdproj/exports").join(f).is_file(), "{f}");
+                tris.push(r["triangles"].as_u64().expect("tris"));
+            }
+            assert!(
+                tris[0] > 0 && tris[0] == tris[1] && tris[2] == 0,
+                "{tris:?}"
+            );
+            let bad = call(
+                &reg,
+                &ctx,
+                "water.export",
+                serde_json::json!({ "path": "w.obj" }),
+            );
+            assert_eq!(bad.status, Status::Error);
+            // Engine profiles carry it: the mesh, water.json, the README's placement; the probe (the
+            // deepest water's surface) lies inside the mesh's bounds in the export frame.
+            for (profile, file) in [("unity", "water.fbx"), ("unreal", "water.glb")] {
+                let r = call(
+                    &reg,
+                    &ctx,
+                    "terrain.export_profile",
+                    serde_json::json!({ "profile": profile, "dir": profile, "water": true }),
+                );
+                assert_eq!(r.status, Status::Ok, "{:?}", r.error);
+                let files: Vec<String> =
+                    serde_json::from_value(r.result.expect("report")["files"].clone())
+                        .expect("files");
+                for f in [file, "water.json"] {
+                    assert!(files.iter().any(|x| x == f), "{profile}: {f} in {files:?}");
+                }
+                let out = dir.path().join("w.jdproj/exports").join(profile);
+                assert!(
+                    std::fs::read_to_string(out.join("README.md"))
+                        .expect("readme")
+                        .contains("## Water")
+                );
+                let doc: serde_json::Value =
+                    serde_json::from_slice(&std::fs::read(out.join("water.json")).expect("json"))
+                        .expect("parse");
+                assert_eq!(doc["meshes"][0]["file"], file);
+                let f = |v: &serde_json::Value| v.as_f64().expect("number");
+                let probe = &doc["probe"];
+                let at = [f(&probe[0]) - 320.0, f(&probe[2]), 320.0 - f(&probe[1])];
+                let (lo, hi) = (
+                    &doc["meshes"][0]["bounds_min"],
+                    &doc["meshes"][0]["bounds_max"],
+                );
+                for k in 0..3 {
+                    assert!(
+                        f(&lo[k]) - 1e-3 <= at[k] && at[k] <= f(&hi[k]) + 1e-3,
+                        "{profile}: probe {at:?} in {lo} .. {hi}"
+                    );
+                }
+            }
+        }
+
+        #[test]
         fn a_cave_node_opens_the_terrain_and_meshes_and_exports_its_cave() {
             use crate::envelope::Status;
             let reg = Registry::with_builtins();
@@ -5413,6 +5692,12 @@ pub mod terrain {
         /// merged into `holes.png`, and `caves.json` listing the files, bounds and entrances.
         #[serde(default)]
         pub caves: bool,
+        /// Carry the project's water: every published `lakes` / `*_water` depth layer as a surface
+        /// on the terrain plus each waterfall's sheet, as `water.fbx` (Unity) / `water.glb`
+        /// (Unreal) in the terrain frame, and `water.json` listing the file, its bounds, the falls
+        /// and a probe point.
+        #[serde(default)]
+        pub water: bool,
     }
 
     /// `terrain.scatter` params.
@@ -6791,6 +7076,32 @@ pub mod terrain {
                         jd_terrain::EngineProfile::Unity => format!("{} cave mesh(es) as cave_<n>.fbx: the import script places them under the terrain (turned 180° about Y, at the terrain's centre) with mesh colliders; their mouths open through holes.png", caves.len()),
                         jd_terrain::EngineProfile::Unreal => format!("{} cave mesh(es) as cave_<n>.glb: import them (Interchange) and place them as the README says; their mouths open through holes.png on the Visibility layer", caves.len()),
                     });
+                }
+                if p.water
+                    && let Some(water) = crate::ops::graph::build_water(ctx, &p.layer)?
+                {
+                    let name = match p.profile {
+                        jd_terrain::EngineProfile::Unity => "water.fbx",
+                        jd_terrain::EngineProfile::Unreal => "water.glb",
+                    };
+                    match p.profile {
+                        jd_terrain::EngineProfile::Unity => {
+                            jd_terrain::fbx::export_fbx_mesh(&water.mesh, &dir.join(name), "water", crate::ops::graph::WATER_RGB)?;
+                        }
+                        jd_terrain::EngineProfile::Unreal => {
+                            jd_terrain::mesh::write_glb_mesh_named(&water.mesh, extent, &dir.join(name), 1, None, "water")?;
+                        }
+                    }
+                    std::fs::write(dir.join("water.json"), serde_json::to_vec_pretty(&water.doc(Some(name))).map_err(|e| JdError::new(ErrorCode::E_INTERNAL, e.to_string()))?)?;
+                    report.files.extend([name.to_owned(), "water.json".to_owned()]);
+                    let readme = dir.join("README.md");
+                    let mut text = std::fs::read_to_string(&readme).unwrap_or_default();
+                    text.push_str(&match p.profile {
+                        jd_terrain::EngineProfile::Unity => format!("\n## Water\n\n`water.fbx` holds the water surfaces ({}) and {} waterfall sheet(s) in the terrain export's frame. The import script places it as the caves: **rotation Y = 180°, position = ({:.1}, 0, {:.1})**, no collider. Give it a water material (transparent, two-sided for the falls). Checked headlessly: the probe point in `water.json` lies on the placed mesh.\n", water.layers.join(", "), water.falls.len(), extent[0] / 2.0, extent[1] / 2.0),
+                        jd_terrain::EngineProfile::Unreal => format!("\n## Water\n\nImport `water.glb` (Interchange): the water surfaces ({}) and {} waterfall sheet(s). Place it as the caves, at the **Landscape's location + ({:.0}, {:.0}, 0) cm** with no rotation and Z = 0, and give it a translucent water material (two-sided for the falls).\n", water.layers.join(", "), water.falls.len(), extent[0] * 50.0, extent[1] * 50.0),
+                    });
+                    std::fs::write(&readme, text)?;
+                    report.notes.push(format!("water ({}) and {} waterfall sheet(s) as {name}: place it as the caves (the README)", water.layers.join(", "), water.falls.len()));
                 }
                 let warnings = report.notes.iter().map(|n| Warning::new("W_ENGINE_SIZE", n.clone())).collect();
                 ctx.with_project(|proj| crate::geo::write_attribution_txt(proj, &dir).map(|_| ()))?;

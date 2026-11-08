@@ -40,3 +40,7 @@ geometry — use the CSV / DataTable route from `terrain.scatter {engine: "unrea
 ## Caves
 
 A profile exported with `caves: true` carries `cave_<n>.glb` and `caves.json`. The headless check imports each GLB through Interchange and measures how the axes mapped: +x → X (east), +z → Y (south), +y → Z (up), metres → cm, 0 m error on each axis (UE 5.8). Place the cave actor at the Landscape's location + (extent_x × 50, extent_y × 50, 0) cm, unrotated; the README in the profile gives the numbers. The mouths open through `holes.png` on the Landscape's Visibility layer (the landscape material needs a Landscape Visibility Mask node).
+
+## Water
+
+A profile exported with `water: true` carries `water.glb` and `water.json`: the water surfaces of every published `lakes` / `*_water` depth layer standing on the terrain, plus each waterfall's two-sided sheet, in the caves' frame. The headless check imports it through Interchange like the caves (0 m bound error on each axis on the terraced-rivers test scene). Place it as a cave — the Landscape's location + (extent_x × 50, extent_y × 50, 0) cm, unrotated — and give it a translucent water material (two-sided for the falls).

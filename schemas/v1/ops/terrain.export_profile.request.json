@@ -69,6 +69,11 @@
       "description": "Carry the project's caves: every `jd.cave.system@1` node's walls and speleothems as\n`cave_<n>.fbx` (Unity) / `cave_<n>.glb` (Unreal) in the terrain frame, their entrance holes\nmerged into `holes.png`, and `caves.json` listing the files, bounds and entrances.",
       "type": "boolean",
       "default": false
+    },
+    "water": {
+      "description": "Carry the project's water: every published `lakes` / `*_water` depth layer as a surface\non the terrain plus each waterfall's sheet, as `water.fbx` (Unity) / `water.glb`\n(Unreal) in the terrain frame, and `water.json` listing the file, its bounds, the falls\nand a probe point.",
+      "type": "boolean",
+      "default": false
     }
   },
   "additionalProperties": false,

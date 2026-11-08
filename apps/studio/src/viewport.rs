@@ -94,68 +94,29 @@ struct LakeVertex {
 /// The lakes grid (vertices, indices) and its wet cell count.
 type LakesGeometry = (Vec<LakeVertex>, Vec<u32>, usize);
 
-/// A waterfall to draw (`hydrology.waterfalls`): lip and foot `[u, v, z]` in metres from the
-/// world's south-west corner, and its width.
-#[derive(Debug, Clone, PartialEq)]
-pub struct FallSheet {
-    /// Top of the fall.
-    pub lip: [f32; 3],
-    /// Foot of the fall.
-    pub base: [f32; 3],
-    /// Width across the river, metres.
-    pub width_m: f32,
-}
+pub use jd_terrain::FallSheet;
 
-/// Each fall as a double-sided ribbon of falling water from its lip to its foot, in the viewport
-/// frame (x = u − extent/2 east, y up, z = extent/2 − v south). A jet leaving the lip
-/// horizontally at `JET_MPS` falls freely: after dropping `d` it has covered `JET_MPS·√(2d/g)`,
-/// so the ribbon bows out along that arc (clear of the rock face) and lands at least as far out
-/// as the foot; white water at the lip thins towards the pool, where a disk of aerated foam
-/// marks the impact.
+/// Each fall as the shared two-sided ribbon of falling water (`jd_terrain::fall_sheets`: the
+/// jet's free-fall arc from the lip, as the engines get it) in the viewport frame, white water
+/// at the lip thinning towards the pool, where a disk of aerated foam marks the impact.
 fn falls_mesh(falls: &[FallSheet], extent_m: [f32; 2]) -> (Vec<LakeVertex>, Vec<u32>) {
-    const ROWS: u32 = 10;
-    // INFERRED: a typical mountain-stream velocity at the lip (rivers run at ~1–3 m/s).
-    const JET_MPS: f32 = 1.5;
     const FOAM: u32 = 16;
-    let (mut v, mut idx) = (Vec::new(), Vec::new());
+    let sheets = jd_terrain::fall_sheets(falls, extent_m);
+    let p = sheets.positions.as_chunks::<3>().0;
+    let n = sheets.normals.as_chunks::<3>().0;
+    let uv = sheets.uvs.as_chunks::<2>().0;
+    let mut v: Vec<LakeVertex> = (0..p.len())
+        .map(|k| LakeVertex {
+            pos: p[k],
+            normal: n[k],
+            color: [0.86, 0.92, 0.96, 0.9 - 0.3 * uv[k][1]],
+        })
+        .collect();
+    let mut idx = sheets.indices;
+    let to_view = |u: f32, vv: f32, z: f32| [u - extent_m[0] / 2.0, z, extent_m[1] / 2.0 - vv];
     for f in falls {
-        let (du, dv) = (f.base[0] - f.lip[0], f.base[1] - f.lip[1]);
-        let run = du.hypot(dv);
-        let dir = if run > 1e-3 {
-            [du / run, dv / run]
-        } else {
-            [0.0, -1.0]
-        };
-        let side = [-dir[1] * f.width_m / 2.0, dir[0] * f.width_m / 2.0];
-        let to_view = |u: f32, vv: f32, z: f32| [u - extent_m[0] / 2.0, z, extent_m[1] / 2.0 - vv];
-        let drop = (f.lip[2] - f.base[2]).max(0.0);
-        let reach_m = run.max(JET_MPS * (2.0 * drop / 9.81).sqrt());
-        let normal = normalize([dir[0], 0.0, -dir[1]]);
-        let first = v.len() as u32;
-        for k in 0..=ROWS {
-            let t = k as f32 / ROWS as f32;
-            let reach = reach_m * t.sqrt();
-            let (u, vv, z) = (
-                f.lip[0] + dir[0] * reach,
-                f.lip[1] + dir[1] * reach,
-                f.lip[2] + (f.base[2] - f.lip[2]) * t,
-            );
-            let alpha = 0.9 - 0.3 * t;
-            for s in [-1.0, 1.0] {
-                v.push(LakeVertex {
-                    pos: to_view(u + s * side[0], vv + s * side[1], z),
-                    normal,
-                    color: [0.86, 0.92, 0.96, alpha],
-                });
-            }
-        }
-        for k in 0..ROWS {
-            let (a, b) = (first + 2 * k, first + 2 * k + 2);
-            // Both windings: the sheet is seen from up- and downstream.
-            idx.extend_from_slice(&[a, b, a + 1, a + 1, b, b + 1]);
-            idx.extend_from_slice(&[a, a + 1, b, a + 1, b + 1, b]);
-        }
         // The impact: a disk of white water where the jet lands, 1.5 × the fall's width across.
+        let (dir, reach_m) = f.reach();
         let (cu, cv) = (f.lip[0] + dir[0] * reach_m, f.lip[1] + dir[1] * reach_m);
         let radius = 0.75 * f.width_m;
         let centre = v.len() as u32;
@@ -3885,8 +3846,8 @@ mod tests {
         let (v, i) = falls_mesh(std::slice::from_ref(&f), [100.0, 100.0]);
         assert_eq!(
             v.len(),
-            22 + 17,
-            "11 rows of two, then the foam disk's centre and rim"
+            2 * 22 + 17,
+            "11 rows of two, front and back, then the foam disk's centre and rim"
         );
         assert_eq!(
             i.len(),

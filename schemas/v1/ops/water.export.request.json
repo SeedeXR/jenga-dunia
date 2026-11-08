@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "WaterExport",
+  "description": "`water.export` params.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "description": "`.glb` or `.fbx`: the water surfaces (every published `lakes` / `*_water` depth layer,\nstanding on `layer`) and the waterfalls' sheets as one mesh in the terrain export frame;\n`.json`: the water layers, the falls and a probe point. Relative paths land in the\nproject's `exports/`.",
+      "type": "string"
+    },
+    "layer": {
+      "description": "The height layer the water stands on.",
+      "type": "string",
+      "default": "height"
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "path"
+  ]
+}

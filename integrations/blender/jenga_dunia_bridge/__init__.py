@@ -53,17 +53,21 @@ def _adopt(objects, collection, prefix):
             obj.name = f"{prefix} {obj.name}"
 
 
-def import_project(context, binary, project, layer, step, texture, scatter_mask, spacing_m, seed, caves=True):
+def import_project(context, binary, project, layer, step, texture, scatter_mask, spacing_m, seed, caves=True, water=True):
     """Export through `jd` and import into a new collection. Returns (terrain objects, instance count, mesh report).
 
     With `caves`, every `jd.cave.system@1` node comes along: its walls and speleothems as a mesh in
-    the terrain's frame, and the terrain exported with the `cave_holes` layer so it opens over the mouths."""
+    the terrain's frame, and the terrain exported with the `cave_holes` layer so it opens over the mouths.
+    With `water`, the project's water (every published `lakes` / `*_water` depth layer and the
+    waterfalls' sheets, `water.export`) comes in as one mesh on the terrain."""
     project = os.path.abspath(project)
     name = os.path.splitext(os.path.basename(project))[0]
     exports = tempfile.mkdtemp(prefix="jd-blender-")
     mesh_path = os.path.join(exports, f"{layer}.glb")
-    graph = run_jd(binary, ["op", "graph.list", "--project", project]) if caves else {"nodes": []}
-    cave_ids = [n["id"] for n in graph.get("nodes", []) if n.get("kind") == "jd.cave.system@1"]
+    graph = run_jd(binary, ["op", "graph.list", "--project", project]) if caves or water else {"nodes": []}
+    cave_ids = [n["id"] for n in graph.get("nodes", []) if n.get("kind") == "jd.cave.system@1"] if caves else []
+    published = [(n.get("params") or {}).get("layer", "") for n in graph.get("nodes", []) if n.get("kind", "").startswith("jd.output.height@")]
+    has_water = water and (any(l == "lakes" or l.endswith("_water") for l in published) or any(n.get("kind") == "jd.hydrology.waterfalls@1" for n in graph.get("nodes", [])))
     holes = any(n.get("kind", "").startswith("jd.output.height@") and (n.get("params") or {}).get("layer") == "cave_holes" for n in graph.get("nodes", []))
     if cave_ids and holes:
         params = {"layer": layer, "path": mesh_path, "texture": bool(texture), "holes": "cave_holes"}
@@ -100,6 +104,12 @@ def import_project(context, binary, project, layer, step, texture, scatter_mask,
         before = set(bpy.data.objects)
         bpy.ops.import_scene.gltf(filepath=path)
         _adopt([o for o in bpy.data.objects if o not in before], collection, f"JD {name} cave {i + 1}")
+    if has_water:
+        path = os.path.join(exports, "water.glb")
+        run_jd(binary, ["op", "water.export", "--project", project, "--params", json.dumps({"path": path, "layer": layer})])
+        before = set(bpy.data.objects)
+        bpy.ops.import_scene.gltf(filepath=path)
+        _adopt([o for o in bpy.data.objects if o not in before], collection, f"JD {name} water")
     return terrain, count, report
 
 

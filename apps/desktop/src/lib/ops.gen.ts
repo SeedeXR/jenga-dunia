@@ -1848,6 +1848,11 @@ export type TerrainExportProfileRequest = {
 `cave_<n>.fbx` (Unity) / `cave_<n>.glb` (Unreal) in the terrain frame, their entrance holes
 merged into `holes.png`, and `caves.json` listing the files, bounds and entrances. */
   "caves"?: boolean;
+  /** Carry the project's water: every published `lakes` / `*_water` depth layer as a surface
+on the terrain plus each waterfall's sheet, as `water.fbx` (Unity) / `water.glb`
+(Unreal) in the terrain frame, and `water.json` listing the file, its bounds, the falls
+and a probe point. */
+  "water"?: boolean;
 };
 
 export type ProfileSettings = {
@@ -2358,6 +2363,29 @@ canonical units. */
   "load_ms": number;
   /** Milliseconds in the session. */
   "infer_ms": number;
+};
+
+export type WaterExportRequest = {
+  /** `.glb` or `.fbx`: the water surfaces (every published `lakes` / `*_water` depth layer,
+standing on `layer`) and the waterfalls' sheets as one mesh in the terrain export frame;
+`.json`: the water layers, the falls and a probe point. Relative paths land in the
+project's `exports/`. */
+  "path": string;
+  /** The height layer the water stands on. */
+  "layer"?: string;
+};
+
+export type WaterExportResult = {
+  /** File written. */
+  "path": string;
+  /** Triangles written (0 for `.json`). */
+  "triangles": number;
+  /** Bytes written. */
+  "bytes": number;
+  /** The water-depth layers merged into the surface. */
+  "layers": string[];
+  /** Waterfalls drawn as sheets. */
+  "falls": number;
 };
 
 export type NodeParams_jd_analysis_aspect_1 = {
@@ -3417,6 +3445,8 @@ export interface JdOps {
   "timeline.export": { request: TimelineExportRequest; result: TimelineExportResult };
   /** Monocular depth from a photograph (MoGe-2 or Depth Anything 3 metric through ONNX Runtime, CPU) written as an OpenEXR relief 0..1 — or metres with `metric` — import it with `jd.input.heightmap@1` to sculpt from a picture */
   "vision.depth": { request: VisionDepthRequest; result: VisionDepthResult };
+  /** Write the project's water — every published `lakes` / `*_water` depth layer as a surface standing on the height, plus each waterfall's two-sided sheet — as one .glb or .fbx mesh in the terrain export frame (it drops onto the terrain mesh / engine terrain as is), or as .json (the water layers, the falls, a probe point) */
+  "water.export": { request: WaterExportRequest; result: WaterExportResult };
 }
 
 export type OpId = keyof JdOps;

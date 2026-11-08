@@ -2548,6 +2548,34 @@ fn the_rivers_section_places_and_removes_springs_by_clicking_the_terrain() {
     assert_eq!(rivers_hash(), dry, "and the river goes with it");
 }
 
+/// With rivers in the project the engine export carries the water: `water.fbx` and `water.json`
+/// beside the Unity heightmap.
+#[test]
+fn the_engine_export_carries_the_rivers_water() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut h = window(engine(dir.path()));
+    settle(&mut h, |a| a.viewport.info().is_some());
+    h.get_by_label("Add rivers").scroll_to_me();
+    h.run();
+    h.get_by_label("Add rivers").click();
+    h.run_steps(1);
+    settle(&mut h, |a| {
+        a.layers().iter().any(|l| l == "river_water") && !a.busy()
+    });
+    let by = || {
+        egui_kittest::kittest::by()
+            .role(eframe::egui::accesskit::Role::Button)
+            .label("Export")
+    };
+    h.get_all(by()).next().unwrap().scroll_to_me();
+    h.run();
+    h.get_all(by()).next().unwrap().click();
+    h.run_steps(1);
+    let unity = dir.path().join("Kit.jdproj/exports/unity");
+    settle(&mut h, |a| unity.join("water.json").exists() && !a.busy());
+    assert!(unity.join("water.fbx").is_file());
+}
+
 /// A terrain far above sea level (a DEM of the Kenyan highlands: 1.7 km up on a 2 km world) is in
 /// view: the camera orbits sea level held inside its heights, not the origin, where the home view's
 /// eye sat under it.
