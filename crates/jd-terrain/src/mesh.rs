@@ -232,12 +232,13 @@ pub(crate) fn bake_albedo(
 /// Largest texture side for the baked normal / roughness maps in mesh exports.
 pub const NORMAL_MAP_CAP: u32 = 2048;
 
-/// Full-field material maps as PNG bytes: albedo (hypsometric ramp + slope), tangent-space
-/// normal, roughness; all `px` wide/high, row 0 = south.
+/// Full-field material maps as PNG bytes: albedo (hypsometric ramp + slope), normal (against flat
+/// ground, or a glTF mesh's tangent space — see [`bake_normal_roughness_against`]), roughness; all
+/// `px` wide/high, row 0 = south.
 pub struct BakedMaps {
     /// Base colour PNG.
     pub albedo: Vec<u8>,
-    /// Tangent-space normal map PNG.
+    /// Normal map PNG.
     pub normal: Vec<u8>,
     /// Roughness (G) / metallic (B = 0) PNG.
     pub roughness: Vec<u8>,
@@ -291,17 +292,32 @@ pub fn bake_maps_with(
     bake_maps_body(hf, extent_m, max_px, layers, None)
 }
 
-/// [`bake_maps_with`] for a glTF export of `mesh`: the normal map is tangent-space against that
-/// mesh (see [`bake_normal_roughness_against`]) instead of against flat ground.
+/// The surface a glTF normal map is written against (see [`bake_normal_roughness_against`]).
+#[derive(Clone, Copy)]
+pub enum Against<'a> {
+    /// The regular grid sampled every `step` cells (holes cut): its normals are interpolated from
+    /// the heights texel by texel, so no mesh is held in memory.
+    Grid {
+        /// Grid step in cells.
+        step: u32,
+        /// Hole mask (cells ≥ 0.5 have no triangles).
+        holes: Option<&'a Heightfield>,
+    },
+    /// An irregular (decimated) mesh: its triangles are rasterized over the texels.
+    Mesh(&'a GridMesh),
+}
+
+/// [`bake_maps_with`] for a glTF export: the normal map is tangent-space against that export's
+/// surface (see [`bake_normal_roughness_against`]) instead of against flat ground.
 pub fn bake_maps_against(
     hf: &Heightfield,
     extent_m: [f64; 2],
     max_px: u32,
     layers: &[MaterialLayer],
-    mesh: &GridMesh,
+    against: Against<'_>,
 ) -> JdResult<BakedMaps> {
     validate_layers(hf, layers)?;
-    bake_maps_body(hf, extent_m, max_px, layers, Some(mesh))
+    bake_maps_body(hf, extent_m, max_px, layers, Some(against))
 }
 
 /// Every material mask matches the terrain and every colour / roughness sits in 0..=1 — checked
@@ -340,7 +356,7 @@ fn bake_maps_body(
     extent_m: [f64; 2],
     max_px: u32,
     layers: &[MaterialLayer],
-    against: Option<&GridMesh>,
+    against: Option<Against<'_>>,
 ) -> JdResult<BakedMaps> {
     let (w, h) = (hf.width(), hf.height());
     let ts = w.max(h).div_ceil(max_px.max(16)).max(1);
@@ -487,6 +503,80 @@ pub(crate) fn bake_emissive(
 /// the terrain's own normal against flat ground (+X east, +Y north, +Z up: slope included) — what
 /// the viewport decodes.
 /// Roughness: 0.92 on flat ground, down to 0.62 on steep rock, 0.6 above the snow line.
+/// The grid mesh's normal at every texel (see [`mesh_normals_at`]) without building the mesh: its
+/// vertex normals — central differences between neighbouring vertices, as [`GridMesh::build_with`]
+/// — interpolated over the quad's two triangles (a b c, b d c) under each texel's cell centre;
+/// `None` under a hole.
+fn grid_normals_at(
+    hf: &Heightfield,
+    extent_m: [f64; 2],
+    step: u32,
+    holes: Option<&Heightfield>,
+    ts: u32,
+    tex: [u32; 2],
+) -> Vec<Option<[f64; 3]>> {
+    let (w, h) = (hf.width(), hf.height());
+    let (gw, gh) = ((w - 1).div_ceil(step) + 1, (h - 1).div_ceil(step) + 1);
+    let (sx, sz) = (extent_m[0] / w as f64, extent_m[1] / h as f64);
+    let (col, row) = (
+        |g: u32| (g * step).min(w - 1),
+        |g: u32| (g * step).min(h - 1),
+    );
+    let vertex_normal = |gx: u32, gz: u32| -> [f64; 3] {
+        let (x0, x1) = (gx.saturating_sub(1), (gx + 1).min(gw - 1));
+        let (z0, z1) = (gz.saturating_sub(1), (gz + 1).min(gh - 1));
+        let run = |a: u32, b: u32, s: f64| (f64::from(b) - f64::from(a)).max(1e-9) * s;
+        let dx = f64::from(hf.get(col(x1), row(gz)) - hf.get(col(x0), row(gz)))
+            / run(col(x0), col(x1), sx);
+        // Rows grow north (−Z): the slope along +Z is the reverse.
+        let dz = f64::from(hf.get(col(gx), row(z0)) - hf.get(col(gx), row(z1)))
+            / run(row(z0), row(z1), sz);
+        let l = (dx * dx + 1.0 + dz * dz).sqrt();
+        [-dx / l, 1.0 / l, -dz / l]
+    };
+    // The vertex at or before cell `c` and the share of the way to the next one.
+    let locate = |c: u32, n: u32, at: &dyn Fn(u32) -> u32| -> (u32, f64) {
+        let g = (c / step).min(n.saturating_sub(2));
+        let (a, b) = (at(g), at(g + 1));
+        (
+            g,
+            if b > a {
+                f64::from(c - a) / f64::from(b - a)
+            } else {
+                0.0
+            },
+        )
+    };
+    let mut out = vec![None; (tex[0] * tex[1]) as usize];
+    if gw < 2 || gh < 2 {
+        return out;
+    }
+    for ty in 0..tex[1] {
+        for tx in 0..tex[0] {
+            let (gx, s) = locate((tx * ts).min(w - 1), gw, &col);
+            let (gz, t) = locate((ty * ts).min(h - 1), gh, &row);
+            if !quad_kept(holes, step, gx, gz) {
+                continue;
+            }
+            let (a, b, c, d) = ((gx, gz), (gx + 1, gz), (gx, gz + 1), (gx + 1, gz + 1));
+            let corners = if s + t <= 1.0 {
+                [(a, 1.0 - s - t), (b, s), (c, t)]
+            } else {
+                [(b, 1.0 - t), (d, s + t - 1.0), (c, 1.0 - s)]
+            };
+            let n: [f64; 3] = std::array::from_fn(|k| {
+                corners
+                    .iter()
+                    .map(|((x, z), wgt)| wgt * vertex_normal(*x, *z)[k])
+                    .sum()
+            });
+            let l = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt().max(1e-12);
+            out[(ty * tex[0] + tx) as usize] = Some(n.map(|c| c / l));
+        }
+    }
+    out
+}
+
 /// `mesh`'s normal at every texel of a `tex[0] × tex[1]` map sampled every `ts` cells of a
 /// `size`-cell field: its vertex normals interpolated across the triangle over each texel's cell
 /// centre (as a renderer interpolates them); `None` where no triangle covers it (a hole).
@@ -516,14 +606,9 @@ fn mesh_normals_at(
     for t in mesh.indices.as_chunks::<3>().0 {
         let v = t.map(|i| i as usize);
         let c = v.map(cell_of);
-        let (x0, x1) = (
-            c.iter().map(|p| p.0).fold(f64::MAX, f64::min),
-            c.iter().map(|p| p.0).fold(f64::MIN, f64::max),
-        );
-        let (z0, z1) = (
-            c.iter().map(|p| p.1).fold(f64::MAX, f64::min),
-            c.iter().map(|p| p.1).fold(f64::MIN, f64::max),
-        );
+        let (xs, zs) = (c.map(|p| p.0), c.map(|p| p.1));
+        let (x0, x1) = (xs[0].min(xs[1]).min(xs[2]), xs[0].max(xs[1]).max(xs[2]));
+        let (z0, z1) = (zs[0].min(zs[1]).min(zs[2]), zs[0].max(zs[1]).max(zs[2]));
 
         let den = (c[1].1 - c[2].1) * (c[0].0 - c[2].0) + (c[2].0 - c[1].0) * (c[0].1 - c[2].1);
         if den.abs() < 1e-12 {
@@ -569,7 +654,7 @@ pub(crate) fn bake_normal_roughness_against(
     extent_m: [f64; 2],
     max_px: u32,
     layers: &[MaterialLayer],
-    against: Option<&GridMesh>,
+    against: Option<Against<'_>>,
 ) -> JdResult<(Vec<u8>, Vec<u8>, [u32; 2])> {
     let (w, h) = (hf.width(), hf.height());
     let ts = w.max(h).div_ceil(max_px.max(16)).max(1);
@@ -589,7 +674,10 @@ pub(crate) fn bake_normal_roughness_against(
     // metallic packing, so the one texture serves as occlusionTexture and metallicRoughnessTexture.
     let cell = (sx.max(sz)) as f32;
     let occ = crate::occlusion_mask(hf, [sx as f32, sz as f32], AO_REACH_CELLS * cell)?;
-    let base = against.map(|m| mesh_normals_at(m, [w, h], extent_m, ts, [tw, th]));
+    let base = against.map(|a| match a {
+        Against::Grid { step, holes } => grid_normals_at(hf, extent_m, step, holes, ts, [tw, th]),
+        Against::Mesh(m) => mesh_normals_at(m, [w, h], extent_m, ts, [tw, th]),
+    });
     for ty in 0..th {
         for tx in 0..tw {
             let (x, z) = ((tx * ts).min(w - 1) as i64, (ty * ts).min(h - 1) as i64);
@@ -862,9 +950,13 @@ pub fn export_glb_with_holes(
                 )
             },
         )?;
-        let grid = GridMesh::build_with(hf, extent_m, step, holes)?;
-        let (normal_png, rough_png, px) =
-            bake_normal_roughness_against(hf, extent_m, NORMAL_MAP_CAP, materials, Some(&grid))?;
+        let (normal_png, rough_png, px) = bake_normal_roughness_against(
+            hf,
+            extent_m,
+            NORMAL_MAP_CAP,
+            materials,
+            Some(Against::Grid { step, holes }),
+        )?;
         normal_px = Some(px);
         // The albedo is one texel per exported vertex: the emissive map matches it.
         let emissive = bake_emissive(materials, gw, gh, &|gx, gz| {
@@ -1741,7 +1833,15 @@ pub fn export_mesh_with_holes(
         let grid = GridMesh::build_with(hf, extent_m, step, holes)?;
         let mesh = crate::decimate::decimate(&grid, extent_m, target)?;
         let maps = (texture && matches!(ext.as_deref(), None | Some("glb")))
-            .then(|| bake_maps_against(hf, extent_m, NORMAL_MAP_CAP, materials, &mesh))
+            .then(|| {
+                bake_maps_against(
+                    hf,
+                    extent_m,
+                    NORMAL_MAP_CAP,
+                    materials,
+                    Against::Mesh(&mesh),
+                )
+            })
             .transpose()?;
         return write_decimated(&mesh, ext.as_deref(), extent_m, path, step, maps.as_ref());
     }
@@ -1959,11 +2059,7 @@ pub fn export_mesh_lods_with_holes(
         holes,
     )?;
     let grid = GridMesh::build_with(hf, extent_m, step, holes)?;
-    // ponytail: the levels share LOD 0's maps, tangent-space against the full grid; a coarser level
-    // loses the slope between its vertices' normals and the grid's — fine at the distances it is for.
-    let maps = (texture && matches!(ext.as_deref(), None | Some("glb")))
-        .then(|| bake_maps_against(hf, extent_m, NORMAL_MAP_CAP, materials, &grid))
-        .transpose()?;
+    let textured = texture && matches!(ext.as_deref(), None | Some("glb"));
     let stem = path
         .file_stem()
         .and_then(|s| s.to_str())
@@ -1973,6 +2069,19 @@ pub fn export_mesh_lods_with_holes(
     for i in 1..=lods {
         target = (target / 4).max(2);
         let mesh = crate::decimate::decimate(&grid, extent_m, target)?;
+        // Each level's normal map is written against its own triangles: a coarse level gets back
+        // the relief its geometry dropped.
+        let maps = textured
+            .then(|| {
+                bake_maps_against(
+                    hf,
+                    extent_m,
+                    NORMAL_MAP_CAP,
+                    materials,
+                    Against::Mesh(&mesh),
+                )
+            })
+            .transpose()?;
         let mut lod_path = path.with_file_name(format!("{stem}_lod{i}"));
         if let Some(e) = path.extension() {
             lod_path.set_extension(e);
@@ -2205,6 +2314,48 @@ mod tests {
         let mut wrong = Heightfield::new(8, 8, 8, 0).expect("hf");
         wrong.fill_with(|_, _| 0.0);
         assert!(GridMesh::build_with(&h, [160.0, 160.0], 1, Some(&wrong)).is_err());
+    }
+
+    #[test]
+    fn grid_normals_without_a_mesh_match_the_rasterized_grid_mesh() {
+        // Rough relief, a step that does not divide the size, a hole: the on-the-fly grid normals
+        // equal the built mesh's normals rasterized over the same texels.
+        let mut h = Heightfield::new(37, 29, 64, 0).expect("hf");
+        h.fill_with(|x, y| {
+            (x as f32 * 0.7).sin() * 9.0 + (y as f32 * 0.45).cos() * 6.0 + x as f32 * 0.3
+        });
+        let mut holes = h.clone();
+        holes.fill_with(|x, y| {
+            if (12..16).contains(&x) && (10..14).contains(&y) {
+                1.0
+            } else {
+                0.0
+            }
+        });
+        let extent = [370.0, 290.0];
+        for (step, ts) in [(1, 1), (3, 1), (4, 2)] {
+            let tex = [37u32.div_ceil(ts), 29u32.div_ceil(ts)];
+            let mesh = GridMesh::build_with(&h, extent, step, Some(&holes)).expect("mesh");
+            let a = grid_normals_at(&h, extent, step, Some(&holes), ts, tex);
+            let b = mesh_normals_at(&mesh, [37, 29], extent, ts, tex);
+            let mut edge = 0;
+            for (i, (a, b)) in a.iter().zip(&b).enumerate() {
+                match (a, b) {
+                    (Some(a), Some(b)) => assert!(
+                        (0..3).all(|k| (a[k] - b[k]).abs() < 1e-4),
+                        "step {step}, texel {i}: {a:?} vs {b:?}"
+                    ),
+                    (None, None) => {}
+                    // A texel on a hole's edge: a neighbouring quad's triangle covers it.
+                    _ => edge += 1,
+                }
+            }
+            assert!(
+                edge <= 16,
+                "step {step}: {edge} texels disagree on coverage"
+            );
+            assert!(a.iter().filter(|n| n.is_none()).count() > 0, "the hole");
+        }
     }
 
     #[test]

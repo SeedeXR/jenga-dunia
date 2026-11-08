@@ -1352,11 +1352,18 @@ pub mod graph {
                 input("water").as_deref(),
                 &fp,
             )?;
-            let at = |c: [u32; 2], z: f32| [(c[0] as f32 + 0.5) * sx, (c[1] as f32 + 0.5) * sy, z];
+            // Cell centres, moved across the river onto the water's centre (`shift_m`).
+            let at = |c: [u32; 2], z: f32, d: [f32; 2]| {
+                [
+                    (c[0] as f32 + 0.5) * sx + d[0],
+                    (c[1] as f32 + 0.5) * sy + d[1],
+                    z,
+                ]
+            };
             falls.extend(found.falls.into_iter().map(|f| FallInfo {
                 node: id.clone(),
-                lip: at(f.lip, f.lip_m),
-                base: at(f.base, f.base_m),
+                lip: at(f.lip, f.lip_m, f.shift_m),
+                base: at(f.base, f.base_m, f.shift_m),
                 drop_m: f.drop_m,
                 run_m: f.run_m,
                 width_m: f.width_m,
@@ -6549,7 +6556,8 @@ pub mod terrain {
         pub height: u32,
         /// Base colour (hypsometric ramp blended to rock on slopes), row 0 = south.
         pub albedo_png_base64: String,
-        /// Tangent-space normal map (+X east, +Y north, +Z out).
+        /// Normal map: the terrain's normal against flat ground (+X east, +Y north, +Z up; slope
+        /// included) — decode it in that frame, not in a displaced mesh's tangent space.
         pub normal_png_base64: String,
         /// glTF ORM layout: ambient occlusion in R (1 − sky occlusion within 16 cells), roughness in G (0.92 flat → 0.62 steep rock, 0.6 above the snow line), metallic 0 in B.
         pub roughness_png_base64: String,
@@ -6872,7 +6880,7 @@ pub mod terrain {
         );
         r.register::<TerrainTextures, TexturesResult, _>(
             "terrain.textures",
-            "Bake the material maps of a layer — albedo, tangent-space normal, roughness — as PNGs (base64) for viewers and engines",
+            "Bake the material maps of a layer — albedo, normal, roughness — as PNGs (base64) for viewers. The normal map is the terrain's own normal against flat ground (+X east, +Y north, +Z up; slope included): decode it in that frame, not a mesh's tangent space (on a displaced mesh that counts the slope twice). For a mesh in an engine or DCC use terrain.export_mesh, whose GLB normal map is written against that mesh",
             Scope::ProjectRead,
             |ctx, p| {
                 if !(16..=8192).contains(&p.max_px) {

@@ -113,8 +113,12 @@ pub struct Waterfall {
     pub drop_m: f32,
     /// Horizontal length of the fall along the river, metres.
     pub run_m: f32,
-    /// Width of the fall, metres: its lips side by side across the river, × the cell size.
+    /// Width of the fall, metres: the river's wet width across the flow at the lip (with a
+    /// `river_water` layer), else its lips side by side × the cell size.
     pub width_m: f32,
+    /// Where the falling sheet's centre sits from the lip cell's centre, east and north metres:
+    /// the river's water may spread more to one bank than the other.
+    pub shift_m: [f32; 2],
     /// Upstream area draining over the fall, km².
     pub area_km2: f32,
     /// Plunge pool depth below the foot, metres.
@@ -280,6 +284,12 @@ pub fn waterfalls(
         let (lip, foot, run, _) = &runs[lead];
         let (lip, foot) = (*lip, *foot);
         let drop = heights[lip] - heights[foot];
+        // The river's wet span across the flow at the lip: wider than the lips, centred on the water.
+        let span = wet
+            .as_ref()
+            .map(|d| wet_span(d, w, hh, lip, foot, spacing_m))
+            .filter(|(width, _)| *width > ks.len() as f32 * cell)
+            .unwrap_or((0.0, [0.0, 0.0]));
         for &k in ks {
             faces.extend_from_slice(&runs[k].3);
         }
@@ -290,10 +300,8 @@ pub fn waterfalls(
             base_m: heights[foot],
             drop_m: drop,
             run_m: *run,
-            width_m: (ks.len() as f32 * cell).max(
-                wet.as_ref()
-                    .map_or(0.0, |d| wet_width(d, w, hh, lip, foot, spacing_m)),
-            ),
+            width_m: (ks.len() as f32 * cell).max(span.0),
+            shift_m: span.1,
             area_km2: ks.iter().map(|&k| acc[runs[k].0]).sum::<f32>() * cell_area_km2,
             pool_depth_m: p.pool_depth * drop,
             pool_radius_m: if p.pool_radius > 0.0 {
@@ -347,16 +355,18 @@ pub fn waterfalls(
     })
 }
 
-/// The river's wet width (water ≥ [`crate::water::WET_M`]) across the flow at `lip`: from the lip
+/// The river's wet span (water ≥ [`crate::water::WET_M`]) across the flow at `lip`: from the lip
 /// cell, steps of one cell along the perpendicular to `lip → foot`, both ways, while still wet.
-fn wet_width(
+/// Returns its width and its centre's offset from the lip (east, north metres). Meant for the
+/// rivers node's water: a lake layer would stretch the fall across the whole lake.
+fn wet_span(
     depth: &[f32],
     w: usize,
     hh: usize,
     lip: usize,
     foot: usize,
     spacing_m: [f32; 2],
-) -> f32 {
+) -> (f32, [f32; 2]) {
     let (lx, ly) = ((lip % w) as f32, (lip / w) as f32);
     let (dx, dy) = (
         ((foot % w) as f32 - lx) * spacing_m[0],
@@ -378,14 +388,19 @@ fn wet_width(
             && depth[y as usize * w + x as usize] >= crate::water::WET_M
     };
     if !wet_at(0.0) {
-        return 0.0;
+        return (0.0, [0.0, 0.0]);
     }
     let side = |sign: f32| {
         (1..)
             .take_while(|k| *k <= w.max(hh) && wet_at(sign * *k as f32))
             .count()
     };
-    (1 + side(1.0) + side(-1.0)) as f32 * cell
+    let (right, left) = (side(1.0) as f32, side(-1.0) as f32);
+    let mid = (right - left) / 2.0; // in steps of one cell along the perpendicular
+    (
+        (1.0 + right + left) * cell,
+        [px * mid * spacing_m[0], py * mid * spacing_m[1]],
+    )
 }
 
 /// Dig `f`'s plunge pool: a raised-cosine bowl centred on the foot, lowering only ground at or
@@ -514,6 +529,25 @@ mod tests {
             (r.falls[0].width_m - 25.0).abs() < 1e-3,
             "{}",
             r.falls[0].width_m
+        );
+        assert_eq!(r.falls[0].shift_m, [0.0, 0.0], "centred on the lip");
+        // Water spread to one bank (x 23..=30, lip at 24): the sheet is 40 m wide and its centre
+        // sits on the water's, 2.5 cells (12.5 m) across from the lip.
+        water.fill_with(|x, _| if (23..=30).contains(&x) { 1.0 } else { 0.0 });
+        let r = waterfalls(
+            &h,
+            [5.0, 5.0],
+            Some(&rivers),
+            Some(&water),
+            &FallsParams::default(),
+        )
+        .expect("falls");
+        let f = &r.falls[0];
+        assert!((f.width_m - 40.0).abs() < 1e-3, "{}", f.width_m);
+        assert!(
+            (f.shift_m[0] - 12.5).abs() < 1e-3 && f.shift_m[1].abs() < 1e-3,
+            "{:?}",
+            f.shift_m
         );
         // Water narrower than the lips never narrows the fall; a mismatched layer is refused.
         water.fill_with(|x, _| if x == 24 { 1.0 } else { 0.0 });

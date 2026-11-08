@@ -860,14 +860,15 @@ impl Camera {
     }
 
     /// Pan the orbit's centre across the ground by a drag of `dx`, `dy` pixels: the ground follows
-    /// the pointer, faster the farther the camera is; kept over the world (± half its size).
-    pub fn pan(&mut self, dx: f32, dy: f32) {
+    /// the pointer, faster the farther the camera is; kept over a world of `extent_m` (each axis
+    /// within half its own side).
+    pub fn pan(&mut self, dx: f32, dy: f32, extent_m: [f32; 2]) {
         let k = self.radius * 0.0015;
         let (st, ct) = self.theta.sin_cos();
         // On the ground: right = (cos θ, −sin θ), towards the view = −(sin θ, cos θ).
-        let half = self.size / 2.0;
-        self.centre_x = (self.centre_x - dx * k * ct - dy * k * st).clamp(-half, half);
-        self.centre_z = (self.centre_z + dx * k * st - dy * k * ct).clamp(-half, half);
+        let (hx, hz) = (extent_m[0] / 2.0, extent_m[1] / 2.0);
+        self.centre_x = (self.centre_x - dx * k * ct - dy * k * st).clamp(-hx, hx);
+        self.centre_z = (self.centre_z + dx * k * st - dy * k * ct).clamp(-hz, hz);
     }
 
     fn view_proj(&self, aspect: f32) -> [[f32; 4]; 4] {
@@ -931,8 +932,16 @@ impl Camera {
             radius: ln_r.exp().clamp(first.size * 0.02, first.size * 20.0),
             size: first.size,
             centre_y: first.centre_y,
-            centre_x: cx,
-            centre_z: cz,
+            // Catmull-Rom overshoots between keys: the centre stays within the keys' own range, so a
+            // path never looks past the edge the pan stopped at.
+            centre_x: cx.clamp(
+                keys.iter().map(|c| c.centre_x).fold(f32::MAX, f32::min),
+                keys.iter().map(|c| c.centre_x).fold(f32::MIN, f32::max),
+            ),
+            centre_z: cz.clamp(
+                keys.iter().map(|c| c.centre_z).fold(f32::MAX, f32::min),
+                keys.iter().map(|c| c.centre_z).fold(f32::MIN, f32::max),
+            ),
         })
     }
 }
@@ -2745,7 +2754,11 @@ impl Viewport {
         let pan = resp.dragged_by(PointerButton::Middle)
             || ((orbit_primary || orbit_other) && ui.input(|i| i.modifiers.shift));
         if pan && d != egui::Vec2::ZERO {
-            self.camera.pan(d.x, d.y);
+            let extent = self
+                .info
+                .as_ref()
+                .map_or([self.camera.size; 2], |i| i.extent_m);
+            self.camera.pan(d.x, d.y, extent);
             self.dirty = true;
         } else if (orbit_primary || orbit_other) && d != egui::Vec2::ZERO {
             self.camera.theta -= d.x * 0.005;
@@ -3724,12 +3737,35 @@ mod tests {
         // keeps its offset from it; home is the world's centre again.
         let mut p = Camera { theta: 0.0, ..cam };
         let eye0 = p.eye();
-        p.pan(100.0, 0.0); // drag right, camera looking north (θ 0): the ground moves east → centre west
+        let extent = [4096.0, 2048.0];
+        p.pan(100.0, 0.0, extent); // drag right, looking north (θ 0): the ground moves east → centre west
         assert!(p.centre_x < 0.0 && p.centre_z.abs() < 1e-3, "{p:?}");
         let e = p.eye();
         assert!((e[0] - eye0[0] - p.centre_x).abs() < 1e-3 && (e[2] - eye0[2]).abs() < 1e-3);
-        p.pan(0.0, 1.0e6);
-        assert_eq!(p.centre_z, -cam.size / 2.0, "held over the world");
+        p.pan(0.0, 1.0e6, extent);
+        assert_eq!(
+            p.centre_z, -1024.0,
+            "held over the world: half its north–south side"
+        );
+        // A flythrough between panned keys never overshoots them.
+        let (k0, k1, k2) = (
+            Camera {
+                centre_x: 1000.0,
+                ..cam
+            },
+            Camera {
+                centre_x: -1000.0,
+                ..cam
+            },
+            Camera {
+                centre_x: 1000.0,
+                ..cam
+            },
+        );
+        for t in [0.1, 0.3, 0.5, 0.7, 0.9] {
+            let c = Camera::along(&[k0, k1, k2], t).unwrap();
+            assert!(c.centre_x.abs() <= 1000.0 + 1e-3, "{t}: {}", c.centre_x);
+        }
         assert_eq!(
             (
                 Camera::fit([4096.0, 2048.0]).centre_x,

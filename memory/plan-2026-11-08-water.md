@@ -115,3 +115,13 @@ Loop prompt: `/loop Water features per memory/plan-2026-11-08-water.md (waterfal
   south), w −1: median 6.8° (decimated 5.3°); the control (bitangent north) is back at 99°.
   scripts/blender/tangent_check.py had the sign rule inverted (glTF w = −Blender sign) and had
   passed the broken map; corrected. Old textured GLBs should be re-exported (quickstart says so).
+- 2026-11-08 W7 review (/code-review medium db5e06a..bcd4c2d, 8 findings; ponytail: bounds shrink).
+  Fixed: a fall's sheet is centred on the river's wet span (`shift_m`, applied to lip and foot by
+  build_falls); grid GLB normals come straight from the heights (`Against::Grid`, no second mesh —
+  an 8k² export would have held 2 GB more); each LOD level's map is baked against its own triangles
+  (Blender oracle: LOD 2 median 2.0°, decimated 2.0°, grid 6.8°); terrain.textures says its normal
+  map is against flat ground; pan clamps each axis to its own half-extent; flythroughs stay within
+  their keys' centres. Documented, not capped: a lake layer wired into the falls' `water` widens the
+  fall to the lake. Dismissed: "middle-drag breaks UI parity" — the Editor has no 3-D viewport
+  since Option B. falls_water reaches 33 m on the terraced world: 39 cells of pools in closed
+  hollows, which hold water to their rim (1 130 wet cells, under the falls mask's 2 107).

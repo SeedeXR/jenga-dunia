@@ -2244,7 +2244,8 @@ export type TerrainTexturesResult = {
   "height": number;
   /** Base colour (hypsometric ramp blended to rock on slopes), row 0 = south. */
   "albedo_png_base64": string;
-  /** Tangent-space normal map (+X east, +Y north, +Z out). */
+  /** Normal map: the terrain's normal against flat ground (+X east, +Y north, +Z up; slope
+included) — decode it in that frame, not in a displaced mesh's tangent space. */
   "normal_png_base64": string;
   /** glTF ORM layout: ambient occlusion in R (1 − sky occlusion within 16 cells), roughness in G (0.92 flat → 0.62 steep rock, 0.6 above the snow line), metallic 0 in B. */
   "roughness_png_base64": string;
@@ -3439,7 +3440,7 @@ export interface JdOps {
   "terrain.scatter": { request: TerrainScatterRequest; result: TerrainScatterResult };
   /** Statistics and content hash of a layer */
   "terrain.stats": { request: TerrainStatsRequest; result: TerrainStatsResult };
-  /** Bake the material maps of a layer — albedo, tangent-space normal, roughness — as PNGs (base64) for viewers and engines */
+  /** Bake the material maps of a layer — albedo, normal, roughness — as PNGs (base64) for viewers. The normal map is the terrain's own normal against flat ground (+X east, +Y north, +Z up; slope included): decode it in that frame, not a mesh's tangent space (on a displaced mesh that counts the slope twice). For a mesh in an engine or DCC use terrain.export_mesh, whose GLB normal map is written against that mesh */
   "terrain.textures": { request: TerrainTexturesRequest; result: TerrainTexturesResult };
   /** Evaluate the graph at evenly spaced timeline positions and write one heightmap per frame (keyframed parameters animate; the project's own time is untouched) */
   "timeline.export": { request: TimelineExportRequest; result: TimelineExportResult };
